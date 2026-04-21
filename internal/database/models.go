@@ -12,7 +12,7 @@ type Subscription struct {
 	TitleEN          string
 	TitleJP          string
 	Year             int
-	Season           int    `gorm:"default:1"`
+	Season           int `gorm:"default:1"`
 	SourceName       string
 	BangumiID        string
 	RSSURL           string
@@ -34,16 +34,16 @@ type Subscription struct {
 
 type Episode struct {
 	gorm.Model
-	SubscriptionID uint    `gorm:"not null;index"`
-	Season         int     `gorm:"default:1"`
-	Number         float32 `gorm:"not null"`
-	Title          string
-	Status         string `gorm:"default:'pending'"`
-	TorrentHash    string `gorm:"uniqueIndex"`
-	TorrentURL     string
-	OriginalName   string
-	FinalPath      string
-	FileSize       int64
+	SubscriptionID     uint    `gorm:"not null;index"`
+	Season             int     `gorm:"default:1"`
+	Number             float32 `gorm:"not null"`
+	Title              string
+	Status             string `gorm:"default:'pending'"`
+	TorrentHash        string `gorm:"uniqueIndex"`
+	TorrentURL         string
+	OriginalName       string
+	FinalPath          string
+	FileSize           int64
 	DownloadStartedAt  *time.Time
 	DownloadFinishedAt *time.Time
 	OrganizedAt        *time.Time

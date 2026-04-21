@@ -39,16 +39,16 @@ type Episode struct {
 }
 
 type Subscription struct {
-	ID            uint
-	Title         string
-	BangumiID     string
-	AnimeID       string
-	SourceName    string
-	SubgroupPref  []string
-	DownloadPath  string
-	Filter        Filter
-	Enabled       bool
-	Completed     bool
+	ID           uint
+	Title        string
+	BangumiID    string
+	AnimeID      string
+	SourceName   string
+	SubgroupPref []string
+	DownloadPath string
+	Filter       Filter
+	Enabled      bool
+	Completed    bool
 }
 
 type Filter struct {
