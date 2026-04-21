@@ -1,4 +1,4 @@
-module github.com/xiaoyueRX/autoani
+module github.com/xiaoyueRX/ani-rss
 
 go 1.22.5
 
