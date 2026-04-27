@@ -1,4 +1,4 @@
-# Ani-rss 项目核心记忆 (Project Context)
+# Ani-Go 项目核心记忆 (Project Context)
 
 > [!IMPORTANT]
 > **此文件是项目的“灵魂核心”。** 如果你在新的环境或使用新的 AI 助手开始工作，请第一时间让它阅读此文件，以获取完整的项目背景和开发约束。
@@ -30,7 +30,7 @@
 - **痛点2**: 数据库鲁棒性差，曾因 DNS 故障导致逻辑大规模崩溃。
 - **痛点3**: 订阅管理手动程度高。
 
-### Ani-rss 的终极目标
+### Ani-Go 的终极目标
 1. **Mikan 个人 RSS 全量同步**: 网页端一键订阅，后台自动发现并创建任务。
 2. **历史全量补全 (Soul Feature)**: 能够爬取 Mikan 番剧详情页，自动抓取并下载全量历史种子。
 3. **文件整理一体化**: 实现符合 Jellyfin/fnOS 刮削规范的自动重命名与目录层级创建。
@@ -56,14 +56,14 @@
 ## 4. 当前开发进度 (Progress)
 
 - [x] **Phase 0: 项目初始化**
-  - [x] 确定项目名称: `Ani-rss`
+  - [x] 确定项目名称: `Ani-Go`
   - [x] 初始化 Go 模块与目录结构
   - [x] 定义核心接口 `internal/core/interfaces.go`
   - [x] 实现配置加载系统 (环境变量优先)
   - [x] 实现数据库初始化与 ORM 模型 (GORM)
 - [x] **Phase 0.5: 代码上云**
   - [x] 成功修复 PowerShell 造成的编码破坏 (UTF-8)
-  - [x] 建立 GitHub 仓库 `xiaoyueRX/Ani-rss`
+  - [x] 建立 GitHub 仓库 `xiaoyueRX/Ani-rss` (仓库名保留为 Ani-rss)
   - [x] 完成首次代码 Push
 - [ ] **Phase 1: 核心引擎实现** (NEXT)
   - [ ] Mikan RSS 解析器
@@ -81,4 +81,4 @@
 
 ---
 
-*Last Updated: 2026-04-21*
+*Last Updated: 2026-04-24*

@@ -142,12 +142,12 @@ func Load() *Config {
 func defaults() *Config {
 	return &Config{
 		Server:   ServerConfig{Host: "0.0.0.0", Port: 8080},
-		Database: DatabaseConfig{Path: "/data/ani-rss.db"},
+		Database: DatabaseConfig{Path: "/data/ani-go.db"},
 		Mikan:    MikanConfig{Domain: "mikanani.me"},
 		Downloaders: DownloadersConfig{
 			Default: "qbittorrent",
 			QBittorrent: QBittorrentConfig{
-				Host: "http://localhost:8080", Category: "ani-rss",
+				Host: "http://localhost:8081", Category: "ani-go",
 			},
 		},
 		Metadata: MetadataConfig{

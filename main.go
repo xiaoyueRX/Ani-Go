@@ -26,7 +26,7 @@ func main() {
 
 	printConfig(cfg)
 
-	fmt.Println("\n✅ Ani-rss 启动成功，等待功能模块接入...")
+	fmt.Println("\n✅ Ani-Go 启动成功，等待功能模块接入...")
 	fmt.Println("   下一步：实现 Mikan RSS 解析器")
 	fmt.Println("   按 Ctrl+C 退出")
 
@@ -34,7 +34,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	fmt.Println("\n👋 Ani-rss 正在关闭...")
+	fmt.Println("\n👋 Ani-Go 正在关闭...")
 }
 
 func printBanner() {
@@ -45,7 +45,7 @@ func printBanner() {
  / ___ |/ / / / /______/ /  (__  )/__  ) 
 /_/  |_/_/ /_/_/      /_/  /____//____/  
                                          
-Ani-rss - 全自动番剧追番管理系统
+Ani-Go - 全自动番剧追番管理系统
 `)
 }
 
