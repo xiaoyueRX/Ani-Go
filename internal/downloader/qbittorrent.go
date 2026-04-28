@@ -4,6 +4,7 @@ package downloader
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -294,158 +295,39 @@ func (q *QBittorrent) ensureLogin(ctx context.Context) error {
 }
 
 // ============================================================
-// qBittorrent JSON 响应解析
+// qBittorrent JSON 响应解析（使用 encoding/json 标准库）
 // ============================================================
 
+// qbTorrentInfo qBittorrent API 返回的单个种子信息
+type qbTorrentInfo struct {
+	Hash      string  `json:"hash"`
+	Name      string  `json:"name"`
+	SavePath  string  `json:"save_path"`
+	State     string  `json:"state"`
+	Progress  float32 `json:"progress"`
+	DlSpeed   int64   `json:"dlspeed"`
+	Size      int64   `json:"size"`
+	Completed int64   `json:"completed"`
+}
+
 func parseQBittorrentList(r io.Reader) ([]core.DownloadTask, error) {
-	// 使用轻量 JSON 解析，避免引入第三方依赖
-	body, err := io.ReadAll(r)
-	if err != nil {
-		return nil, err
+	var infos []qbTorrentInfo
+	if err := json.NewDecoder(r).Decode(&infos); err != nil {
+		return nil, fmt.Errorf("JSON 解码失败: %w", err)
 	}
 
-	// 简单手写 JSON 数组解析（qBittorrent 返回结构固定）
-	// 格式: [{...},{...}]
-	// 核心字段: hash, name, save_path, state, progress, dlspeed, size, completed
-	rawJSON := strings.TrimSpace(string(body))
-	if rawJSON == "[]" || rawJSON == "" {
-		return nil, nil
+	tasks := make([]core.DownloadTask, 0, len(infos))
+	for _, info := range infos {
+		tasks = append(tasks, core.DownloadTask{
+			Hash:      info.Hash,
+			Name:      info.Name,
+			SavePath:  info.SavePath,
+			Status:    info.State,
+			Progress:  info.Progress,
+			SpeedDown: info.DlSpeed,
+			Size:      info.Size,
+			Done:      info.Completed,
+		})
 	}
-
-	return parseTorrentJSONArray(rawJSON), nil
-}
-
-// parseTorrentJSONArray 从 qBittorrent JSON 数组提取 DownloadTask 列表
-// 不使用 encoding/json 以保持更小内存占用和更快的解析速度
-func parseTorrentJSONArray(raw string) []core.DownloadTask {
-	var tasks []core.DownloadTask
-
-	// 按对象边界分割
-	objects := splitJSONObjects(raw)
-	for _, obj := range objects {
-		task := core.DownloadTask{
-			Hash:     extractJSONField(obj, "hash"),
-			Name:     extractJSONField(obj, "name"),
-			SavePath: extractJSONField(obj, "save_path"),
-			Status:   extractJSONField(obj, "state"),
-			Progress: parseFloatField(obj, "progress"),
-			SpeedDown: parseIntField(obj, "dlspeed"),
-			Size:     parseIntField(obj, "size"),
-			Done:     parseIntField(obj, "completed"),
-		}
-		tasks = append(tasks, task)
-	}
-
-	return tasks
-}
-
-// splitJSONObjects 从 JSON 数组中提取每个对象字符串
-func splitJSONObjects(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if len(raw) < 2 || raw[0] != '[' {
-		return nil
-	}
-	raw = raw[1 : len(raw)-1] // 去掉外层 []
-
-	var objects []string
-	var depth, start int
-	inString := false
-
-	for i, ch := range raw {
-		if ch == '"' && (i == 0 || raw[i-1] != '\\') {
-			inString = !inString
-			continue
-		}
-		if inString {
-			continue
-		}
-		switch ch {
-		case '{':
-			if depth == 0 {
-				start = i
-			}
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				objects = append(objects, raw[start:i+1])
-			}
-		}
-	}
-
-	return objects
-}
-
-// extractJSONField 从 JSON 对象中提取指定字段的字符串值
-func extractJSONField(obj, field string) string {
-	// 匹配 "field":"value" 或 "field": "value"
-	pattern := fmt.Sprintf(`"%s"\s*:\s*"`, field)
-	idx := strings.Index(obj, pattern)
-	if idx == -1 {
-		return ""
-	}
-	idx += len(pattern)
-	end := idx
-	for end < len(obj) {
-		if obj[end] == '"' && (end == 0 || obj[end-1] != '\\') {
-			break
-		}
-		end++
-	}
-	if end <= idx {
-		return ""
-	}
-	return obj[idx:end]
-}
-
-// parseFloatField 从 JSON 对象中提取浮点字段
-func parseFloatField(obj, field string) float32 {
-	s := extractJSONField(obj, field)
-	if s == "" {
-		// 尝试非引号数值
-		s = extractJSONFieldNum(obj, field)
-	}
-	var f float64
-	fmt.Sscanf(s, "%f", &f)
-	return float32(f)
-}
-
-// parseIntField 从 JSON 对象中提取整数字段
-func parseIntField(obj, field string) int64 {
-	s := extractJSONField(obj, field)
-	if s == "" {
-		s = extractJSONFieldNum(obj, field)
-	}
-	var n int64
-	fmt.Sscanf(s, "%d", &n)
-	return n
-}
-
-// extractJSONFieldNum 从 JSON 对象中提取非引号的数值字段
-func extractJSONFieldNum(obj, field string) string {
-	pattern := fmt.Sprintf(`"%s"\s*:\s*`, field)
-	idx := strings.Index(obj, pattern)
-	if idx == -1 {
-		return "0"
-	}
-	idx += len(pattern)
-
-	// 跳过空格
-	for idx < len(obj) && obj[idx] == ' ' {
-		idx++
-	}
-
-	end := idx
-	for end < len(obj) {
-		ch := obj[end]
-		if ch == ',' || ch == '}' || ch == ' ' || ch == '\n' || ch == '\r' {
-			break
-		}
-		end++
-	}
-
-	if end == idx {
-		return "0"
-	}
-	return obj[idx:end]
+	return tasks, nil
 }
