@@ -61,3 +61,10 @@ type Setting struct {
 	Key   string `gorm:"primaryKey"`
 	Value string `gorm:"type:text"`
 }
+
+// User 用户模型（鉴权用）
+type User struct {
+	gorm.Model
+	Username     string `gorm:"uniqueIndex;not null"`
+	PasswordHash string `gorm:"not null"`
+}

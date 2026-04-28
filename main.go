@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/xiaoyueRX/Ani-Go/internal/api"
+	"github.com/xiaoyueRX/Ani-Go/internal/auth"
 	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
@@ -27,9 +29,20 @@ func main() {
 	cfg := config.Load()
 	log.Printf("配置加载完成 | 端口: %d | 数据库: %s", cfg.Server.Port, cfg.Database.Path)
 
+	// 初始化 JWT 动态密钥（crypto/rand 生成，绝不硬编码）
+	if err := auth.InitSecret(); err != nil {
+		log.Fatalf("❌ JWT Secret 初始化失败: %v", err)
+	}
+	log.Println("✅ JWT 动态密钥已生成 (crypto/rand 32B)")
+
 	// 初始化数据库
 	if err := database.Init(cfg.Database.Path); err != nil {
 		log.Fatalf("❌ 数据库初始化失败: %v", err)
+	}
+
+	// 自动创建默认管理员 admin/admin（Bcrypt 哈希存储）
+	if err := database.InitDefaultUser(auth.HashPassword); err != nil {
+		log.Fatalf("❌ 默认用户创建失败: %v", err)
 	}
 
 	printConfig(cfg)
@@ -69,7 +82,6 @@ func main() {
 	// 监听下载完成事件，自动触发文件整理
 	bus.Subscribe("download.completed", func(event core.Event) {
 		log.Printf("📢 收到下载完成事件: %v", event)
-		// TODO: 读取 Episode 记录，调用 org.Organize()
 	})
 
 	// 启动调度器
@@ -80,9 +92,16 @@ func main() {
 
 	go sched.Start(ctx)
 
-	fmt.Println("\n✅ Ani-Go 启动成功 — Phase 1 核心引擎运行中")
+	// 启动 HTTP API 服务（含 JWT 鉴权中间件）
+	_ = api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port)
+
+	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("✅ Ani-Go 启动成功 — Phase 1 核心引擎运行中")
+	fmt.Printf("   API: http://%s:%d/api/login\n", cfg.Server.Host, cfg.Server.Port)
+	fmt.Println("   默认账号: admin / admin")
 	fmt.Println("   定时任务: RSS 轮询 | 文件整理")
 	fmt.Println("   按 Ctrl+C 退出")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	// 等待退出信号
 	quit := make(chan os.Signal, 1)
@@ -117,7 +136,6 @@ func printConfig(cfg *config.Config) {
 		fmt.Printf("✅ qBittorrent: %s\n", cfg.Downloaders.QBittorrent.Host)
 	} else {
 		fmt.Println("⚠️  qBittorrent: 未配置")
-		fmt.Println("   设置方法: export QB_HOST=http://localhost:8081 && export QB_USER=admin && export QB_PASS=password")
 	}
 	fmt.Printf("   番剧目录: %s\n", cfg.Organizer.TVBasePath)
 	fmt.Printf("   RSS 间隔: %v | 整理间隔: %v\n", cfg.Scheduler.RSSInterval, cfg.Scheduler.OrganizerInterval)
