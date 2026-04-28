@@ -4,6 +4,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"time"
 
@@ -14,23 +15,25 @@ import (
 
 // Scheduler 调度器，管理所有定时任务
 type Scheduler struct {
-	cfg        *config.Config
-	mikanRSSURL string
-	source     core.Source
-	downloader core.Downloader
-	organizer  core.Organizer
-	bus        core.EventBus
+	cfg              *config.Config
+	mikanRSSURL      string
+	source           core.Source
+	downloader       core.Downloader
+	organizer        core.Organizer
+	bus              core.EventBus
+	metadataProvider core.MetadataProvider // 元数据提供者（可选）
 }
 
 // New 创建调度器实例
-func New(cfg *config.Config, source core.Source, dl core.Downloader, org core.Organizer, bus core.EventBus) *Scheduler {
+func New(cfg *config.Config, source core.Source, dl core.Downloader, org core.Organizer, bus core.EventBus, md core.MetadataProvider) *Scheduler {
 	return &Scheduler{
-		cfg:         cfg,
-		mikanRSSURL: cfg.Mikan.PersonalRSSURL,
-		source:      source,
-		downloader:  dl,
-		organizer:   org,
-		bus:         bus,
+		cfg:              cfg,
+		mikanRSSURL:      cfg.Mikan.PersonalRSSURL,
+		source:           source,
+		downloader:       dl,
+		organizer:        org,
+		bus:              bus,
+		metadataProvider: md,
 	}
 }
 
@@ -44,8 +47,17 @@ func (s *Scheduler) Start(ctx context.Context) {
 	orgTicker := time.NewTicker(s.cfg.Scheduler.OrganizerInterval)
 	defer orgTicker.Stop()
 
+	suppTicker := time.NewTicker(s.cfg.Scheduler.SupplementInterval)
+	defer suppTicker.Stop()
+
 	// 启动后立即执行一次 RSS 轮询
 	go s.pollRSS(ctx)
+
+	// 延迟 30 秒后执行首次补全扫描
+	go func() {
+		time.Sleep(30 * time.Second)
+		s.pollSupplement(ctx)
+	}()
 
 	for {
 		select {
@@ -56,6 +68,8 @@ func (s *Scheduler) Start(ctx context.Context) {
 			go s.pollRSS(ctx)
 		case <-orgTicker.C:
 			go s.pollOrganizer(ctx)
+		case <-suppTicker.C:
+			go s.pollSupplement(ctx)
 		}
 	}
 }
@@ -157,6 +171,146 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 	log.Printf("✅ 已整理 %d 个文件", len(episodes))
 }
 
+// pollSupplement 执行补全扫描：查找集数不完整的订阅，爬取历史种子补全
+func (s *Scheduler) pollSupplement(ctx context.Context) {
+	log.Println("🔍 开始补全扫描...")
+
+	var subs []database.Subscription
+	database.DB.Where(
+		"enabled = ? AND completed = ? AND total_episodes > 0 AND current_episodes < total_episodes",
+		true, false,
+	).Find(&subs)
+
+	if len(subs) == 0 {
+		log.Println("✅ 补全扫描完成: 无需补全的订阅")
+		return
+	}
+
+	log.Printf("📋 发现 %d 个需要补全的订阅", len(subs))
+
+	for _, sub := range subs {
+		if sub.BangumiID == "" {
+			continue
+		}
+
+		filter := buildFilter(sub)
+
+		if s.bus != nil {
+			s.bus.Publish(core.Event{
+				Type: core.EventSupplementTriggered,
+				Payload: map[string]any{
+					"subscription_id": sub.ID,
+					"bangumi_id":      sub.BangumiID,
+					"title":           sub.TitleCN,
+				},
+				Time: time.Now(),
+			})
+		}
+
+		items, err := s.source.FetchHistory(ctx, sub.BangumiID, filter)
+		if err != nil {
+			log.Printf("❌ 获取历史种子失败 [%s]: %v", sub.TitleCN, err)
+			continue
+		}
+
+		newCount := 0
+		for _, item := range items {
+			// 去重检查
+			if isDuplicate(item.URL) {
+				continue
+			}
+			if item.InfoHash != "" && isEpisodeExists(item.InfoHash) {
+				continue
+			}
+
+			savePath := sub.CustomPath
+			if savePath == "" {
+				savePath = s.cfg.Organizer.TVBasePath
+			}
+
+			if err := s.downloader.Add(ctx, item, savePath); err != nil {
+				log.Printf("❌ 添加补全下载失败 [%s]: %v", item.Title, err)
+				continue
+			}
+
+			recordDownload(item)
+			createEpisodeRecord(sub.ID, item)
+			newCount++
+		}
+
+		if newCount > 0 {
+			log.Printf("✅ 补全 [%s]: 新增 %d 个下载", sub.TitleCN, newCount)
+		}
+
+		// 更新当前集数统计
+		var count int64
+		database.DB.Model(&database.Episode{}).
+			Where("subscription_id = ? AND status IN ?", sub.ID, []string{"downloaded", "downloading"}).
+			Count(&count)
+		database.DB.Model(&sub).Update("current_episodes", count)
+
+		// 检查是否已完成
+		if int(count) >= sub.TotalEpisodes {
+			database.DB.Model(&sub).Update("completed", true)
+			if s.bus != nil {
+				s.bus.Publish(core.Event{
+					Type: core.EventSupplementCompleted,
+					Payload: map[string]any{
+						"subscription_id": sub.ID,
+						"title":           sub.TitleCN,
+					},
+					Time: time.Now(),
+				})
+			}
+		}
+	}
+
+	log.Println("✅ 补全扫描完成")
+}
+
+// buildFilter 从订阅的 FilterJSON 构建 core.Filter
+func buildFilter(sub database.Subscription) core.Filter {
+	filter := core.Filter{
+		PreferSubgroup: sub.SubgroupName,
+	}
+	if sub.FilterJSON != "" {
+		var stored struct {
+			IncludeKeywords []string `json:"include_keywords"`
+			ExcludeKeywords []string `json:"exclude_keywords"`
+			Resolution      string   `json:"resolution"`
+		}
+		if err := json.Unmarshal([]byte(sub.FilterJSON), &stored); err == nil {
+			filter.IncludeKeywords = stored.IncludeKeywords
+			filter.ExcludeKeywords = stored.ExcludeKeywords
+			if stored.Resolution != "" {
+				filter.Resolution = stored.Resolution
+			}
+		}
+	}
+	return filter
+}
+
+// createEpisodeRecord 创建或更新 Episode 记录
+func createEpisodeRecord(subID uint, item core.TorrentItem) {
+	if item.InfoHash == "" {
+		return
+	}
+	now := time.Now()
+	ep := database.Episode{
+		SubscriptionID:    subID,
+		Season:            1,
+		Number:            0,
+		Title:             item.Title,
+		Status:            "downloading",
+		TorrentHash:       item.InfoHash,
+		TorrentURL:        item.URL,
+		OriginalName:      item.Title,
+		FileSize:          item.Size,
+		DownloadStartedAt: &now,
+	}
+	database.DB.Where("torrent_hash = ?", item.InfoHash).FirstOrCreate(&ep)
+}
+
 // ============================================================
 // 辅助函数
 // ============================================================
@@ -166,6 +320,15 @@ func isDuplicate(torrentURL string) bool {
 	var count int64
 	database.DB.Model(&database.DownloadRecord{}).
 		Where("torrent_url = ?", torrentURL).
+		Count(&count)
+	return count > 0
+}
+
+// isEpisodeExists 检查通过 InfoHash 是否已存在 Episode 记录
+func isEpisodeExists(infoHash string) bool {
+	var count int64
+	database.DB.Model(&database.Episode{}).
+		Where("torrent_hash = ?", infoHash).
 		Count(&count)
 	return count > 0
 }

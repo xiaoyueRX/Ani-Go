@@ -29,6 +29,7 @@ go mod tidy                     # Sync Go dependencies
 ## Key Conventions
 
 - **Windows dev / Linux deploy**: The developer works on Windows (PowerShell) but deploys to a PVE LXC container (Debian). Code must compile and run on both. The SQLite driver `github.com/glebarez/sqlite` is a pure Go driver — `gorm.io/driver/sqlite` requires CGO and breaks cross-compilation.
+- **GFW 网络环境**: GitHub、Go 代理、Mikan 等境外服务可能被墙。Go 模块下载用 `GOPROXY=https://goproxy.cn,direct`。Mikan、BGM.tv、TMDB API 均已内置多域名镜像自动回退机制。
 - **Chinese comments**: All Go source comments are in Chinese. Documentation files are bilingual (CN + EN copies).
 - **GitHub push**: GFW blocks GitHub; a VPN (TUN mode global proxy) is needed for `git push`, `gh`, and cloning from GitHub.
 - **JWT auth**: Secret is dynamically generated each startup via `crypto/rand` (never hardcoded). RBAC by default is token-only (users table stores Bcrypt hashes). The `/api/me` endpoint uses `extractToken()` to re-validate even though AuthMiddleware already checked it — intentional belt-and-suspenders.

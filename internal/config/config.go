@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -30,6 +31,7 @@ type MikanConfig struct {
 	PersonalRSSURL string
 	Domain         string
 	ProxyDomain    string
+	MirrorDomains  []string // 镜像域名列表，GFW 环境下自动回退
 }
 
 type DownloadersConfig struct {
@@ -67,14 +69,16 @@ type MetadataConfig struct {
 }
 
 type TMDBConfig struct {
-	Enabled  bool
-	APIKey   string
-	Language string
+	Enabled       bool
+	APIKey        string
+	Language      string
+	MirrorDomains []string // TMDB API 镜像域名列表
 }
 
 type BGMTVConfig struct {
-	Enabled   bool
-	UserToken string
+	Enabled       bool
+	UserToken     string
+	MirrorDomains []string // BGM 镜像域名 (bgm.tv, bangumi.tv, chii.in)
 }
 
 type OrganizerConfig struct {
@@ -110,6 +114,12 @@ func Load() *Config {
 	if v := os.Getenv("MIKAN_DOMAIN"); v != "" {
 		cfg.Mikan.Domain = v
 	}
+	if v := os.Getenv("MIKAN_PROXY_DOMAIN"); v != "" {
+		cfg.Mikan.ProxyDomain = v
+	}
+	if v := os.Getenv("MIKAN_MIRROR_DOMAINS"); v != "" {
+		cfg.Mikan.MirrorDomains = splitEnv(v)
+	}
 	if v := os.Getenv("QB_HOST"); v != "" {
 		cfg.Downloaders.QBittorrent.Host = v
 		cfg.Downloaders.QBittorrent.Enabled = true
@@ -123,6 +133,25 @@ func Load() *Config {
 	if v := os.Getenv("TMDB_API_KEY"); v != "" {
 		cfg.Metadata.TMDB.APIKey = v
 		cfg.Metadata.TMDB.Enabled = true
+	}
+	if v := os.Getenv("TMDB_MIRROR_DOMAINS"); v != "" {
+		cfg.Metadata.TMDB.MirrorDomains = splitEnv(v)
+	}
+	if v := os.Getenv("BGMTV_USER_TOKEN"); v != "" {
+		cfg.Metadata.BGMTV.UserToken = v
+		cfg.Metadata.BGMTV.Enabled = true
+	}
+	if v := os.Getenv("BGMTV_MIRROR_DOMAINS"); v != "" {
+		cfg.Metadata.BGMTV.MirrorDomains = splitEnv(v)
+	}
+	if v := os.Getenv("TV_BASE_PATH"); v != "" {
+		cfg.Organizer.TVBasePath = v
+	}
+	if v := os.Getenv("MOVIE_BASE_PATH"); v != "" {
+		cfg.Organizer.MovieBasePath = v
+	}
+	if v := os.Getenv("OVA_BASE_PATH"); v != "" {
+		cfg.Organizer.OVABasePath = v
 	}
 	if v := os.Getenv("AI_ENDPOINT"); v != "" {
 		cfg.AI.Endpoint = v
@@ -143,7 +172,9 @@ func defaults() *Config {
 	return &Config{
 		Server:   ServerConfig{Host: "0.0.0.0", Port: 8080},
 		Database: DatabaseConfig{Path: "/data/ani-go.db"},
-		Mikan:    MikanConfig{Domain: "mikanani.me"},
+		Mikan: MikanConfig{
+			Domain: "mikanani.me", MirrorDomains: []string{"mikanani.me", "mikanime.tv"},
+		},
 		Downloaders: DownloadersConfig{
 			Default: "qbittorrent",
 			QBittorrent: QBittorrentConfig{
@@ -153,7 +184,9 @@ func defaults() *Config {
 		Metadata: MetadataConfig{
 			Primary: "tmdb",
 			TMDB:    TMDBConfig{Language: "zh-CN"},
-			BGMTV:   BGMTVConfig{Enabled: true},
+			BGMTV: BGMTVConfig{
+				Enabled: true, MirrorDomains: []string{"api.bgm.tv", "api.bangumi.tv", "api.chii.in"},
+			},
 		},
 		Organizer: OrganizerConfig{
 			TVBasePath:    "/TV/Media/番剧",
@@ -167,4 +200,18 @@ func defaults() *Config {
 			RSSInterval: 30 * time.Minute, SupplementInterval: 24 * time.Hour, OrganizerInterval: 2 * time.Minute,
 		},
 	}
+}
+
+// splitEnv 将逗号或空格分隔的环境变量值拆分为字符串切片
+func splitEnv(v string) []string {
+	parts := strings.FieldsFunc(v, func(r rune) bool {
+		return r == ',' || r == ' '
+	})
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

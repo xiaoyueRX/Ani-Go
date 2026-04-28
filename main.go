@@ -15,6 +15,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/downloader"
 	"github.com/xiaoyueRX/Ani-Go/internal/event"
+	"github.com/xiaoyueRX/Ani-Go/internal/metadata"
 	"github.com/xiaoyueRX/Ani-Go/internal/organizer"
 	"github.com/xiaoyueRX/Ani-Go/internal/scheduler"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
@@ -52,8 +53,8 @@ func main() {
 	log.Println("✅ 事件总线已初始化")
 
 	// 初始化 Mikan 资源源
-	mikanSource := source.NewMikanSource(cfg.Mikan.Domain, cfg.Mikan.ProxyDomain)
-	log.Printf("✅ Mikan 资源源已就绪 (域名: %s)", cfg.Mikan.Domain)
+	mikanSource := source.NewMikanSource(cfg.Mikan.Domain, cfg.Mikan.ProxyDomain, cfg.Mikan.MirrorDomains)
+	log.Printf("✅ Mikan 资源源已就绪 (域名: %s, 镜像: %d 个)", cfg.Mikan.Domain, len(cfg.Mikan.MirrorDomains))
 
 	// 初始化 qBittorrent 下载器
 	if cfg.Downloaders.QBittorrent.Enabled {
@@ -79,13 +80,37 @@ func main() {
 	)
 	log.Println("✅ 文件整理器已就绪")
 
+	// 初始化 TMDB 元数据提供者（可选）
+	var primaryMetadata core.MetadataProvider
+	if cfg.Metadata.TMDB.Enabled && cfg.Metadata.TMDB.APIKey != "" {
+		primaryMetadata = metadata.NewTMDBProvider(
+			cfg.Metadata.TMDB.APIKey,
+			cfg.Metadata.TMDB.Language,
+			cfg.Metadata.TMDB.MirrorDomains,
+		)
+		log.Printf("✅ TMDB 元数据提供者已就绪 (语言: %s)", cfg.Metadata.TMDB.Language)
+	}
+
+	// 初始化 BGM.tv 元数据提供者（可选）
+	if cfg.Metadata.BGMTV.Enabled && cfg.Metadata.BGMTV.UserToken != "" {
+		bgmProvider := metadata.NewBGMTVProvider(
+			cfg.Metadata.BGMTV.UserToken,
+			cfg.Metadata.BGMTV.MirrorDomains,
+		)
+		log.Printf("✅ BGM.tv 元数据提供者已就绪")
+		// 若 BGM 被设为主元数据源则优先使用
+		if cfg.Metadata.Primary == "bgmtv" {
+			primaryMetadata = bgmProvider
+		}
+	}
+
 	// 监听下载完成事件，自动触发文件整理
 	bus.Subscribe("download.completed", func(event core.Event) {
 		log.Printf("📢 收到下载完成事件: %v", event)
 	})
 
 	// 启动调度器
-	sched := scheduler.New(cfg, mikanSource, qb, org, bus)
+	sched := scheduler.New(cfg, mikanSource, qb, org, bus, primaryMetadata)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
