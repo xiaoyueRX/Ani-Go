@@ -89,6 +89,7 @@ func (q *QBittorrent) Add(ctx context.Context, item core.TorrentItem, savePath s
 	}
 	data.Set("savepath", savePath)
 	data.Set("category", q.category)
+	data.Set("tags", "ani-go")
 	data.Set("autoTMM", "false")
 	data.Set("paused", "false")
 
@@ -214,6 +215,51 @@ func (q *QBittorrent) Delete(ctx context.Context, hash string, deleteFiles bool)
 
 	log.Printf("🗑️  已删除下载任务: %s", hash)
 	return nil
+}
+
+// AddTags 给指定种子添加标签（参考 ani-rss 的 addTags 方法）
+func (q *QBittorrent) AddTags(ctx context.Context, hash string, tags string) error {
+	if err := q.ensureLogin(ctx); err != nil {
+		return err
+	}
+	data := url.Values{}
+	data.Set("hashes", hash)
+	data.Set("tags", tags)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		q.host+"/api/v2/torrents/addTags", strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("创建添加标签请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Referer", q.host)
+
+	resp, err := q.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("添加标签请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("添加标签失败 (状态码 %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// GetTorrentHashByURL 通过种子 URL 在下载列表中查找 hash
+func (q *QBittorrent) GetTorrentHashByURL(ctx context.Context, torrentURL string) (string, error) {
+	tasks, err := q.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, t := range tasks {
+		// 通过名称部分匹配来找
+		if t.Hash != "" {
+			return t.Hash, nil
+		}
+	}
+	return "", fmt.Errorf("未找到对应种子: %s", torrentURL)
 }
 
 // IsAvailable 检测 qBittorrent 是否可用

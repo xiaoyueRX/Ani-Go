@@ -85,9 +85,84 @@ func TestParseMikanTitle_EPStyle(t *testing.T) {
 }
 
 func TestParseMikanTitle_PointFiveEpisode(t *testing.T) {
-	// EPStyle with .5
 	info := ParseMikanTitle("【MingY】葬送的芙莉莲 EP12.5")
 	if info.Episode != 12.5 {
 		t.Errorf("集数 = %g, 期望 12.5", info.Episode)
+	}
+}
+
+func TestParseMikanTitle_VolPattern(t *testing.T) {
+	info := ParseMikanTitle("[DMG] 某科学的超电磁炮 Vol 5")
+	if info.Episode != 5 {
+		t.Errorf("集数 = %g, 期望 5", info.Episode)
+	}
+}
+
+func TestParseMikanTitle_ChineseBracketEp(t *testing.T) {
+	// 【01】中文方括号格式
+	info := ParseMikanTitle("【极影字幕社】某科学的超电磁炮T【01】")
+	if info.Episode != 1 {
+		t.Errorf("集数 = %g, 期望 1", info.Episode)
+	}
+	if info.Subgroup != "极影字幕社" {
+		t.Errorf("字幕组 = %q, 期望 %q", info.Subgroup, "极影字幕社")
+	}
+}
+
+func TestParseMikanTitle_SquareBracketEp(t *testing.T) {
+	// [01] 英文方括号格式
+	info := ParseMikanTitle("Fate/Zero [01] 1080p")
+	if info.Episode != 1 {
+		t.Errorf("集数 = %g, 期望 1", info.Episode)
+	}
+}
+
+func TestParseMikanTitle_SquareBracketWithVersion(t *testing.T) {
+	// [01v2] 带版本号
+	info := ParseMikanTitle("[DMG] 某动画 [01v2]")
+	if info.Episode != 1 {
+		t.Errorf("集数 = %g, 期望 1", info.Episode)
+	}
+	if info.Version != 2 {
+		t.Errorf("版本号 = %d, 期望 2", info.Version)
+	}
+}
+
+func TestParseMikanTitle_VersionInTitle(t *testing.T) {
+	info := ParseMikanTitle("[VCB-Studio] Fate/stay night V2 1080p")
+	if info.Version != 2 {
+		t.Errorf("版本号 = %d, 期望 2", info.Version)
+	}
+}
+
+func TestParseMikanTitle_IsBatch(t *testing.T) {
+	info := ParseMikanTitle("【悠哈璃羽字幕社】孤独摇滚 全12集 合集")
+	if !info.IsBatch {
+		t.Error("应识别为合集")
+	}
+}
+
+func TestParseMikanTitle_IsSpecial(t *testing.T) {
+	info := ParseMikanTitle("[LoliHouse] 某科学的超电磁炮 OVA")
+	if !info.IsSpecial {
+		t.Error("应将 OVA 识别为特别篇")
+	}
+}
+
+func TestParseMikanTitle_IsSP(t *testing.T) {
+	info := ParseMikanTitle("葬送的芙莉莲 SP1")
+	if !info.IsSpecial {
+		t.Error("应将 SP 识别为特别篇")
+	}
+}
+
+func TestParseMikanTitle_CleanCodecTags(t *testing.T) {
+	info := ParseMikanTitle("[VCB-Studio] 攻壳机动队 [01] [Ma10p_1080p][x265_2flac]")
+	if info.Episode != 1 {
+		t.Errorf("集数 = %g, 期望 1", info.Episode)
+	}
+	// 标题不应包含编码标签
+	if info.Title == "" {
+		t.Error("番剧名为空")
 	}
 }
