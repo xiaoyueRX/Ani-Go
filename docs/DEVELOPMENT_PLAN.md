@@ -56,7 +56,7 @@
 - [x] 定义核心接口 (`internal/core/interfaces.go`)。
 - [x] 实现配置加载系统 (环境变量优先)。
 - [x] 实现数据库初始化与 ORM 模型。
-- [ ] 建立 GitHub 仓库并完成首次代码 Push。
+- [x] 建立 GitHub 仓库并完成首次代码 Push。
 - [x] 创建项目记忆文档 (`docs/PROJECT_CONTEXT.md`)。
 - [x] **参考开源代码**：以 GitHub 上的 `AutoBangumi` 和原版 `ani-rss` 等项目为底，参考其源码，避免重复造轮子。
 
