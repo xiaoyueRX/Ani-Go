@@ -1,4 +1,4 @@
-module github.com/xiaoyueRX/Ani-rss
+module github.com/xiaoyueRX/Ani-Go
 
 go 1.22.5
 

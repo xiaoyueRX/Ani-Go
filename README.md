@@ -32,8 +32,8 @@ docker run -d \
 
 ```bash
 # 克隆项目
-git clone https://github.com/xiaoyueRX/Ani-rss.git
-cd Ani-rss
+git clone https://github.com/xiaoyueRX/Ani-Go.git
+cd Ani-Go
 
 # 配置环境变量
 cp .env.example .env

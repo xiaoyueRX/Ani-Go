@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/xiaoyueRX/Ani-rss/internal/config"
-	"github.com/xiaoyueRX/Ani-rss/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/config"
+	"github.com/xiaoyueRX/Ani-Go/internal/database"
 )
 
 var version = "dev"
@@ -39,14 +39,14 @@ func main() {
 
 func printBanner() {
 	fmt.Println(`
-    ___         _                    
-   /   |  ____ (_)       __________ _____
-  / /| | / __ \/ /______/ ___/ ___// ___/
- / ___ |/ / / / /______/ /  (__  )/__  ) 
-/_/  |_/_/ /_/_/      /_/  /____//____/  
-                                         
-Ani-Go - 全自动番剧追番管理系统
-`)
+	   _          _        ____
+	  / \   _ __ (_)      / ___| ___
+	 / _ \ | '_ \| |_____| |  _ / _ \
+	/ ___ \| | | | |_____| |_| | (_) |
+       /_/   \_\_| |_|_|      \____|\___/
+
+	Ani-Go - 全自动番剧追番管理系统
+	`)
 }
 
 func printConfig(cfg *config.Config) {

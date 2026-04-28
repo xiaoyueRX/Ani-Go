@@ -19,7 +19,7 @@
 ### 存储路径 (fnOS)
 - **电视剧/番剧根目录**: `/vol2/1000/TV/Media/番剧`
 - **剧场版根目录**: `/vol2/1000/TV/Media/剧场版`
-- **数据库路径**: `d:\pve\Ani-rss\ani-rss.db` (Windows) / `/data/ani-rss.db` (Docker)
+- **数据库路径**: `d:\pve\Ani-Go\ani-go.db` (Windows) / `/data/ani-go.db` (Docker)
 
 ---
 
@@ -63,7 +63,7 @@
   - [x] 实现数据库初始化与 ORM 模型 (GORM)
 - [x] **Phase 0.5: 代码上云**
   - [x] 成功修复 PowerShell 造成的编码破坏 (UTF-8)
-  - [x] 建立 GitHub 仓库 `xiaoyueRX/Ani-rss` (仓库名保留为 Ani-rss)
+  - [x] 建立 GitHub 仓库 `xiaoyueRX/Ani-Go`
   - [x] 完成首次代码 Push
 - [ ] **Phase 1: 核心引擎实现** (NEXT)
   - [ ] Mikan RSS 解析器

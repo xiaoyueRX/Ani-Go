@@ -58,7 +58,7 @@
 - [x] 实现数据库初始化与 ORM 模型。
 - [ ] 建立 GitHub 仓库并完成首次代码 Push。
 - [x] 创建项目记忆文档 (`docs/PROJECT_CONTEXT.md`)。
-- [x] **参考开源代码**：以 GitHub 上的 `autobangumi` 和原版 `ani-rss` 等项目为底，参考其源码，避免重复造轮子。
+- [x] **参考开源代码**：以 GitHub 上的 `AutoBangumi` 和原版 `ani-rss` 等项目为底，参考其源码，避免重复造轮子。
 
 ### Phase 1: 核心引擎实现 (MVP)
 - [ ] **Mikan RSS 解析器**：实现 `Source` 接口，解析 Mikan 个人 RSS，自动发现订阅。
