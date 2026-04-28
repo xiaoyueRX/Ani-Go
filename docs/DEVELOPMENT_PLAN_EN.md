@@ -72,16 +72,16 @@
 - [x] **Title Parsing Enhancement**: 8 regex patterns covering Vol/【】/[]/SxxExx/.5/version/batch/special, referenced from ani-rss and AutoBangumi.
 
 ### Phase 2: Historical Completion & Metadata
-- [ ] **Mikan Full-Page Crawling**: Implement historical batch completion logic (core innovation).
-- [ ] **TMDB/BGM.tv Integration**: Implement `MetadataProvider` interface, fetch anime metadata.
-- [ ] **Enhanced File Organization**: Support custom path templates, improve series merging rules.
-- [ ] **Episode Gap Detection** (ref AutoBangumi): Check episode number continuity, auto-trigger backfill when gaps detected.
+- [x] **Mikan Full-Page Crawling**: Implement historical batch completion logic (core innovation).
+- [x] **TMDB/BGM.tv Integration**: Implement `MetadataProvider` interface, fetch anime metadata.
+- [x] **GFW Mirror/Proxy Support**: Multi-domain mirror auto-fallback for Mikan, BGM.tv, TMDB; GitHub proxy configuration.
+- [x] **Supplement Scheduler** (ref AutoBangumi): Auto-detect episode gaps for incomplete subscriptions, crawl historical torrents for backfill.
 - [ ] **Dead Torrent Timeout Warning** (ref AutoBangumi): Auto-flag stalled downloads after N days, suggest subgroup change.
 - [ ] **User-Customizable Regex** (ref AutoBangumi): Allow advanced users to add custom title parsing rules in config, running alongside built-in patterns.
 
 ### Phase 3: Web UI & Deployment
-- [ ] **Basic Web UI**: Implement dashboard, subscription list, settings page.
-- [ ] **RESTful API**: Provide backend APIs for Web UI.
+- [x] **Basic Web UI**: Vue3 + Vite + DaisyUI login page and dashboard.
+- [x] **RESTful API**: Subscription CRUD (GET/POST/PUT/DELETE), download queue, settings management, supplement trigger.
 - [ ] **Docker Deployment**: Write Dockerfile and docker-compose.yml.
 - [ ] **CI/CD**: Configure GitHub Actions for automatic image building.
 

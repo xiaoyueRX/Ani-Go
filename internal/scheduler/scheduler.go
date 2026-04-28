@@ -189,83 +189,96 @@ func (s *Scheduler) pollSupplement(ctx context.Context) {
 	log.Printf("📋 发现 %d 个需要补全的订阅", len(subs))
 
 	for _, sub := range subs {
-		if sub.BangumiID == "" {
+		s.supplementOne(ctx, sub)
+	}
+
+	log.Println("✅ 补全扫描完成")
+}
+
+// TriggerSupplement 对单个订阅执行补全扫描（供 API 调用）
+func (s *Scheduler) TriggerSupplement(ctx context.Context, subID uint) error {
+	var sub database.Subscription
+	if err := database.DB.First(&sub, subID).Error; err != nil {
+		return err
+	}
+	s.supplementOne(ctx, sub)
+	return nil
+}
+
+// supplementOne 对单个订阅执行补全逻辑
+func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription) {
+	if sub.BangumiID == "" {
+		log.Printf("⚠️  订阅 %s 未设置 BangumiID，跳过补全", sub.TitleCN)
+		return
+	}
+
+	filter := buildFilter(sub)
+
+	if s.bus != nil {
+		s.bus.Publish(core.Event{
+			Type: core.EventSupplementTriggered,
+			Payload: map[string]any{
+				"subscription_id": sub.ID,
+				"bangumi_id":      sub.BangumiID,
+				"title":           sub.TitleCN,
+			},
+			Time: time.Now(),
+		})
+	}
+
+	items, err := s.source.FetchHistory(ctx, sub.BangumiID, filter)
+	if err != nil {
+		log.Printf("❌ 获取历史种子失败 [%s]: %v", sub.TitleCN, err)
+		return
+	}
+
+	newCount := 0
+	for _, item := range items {
+		if isDuplicate(item.URL) {
+			continue
+		}
+		if item.InfoHash != "" && isEpisodeExists(item.InfoHash) {
 			continue
 		}
 
-		filter := buildFilter(sub)
+		savePath := sub.CustomPath
+		if savePath == "" {
+			savePath = s.cfg.Organizer.TVBasePath
+		}
 
+		if err := s.downloader.Add(ctx, item, savePath); err != nil {
+			log.Printf("❌ 添加补全下载失败 [%s]: %v", item.Title, err)
+			continue
+		}
+
+		recordDownload(item)
+		createEpisodeRecord(sub.ID, item)
+		newCount++
+	}
+
+	if newCount > 0 {
+		log.Printf("✅ 补全 [%s]: 新增 %d 个下载", sub.TitleCN, newCount)
+	}
+
+	var count int64
+	database.DB.Model(&database.Episode{}).
+		Where("subscription_id = ? AND status IN ?", sub.ID, []string{"downloaded", "downloading"}).
+		Count(&count)
+	database.DB.Model(&sub).Update("current_episodes", count)
+
+	if int(count) >= sub.TotalEpisodes {
+		database.DB.Model(&sub).Update("completed", true)
 		if s.bus != nil {
 			s.bus.Publish(core.Event{
-				Type: core.EventSupplementTriggered,
+				Type: core.EventSupplementCompleted,
 				Payload: map[string]any{
 					"subscription_id": sub.ID,
-					"bangumi_id":      sub.BangumiID,
 					"title":           sub.TitleCN,
 				},
 				Time: time.Now(),
 			})
 		}
-
-		items, err := s.source.FetchHistory(ctx, sub.BangumiID, filter)
-		if err != nil {
-			log.Printf("❌ 获取历史种子失败 [%s]: %v", sub.TitleCN, err)
-			continue
-		}
-
-		newCount := 0
-		for _, item := range items {
-			// 去重检查
-			if isDuplicate(item.URL) {
-				continue
-			}
-			if item.InfoHash != "" && isEpisodeExists(item.InfoHash) {
-				continue
-			}
-
-			savePath := sub.CustomPath
-			if savePath == "" {
-				savePath = s.cfg.Organizer.TVBasePath
-			}
-
-			if err := s.downloader.Add(ctx, item, savePath); err != nil {
-				log.Printf("❌ 添加补全下载失败 [%s]: %v", item.Title, err)
-				continue
-			}
-
-			recordDownload(item)
-			createEpisodeRecord(sub.ID, item)
-			newCount++
-		}
-
-		if newCount > 0 {
-			log.Printf("✅ 补全 [%s]: 新增 %d 个下载", sub.TitleCN, newCount)
-		}
-
-		// 更新当前集数统计
-		var count int64
-		database.DB.Model(&database.Episode{}).
-			Where("subscription_id = ? AND status IN ?", sub.ID, []string{"downloaded", "downloading"}).
-			Count(&count)
-		database.DB.Model(&sub).Update("current_episodes", count)
-
-		// 检查是否已完成
-		if int(count) >= sub.TotalEpisodes {
-			database.DB.Model(&sub).Update("completed", true)
-			if s.bus != nil {
-				s.bus.Publish(core.Event{
-					Type: core.EventSupplementCompleted,
-					Payload: map[string]any{
-						"subscription_id": sub.ID,
-						"title":           sub.TitleCN,
-					},
-					Time: time.Now(),
-				})
-			}
-		}
 	}
-
-	log.Println("✅ 补全扫描完成")
 }
 
 // buildFilter 从订阅的 FilterJSON 构建 core.Filter

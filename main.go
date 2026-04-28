@@ -118,7 +118,7 @@ func main() {
 	go sched.Start(ctx)
 
 	// 启动 HTTP API 服务（含 JWT 鉴权中间件）
-	_ = api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port)
+	_ = api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, qb, sched.TriggerSupplement)
 
 	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("✅ Ani-Go 启动成功 — Phase 1 核心引擎运行中")

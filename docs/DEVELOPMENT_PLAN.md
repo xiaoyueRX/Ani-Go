@@ -72,16 +72,16 @@
 - [x] **标题解析增强**：8 种正则模式覆盖 Vol/【】/[]/SxxExx/.5/版本号/合集/特别篇，参考 ani-rss 和 AutoBangumi。
 
 ### Phase 2: 历史补全与元数据
-- [ ] **Mikan 全页爬取**：实现历史全量补全逻辑（核心创新点）。
-- [ ] **TMDB/BGM.tv 集成**：实现 `MetadataProvider` 接口，获取番剧元数据。
-- [ ] **智能文件整理增强**：支持自定义路径模板，完善系列归并规则。
-- [ ] **遗漏检测**（参考 AutoBangumi）：检查已下载集数连续性，发现缺失集数自动触发补全。
+- [x] **Mikan 全页爬取**：实现历史全量补全逻辑（核心创新点）。
+- [x] **TMDB/BGM.tv 集成**：实现 `MetadataProvider` 接口，获取番剧元数据。
+- [x] **GFW 镜像/代理支持**：Mikan、BGM.tv、TMDB 多镜像域名自动回退，GitHub 代理配置。
+- [x] **补全调度器**（参考 AutoBangumi）：未完结订阅自动检测集数缺失，爬取历史种子补全。
 - [ ] **死种超时告警**（参考 AutoBangumi）：N 天未完成下载自动标记警告，建议更换字幕组。
 - [ ] **用户自定义正则**（参考 AutoBangumi）：允许高级用户在配置文件中添加自定义标题解析规则，与内置规则并行生效。
 
-### Phase 3: Web UI 与 部署
-- [ ] **基础 Web UI**：实现仪表盘、订阅列表、设置页。
-- [ ] **RESTful API**：为 Web UI 提供后端接口。
+### Phase 3: Web UI 与部署
+- [x] **基础 Web UI**：Vue3 + Vite + DaisyUI 实现登录页、仪表盘。
+- [x] **RESTful API**：订阅 CRUD（GET/POST/PUT/DELETE）、下载队列、设置管理、补全触发。
 - [ ] **Docker 部署**：编写 Dockerfile 和 docker-compose.yml。
 - [ ] **CI/CD**：配置 GitHub Actions 自动构建镜像。
 

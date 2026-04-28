@@ -11,17 +11,26 @@ import (
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/auth"
+	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 )
 
+// Server 持有 API 所需的依赖
+type Server struct {
+	downloader        core.Downloader
+	triggerSupplement func(ctx context.Context, subID uint) error
+}
+
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
-func StartServer(ctx context.Context, host string, port int) *http.Server {
+func StartServer(ctx context.Context, host string, port int, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error) *http.Server {
+	s := &Server{
+		downloader:        dl,
+		triggerSupplement: triggerSupp,
+	}
+
 	mux := http.NewServeMux()
+	s.registerRoutes(mux)
 
-	// 注册路由
-	registerRoutes(mux)
-
-	// 中间件链: ProxyHeaders → CORS → Auth
 	handler := auth.ProxyHeadersMiddleware(
 		auth.CORSMiddleware(
 			auth.AuthMiddleware(mux),
@@ -45,7 +54,6 @@ func StartServer(ctx context.Context, host string, port int) *http.Server {
 		}
 	}()
 
-	// 优雅关闭
 	go func() {
 		<-ctx.Done()
 		log.Println("🛑 HTTP 服务正在关闭...")
@@ -57,10 +65,28 @@ func StartServer(ctx context.Context, host string, port int) *http.Server {
 	return srv
 }
 
-func registerRoutes(mux *http.ServeMux) {
+func (s *Server) registerRoutes(mux *http.ServeMux) {
+	// 认证接口（AuthMiddleware 放行）
 	mux.HandleFunc("/api/login", handleLogin)
-	mux.HandleFunc("/api/me", handleMe)
 	mux.HandleFunc("/api/health", handleHealth)
+
+	// 用户信息
+	mux.HandleFunc("GET /api/me", handleMe)
+
+	// 订阅管理 CRUD
+	mux.HandleFunc("GET /api/subscriptions", s.handleListSubscriptions)
+	mux.HandleFunc("POST /api/subscriptions", s.handleCreateSubscription)
+	mux.HandleFunc("GET /api/subscriptions/{id}", s.handleGetSubscription)
+	mux.HandleFunc("PUT /api/subscriptions/{id}", s.handleUpdateSubscription)
+	mux.HandleFunc("DELETE /api/subscriptions/{id}", s.handleDeleteSubscription)
+	mux.HandleFunc("POST /api/subscriptions/{id}/trigger-supplement", s.handleTriggerSupplement)
+
+	// 下载队列
+	mux.HandleFunc("GET /api/downloads", s.handleListDownloads)
+
+	// 设置
+	mux.HandleFunc("GET /api/settings", s.handleGetSettings)
+	mux.HandleFunc("PUT /api/settings", s.handleUpdateSettings)
 }
 
 // ============================================================
@@ -83,11 +109,9 @@ type errorResponse struct {
 }
 
 // ============================================================
-// API 处理器
+// 认证处理器
 // ============================================================
 
-// handleLogin 处理登录请求，校验密码并签发 JWT
-// POST /api/login
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 POST"})
@@ -105,7 +129,6 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 查询用户
 	var user database.User
 	if err := database.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
 		log.Printf("⚠️  登录失败: 用户 %s 不存在", req.Username)
@@ -113,14 +136,12 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 校验 Bcrypt 密码
 	if !auth.CheckPassword(req.Password, user.PasswordHash) {
 		log.Printf("⚠️  登录失败: 用户 %s 密码错误", req.Username)
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "用户名或密码错误"})
 		return
 	}
 
-	// 签发 JWT
 	token, err := auth.GenerateToken(req.Username)
 	if err != nil {
 		log.Printf("❌ JWT 签发失败: %v", err)
@@ -136,15 +157,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleMe 获取当前登录用户信息（需认证）
-// GET /api/me
 func handleMe(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 GET"})
-		return
-	}
-
-	// 从 Authorization 头提取用户信息
 	token := extractToken(r)
 	claims, err := auth.ValidateToken(token)
 	if err != nil {
@@ -157,8 +170,6 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleHealth 健康检查接口
-// GET /api/health
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "ok",
