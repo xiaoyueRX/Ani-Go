@@ -64,15 +64,20 @@
 - [x] **Chinese Comment Standard**: All Go source code comments use Chinese.
 
 ### Phase 1: Core Engine Implementation (MVP)
-- [ ] **Mikan RSS Parser**: Implement `Source` interface, parse Mikan personal RSS, auto-discover subscriptions.
-- [ ] **qBittorrent Client Integration**: Implement `Downloader` interface, interact with qBittorrent API.
-- [ ] **Basic Scheduler**: Implement periodic RSS polling and dispatch download tasks.
-- [ ] **Basic File Organization**: Implement simple rename and directory creation logic.
+- [x] **Mikan RSS Parser**: Implement `Source` interface, parse Mikan personal RSS, auto-discover subscriptions.
+- [x] **qBittorrent Client Integration**: Implement `Downloader` interface, interact with qBittorrent API.
+- [x] **Basic Scheduler**: Implement periodic RSS polling and dispatch download tasks.
+- [x] **Basic File Organization**: Implement simple rename and directory creation logic.
+- [x] **EventBus**: Implement publish/subscribe pattern for decoupled inter-module communication.
+- [x] **Title Parsing Enhancement**: 8 regex patterns covering Vol/【】/[]/SxxExx/.5/version/batch/special, referenced from ani-rss and AutoBangumi.
 
 ### Phase 2: Historical Completion & Metadata
 - [ ] **Mikan Full-Page Crawling**: Implement historical batch completion logic (core innovation).
 - [ ] **TMDB/BGM.tv Integration**: Implement `MetadataProvider` interface, fetch anime metadata.
 - [ ] **Enhanced File Organization**: Support custom path templates, improve series merging rules.
+- [ ] **Episode Gap Detection** (ref AutoBangumi): Check episode number continuity, auto-trigger backfill when gaps detected.
+- [ ] **Dead Torrent Timeout Warning** (ref AutoBangumi): Auto-flag stalled downloads after N days, suggest subgroup change.
+- [ ] **User-Customizable Regex** (ref AutoBangumi): Allow advanced users to add custom title parsing rules in config, running alongside built-in patterns.
 
 ### Phase 3: Web UI & Deployment
 - [ ] **Basic Web UI**: Implement dashboard, subscription list, settings page.
