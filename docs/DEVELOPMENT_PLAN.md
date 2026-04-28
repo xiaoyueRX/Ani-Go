@@ -24,6 +24,7 @@
 - **多模型兼容**：支持 OpenAI 兼容 API、Gemini、本地 Ollama 等市面主流 AI。
 - **AI 辅助分类**：自动识别 TV、剧场版、OVA、特别篇、特典等类型。
 - **系列智能归并**：跨资源站、不同季、剧场版/OVA 能自动识别为同一系列，统一归入同一父目录并自动分季。
+- **自然语言任务解析**：通过 QQ/微信/飞书/钉钉/Telegram 等平台发消息（如"订阅鬼灭之刃第二季"），AI 解析为结构化追番任务并自动创建订阅。
 - **规则兜底**：无 AI 时通过 TMDB Collection/Series ID、标题标准化、BGM.tv 关联等规则实现基础归并。
 
 ## 🧩 架构设计与扩展性
@@ -59,6 +60,8 @@
 - [x] 建立 GitHub 仓库并完成首次代码 Push。
 - [x] 创建项目记忆文档 (`docs/PROJECT_CONTEXT.md`)。
 - [x] **参考开源代码**：以 GitHub 上的 `AutoBangumi` 和原版 `ani-rss` 等项目为底，参考其源码，避免重复造轮子。
+- [ ] **中英双语文档**：所有 `.md` 和 `docx` 文档生成纯中文和纯英文两份版本，方便国际用户。
+- [ ] **中文注释规范**：所有 Go 源码注释使用中文。
 
 ### Phase 1: 核心引擎实现 (MVP)
 - [ ] **Mikan RSS 解析器**：实现 `Source` 接口，解析 Mikan 个人 RSS，自动发现订阅。
@@ -82,3 +85,33 @@
 - [ ] **多下载器/多资源站**：支持 Transmission, Aria2, Nyaa 等。
 - [ ] **插件系统**：设计并实现开放的插件架构和事件总线。
 - [ ] **数据迁移工具**：支持从原版 ani-rss 导入数据。
+
+### Phase 5: 外部消息平台与 AI 通知系统
+- [ ] **EventBus 实现**：实现事件总线 (`internal/event/bus.go`)，支持发布/订阅。
+- [ ] **多平台消息接入**：统一 `Messenger` 接口，支持国内外主流平台：
+  - **国内 IM**：
+    - [ ] **QQ**：反向 WebSocket（go-cqhttp / Lagrange 兼容）
+    - [ ] **微信公众号**：被动回复 + 客服消息
+    - [ ] **企业微信**：Webhook bot + 应用消息
+    - [ ] **飞书/Lark**：Webhook + 事件订阅 + 官方 SDK
+    - [ ] **钉钉**：Webhook bot + 消息推送
+  - **国际 IM**：
+    - [ ] **Telegram**：Bot API（长轮询 getUpdates）
+    - [ ] **Discord**：Bot + Webhook（discordgo）
+    - [ ] **Slack**：Socket Mode + Web API（slack-go）
+    - [ ] **LINE**：Messaging API
+    - [ ] **WhatsApp**：Cloud API（Meta）
+    - [ ] **Signal**：Bot API
+  - **Push 推送服务**：
+    - [ ] **邮件**：IMAP 收命令 + SMTP 发通知
+    - [ ] **Server酱**：HTTP API（sctapi.ftqq.com，微信推送）
+    - [ ] **Bark**：HTTP API（iOS 推送）
+    - [ ] **Pushover**：HTTP API
+    - [ ] **Gotify**：WebSocket + HTTP API（自托管）
+    - [ ] **ntfy**：HTTP API（自托管开源推送）
+- [ ] **任务解析器（双重模式）**：
+  - [ ] **规则引擎（默认）**：基于正则 + 关键词匹配，零依赖，无 AI 也能正常工作。内置订阅/搜索/状态等常见命令模式。
+  - [ ] **AI 增强（可选）**：接入 OpenAI/Gemini/Ollama 大模型，准确率更高（理解模糊表达、纠错同义词），关闭 AI 后自动回退规则引擎。
+- [ ] **通知管理器**：监听 EventBus 事件（下载完成/失败/补番完成等），通过上述所有平台推送通知。
+- [ ] **通知模板系统**：支持自定义消息模板，按事件类型和平台分别配置。
+- [ ] **全平台集成测试**：每个平台逐一验证连通性、命令解析、通知推送，共 17 个平台全部通过。
