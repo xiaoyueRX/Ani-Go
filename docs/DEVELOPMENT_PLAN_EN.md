@@ -60,8 +60,8 @@
 - [x] Create GitHub repository and complete first code push.
 - [x] Create project memory document (`docs/PROJECT_CONTEXT.md`).
 - [x] **Reference open source code**: Use AutoBangumi and original ani-rss as references for source code to avoid reinventing the wheel.
-- [ ] **Bilingual Documentation**: Generate pure Chinese and pure English versions for all `.md` and documentation files for international users.
-- [ ] **Chinese Comment Standard**: All Go source code comments use Chinese.
+- [x] **Bilingual Documentation**: Generate pure Chinese and pure English versions for all `.md` and documentation files for international users.
+- [x] **Chinese Comment Standard**: All Go source code comments use Chinese.
 
 ### Phase 1: Core Engine Implementation (MVP)
 - [ ] **Mikan RSS Parser**: Implement `Source` interface, parse Mikan personal RSS, auto-discover subscriptions.
