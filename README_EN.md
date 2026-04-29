@@ -11,7 +11,7 @@
 - ⬇️ **Multiple Downloaders**: qBittorrent / Transmission / Aria2
 - 🗂️ **Auto Organization**: Rename + directory creation, directly recognized by Jellyfin without additional processing
 - 🌐 **GFW Mirror Fallback**: Multi-domain mirror auto-switching for Mikan / BGM.tv / TMDB
-- 🤖 **AI Assisted** (optional): Supports OpenAI / Gemini / Ollama for category recognition
+- 🤖 **AI Assisted** (optional): Supports OpenAI / Google / Anthropic / Ollama 4 protocols for category recognition
 - 🧩 **Plugin System**: Open hooks supporting third-party extensions
 - 🌐 **Web UI**: Vue3 + DaisyUI, manage subscriptions, download queues, and settings from a browser
 - 🔐 **JWT Auth**: Dynamic secret + Bcrypt, secure and reliable
@@ -19,15 +19,49 @@
 
 ## Quick Start
 
+### Docker Compose (Recommended)
+
+```bash
+# Clone the project
+git clone https://github.com/xiaoyueRX/Ani-Go.git
+cd Ani-Go
+
+# Configure environment variables
+cp .env.example .env
+# Edit .env and fill in your MIKAN_RSS_URL, QB_HOST, etc.
+
+# One-click start
+docker compose up -d
+```
+
+Open `http://localhost:20001` in your browser. Default account: `admin` / `admin`.
+
+### Docker Single Container
+
 ```bash
 docker run -d \
+  --name ani-go \
   -e MIKAN_RSS_URL="https://mikanani.me/RSS/MyBangumi?token=YOUR_TOKEN" \
   -e QB_HOST="http://qbittorrent:8080" \
   -e QB_USER="username" \
   -e QB_PASS="password" \
   -v /your/tv/path:/TV \
-  -p 8080:8080 \
+  -p 20001:20001 \
   ghcr.io/xiaoyuerx/ani-go:latest
+```
+
+### Manual Build
+
+```bash
+git clone https://github.com/xiaoyueRX/Ani-Go.git
+cd Ani-Go
+
+# Build frontend
+cd web && npm install && npm run build && cd ..
+
+# Build and run (frontend embedded in binary)
+go build -o anigo .
+./anigo
 ```
 
 ## Development
@@ -39,12 +73,11 @@ cd Ani-Go
 
 # Configure environment variables
 cp .env.example .env
-# Edit .env and fill in your configuration
 
-# Install frontend dependencies (first time)
-cd web && npm install && cd ..
+# Frontend dev (Vite HMR)
+cd web && npm install && npm run dev
 
-# Build and run
+# Backend dev
 go run .
 ```
 
@@ -56,18 +89,22 @@ go run .
 | `MIKAN_DOMAIN` | Mikan primary domain | `mikanani.me` |
 | `MIKAN_PROXY_DOMAIN` | Mikan proxy domain (GFW) | - |
 | `MIKAN_MIRROR_DOMAINS` | Mikan mirror domains (comma-separated) | `mikanani.me,mikanime.tv` |
+| `DEFAULT_DOWNLOADER` | Default downloader | `qbittorrent` |
 | `QB_HOST` | qBittorrent address | `http://localhost:8081` |
 | `QB_USER` | qBittorrent username | - |
 | `QB_PASS` | qBittorrent password | - |
+| `TR_HOST` | Transmission address | `http://localhost:9091` |
+| `TR_USER` | Transmission username | - |
+| `TR_PASS` | Transmission password | - |
 | `TMDB_API_KEY` | TMDB API Key | - |
 | `TMDB_MIRROR_DOMAINS` | TMDB mirror domains | - |
 | `BGMTV_USER_TOKEN` | BGM.tv user token | - |
 | `BGMTV_MIRROR_DOMAINS` | BGM mirror domains | `api.bgm.tv,api.bangumi.tv,api.chii.in` |
-| `DB_PATH` | Database file path | `/data/ani-go.db` |
-| `TV_BASE_PATH` | Anime root directory | `/TV/Media/番剧` |
-| `MOVIE_BASE_PATH` | Movie root directory | `/TV/Media/剧场版` |
-| `OVA_BASE_PATH` | OVA root directory | - |
-| `PORT` | Web UI port | `8080` |
+| `DB_PATH` | Database file path | `ani-go.db` |
+| `TV_BASE_PATH` | Anime root directory | `./TV/番剧` |
+| `MOVIE_BASE_PATH` | Movie root directory | `./TV/剧场版` |
+| `OVA_BASE_PATH` | OVA root directory | `./TV/OVA` |
+| `PORT` | Web UI port | `20001` |
 
 ## Project Structure
 
@@ -84,6 +121,7 @@ Ani-Go/
 │   ├── event/               # EventBus
 │   ├── metadata/            # Metadata providers (TMDB, BGM.tv)
 │   ├── organizer/           # File organizer
+│   ├── parser/              # Natural language task parser
 │   ├── scheduler/           # Scheduled task runner
 │   └── source/              # Source site implementations (Mikan RSS + HTML crawling)
 ├── web/                     # Vue3 frontend
@@ -104,6 +142,7 @@ Ani-Go/
 | `GET` | `/api/subscriptions/{id}` | Subscription detail + episodes |
 | `PUT` | `/api/subscriptions/{id}` | Update subscription |
 | `DELETE` | `/api/subscriptions/{id}` | Delete subscription |
+| `POST` | `/api/parse` | Parse natural language task |
 | `POST` | `/api/subscriptions/{id}/trigger-supplement` | Trigger history backfill |
 | `GET` | `/api/downloads` | Download queue |
 | `GET` | `/api/settings` | Get settings |
@@ -116,9 +155,9 @@ Ani-Go/
 | Phase 0: Project Initialization | ✅ Complete |
 | Phase 1: Core Engine MVP | ✅ Complete |
 | Phase 2: Historical Completion + Metadata | ✅ Complete |
-| Phase 3: Web UI + RESTful API | 🚧 In Progress |
-| Phase 4: AI + Multi-Downloader + Plugins | 📅 Planned |
-| Phase 5: Multi-Platform Messaging | 📅 Planned |
+| Phase 3: Web UI + RESTful API | ✅ Complete |
+| Phase 4: AI + Multi-Downloader + Plugins | ✅ Complete |
+| Phase 5: Multi-Platform Messaging | ✅ Complete (16 platforms) |
 
 ## License
 

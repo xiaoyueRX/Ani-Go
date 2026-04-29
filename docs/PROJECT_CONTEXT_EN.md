@@ -40,36 +40,56 @@
 
 ## 3. Technical Architecture (Stack)
 
-- **Language**: Go 1.22+
+- **Language**: Go 1.25+
 - **Database**: SQLite (via GORM + pure Go driver `glebarez/sqlite`)
+- **Key Dependencies**: `golang-jwt/jwt/v5` (JWT auth), `goquery` (HTML parsing), `golang.org/x/crypto` (Bcrypt)
 - **Core Pattern**: **Interface-First**
   - `Source`: Resource fetching
   - `Downloader`: Download client interaction (qB/TR/Aria2)
   - `Metadata`: Anime metadata (TMDB/BGM.tv)
   - `Organizer`: File organization rules
 - **Interaction**:
-  - Web UI + RESTful API
+  - Vue3 + DaisyUI Web UI + RESTful API (JWT auth)
   - Plugin system (HTTP Sidecar pattern)
 
 ---
 
 ## 4. Current Development Progress
 
-- [x] **Phase 0: Project Initialization**
+- [x] **Phase 0: Project Initialization** ✅
   - [x] Determine project name: `Ani-Go`
   - [x] Initialize Go module and directory structure
   - [x] Define core interfaces `internal/core/interfaces.go`
   - [x] Implement config loading system (environment variables first)
   - [x] Implement database initialization and ORM models (GORM)
-- [x] **Phase 0.5: Code Goes Live**
-  - [x] Successfully fix encoding corruption caused by PowerShell (UTF-8)
-  - [x] Create GitHub repository `xiaoyueRX/Ani-Go`
-  - [x] Complete first code push
-- [ ] **Phase 1: Core Engine Implementation** (NEXT)
-  - [ ] Mikan RSS parser
-  - [ ] qBittorrent client integration
-- [ ] **Phase 2: Organization & Metadata**
-- [ ] **Phase 3: Web UI & Deployment**
+  - [x] Create GitHub repository and complete first code push
+- [x] **Phase 1: Core Engine MVP** ✅
+  - [x] Mikan RSS parser (8 regex patterns)
+  - [x] qBittorrent client integration
+  - [x] Basic scheduler (periodic polling)
+  - [x] Basic file organization
+  - [x] EventBus
+- [x] **Phase 2: Historical Completion & Metadata** ✅
+  - [x] Mikan HTML full-page crawling (historical backfill)
+  - [x] TMDB / BGM.tv metadata integration
+  - [x] GFW mirror/proxy auto-fallback
+  - [x] Supplement scheduler
+- [x] **Phase 3: Web UI & Deployment** ✅
+  - [x] Vue3 + DaisyUI frontend (login, subscription management, downloads, settings)
+  - [x] RESTful API + JWT auth + go:embed frontend embedding
+  - [x] Docker multi-stage build + CI/CD (GitHub Actions multi-arch images)
+- [x] **Phase 4: AI + Multi-Downloader + Plugins** ✅
+  - [x] AI multi-protocol (OpenAI/Google/Anthropic/Ollama)
+  - [x] qBittorrent / Transmission / Aria2 multiple downloaders
+  - [x] Plugin system (Webhook + Shell scripts)
+  - [x] Multiple source sites (Nyaa/ACG.RIP/AnimeTosho + MultiSource aggregator)
+- [x] **Phase 5: Multi-Platform Messaging** ✅
+  - [x] 16-platform notification (Telegram/Discord/WeCom/Feishu/DingTalk/QQ/Slack/Matrix/LINE/WhatsApp/ServerChan/Bark/Pushover/Gotify/ntfy/Email)
+  - [x] Natural language task parser (regex + AI fallback)
+  - [x] EventBus auto-push + MultiNotifier aggregated broadcast
+- [x] **Phase 6: Data Migration** ✅
+  - [x] AutoBangumi SQLite data import tool
+- **Tests**: 108 tests passing
 
 ---
 
@@ -81,4 +101,4 @@
 
 ---
 
-*Last Updated: 2026-04-28*
+*Last Updated: 2026-04-29*

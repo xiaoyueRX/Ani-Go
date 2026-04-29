@@ -129,4 +129,21 @@ const (
 	EventAnimeMatched        = "anime.matched"
 	EventSupplementTriggered = "supplement.triggered"
 	EventSupplementCompleted = "supplement.completed"
+	EventTaskParsed          = "task.parsed"
 )
+
+type ParseResult struct {
+	Action       string   `json:"action"`       // subscribe / unsubscribe / list / search / unknown
+	Title        string   `json:"title"`        // 番剧标题
+	Season       int      `json:"season"`       // 季号 (0 表示未指定)
+	Resolution   string   `json:"resolution"`   // 1080p / 720p / 4K
+	SubgroupPref string   `json:"subgroup_pref"` // 字幕组偏好
+	Keywords     []string `json:"keywords"`     // 额外关键词
+	Confidence   float64  `json:"confidence"`   // 0-1
+	RawInput     string   `json:"raw_input"`    // 原始输入
+}
+
+type TaskParser interface {
+	Parse(ctx context.Context, input string) (ParseResult, error)
+	Name() string
+}

@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/xiaoyueRX/Ani-Go/internal/ai"
 	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
@@ -22,10 +23,11 @@ type Scheduler struct {
 	organizer        core.Organizer
 	bus              core.EventBus
 	metadataProvider core.MetadataProvider // 元数据提供者（可选）
+	aiClient         ai.Classifier         // AI 分类器（可选）
 }
 
 // New 创建调度器实例
-func New(cfg *config.Config, source core.Source, dl core.Downloader, org core.Organizer, bus core.EventBus, md core.MetadataProvider) *Scheduler {
+func New(cfg *config.Config, source core.Source, dl core.Downloader, org core.Organizer, bus core.EventBus, md core.MetadataProvider, aic ai.Classifier) *Scheduler {
 	return &Scheduler{
 		cfg:              cfg,
 		mikanRSSURL:      cfg.Mikan.PersonalRSSURL,
@@ -34,6 +36,7 @@ func New(cfg *config.Config, source core.Source, dl core.Downloader, org core.Or
 		organizer:        org,
 		bus:              bus,
 		metadataProvider: md,
+		aiClient:         aic,
 	}
 }
 

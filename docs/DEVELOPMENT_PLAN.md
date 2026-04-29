@@ -76,47 +76,50 @@
 - [x] **TMDB/BGM.tv 集成**：实现 `MetadataProvider` 接口，获取番剧元数据。
 - [x] **GFW 镜像/代理支持**：Mikan、BGM.tv、TMDB 多镜像域名自动回退，GitHub 代理配置。
 - [x] **补全调度器**（参考 AutoBangumi）：未完结订阅自动检测集数缺失，爬取历史种子补全。
-- [ ] **死种超时告警**（参考 AutoBangumi）：N 天未完成下载自动标记警告，建议更换字幕组。
-- [ ] **用户自定义正则**（参考 AutoBangumi）：允许高级用户在配置文件中添加自定义标题解析规则，与内置规则并行生效。
+- [x] **死种超时告警**（参考 AutoBangumi）：N 天未完成下载自动标记警告，默认阈值 48 小时，可通过设置 `stall_timeout_hours` 调整。
+- [x] **用户自定义正则**（参考 AutoBangumi）：允许高级用户通过设置表 `custom_regex_N` 添加自定义标题解析规则，与内置 8 种模式并行生效，自定义规则优先匹配。
 
 ### Phase 3: Web UI 与部署
-- [x] **基础 Web UI**：Vue3 + Vite + DaisyUI 实现登录页、仪表盘。
+- [x] **基础 Web UI**：Vue3 + Vite + DaisyUI 实现登录页、仪表盘、订阅管理、下载队列、设置页。
 - [x] **RESTful API**：订阅 CRUD（GET/POST/PUT/DELETE）、下载队列、设置管理、补全触发。
-- [ ] **Docker 部署**：编写 Dockerfile 和 docker-compose.yml。
-- [ ] **CI/CD**：配置 GitHub Actions 自动构建镜像。
+- [x] **Docker 部署**：多阶段 Dockerfile（Node → Go → Alpine）+ docker-compose.yml 一键启动。
+- [x] **CI/CD**：配置 GitHub Actions 自动构建多架构（amd64/arm64）镜像并推送到 GHCR。
 
 ### Phase 4: 进阶功能 (V2/V3)
-- [ ] **AI 辅助模块**：集成大模型进行分类和系列归并。
-- [ ] **多下载器/多资源站**：支持 Transmission, Aria2, Nyaa 等。
-- [ ] **插件系统**：设计并实现开放的插件架构和事件总线。
-- [ ] **数据迁移工具**：支持从原版 ani-rss 导入数据。
+- [x] **AI 辅助模块**：集成大模型进行分类和系列归并。支持 OpenAI / Gemini / Claude / Ollama 四大协议，自动检测端点。
+- [x] **多下载器**：qBittorrent / Transmission / Aria2 已实现，环境变量切换。
+- [x] **插件系统**：EventBus 驱动的 Webhook + Shell 脚本插件，API 管理端点。
+- [x] **死种超时检测**：批量查询超时剧集，前端卡片警告，阈值可配置。
+- [x] **用户自定义正则**：数据库存储自定义解析规则，优先级高于内置模式，API 重载。
+- [x] **多资源站**：Nyaa / ACG.RIP / AnimeTosho + MultiSource 聚合器，去重合并结果。
+- [x] **数据迁移工具**：支持从原版 AutoBangumi 导入数据。
 
 ### Phase 5: 外部消息平台与 AI 通知系统
-- [ ] **EventBus 实现**：实现事件总线 (`internal/event/bus.go`)，支持发布/订阅。
-- [ ] **多平台消息接入**：统一 `Messenger` 接口，支持国内外主流平台：
+- [x] **多平台消息接入**：统一 `Notifier` 接口，EventBus 驱动自动推送，共 16 个平台 + `MultiNotifier` 聚合广播：
   - **国内 IM**：
-    - [ ] **QQ**：反向 WebSocket（go-cqhttp / Lagrange 兼容）
-    - [ ] **微信公众号**：被动回复 + 客服消息
-    - [ ] **企业微信**：Webhook bot + 应用消息
-    - [ ] **飞书/Lark**：Webhook + 事件订阅 + 官方 SDK
-    - [ ] **钉钉**：Webhook bot + 消息推送
+    - [x] **企业微信**：Webhook bot
+    - [x] **飞书/Lark**：Webhook bot
+    - [x] **钉钉**：Webhook bot
+    - [x] **QQ**：OneBot 协议（NapCat/go-cqhttp/Lagrange/LLOneBot）
+    - [ ] **微信公众号**：被动回复 + 客服消息（待实现）
   - **国际 IM**：
-    - [ ] **Telegram**：Bot API（长轮询 getUpdates）
-    - [ ] **Discord**：Bot + Webhook（discordgo）
-    - [ ] **Slack**：Socket Mode + Web API（slack-go）
-    - [ ] **LINE**：Messaging API
-    - [ ] **WhatsApp**：Cloud API（Meta）
-    - [ ] **Signal**：Bot API
+    - [x] **Telegram**：Bot API + Markdown
+    - [x] **Discord**：Webhook
+    - [x] **Slack**：Webhook + Block Kit
+    - [x] **LINE**：Messaging API / push message
+    - [x] **WhatsApp**：Meta Cloud API（graph.facebook.com）
+    - [ ] **Signal**：Bot API（待实现）
   - **Push 推送服务**：
-    - [ ] **邮件**：IMAP 收命令 + SMTP 发通知
-    - [ ] **Server酱**：HTTP API（sctapi.ftqq.com，微信推送）
-    - [ ] **Bark**：HTTP API（iOS 推送）
-    - [ ] **Pushover**：HTTP API
-    - [ ] **Gotify**：WebSocket + HTTP API（自托管）
-    - [ ] **ntfy**：HTTP API（自托管开源推送）
-- [ ] **任务解析器（双重模式）**：
-  - [ ] **规则引擎（默认）**：基于正则 + 关键词匹配，零依赖，无 AI 也能正常工作。内置订阅/搜索/状态等常见命令模式。
-  - [ ] **AI 增强（可选）**：接入 OpenAI/Gemini/Ollama 大模型，准确率更高（理解模糊表达、纠错同义词），关闭 AI 后自动回退规则引擎。
-- [ ] **通知管理器**：监听 EventBus 事件（下载完成/失败/补番完成等），通过上述所有平台推送通知。
-- [ ] **通知模板系统**：支持自定义消息模板，按事件类型和平台分别配置。
-- [ ] **全平台集成测试**：每个平台逐一验证连通性、命令解析、通知推送，共 17 个平台全部通过。
+    - [x] **邮件**：SMTP 发通知（goroutine + context 超时）
+    - [x] **Server酱**：HTTP API（微信推送）
+    - [x] **Bark**：HTTP API（iOS 推送）
+    - [x] **Pushover**：HTTP API
+    - [x] **Gotify**：HTTP API（自托管）
+    - [x] **ntfy**：HTTP API（自托管开源推送）
+    - [x] **Matrix**：Client-Server API / PUT message
+- [x] **任务解析器（双重模式）**：
+  - [x] **规则引擎（默认）**：基于正则 + 关键词匹配，零依赖，无 AI 也能正常工作。内置订阅/搜索/状态等常见命令模式。
+  - [x] **AI 增强（可选）**：接入 OpenAI/Gemini/Ollama 大模型，准确率更高（理解模糊表达、纠错同义词），关闭 AI 后自动回退规则引擎。
+- [x] **通知管理器**：监听 EventBus 事件（下载完成/失败/补番完成等），通过上述所有平台推送通知。
+- [ ] **通知模板系统**：支持自定义消息模板，按事件类型和平台分别配置。（待实现）
+- [ ] **全平台集成测试**：每个平台逐一验证连通性和通知推送。（部分待验证）

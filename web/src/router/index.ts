@@ -10,8 +10,38 @@ const router = createRouter({
     },
     {
       path: '/',
-      name: 'home',
-      component: () => import('../views/Home.vue'),
+      component: () => import('../views/Layout.vue'),
+      children: [
+        {
+          path: '',
+          redirect: '/subscriptions',
+        },
+        {
+          path: 'subscriptions',
+          name: 'subscriptions',
+          component: () => import('../views/Subscriptions.vue'),
+        },
+        {
+          path: 'subscriptions/new',
+          name: 'subscription-create',
+          component: () => import('../views/SubscriptionForm.vue'),
+        },
+        {
+          path: 'subscriptions/:id',
+          name: 'subscription-detail',
+          component: () => import('../views/SubscriptionDetail.vue'),
+        },
+        {
+          path: 'downloads',
+          name: 'downloads',
+          component: () => import('../views/Downloads.vue'),
+        },
+        {
+          path: 'settings',
+          name: 'settings',
+          component: () => import('../views/SettingsPage.vue'),
+        },
+      ],
     },
   ],
 })

@@ -1,0 +1,11 @@
+node_modules
+web/node_modules
+web/dist
+*.exe
+*.db
+.env
+.git
+.claude
+docs/
+*.md
+!CLAUDE.md

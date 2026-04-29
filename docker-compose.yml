@@ -1,0 +1,27 @@
+# Ani-Go Docker Compose 部署配置
+# 使用方式: docker compose up -d
+
+services:
+  ani-go:
+    build: .
+    container_name: ani-go
+    restart: unless-stopped
+    ports:
+      - "20001:20001"
+    env_file:
+      - .env
+    volumes:
+      # 番剧媒体库根目录（根据你的 NAS/fnOS 路径修改）
+      - /vol2/1000/TV:/TV
+      # 数据库持久化（可选，SQLite 文件存储在此处）
+      - ./data:/data
+    environment:
+      # 可通过环境变量覆盖 .env 中的值
+      - PORT=20001
+      - DB_PATH=/data/ani-go.db
+      - TV_BASE_PATH=/TV/Media/番剧
+      - MOVIE_BASE_PATH=/TV/Media/剧场版
+      - OVA_BASE_PATH=/TV/Media/OVA
+    # Lucky 反向代理兼容（传递 X-Forwarded-* 头）
+    # 若使用 Nginx/Caddy 反代，取消注释下行：
+    # network_mode: bridge

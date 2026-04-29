@@ -2,13 +2,17 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/migrate"
+	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
 
 // ============================================================
@@ -36,6 +40,7 @@ type subscriptionResponse struct {
 	Completed       bool   `json:"completed"`
 	FilterJSON      string `json:"filter_json"`
 	CustomPath      string `json:"custom_path"`
+	StalledEpisodes int    `json:"stalled_episodes"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 }
@@ -81,6 +86,7 @@ type episodeResponse struct {
 	OriginalName     string  `json:"original_name"`
 	FinalPath        string  `json:"final_path"`
 	FileSize         int64   `json:"file_size"`
+	IsStalled        bool    `json:"is_stalled"`
 	DownloadStartedAt string  `json:"download_started_at,omitempty"`
 	CreatedAt        string  `json:"created_at"`
 }
@@ -154,9 +160,18 @@ func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// 批量统计超时剧集
+	subIDs := make([]uint, len(subs))
+	for i, sub := range subs {
+		subIDs[i] = sub.ID
+	}
+	stalledMap := batchStalledCounts(subIDs, getStallTimeout())
+
 	result := make([]subscriptionResponse, 0, len(subs))
 	for _, sub := range subs {
-		result = append(result, toSubscriptionResponse(sub))
+		r := toSubscriptionResponse(sub)
+		r.StalledEpisodes = stalledMap[sub.ID]
+		result = append(result, r)
 	}
 	writeJSON(w, http.StatusOK, result)
 }
@@ -214,13 +229,26 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		Order("season ASC, number ASC").
 		Find(&episodes)
 
+	timeout := getStallTimeout()
 	eps := make([]episodeResponse, 0, len(episodes))
 	for _, ep := range episodes {
-		eps = append(eps, toEpisodeResponse(ep))
+		r := toEpisodeResponse(ep)
+		r.IsStalled = isEpisodeStalled(ep, timeout)
+		eps = append(eps, r)
 	}
 
+	// 计算卡住总数
+	stalledCount := 0
+	for _, ep := range eps {
+		if ep.IsStalled {
+			stalledCount++
+		}
+	}
+	subResp := toSubscriptionResponse(sub)
+	subResp.StalledEpisodes = stalledCount
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"subscription": toSubscriptionResponse(sub),
+		"subscription": subResp,
 		"episodes":     eps,
 	})
 }
@@ -428,6 +456,67 @@ func (s *Server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================
+// 死种/超时检测
+// ============================================================
+
+// getStallTimeout 获取超时阈值，默认 48 小时
+func getStallTimeout() time.Duration {
+	var setting database.Setting
+	if err := database.DB.Where("key = ?", "stall_timeout_hours").First(&setting).Error; err == nil {
+		if hours, err := strconv.Atoi(setting.Value); err == nil && hours > 0 {
+			return time.Duration(hours) * time.Hour
+		}
+	}
+	return 48 * time.Hour
+}
+
+// countStalledEpisodes 统计订阅下所有卡住的剧集数
+func countStalledEpisodes(subID uint, timeout time.Duration) int {
+	cutoff := time.Now().Add(-timeout)
+	var count int64
+	database.DB.Model(&database.Episode{}).
+		Where("subscription_id = ?", subID).
+		Where("(status = 'pending' AND created_at < ?) OR (status = 'downloading' AND download_started_at < ?)", cutoff, cutoff).
+		Count(&count)
+	return int(count)
+}
+
+// batchStalledCounts 批量获取多个订阅的超时剧集数
+func batchStalledCounts(subIDs []uint, timeout time.Duration) map[uint]int {
+	cutoff := time.Now().Add(-timeout)
+	type stalledResult struct {
+		SubscriptionID uint
+		Count          int64
+	}
+	var results []stalledResult
+	database.DB.Model(&database.Episode{}).
+		Select("subscription_id, count(*) as count").
+		Where("subscription_id IN ?", subIDs).
+		Where("(status = 'pending' AND created_at < ?) OR (status = 'downloading' AND download_started_at < ?)", cutoff, cutoff).
+		Group("subscription_id").
+		Find(&results)
+
+	m := make(map[uint]int, len(results))
+	for _, r := range results {
+		m[r.SubscriptionID] = int(r.Count)
+	}
+	return m
+}
+
+// isEpisodeStalled 判断单个剧集是否超时
+func isEpisodeStalled(ep database.Episode, timeout time.Duration) bool {
+	cutoff := time.Now().Add(-timeout)
+	switch ep.Status {
+	case "pending":
+		return ep.CreatedAt.Before(cutoff)
+	case "downloading":
+		return ep.DownloadStartedAt != nil && ep.DownloadStartedAt.Before(cutoff)
+	default:
+		return false
+	}
+}
+
+// ============================================================
 // 设置
 // ============================================================
 
@@ -469,4 +558,166 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✅ 已更新 %d 项设置", len(req.Settings))
 	writeJSON(w, http.StatusOK, map[string]string{"message": "设置已更新"})
+}
+
+// handleGetCustomRegex 获取当前自定义正则规则
+// GET /api/settings/custom-regex
+func (s *Server) handleGetCustomRegex(w http.ResponseWriter, r *http.Request) {
+	var rawPatterns []string
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("custom_regex_%d", i)
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", key).First(&setting).Error; err != nil {
+			break
+		}
+		if v := strings.TrimSpace(setting.Value); v != "" {
+			rawPatterns = append(rawPatterns, v)
+		} else {
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"patterns":            rawPatterns,
+		"compiled":            source.GetCustomRegexPatterns(),
+		"builtin_count":       8,
+	})
+}
+
+// handleReloadCustomRegex 从数据库重新加载自定义正则
+// POST /api/settings/custom-regex/reload
+func (s *Server) handleReloadCustomRegex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 POST"})
+		return
+	}
+	source.LoadCustomPatternsFromSettings(func(key string) (string, bool) {
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", key).First(&setting).Error; err != nil {
+			return "", false
+		}
+		return setting.Value, true
+	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":   "自定义正则已重新加载",
+		"compiled":  source.GetCustomRegexPatterns(),
+	})
+}
+
+// ============================================================
+// 插件管理
+// ============================================================
+
+// handleGetPlugins 获取当前已加载的插件列表
+// GET /api/plugins
+func (s *Server) handleGetPlugins(w http.ResponseWriter, r *http.Request) {
+	if s.pluginManager == nil {
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+	plugins := s.pluginManager.GetPlugins()
+	writeJSON(w, http.StatusOK, plugins)
+}
+
+// handleReloadPlugins 重新加载插件配置
+// POST /api/plugins/reload
+func (s *Server) handleReloadPlugins(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 POST"})
+		return
+	}
+	if s.pluginManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "插件管理器未初始化"})
+		return
+	}
+	s.pluginManager.Reload()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "插件已重新加载",
+		"count":   len(s.pluginManager.GetPlugins()),
+	})
+}
+
+
+// ============================================================
+// 任务解析
+// ============================================================
+
+type parseRequest struct {
+	Input string `json:"input"`
+}
+
+// handleParseTask 自然语言解析订阅任务
+// POST /api/parse
+func (s *Server) handleParseTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 POST"})
+		return
+	}
+
+	if s.taskParser == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "任务解析器未初始化"})
+		return
+	}
+
+	var req parseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+		return
+	}
+
+	if req.Input == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请输入指令，如：追番 某科学的超电磁炮 第一季"})
+		return
+	}
+
+	result, err := s.taskParser.Parse(r.Context(), req.Input)
+	if err != nil {
+		log.Printf("⚠️  任务解析失败: %v", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "解析失败: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ============================================================
+// 数据迁移
+// ============================================================
+
+type migrateRequest struct {
+	SourcePath string `json:"source_path"`
+}
+
+// handleMigrateData 从 AutoBangumi / ani-rss SQLite 数据库迁移数据
+// POST /api/migrate
+func (s *Server) handleMigrateData(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 POST"})
+		return
+	}
+
+	var req migrateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+		return
+	}
+
+	if req.SourcePath == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请提供 source_path（源数据库文件路径）"})
+		return
+	}
+
+	stats, err := migrate.MigrateFromPath(req.SourcePath)
+	if err != nil {
+		log.Printf("❌ 数据迁移失败: %v", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "迁移失败: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":       "迁移完成",
+		"subscriptions": stats.Subscriptions,
+		"episodes":      stats.Episodes,
+		"downloads":     stats.Downloads,
+		"errors":        stats.Errors,
+	})
 }

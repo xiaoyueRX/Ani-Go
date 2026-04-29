@@ -11,7 +11,7 @@
 - ⬇️ **多下载器**：qBittorrent / Transmission / Aria2
 - 🗂️ **自动整理**：重命名 + 建目录，Jellyfin 直接刮削，无需二次处理
 - 🌐 **GFW 镜像回退**：Mikan / BGM.tv / TMDB 多镜像域名自动切换
-- 🤖 **AI 辅助**（可选）：支持 OpenAI / Gemini / Ollama，辅助分类识别
+- 🤖 **AI 辅助**（可选）：支持 OpenAI / Google / Anthropic / Ollama 四大协议，辅助分类识别
 - 🧩 **插件系统**：开放钩子，支持第三方扩展
 - 🌐 **Web UI**：Vue3 + DaisyUI，浏览器管理订阅、下载队列、设置
 - 🔐 **JWT 鉴权**：动态密钥 + Bcrypt，安全可靠
@@ -19,15 +19,49 @@
 
 ## 快速开始
 
+### Docker Compose（推荐）
+
+```bash
+# 克隆项目
+git clone https://github.com/xiaoyueRX/Ani-Go.git
+cd Ani-Go
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 填入你的 MIKAN_RSS_URL、QB_HOST 等配置
+
+# 一键启动
+docker compose up -d
+```
+
+浏览器打开 `http://localhost:20001`，默认账号 `admin` / `admin`。
+
+### Docker 单容器
+
 ```bash
 docker run -d \
+  --name ani-go \
   -e MIKAN_RSS_URL="https://mikanani.me/RSS/MyBangumi?token=你的token" \
   -e QB_HOST="http://qbittorrent:8080" \
   -e QB_USER="用户名" \
   -e QB_PASS="密码" \
   -v /your/tv/path:/TV \
-  -p 8080:8080 \
+  -p 20001:20001 \
   ghcr.io/xiaoyuerx/ani-go:latest
+```
+
+### 手动构建
+
+```bash
+git clone https://github.com/xiaoyueRX/Ani-Go.git
+cd Ani-Go
+
+# 构建前端
+cd web && npm install && npm run build && cd ..
+
+# 构建并运行（前端已嵌入二进制）
+go build -o anigo .
+./anigo
 ```
 
 ## 开发
@@ -39,12 +73,11 @@ cd Ani-Go
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env 填入你的配置
 
-# 安装前端依赖（首次）
-cd web && npm install && cd ..
+# 前端开发（Vite 热更新）
+cd web && npm install && npm run dev
 
-# 构建并运行
+# 后端开发
 go run .
 ```
 
@@ -56,18 +89,22 @@ go run .
 | `MIKAN_DOMAIN` | Mikan 主域名 | `mikanani.me` |
 | `MIKAN_PROXY_DOMAIN` | Mikan 代理域名（GFW） | - |
 | `MIKAN_MIRROR_DOMAINS` | Mikan 镜像域名（逗号分隔） | `mikanani.me,mikanime.tv` |
+| `DEFAULT_DOWNLOADER` | 默认下载器 | `qbittorrent` |
 | `QB_HOST` | qBittorrent 地址 | `http://localhost:8081` |
 | `QB_USER` | qBittorrent 用户名 | - |
 | `QB_PASS` | qBittorrent 密码 | - |
+| `TR_HOST` | Transmission 地址 | `http://localhost:9091` |
+| `TR_USER` | Transmission 用户名 | - |
+| `TR_PASS` | Transmission 密码 | - |
 | `TMDB_API_KEY` | TMDB API Key | - |
 | `TMDB_MIRROR_DOMAINS` | TMDB 镜像域名 | - |
 | `BGMTV_USER_TOKEN` | BGM.tv 用户 Token | - |
 | `BGMTV_MIRROR_DOMAINS` | BGM 镜像域名 | `api.bgm.tv,api.bangumi.tv,api.chii.in` |
-| `DB_PATH` | 数据库文件路径 | `/data/ani-go.db` |
-| `TV_BASE_PATH` | 番剧根目录 | `/TV/Media/番剧` |
-| `MOVIE_BASE_PATH` | 剧场版根目录 | `/TV/Media/剧场版` |
-| `OVA_BASE_PATH` | OVA 根目录 | - |
-| `PORT` | Web UI 端口 | `8080` |
+| `DB_PATH` | 数据库文件路径 | `ani-go.db` |
+| `TV_BASE_PATH` | 番剧根目录 | `./TV/番剧` |
+| `MOVIE_BASE_PATH` | 剧场版根目录 | `./TV/剧场版` |
+| `OVA_BASE_PATH` | OVA 根目录 | `./TV/OVA` |
+| `PORT` | Web UI 端口 | `20001` |
 
 ## 项目结构
 
@@ -84,6 +121,7 @@ Ani-Go/
 │   ├── event/               # EventBus 事件总线
 │   ├── metadata/            # 元数据提供者（TMDB、BGM.tv）
 │   ├── organizer/           # 文件整理器
+│   ├── parser/              # 自然语言任务解析器
 │   ├── scheduler/           # 定时任务调度器
 │   └── source/              # 资源站实现（Mikan RSS + HTML 爬取）
 ├── web/                     # Vue3 前端
@@ -104,6 +142,7 @@ Ani-Go/
 | `GET` | `/api/subscriptions/{id}` | 订阅详情 + 剧集 |
 | `PUT` | `/api/subscriptions/{id}` | 更新订阅 |
 | `DELETE` | `/api/subscriptions/{id}` | 删除订阅 |
+| `POST` | `/api/parse` | 自然语言解析任务 |
 | `POST` | `/api/subscriptions/{id}/trigger-supplement` | 手动触发补全 |
 | `GET` | `/api/downloads` | 下载队列 |
 | `GET` | `/api/settings` | 获取设置 |
@@ -116,9 +155,9 @@ Ani-Go/
 | Phase 0: 项目初始化 | ✅ 完成 |
 | Phase 1: 核心引擎 MVP | ✅ 完成 |
 | Phase 2: 历史补全 + 元数据 | ✅ 完成 |
-| Phase 3: Web UI + RESTful API | 🚧 进行中 |
-| Phase 4: AI + 多下载器 + 插件 | 📅 计划中 |
-| Phase 5: 多平台消息通知 | 📅 计划中 |
+| Phase 3: Web UI + RESTful API | ✅ 完成 |
+| Phase 4: AI + 多下载器 + 插件 + 多资源站 | ✅ 已完成 |
+| Phase 5: 多平台消息通知 | ✅ 已完成 (16 平台) |
 
 ## License
 

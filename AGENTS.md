@@ -68,24 +68,33 @@ GitHub、Go 代理、Mikan 等境外服务可能被墙：
 
 ## 当前项目状态
 - **Phase 0** ✅ — 项目初始化
-- **Phase 1** ✅ — 核心引擎 MVP（31 测试）
-- **Phase 2** ✅ — 历史补全 + 元数据 + 镜像支持
-- **Phase 3** 🚧 — Web UI + RESTful API（63 测试）
-- **Phase 4** 📅 — AI + 多下载器 + 插件
-- **Phase 5** 📅 — 多平台消息通知
+- **Phase 1** ✅ — 核心引擎 MVP
+- **Phase 2** ✅ — 历史补全 + 元数据 + 镜像支持 + 死种超时告警 + 自定义正则
+- **Phase 3** ✅ — Web UI + RESTful API + Docker + CI/CD
+- **Phase 4** ✅ — AI 多协议 + qBittorrent/Transmission/Aria2 + 插件系统 + 多资源站
+- **Phase 5** ✅ — 16 平台消息通知 + 自然语言任务解析器
+- **Phase 6** ✅ — 数据迁移工具（AutoBangumi 导入）
+- **测试**：108 个测试全通过
 
 ## 关键文件速查
 
 | 文件 | 作用 |
 |------|------|
-| `internal/core/interfaces.go` | 6 核心接口 + 12 事件常量 + 数据类型定义 |
-| `internal/config/config.go` | 配置结构体 + env 加载 + 默认值 |
+| `internal/core/interfaces.go` | 7 核心接口 + 事件常量 + 数据类型定义 |
+| `internal/config/config.go` | 配置结构体 + env 加载 + 默认值 + DB 回退 |
 | `internal/database/models.go` | 5 个 ORM 模型 |
 | `internal/api/server.go` | HTTP 路由注册 + 中间件链 + 服务生命周期 |
-| `internal/api/handlers.go` | 9 个 API 处理器（订阅 CRUD、下载、设置） |
+| `internal/api/handlers.go` | API 处理器（订阅 CRUD、下载、设置、解析、迁移） |
 | `internal/source/mikan.go` | Mikan RSS 解析 + HTML 详情页爬取 + 镜像回退 |
+| `internal/source/multi.go` | 多资源站聚合器（Nyaa/ACGRIP/AnimeTosho） |
 | `internal/scheduler/scheduler.go` | RSS 轮询 + 文件整理 + 补全扫描 + TriggerSupplement |
 | `internal/downloader/qbittorrent.go` | qBittorrent Web API 客户端 |
+| `internal/downloader/transmission.go` | Transmission RPC 客户端 |
+| `internal/downloader/aria2.go` | Aria2 JSON-RPC 客户端 |
 | `internal/metadata/tmdb.go` | TMDB API v3 元数据提供者 |
 | `internal/metadata/bangumi.go` | BGM.tv 元数据提供者 |
+| `internal/notifier/` | 16 平台通知实现（Telegram/Discord/QQ/LINE/WhatsApp 等） |
+| `internal/ai/` | AI 4 协议适配（OpenAI/Google/Anthropic/Ollama） |
+| `internal/parser/` | 自然语言任务解析器（正则 + AI 回退） |
+| `internal/plugin/` | 插件系统（Webhook + Shell 脚本） |
 | `main.go` | 启动流程：Config → JWT → DB → EventBus → Source → Downloader → Organizer → Scheduler → API |

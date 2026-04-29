@@ -14,11 +14,14 @@ cp .env.example .env
 ## Current Status
 
 - **Branch**: main
-- **Phase 0**: Complete
-- **Phase 1 (Core Engine MVP)**: Complete — 31 tests passing, Mikan RSS parser, qBittorrent client, scheduler, organizer, EventBus, 8 regex title parsing patterns
-- **Phase 2 (Historical Completion + Metadata)**: Complete — Mikan HTML parser (goquery), TMDB/BGM.tv providers, mirror/proxy architecture for GFW, supplement scheduler
-- **Phase 3 (Web UI + RESTful API)**: In progress — Vue3 frontend (Login + Dashboard), RESTful API (subscription CRUD, downloads, settings)
-- **Tests**: 63 passing across all packages
+- **Phase 0**: Complete ✅
+- **Phase 1 (Core Engine MVP)**: Complete ✅ — Mikan RSS parser, qBittorrent client, scheduler, organizer, EventBus, 8 regex title parsing patterns
+- **Phase 2 (Historical Completion + Metadata)**: Complete ✅ — Mikan HTML parser (goquery), TMDB/BGM.tv providers, mirror/proxy architecture for GFW, supplement scheduler
+- **Phase 3 (Web UI + RESTful API + Docker)**: Complete ✅ — Vue3 frontend, RESTful API, go:embed frontend embedding, multi-stage Docker build, GitHub Actions CI/CD
+- **Phase 4 (AI + Multi-Downloader + Plugins + Multiple Sources)**: Complete ✅ — AI 4-protocol, qBittorrent/Transmission/Aria2, plugin system, dead torrent detection, Nyaa/ACGRIP/AnimeTosho + MultiSource
+- **Phase 5 (Multi-Platform Messaging + Task Parser)**: Complete ✅ — 16-platform notification, natural language task parser (regex + AI), EventBus auto-push
+- **Phase 6 (Data Migration)**: Complete ✅ — AutoBangumi SQLite import
+- **Tests**: 108 tests passing
 
 ## Tech Stack
 
@@ -35,20 +38,29 @@ cp .env.example .env
 | File | Description |
 |------|-------------|
 | `main.go` | Entry point, prints banner, loads config, initializes all modules |
-| `internal/core/interfaces.go` | 6 core interfaces + 12 event constants |
-| `internal/config/config.go` | Config loading (env vars take priority) |
+| `embed.go` | `//go:embed web/dist` frontend static file embedding |
+| `internal/core/interfaces.go` | 7 core interfaces + event constants + data types |
+| `internal/config/config.go` | Config loading (env vars take priority) + DB fallback (MergeFromSettings) |
 | `internal/database/db.go` | GORM initialization + AutoMigrate |
 | `internal/database/models.go` | 5 ORM models (Subscription, Episode, DownloadRecord, Setting, User) |
 | `internal/source/mikan.go` | Mikan RSS parser + HTML detail page crawler |
+| `internal/source/multi.go` | Multi-source aggregator (Nyaa/ACGRIP/AnimeTosho) |
 | `internal/scheduler/scheduler.go` | Scheduled tasks: RSS polling, file organization, supplement scanning |
 | `internal/api/server.go` | HTTP API server with JWT auth middleware |
-| `internal/api/handlers.go` | RESTful API handlers: subscription CRUD, downloads, settings |
+| `internal/api/handlers.go` | RESTful API handlers: subscription CRUD, downloads, settings, parse, migration |
+| `internal/downloader/qbittorrent.go` | qBittorrent Web API client |
+| `internal/downloader/transmission.go` | Transmission RPC client |
+| `internal/downloader/aria2.go` | Aria2 JSON-RPC client |
 | `internal/metadata/tmdb.go` | TMDB API v3 metadata provider |
 | `internal/metadata/bangumi.go` | BGM.tv metadata provider |
-| `internal/downloader/qbittorrent.go` | qBittorrent Web API client |
+| `internal/notifier/` | 16-platform notification implementations |
+| `internal/ai/` | AI 4-protocol adapter (OpenAI/Google/Anthropic/Ollama) |
+| `internal/parser/` | Natural language task parser (regex + AI fallback) |
+| `internal/plugin/` | Plugin system (Webhook + Shell) |
+| `internal/migrate/` | AutoBangumi data migration |
 | `AGENTS.md` / `AGENTS_EN.md` | AI assistant guidelines (CN/EN) |
 | `CLAUDE.md` | Claude Code guidance |
-| `docs/DEVELOPMENT_PLAN.md` | Full 5-phase development roadmap (CN/EN) |
+| `docs/DEVELOPMENT_PLAN.md` | Full development roadmap (CN/EN) |
 | `docs/PROJECT_CONTEXT.md` | Project core memory (CN/EN) |
 
 ## Key Constraints

@@ -156,6 +156,58 @@ func TestParseMikanTitle_IsSP(t *testing.T) {
 	}
 }
 
+func TestSetCustomRegexPatterns_Valid(t *testing.T) {
+	err := SetCustomRegexPatterns([]string{`第(\d{1,3})話`, `EP(\d{1,3})`})
+	if err != nil {
+		t.Fatalf("设置自定义正则失败: %v", err)
+	}
+	if len(customRegexPatterns) != 2 {
+		t.Fatalf("自定义正则数量 = %d, 期望 2", len(customRegexPatterns))
+	}
+	// 清理
+	SetCustomRegexPatterns(nil)
+}
+
+func TestSetCustomRegexPatterns_Invalid(t *testing.T) {
+	err := SetCustomRegexPatterns([]string{`[invalid(`})
+	if err == nil {
+		t.Error("无效正则应返回错误")
+	}
+}
+
+func TestParseMikanTitle_CustomRegexMatch(t *testing.T) {
+	// 设置自定义正则：匹配 "第X話" 日语格式
+	err := SetCustomRegexPatterns([]string{`第(\d{1,3})話`})
+	if err != nil {
+		t.Fatalf("设置自定义正则失败: %v", err)
+	}
+	defer SetCustomRegexPatterns(nil)
+
+	// 这个标题只有日语话数格式，内置模式能匹配（第X話已在pattern[3]），
+	// 但自定义正则优先，应同样能正确匹配
+	info := ParseMikanTitle("[LoliHouse] 迷宫饭 第07話")
+	if info.Episode != 7 {
+		t.Errorf("自定义正则: 集数 = %g, 期望 7", info.Episode)
+	}
+}
+
+func TestParseMikanTitle_CustomRegexSeasonEpisode(t *testing.T) {
+	// 自定义 SxxExx 风格正则（2个捕获组：Season + Episode）
+	err := SetCustomRegexPatterns([]string{`[Ss](\d{1,2})[Ee](\d{1,3})`})
+	if err != nil {
+		t.Fatalf("设置自定义正则失败: %v", err)
+	}
+	defer SetCustomRegexPatterns(nil)
+
+	info := ParseMikanTitle("[桜都字幕组] 无职转生 S02E03 1080p")
+	if info.Season != 2 {
+		t.Errorf("自定义正则Season+Episode: 季数 = %d, 期望 2", info.Season)
+	}
+	if info.Episode != 3 {
+		t.Errorf("自定义正则Season+Episode: 集数 = %g, 期望 3", info.Episode)
+	}
+}
+
 func TestParseMikanTitle_CleanCodecTags(t *testing.T) {
 	info := ParseMikanTitle("[VCB-Studio] 攻壳机动队 [01] [Ma10p_1080p][x265_2flac]")
 	if info.Episode != 1 {

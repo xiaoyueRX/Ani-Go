@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -260,8 +261,68 @@ var (
 	reTrailingDigits = regexp.MustCompile(`\s+\d{1,3}\s*$`)
 )
 
+// 用户自定义正则模式（线程安全）
+var (
+	customRegexPatterns []*regexp.Regexp
+	customRegexMu       sync.RWMutex
+)
+
+// SetCustomRegexPatterns 设置用户自定义正则模式
+// 每个模式应包含一个捕获组提取集数（可选两个：Season + Episode 类似 SxxExx）
+func SetCustomRegexPatterns(patterns []string) error {
+	customRegexMu.Lock()
+	defer customRegexMu.Unlock()
+
+	customRegexPatterns = make([]*regexp.Regexp, 0, len(patterns))
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return fmt.Errorf("自定义正则编译失败: %s → %w", p, err)
+		}
+		customRegexPatterns = append(customRegexPatterns, re)
+	}
+	if len(customRegexPatterns) > 0 {
+		log.Printf("✅ 已加载 %d 条自定义正则解析规则", len(customRegexPatterns))
+	}
+	return nil
+}
+
+// GetCustomRegexPatterns 返回当前自定义正则模式（用于展示）
+func GetCustomRegexPatterns() []string {
+	customRegexMu.RLock()
+	defer customRegexMu.RUnlock()
+
+	result := make([]string, len(customRegexPatterns))
+	for i, re := range customRegexPatterns {
+		result[i] = re.String()
+	}
+	return result
+}
+
+// LoadCustomPatternsFromSettings 从数据库 settings 表加载自定义正则
+// 格式：custom_regex_0, custom_regex_1, ...
+func LoadCustomPatternsFromSettings(getSetting func(key string) (string, bool)) {
+	var patterns []string
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("custom_regex_%d", i)
+		val, ok := getSetting(key)
+		if !ok || strings.TrimSpace(val) == "" {
+			break
+		}
+		patterns = append(patterns, val)
+	}
+	if err := SetCustomRegexPatterns(patterns); err != nil {
+		log.Printf("⚠️  加载自定义正则失败: %v", err)
+	}
+}
+
 // ParseMikanTitle 从 Mikan 种子标题中提取结构化信息
 // 参考 ani-rss RenameUtil.rename() 的解析逻辑
+// 优先尝试用户自定义正则，再回退到内置 8 种模式
 func ParseMikanTitle(rawTitle string) TitleInfo {
 	info := TitleInfo{
 		RawTitle: rawTitle,
@@ -296,7 +357,42 @@ func ParseMikanTitle(rawTitle string) TitleInfo {
 		info.Version, _ = strconv.Atoi(m[1])
 	}
 
-	// 逐模式尝试提取集数
+	// 先尝试用户自定义正则（优先级高于内置模式）
+	customRegexMu.RLock()
+	customPats := make([]*regexp.Regexp, len(customRegexPatterns))
+	copy(customPats, customRegexPatterns)
+	customRegexMu.RUnlock()
+
+	var matched bool
+	for i, re := range customPats {
+		m := re.FindStringSubmatch(title)
+		if m == nil {
+			continue
+		}
+		// 捕获组 >= 3：(1=Season, 2=Episode)；否则 1=Episode
+		if len(m) >= 3 {
+			if s, err := strconv.Atoi(m[1]); err == nil && s > 0 {
+				info.Season = s
+			}
+			if ep, err := strconv.ParseFloat(m[2], 32); err == nil {
+				info.Episode = float32(ep)
+			}
+		} else {
+			if ep, err := strconv.ParseFloat(m[1], 32); err == nil {
+				info.Episode = float32(ep)
+			}
+		}
+		if strings.Contains(m[0], ".5") {
+			info.Episode += 0.5
+		}
+		title = re.ReplaceAllString(title, "")
+		log.Printf("🔧 自定义正则命中 [%d]: %s → S%dE%.1f", i, m[0], info.Season, info.Episode)
+		matched = true
+		break
+	}
+
+	// 逐模式尝试提取集数（内置 8 种模式）
+	if !matched {
 	for ri, re := range reEpisodePatterns {
 		m := re.FindStringSubmatch(title)
 		if m == nil {
@@ -332,6 +428,7 @@ func ParseMikanTitle(rawTitle string) TitleInfo {
 
 		title = re.ReplaceAllString(title, "")
 		break
+		}
 	}
 
 	// 提取季数（从 "Season 2" 或 "第二季" 关键词）

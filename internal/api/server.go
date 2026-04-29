@@ -13,34 +13,62 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/auth"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 )
 
 // Server 持有 API 所需的依赖
 type Server struct {
 	downloader        core.Downloader
 	triggerSupplement func(ctx context.Context, subID uint) error
+	pluginManager     *plugin.Manager
+	taskParser        core.TaskParser
 }
 
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
-func StartServer(ctx context.Context, host string, port int, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error) *http.Server {
+// staticHandler 为嵌入式前端静态文件服务，若为 nil 则仅提供 API 服务
+func StartServer(ctx context.Context, host string, port int, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error, pluginMgr *plugin.Manager, parser core.TaskParser, staticHandler http.Handler) *http.Server {
 	s := &Server{
 		downloader:        dl,
 		triggerSupplement: triggerSupp,
+		pluginManager:     pluginMgr,
+		taskParser:        parser,
 	}
 
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
-	handler := auth.ProxyHeadersMiddleware(
+	apiHandler := auth.ProxyHeadersMiddleware(
 		auth.CORSMiddleware(
 			auth.AuthMiddleware(mux),
 		),
 	)
 
+	// 将 API 处理器与静态文件处理器合并
+	var finalHandler http.Handler
+	if staticHandler != nil {
+		finalHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// API 路由优先
+			if len(r.URL.Path) >= 5 && r.URL.Path[:5] == "/api/" {
+				apiHandler.ServeHTTP(w, r)
+				return
+			}
+			// /api/health 和 /api/login 也走 API
+			if r.URL.Path == "/api/health" || r.URL.Path == "/api/login" || r.URL.Path == "/api/me" {
+				apiHandler.ServeHTTP(w, r)
+				return
+			}
+			// 其余全部交给静态文件处理器（含 SPA 回退）
+			staticHandler.ServeHTTP(w, r)
+		})
+		log.Println("✅ 前端静态文件处理器已挂载（非 /api/* 路径 → SPA 回退）")
+	} else {
+		finalHandler = apiHandler
+	}
+
 	addr := fmt.Sprintf("%s:%d", host, port)
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      handler,
+		Handler:      finalHandler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -87,6 +115,18 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 设置
 	mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", s.handleUpdateSettings)
+	mux.HandleFunc("GET /api/settings/custom-regex", s.handleGetCustomRegex)
+	mux.HandleFunc("POST /api/settings/custom-regex/reload", s.handleReloadCustomRegex)
+
+	// 插件管理
+	mux.HandleFunc("GET /api/plugins", s.handleGetPlugins)
+	mux.HandleFunc("POST /api/plugins/reload", s.handleReloadPlugins)
+
+	// 数据迁移
+	mux.HandleFunc("POST /api/migrate", s.handleMigrateData)
+
+	// 任务解析
+	mux.HandleFunc("POST /api/parse", s.handleParseTask)
 }
 
 // ============================================================

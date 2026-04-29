@@ -76,47 +76,50 @@
 - [x] **TMDB/BGM.tv Integration**: Implement `MetadataProvider` interface, fetch anime metadata.
 - [x] **GFW Mirror/Proxy Support**: Multi-domain mirror auto-fallback for Mikan, BGM.tv, TMDB; GitHub proxy configuration.
 - [x] **Supplement Scheduler** (ref AutoBangumi): Auto-detect episode gaps for incomplete subscriptions, crawl historical torrents for backfill.
-- [ ] **Dead Torrent Timeout Warning** (ref AutoBangumi): Auto-flag stalled downloads after N days, suggest subgroup change.
-- [ ] **User-Customizable Regex** (ref AutoBangumi): Allow advanced users to add custom title parsing rules in config, running alongside built-in patterns.
+- [x] **Dead Torrent Timeout Warning** (ref AutoBangumi): Auto-flag stalled downloads after N days, default 48h threshold adjustable via `stall_timeout_hours` setting.
+- [x] **User-Customizable Regex** (ref AutoBangumi): Allow advanced users to add custom title parsing rules via settings table `custom_regex_N`, running alongside 8 built-in patterns with custom rules taking priority.
 
 ### Phase 3: Web UI & Deployment
-- [x] **Basic Web UI**: Vue3 + Vite + DaisyUI login page and dashboard.
+- [x] **Basic Web UI**: Vue3 + Vite + DaisyUI login page, dashboard, subscription management, downloads queue, settings page.
 - [x] **RESTful API**: Subscription CRUD (GET/POST/PUT/DELETE), download queue, settings management, supplement trigger.
-- [ ] **Docker Deployment**: Write Dockerfile and docker-compose.yml.
-- [ ] **CI/CD**: Configure GitHub Actions for automatic image building.
+- [x] **Docker Deployment**: Multi-stage Dockerfile (Node → Go → Alpine) + docker-compose.yml one-click startup.
+- [x] **CI/CD**: Configure GitHub Actions for multi-arch (amd64/arm64) image building and GHCR push.
 
 ### Phase 4: Advanced Features (V2/V3)
-- [ ] **AI-Assisted Module**: Integrate LLMs for classification and series merging.
-- [ ] **Multiple Downloaders/Source Sites**: Support Transmission, Aria2, Nyaa, etc.
-- [ ] **Plugin System**: Design and implement open plugin architecture and event bus.
-- [ ] **Data Migration Tool**: Support importing data from original ani-rss.
+- [x] **AI-Assisted Module**: Integrate LLMs for classification and series merging. Supports 4 protocols: OpenAI / Gemini / Claude / Ollama with auto-detection.
+- [x] **Multiple Downloaders**: qBittorrent / Transmission / Aria2 implemented, switchable via env vars.
+- [x] **Plugin System**: EventBus-driven Webhook + Shell script plugins with API management endpoints.
+- [x] **Dead Torrent Detection**: Batch query for stalled episodes, frontend warning badges, configurable threshold.
+- [x] **Custom Regex Patterns**: DB-stored user regex patterns with higher priority than built-in patterns, API reload.
+- [x] **Multiple Source Sites**: Nyaa / ACG.RIP / AnimeTosho + MultiSource aggregator with dedup merge.
+- [x] **Data Migration Tool**: Support importing data from original AutoBangumi.
 
 ### Phase 5: External Messaging Platform & AI Notification System
-- [ ] **EventBus Implementation**: Implement event bus (`internal/event/bus.go`) with publish/subscribe support.
-- [ ] **Multi-Platform Messaging**: Unified `Messenger` interface supporting both Chinese and international mainstream platforms:
+- [x] **Multi-Platform Messaging**: Unified `Notifier` interface with EventBus-driven auto-push, 16 platforms + `MultiNotifier` aggregated broadcast:
   - **Chinese IM**:
-    - [ ] **QQ**: Reverse WebSocket (go-cqhttp / Lagrange compatible)
-    - [ ] **WeChat Official Account**: Passive reply + customer service messages
-    - [ ] **WeCom (Enterprise WeChat)**: Webhook bot + app messages
-    - [ ] **Feishu/Lark**: Webhook + event subscription + official SDK
-    - [ ] **DingTalk**: Webhook bot + message push
+    - [x] **QQ**: OneBot protocol (NapCat/go-cqhttp/Lagrange/LLOneBot)
+    - [ ] **WeChat Official Account**: Passive reply + customer service messages (pending)
+    - [x] **WeCom (Enterprise WeChat)**: Webhook bot
+    - [x] **Feishu/Lark**: Webhook bot
+    - [x] **DingTalk**: Webhook bot
   - **International IM**:
-    - [ ] **Telegram**: Bot API (long polling getUpdates)
-    - [ ] **Discord**: Bot + Webhook (discordgo)
-    - [ ] **Slack**: Socket Mode + Web API (slack-go)
-    - [ ] **LINE**: Messaging API
-    - [ ] **WhatsApp**: Cloud API (Meta)
-    - [ ] **Signal**: Bot API
+    - [x] **Telegram**: Bot API + Markdown
+    - [x] **Discord**: Webhook
+    - [x] **Slack**: Webhook + Block Kit
+    - [x] **LINE**: Messaging API / push message
+    - [x] **WhatsApp**: Meta Cloud API (graph.facebook.com)
+    - [ ] **Signal**: Bot API (pending)
   - **Push Notification Services**:
-    - [ ] **Email**: IMAP receive commands + SMTP send notifications
-    - [ ] **ServerChan**: HTTP API (sctapi.ftqq.com, WeChat push)
-    - [ ] **Bark**: HTTP API (iOS push)
-    - [ ] **Pushover**: HTTP API
-    - [ ] **Gotify**: WebSocket + HTTP API (self-hosted)
-    - [ ] **ntfy**: HTTP API (self-hosted open source push)
-- [ ] **Task Parser (Dual Mode)**:
-  - [ ] **Rule Engine (Default)**: Based on regex + keyword matching, zero dependencies, works without AI. Built-in patterns for subscribe/search/status commands.
-  - [ ] **AI Enhancement (Optional)**: Integrates OpenAI/Gemini/Ollama for higher accuracy (fuzzy expressions, synonym correction), auto-fallbacks to rule engine when AI is disabled.
-- [ ] **Notification Manager**: Listen to EventBus events (download complete/failed/supplement done, etc.), push notifications through all above platforms.
-- [ ] **Notification Template System**: Support custom message templates, configurable per event type and platform.
-- [ ] **Full Platform Integration Testing**: Verify connectivity, command parsing, and notification push for each platform; all 17 platforms must pass.
+    - [x] **Email**: SMTP send notifications (goroutine + context timeout)
+    - [x] **ServerChan**: HTTP API (WeChat push)
+    - [x] **Bark**: HTTP API (iOS push)
+    - [x] **Pushover**: HTTP API
+    - [x] **Gotify**: HTTP API (self-hosted)
+    - [x] **ntfy**: HTTP API (self-hosted open source push)
+    - [x] **Matrix**: Client-Server API / PUT message
+- [x] **Task Parser (Dual Mode)**:
+  - [x] **Rule Engine (Default)**: Based on regex + keyword matching, zero dependencies, works without AI. Built-in patterns for subscribe/search/status commands.
+  - [x] **AI Enhancement (Optional)**: Integrates OpenAI/Gemini/Ollama for higher accuracy (fuzzy expressions, synonym correction), auto-fallbacks to rule engine when AI is disabled.
+- [x] **Notification Manager**: Listen to EventBus events (download complete/failed/supplement done, etc.), push notifications through all above platforms.
+- [ ] **Notification Template System**: Support custom message templates, configurable per event type and platform. (pending)
+- [ ] **Full Platform Integration Testing**: Verify connectivity and notification push for each platform. (partially pending)

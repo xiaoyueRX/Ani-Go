@@ -40,36 +40,56 @@
 
 ## 3. 技术架构 (Stack)
 
-- **语言**: Go 1.22+
+- **语言**: Go 1.25+
 - **数据库**: SQLite (via GORM + 纯 Go 驱动 `glebarez/sqlite`)
+- **关键依赖**: `golang-jwt/jwt/v5`（JWT 鉴权）、`goquery`（HTML 解析）、`golang.org/x/crypto`（Bcrypt）
 - **核心模式**: **接口驱动 (Interface-First)**
   - `Source`: 资源抓取
   - `Downloader`: 如下载器交互 (qB/TR/Aria2)
   - `Metadata`: 番剧元数据 (TMDB/BGM.tv)
   - `Organizer`: 文件整理规则
 - **交互方式**:
-  - Web UI + RESTful API
+  - Vue3 + DaisyUI Web UI + RESTful API（JWT 鉴权）
   - 插件系统 (HTTP Sidecar 模式)
 
 ---
 
 ## 4. 当前开发进度 (Progress)
 
-- [x] **Phase 0: 项目初始化**
+- [x] **Phase 0: 项目初始化** ✅
   - [x] 确定项目名称: `Ani-Go`
   - [x] 初始化 Go 模块与目录结构
   - [x] 定义核心接口 `internal/core/interfaces.go`
   - [x] 实现配置加载系统 (环境变量优先)
   - [x] 实现数据库初始化与 ORM 模型 (GORM)
-- [x] **Phase 0.5: 代码上云**
-  - [x] 成功修复 PowerShell 造成的编码破坏 (UTF-8)
-  - [x] 建立 GitHub 仓库 `xiaoyueRX/Ani-Go`
-  - [x] 完成首次代码 Push
-- [ ] **Phase 1: 核心引擎实现** (NEXT)
-  - [ ] Mikan RSS 解析器
-  - [ ] qBittorrent 客户端集成
-- [ ] **Phase 2: 整理与元数据**
-- [ ] **Phase 3: Web UI 与 部署**
+  - [x] 建立 GitHub 仓库并完成首次 Push
+- [x] **Phase 1: 核心引擎 MVP** ✅
+  - [x] Mikan RSS 解析器（8 种正则模式）
+  - [x] qBittorrent 客户端集成
+  - [x] 基础调度器（定时轮询）
+  - [x] 基础文件整理
+  - [x] EventBus 事件总线
+- [x] **Phase 2: 历史补全与元数据** ✅
+  - [x] Mikan HTML 全页爬取（历史补全）
+  - [x] TMDB / BGM.tv 元数据集成
+  - [x] GFW 镜像/代理自动回退
+  - [x] 补全调度器
+- [x] **Phase 3: Web UI 与部署** ✅
+  - [x] Vue3 + DaisyUI 前端（登录、订阅管理、下载队列、设置）
+  - [x] RESTful API + JWT 鉴权 + go:embed 前端嵌合
+  - [x] Docker 多阶段构建 + CI/CD（GitHub Actions 多架构镜像）
+- [x] **Phase 4: AI + 多下载器 + 插件** ✅
+  - [x] AI 多协议辅助（OpenAI/Google/Anthropic/Ollama）
+  - [x] qBittorrent / Transmission / Aria2 多下载器
+  - [x] 插件系统（Webhook + Shell 脚本）
+  - [x] 多资源站（Nyaa/ACG.RIP/AnimeTosho + MultiSource 聚合）
+- [x] **Phase 5: 多平台消息通知** ✅
+  - [x] 16 平台通知（Telegram/Discord/WeCom/Feishu/DingTalk/QQ/Slack/Matrix/LINE/WhatsApp/ServerChan/Bark/Pushover/Gotify/ntfy/Email）
+  - [x] 自然语言任务解析器（正则 + AI 回退）
+  - [x] EventBus 自动推送 + MultiNotifier 聚合广播
+- [x] **Phase 6: 数据迁移** ✅
+  - [x] AutoBangumi SQLite 数据导入工具
+- **测试**: 108 个测试全通过
 
 ---
 
@@ -81,4 +101,4 @@
 
 ---
 
-*Last Updated: 2026-04-24*
+*Last Updated: 2026-04-29*

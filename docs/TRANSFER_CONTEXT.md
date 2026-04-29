@@ -15,10 +15,13 @@ cp .env.example .env
 
 - **分支**: main
 - **Phase 0**: 全部完成 ✅
-- **Phase 1（核心引擎 MVP）**: 全部完成 ✅ — 31 个测试通过，Mikan RSS 解析器、qBittorrent 客户端、调度器、文件整理、EventBus、8 种标题正则解析模式
+- **Phase 1（核心引擎 MVP）**: 全部完成 ✅ — Mikan RSS 解析器、qBittorrent 客户端、调度器、文件整理、EventBus、8 种标题正则解析模式
 - **Phase 2（历史补全 + 元数据）**: 全部完成 ✅ — Mikan HTML 全页爬取（goquery）、TMDB/BGM.tv 元数据提供者、GFW 镜像/代理回退机制、补全调度器
-- **Phase 3（Web UI + RESTful API）**: 进行中 — Vue3 前端（登录 + 仪表盘）、RESTful API（订阅 CRUD、下载队列、设置管理）
-- **测试**: 63 个测试全通过
+- **Phase 3（Web UI + RESTful API + Docker）**: 全部完成 ✅ — Vue3 前端、RESTful API、go:embed 前端嵌合、多阶段 Docker 构建、GitHub Actions CI/CD
+- **Phase 4（AI + 多下载器 + 插件 + 多资源站）**: 全部完成 ✅ — AI 4 协议、qBittorrent/Transmission/Aria2、插件系统、死种检测、Nyaa/ACGRIP/AnimeTosho + MultiSource
+- **Phase 5（多平台消息通知 + 任务解析）**: 全部完成 ✅ — 16 平台通知、自然语言任务解析器（正则 + AI）、EventBus 自动推送
+- **Phase 6（数据迁移）**: 全部完成 ✅ — AutoBangumi SQLite 导入
+- **测试**: 108 个测试全通过
 
 ## 技术栈
 
@@ -35,20 +38,29 @@ cp .env.example .env
 | 文件 | 说明 |
 |------|------|
 | `main.go` | 入口，打印 banner，加载配置，初始化所有模块 |
-| `internal/core/interfaces.go` | 6 个核心接口 + 12 个事件常量 |
-| `internal/config/config.go` | 配置加载（环境变量优先） |
+| `embed.go` | `//go:embed web/dist` 前端静态文件嵌入 |
+| `internal/core/interfaces.go` | 7 个核心接口 + 事件常量 + 数据类型 |
+| `internal/config/config.go` | 配置加载（环境变量优先）+ DB 回退（MergeFromSettings） |
 | `internal/database/db.go` | GORM 初始化 + AutoMigrate |
 | `internal/database/models.go` | 5 个 ORM 模型（Subscription, Episode, DownloadRecord, Setting, User） |
 | `internal/source/mikan.go` | Mikan RSS 解析 + HTML 详情页全量爬取 |
+| `internal/source/multi.go` | 多资源站聚合器（Nyaa/ACGRIP/AnimeTosho） |
 | `internal/scheduler/scheduler.go` | 定时任务：RSS 轮询、文件整理、补全扫描 |
 | `internal/api/server.go` | HTTP API 服务 + JWT 鉴权中间件 |
-| `internal/api/handlers.go` | RESTful API 处理器：订阅 CRUD、下载队列、设置 |
+| `internal/api/handlers.go` | RESTful API 处理器：订阅 CRUD、下载队列、设置、解析、迁移 |
+| `internal/downloader/qbittorrent.go` | qBittorrent Web API 客户端 |
+| `internal/downloader/transmission.go` | Transmission RPC 客户端 |
+| `internal/downloader/aria2.go` | Aria2 JSON-RPC 客户端 |
 | `internal/metadata/tmdb.go` | TMDB API v3 元数据提供者 |
 | `internal/metadata/bangumi.go` | BGM.tv 元数据提供者 |
-| `internal/downloader/qbittorrent.go` | qBittorrent Web API 客户端 |
+| `internal/notifier/` | 16 平台通知实现 |
+| `internal/ai/` | AI 4 协议适配（OpenAI/Google/Anthropic/Ollama） |
+| `internal/parser/` | 自然语言任务解析器（正则 + AI 回退） |
+| `internal/plugin/` | 插件系统（Webhook + Shell） |
+| `internal/migrate/` | AutoBangumi 数据迁移 |
 | `AGENTS.md` / `AGENTS_EN.md` | AI 助手指南（中/英） |
 | `CLAUDE.md` | Claude Code 指导文件 |
-| `docs/DEVELOPMENT_PLAN.md` | 完整 5 阶段开发日程（中/英） |
+| `docs/DEVELOPMENT_PLAN.md` | 完整开发日程（中/英） |
 | `docs/PROJECT_CONTEXT.md` | 项目核心记忆（中/英） |
 
 ## 关键约束
