@@ -158,7 +158,7 @@ Ani-Go/
 | Phase 3: Web UI + RESTful API | ✅ 完成 |
 | Phase 4: AI + 多下载器 + 插件 + 多资源站 | ✅ 已完成 |
 | Phase 5: 多平台消息通知 | ✅ 已完成 (16 平台) |
-
+(待验证是否可用)
 ## License
 
 MIT License © xiaoyueRX
