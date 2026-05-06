@@ -310,7 +310,7 @@ func resolveAIConfig(cfg *config.Config) (endpoint, apiKey, model string) {
 }
 
 func printBanner() {
-	fmt.Println(`
+	fmt.Print(`
     ╔═══════════════════════════════════════════════════════════════╗
     ║                                                               ║
     ║      ___   _   _      ____                                     ║

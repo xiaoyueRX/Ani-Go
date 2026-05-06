@@ -704,6 +704,29 @@ func (s *Server) handleSearchAnime(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+// handleMikanGroups 获取 Mikan 番剧的字幕组列表
+// GET /api/mikan/groups?bangumi_id=xxx
+func (s *Server) handleMikanGroups(w http.ResponseWriter, r *http.Request) {
+	bangumiID := r.URL.Query().Get("bangumi_id")
+	if bangumiID == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "bangumi_id 不能为空"})
+		return
+	}
+
+	groups, err := s.mikanSrc.FetchSubgroups(r.Context(), bangumiID)
+	if err != nil {
+		log.Printf("⚠️  获取 Mikan 字幕组失败 [%s]: %v", bangumiID, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "获取字幕组失败: " + err.Error()})
+		return
+	}
+
+	if groups == nil {
+		groups = []source.SubgroupInfo{}
+	}
+
+	writeJSON(w, http.StatusOK, groups)
+}
+
 // getSettingValue 从数据库获取设置值
 func getSettingValue(key string) string {
 	var s database.Setting

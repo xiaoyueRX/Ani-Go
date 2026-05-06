@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
 import IconSax from '../components/IconSax.vue'
@@ -23,6 +23,25 @@ const subs = ref<Subscription[]>([])
 const loading = ref(true)
 const error = ref('')
 const deletingId = ref<number | null>(null)
+const filterText = ref('')
+const filterType = ref<'all' | 'active' | 'completed'>('all')
+
+const filteredSubs = computed(() => {
+  let list = subs.value
+  // 状态筛选
+  if (filterType.value === 'active') list = list.filter(s => s.enabled)
+  else if (filterType.value === 'completed') list = list.filter(s => s.completed)
+  // 文字搜索
+  const q = filterText.value.trim().toLowerCase()
+  if (q) {
+    list = list.filter(s =>
+      s.title_cn.toLowerCase().includes(q) ||
+      (s.title_en && s.title_en.toLowerCase().includes(q)) ||
+      (s.subgroup_name && s.subgroup_name.toLowerCase().includes(q))
+    )
+  }
+  return list
+})
 
 async function fetchSubscriptions() {
   loading.value = true
@@ -77,13 +96,26 @@ onMounted(fetchSubscriptions)
       <h1 class="text-2xl font-bold">订阅管理</h1>
       <div class="flex gap-2">
         <button class="btn btn-ghost btn-sm gap-1" @click="router.push('/search')">
-          <IconSax name="search" :size="16" />
+          <IconSax name="search" ::size="16" />
           搜索番剧
         </button>
         <button class="btn btn-primary btn-sm gap-1" @click="router.push('/subscriptions/new')">
-          <IconSax name="add" :size="16" />
+          <IconSax name="add" ::size="16" />
           添加订阅
         </button>
+      </div>
+    </div>
+
+    <!-- 搜索/筛选栏 -->
+    <div class="flex flex-col sm:flex-row gap-3 mb-4">
+      <label class="input input-bordered input-sm flex items-center gap-2 flex-1">
+        <IconSax name="search" :size="16" class="opacity-50" />
+        <input v-model="filterText" type="text" class="grow" placeholder="搜索订阅名称/字幕组..." />
+      </label>
+      <div class="flex gap-1">
+        <button class="btn btn-xs" :class="filterType === 'all' ? 'btn-primary' : 'btn-ghost'" @click="filterType = 'all'">全部</button>
+        <button class="btn btn-xs" :class="filterType === 'active' ? 'btn-primary' : 'btn-ghost'" @click="filterType = 'active'">进行中</button>
+        <button class="btn btn-xs" :class="filterType === 'completed' ? 'btn-primary' : 'btn-ghost'" @click="filterType = 'completed'">已完结</button>
       </div>
     </div>
 
@@ -99,12 +131,12 @@ onMounted(fetchSubscriptions)
       <span class="loading loading-spinner loading-lg"></span>
     </div>
 
-    <div v-else-if="subs.length === 0" class="card bg-base-100 shadow">
-      <div class="card-body text-center py-20">
-        <IconSax name="category" :size="56" class="mx-auto text-base-content/20 mb-4" />
-        <p class="text-base-content/50 text-lg">暂无订阅</p>
-        <p class="text-base-content/40 text-sm mt-1">通过搜索添加番剧订阅</p>
-        <button class="btn btn-primary mt-4 gap-1" @click="router.push('/search')">
+    <div v-else-if="filteredSubs.length === 0" class="card bg-base-100 shadow-sm border border-base-200">
+      <div class="card-body text-center py-16">
+        <IconSax name="search" :size="48" class="mx-auto text-base-content/20 mb-4" />
+        <p class="text-base-content/50 text-lg">{{ subs.length > 0 ? '未找到匹配的订阅' : '暂无订阅' }}</p>
+        <p class="text-base-content/40 text-sm mt-1">{{ subs.length > 0 ? '尝试其他关键词' : '通过搜索添加番剧订阅' }}</p>
+        <button v-if="subs.length === 0" class="btn btn-primary mt-4 gap-1" @click="router.push('/search')">
           <IconSax name="search" :size="16" />
           搜索番剧
         </button>
@@ -114,7 +146,7 @@ onMounted(fetchSubscriptions)
     <!-- 订阅卡片网格 -->
     <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       <div
-        v-for="sub in subs" :key="sub.id"
+        v-for="sub in filteredSubs" :key="sub.id"
         class="card bg-base-100 shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer border border-base-200 hover:border-primary/20"
         :class="{ 'opacity-60': !sub.enabled }"
         @click="router.push(`/subscriptions/${sub.id}`)"
@@ -130,7 +162,7 @@ onMounted(fetchSubscriptions)
                 @click="toggleEnabled(sub)"
                 :title="sub.enabled ? '暂停' : '启用'"
               >
-                <IconSax :name="sub.enabled ? 'pause' : 'play'" :size="16" />
+                <IconSax :name="sub.enabled ? 'pause' : 'play'" ::size="16" />
               </button>
               <button
                 class="btn btn-ghost btn-xs btn-square text-error"
@@ -138,21 +170,21 @@ onMounted(fetchSubscriptions)
                 :disabled="deletingId === sub.id"
               >
                 <span v-if="deletingId === sub.id" class="loading loading-spinner loading-xs"></span>
-                <IconSax v-else name="trash" :size="16" />
+                <IconSax v-else name="trash" ::size="16" />
               </button>
             </div>
           </div>
 
           <!-- 字幕组 -->
           <div v-if="sub.subgroup_name" class="flex items-center gap-1 text-sm text-base-content/50">
-            <IconSax name="user" :size="14" />
+            <IconSax name="user" ::size="14" />
             {{ sub.subgroup_name }}
           </div>
 
           <!-- 超时告警 -->
           <div v-if="sub.stalled_episodes > 0">
             <span class="badge badge-warning badge-sm gap-1">
-              <IconSax name="warning" :size="12" />
+              <IconSax name="warning" ::size="12" />
               {{ sub.stalled_episodes }} 集超时
             </span>
           </div>
@@ -173,12 +205,12 @@ onMounted(fetchSubscriptions)
           <!-- 标签行 -->
           <div class="flex flex-wrap gap-2 mt-1" @click.stop>
             <span v-if="sub.anime_type" class="badge badge-sm badge-ghost gap-1">
-              <IconSax name="document" :size="12" />
+              <IconSax name="document" ::size="12" />
               {{ sub.anime_type }}
             </span>
             <span v-if="sub.year" class="badge badge-sm badge-ghost">{{ sub.year }}</span>
             <span v-if="sub.completed" class="badge badge-success badge-sm gap-1">
-              <IconSax name="check" :size="12" />
+              <IconSax name="check" ::size="12" />
               已完结
             </span>
           </div>
@@ -189,7 +221,7 @@ onMounted(fetchSubscriptions)
             class="btn btn-outline btn-xs mt-2 gap-1"
             @click.stop="triggerSupplement(sub)"
           >
-            <IconSax name="history" :size="14" />
+            <IconSax name="history" ::size="14" />
             补全历史集数
           </button>
         </div>

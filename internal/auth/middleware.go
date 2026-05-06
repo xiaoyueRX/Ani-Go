@@ -34,13 +34,13 @@ func CORSMiddleware(next http.Handler) http.Handler {
 }
 
 // AuthMiddleware JWT 鉴权中间件
-// 拦截 /api/* 路径，放行 /api/login
+// 拦截 /api/* 路径，放行 /api/login 和 /api/health
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// 放行登录接口
-		if path == "/api/login" || path == "/api/login/" {
+		// 放行登录接口和健康检查
+		if path == "/api/login" || path == "/api/login/" || path == "/api/health" || path == "/api/health/" {
 			next.ServeHTTP(w, r)
 			return
 		}

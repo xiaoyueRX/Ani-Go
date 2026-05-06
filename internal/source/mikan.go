@@ -848,6 +848,71 @@ func extractInfoHash(magnetURL string) string {
 	return matches[1]
 }
 
+// SubgroupInfo Mikan 番剧页面的字幕组信息
+type SubgroupInfo struct {
+	Name   string `json:"name"`
+	RSSURL string `json:"rss_url"`
+}
+
+// FetchSubgroups 获取 Mikan 番剧详情页的所有字幕组列表及其 RSS URL
+func (m *MikanSource) FetchSubgroups(ctx context.Context, bangumiID string) ([]SubgroupInfo, error) {
+	path := "/Home/Bangumi/" + bangumiID
+	resp, err := m.tryMirrors(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("获取 Mikan 详情页失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取 Mikan 详情页失败: %w", err)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("解析 Mikan 详情页 HTML 失败: %w", err)
+	}
+
+	var groups []SubgroupInfo
+	doc.Find(".leftbar-item").Each(func(_ int, leftbar *goquery.Selection) {
+		groupName := strings.TrimSpace(leftbar.Find("a.subgroup-name").Text())
+		if groupName == "" {
+			return
+		}
+
+		// 查找字幕组对应的 RSS 链接
+		rssLink := leftbar.Find(".mikan-rss")
+		rssHref, exists := rssLink.Attr("href")
+		if !exists {
+			return
+		}
+
+		rssURL := rssHref
+		if !strings.HasPrefix(rssURL, "http") {
+			rssURL = "https://" + m.domain + rssHref
+		}
+
+		groups = append(groups, SubgroupInfo{
+			Name:   groupName,
+			RSSURL: rssURL,
+		})
+	})
+
+	return groups, nil
+}
+
+// ResolveFirstRSSURL 从 BangumiID 获取 Mikan 详情页并提取第一个可用字幕组的 RSS URL
+func (m *MikanSource) ResolveFirstRSSURL(ctx context.Context, bangumiID string) (string, error) {
+	groups, err := m.FetchSubgroups(ctx, bangumiID)
+	if err != nil {
+		return "", err
+	}
+	if len(groups) == 0 {
+		return "", fmt.Errorf("未找到任何字幕组")
+	}
+	return groups[0].RSSURL, nil
+}
+
 // BuildMikanRSSURL 构建 Mikan 个人 RSS 完整 URL
 func BuildMikanRSSURL(tokenURL string) string {
 	return strings.TrimSpace(tokenURL)

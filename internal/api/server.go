@@ -14,6 +14,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
+	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
 
 // Server 持有 API 所需的依赖
@@ -22,6 +23,7 @@ type Server struct {
 	triggerSupplement func(ctx context.Context, subID uint) error
 	pluginManager     *plugin.Manager
 	taskParser        core.TaskParser
+	mikanSrc          *source.MikanSource // Mikan 资源源，用于字幕组查询
 }
 
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
@@ -130,6 +132,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 搜索番剧
 	mux.HandleFunc("GET /api/search", s.handleSearchAnime)
+
+	// Mikan 字幕组查询（根据 BangumiID 获取字幕组 RSS URL）
+	s.mikanSrc = source.NewMikanSource("mikanime.tv", "", nil)
+	mux.HandleFunc("GET /api/mikan/groups", s.handleMikanGroups)
 }
 
 // ============================================================
