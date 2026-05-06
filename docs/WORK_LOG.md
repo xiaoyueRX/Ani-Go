@@ -91,5 +91,18 @@
 - **新增**: 搜索结果耗时和搜索时间显示
 - **文件**: `web/src/views/Search.vue`
 
-### 待处理
-- GitHub push: GFW 阻断，3 commits 已本地保存
+### 5.5 完整测试验证
+- Search: 4 results ✅
+- Mikan Groups: 14 groups ✅  
+- Health check 无 token 可访问 ✅
+- Create subscription with BangumiID → async RSS resolution ✅
+- Go vet: 0 warnings ✅
+- TypeScript: 0 errors ✅
+- Build: success ✅
+
+## 待处理（网络恢复后执行）
+```bash
+cd /root/x/Ani-Go
+git push origin main
+```
+4 pending commits: ddbf461, 0b2e86a, a290872, 6f1d8da
