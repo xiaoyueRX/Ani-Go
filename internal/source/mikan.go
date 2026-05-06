@@ -905,9 +905,19 @@ func (m *MikanSource) FetchSubgroups(ctx context.Context, bangumiID string) ([]S
 			return
 		}
 
-		// 查找字幕组对应的 RSS 链接
-		rssLink := leftbar.Find(".mikan-rss")
-		rssHref, exists := rssLink.Attr("href")
+		// 通过 data-anchor 定位字幕组锚点（如 #202）
+		anchorID, exists := leftbar.Find("a.subgroup-name").Attr("data-anchor")
+		if !exists || anchorID == "" {
+			return
+		}
+
+		// 在文档中找到锚点对应的区块，再找 .mikan-rss
+		anchorSection := doc.Find(anchorID)
+		if anchorSection.Length() == 0 {
+			return
+		}
+
+		rssHref, exists := anchorSection.Find(".mikan-rss").Attr("href")
 		if !exists {
 			return
 		}

@@ -80,5 +80,16 @@
 - Go build: 构建成功
 - 审查范围: 所有新增/修改的 10+ 文件
 
+### 5.3 Mikan Groups 修复
+- **问题**: `leftbar-item` 是 `<li>` 元素，`.mikan-rss` 不在其内部
+- **修复**: 改用 `data-anchor` 属性定位对应区块，再在区块内找 `.mikan-rss`
+- **效果**: 14 个字幕组正常返回
+- **文件**: `internal/source/mikan.go`
+
+### 5.4 搜索超时 + 耗时显示
+- **新增**: 搜索请求 25s 超时，超时提示
+- **新增**: 搜索结果耗时和搜索时间显示
+- **文件**: `web/src/views/Search.vue`
+
 ### 待处理
-- GitHub push: GFW 阻断，commit ddbf461 已本地保存
+- GitHub push: GFW 阻断，3 commits 已本地保存
