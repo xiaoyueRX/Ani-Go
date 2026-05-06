@@ -381,7 +381,7 @@ func defaults() *Config {
 		Server:   ServerConfig{Host: "0.0.0.0", Port: 20001},
 		Database: DatabaseConfig{Path: "ani-go.db"},
 		Mikan: MikanConfig{
-			Domain: "mikanani.me", MirrorDomains: []string{"mikanani.me", "mikanime.tv"},
+			Domain: "mikanime.tv", MirrorDomains: []string{"mikanime.tv", "mikanani.me"},
 		},
 		Downloaders: DownloadersConfig{
 			Default: "qbittorrent",

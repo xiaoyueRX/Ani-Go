@@ -311,14 +311,20 @@ func resolveAIConfig(cfg *config.Config) (endpoint, apiKey, model string) {
 
 func printBanner() {
 	fmt.Println(`
-	   _          _        ____
-	  / \   _ __ (_)      / ___| ___
-	 / _ \ | '_ \| |_____| |  _ / _ \
-	/ ___ \| | | | |_____| |_| | (_) |
-       /_/   \_\_| |_|_|      \____|\___|
-
-	Ani-Go - 全自动番剧追番管理系统  v` + version + `
-	`)
+    ╔═══════════════════════════════════════════════════════════════╗
+    ║                                                               ║
+    ║      ___   _   _      ____                                     ║
+    ║     / _ \ | \ | |    / ___|  ___  _ __   ___                   ║
+    ║    / /_\ \|  \| |___| |  _  / _ \| '_ \ / _ \                  ║
+    ║   / _____ \ |\  |___| |_| || (_) | | | | (_) |                 ║
+    ║  /_/     \_\_| \_|    \____| \___/|_| |_|\___/                  ║
+    ║                                                               ║
+    ║       全自动番剧追番下载管理系统                                 ║
+    ║       Auto Anime Subscription & Download Manager               ║
+    ║                                                               ║
+    ╚═══════════════════════════════════════════════════════════════╝
+`)
+	fmt.Printf("  Version: %s | Port: 20001 | GitHub: github.com/xiaoyueRX/Ani-Go\n\n", version)
 }
 
 func setupNotifier(cfg *config.Config) *notifier.MultiNotifier {

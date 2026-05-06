@@ -5,14 +5,17 @@ import (
 	"time"
 )
 
+// TorrentItem 统一种子条目
+// json 标签与前端 Search.vue TorrentItem 接口保持同步
 type TorrentItem struct {
-	Title       string
-	URL         string
-	MagnetURL   string
-	InfoHash    string
-	Size        int64
-	PublishedAt time.Time
-	SourceName  string
+	Title       string    `json:"title"`
+	URL         string    `json:"url"`
+	MagnetURL   string    `json:"magnet"`
+	InfoHash    string    `json:"info_hash"`
+	Size        int64     `json:"size"`
+	PublishedAt time.Time `json:"pub_date"`
+	SourceName  string    `json:"source"`
+	BangumiID   string    `json:"bangumi_id"`
 }
 
 type Anime struct {

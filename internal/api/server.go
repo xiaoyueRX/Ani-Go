@@ -127,6 +127,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 任务解析
 	mux.HandleFunc("POST /api/parse", s.handleParseTask)
+
+	// 搜索番剧
+	mux.HandleFunc("GET /api/search", s.handleSearchAnime)
 }
 
 // ============================================================

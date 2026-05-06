@@ -2,6 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import request from '../utils/request'
+import IconSax from '../components/IconSax.vue'
+import SubscriptionEditForm from '../components/SubscriptionEditForm.vue'
 
 interface Subscription {
   id: number; title_cn: string; title_en: string; title_jp: string
@@ -56,11 +58,11 @@ async function handleSaveEdit(updated: Record<string, any>) {
   }
 }
 
-const statusLabels: Record<string, string> = {
-  pending: '待下载',
-  downloading: '下载中',
-  completed: '已完成',
-  failed: '失败',
+const statusCfg: Record<string, { label: string; icon: string; cls: string }> = {
+  pending: { label: '待下载', icon: 'history', cls: 'badge-ghost' },
+  downloading: { label: '下载中', icon: 'download', cls: 'badge-warning' },
+  completed: { label: '已完成', icon: 'check', cls: 'badge-success' },
+  failed: { label: '失败', icon: 'warning', cls: 'badge-error' },
 }
 
 function formatSize(bytes: number): string {
@@ -75,8 +77,9 @@ onMounted(fetchDetail)
 
 <template>
   <div>
-    <button class="btn btn-ghost btn-sm mb-4" @click="router.push('/')">
-      ← 返回订阅列表
+    <button class="btn btn-ghost btn-sm mb-4 gap-1" @click="router.push('/')">
+      <IconSax name="chevron-left" :size="16" />
+      返回订阅列表
     </button>
 
     <div v-if="loading" class="flex justify-center py-16">
@@ -84,75 +87,115 @@ onMounted(fetchDetail)
     </div>
 
     <div v-else-if="error" class="alert alert-error">
+      <IconSax name="warning" class="shrink-0" />
       <span>{{ error }}</span>
     </div>
 
     <template v-else-if="sub">
       <!-- 订阅信息卡片 -->
-      <div class="card bg-base-100 shadow mb-6">
+      <div class="card bg-base-100 shadow-sm border border-base-200 mb-6">
         <div class="card-body">
-          <div class="flex items-start justify-between">
-            <div>
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
               <h1 class="text-2xl font-bold">{{ sub.title_cn }}</h1>
-              <div v-if="sub.title_en" class="text-base-content/60">{{ sub.title_en }}</div>
+              <div v-if="sub.title_en" class="text-base-content/50 mt-0.5">{{ sub.title_en }}</div>
               <div v-if="sub.title_jp" class="text-base-content/40 text-sm">{{ sub.title_jp }}</div>
             </div>
-            <div class="flex gap-2">
-              <button class="btn btn-outline btn-sm" @click="showEdit = true">编辑</button>
+            <div class="flex gap-2 shrink-0">
+              <button class="btn btn-outline btn-sm gap-1" @click="showEdit = true">
+                <IconSax name="edit" :size="14" />
+                编辑
+              </button>
               <button
-                class="btn btn-sm"
+                class="btn btn-sm gap-1"
                 :class="sub.enabled ? 'btn-warning' : 'btn-success'"
                 @click="handleSaveEdit({ enabled: !sub.enabled })"
               >
+                <IconSax :name="sub.enabled ? 'pause' : 'play'" :size="14" />
                 {{ sub.enabled ? '暂停' : '启用' }}
               </button>
             </div>
           </div>
 
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
-            <div><span class="text-sm opacity-60">类型</span><div class="font-medium">{{ sub.anime_type || '-' }}</div></div>
-            <div><span class="text-sm opacity-60">年份</span><div class="font-medium">{{ sub.year || '-' }}</div></div>
-            <div><span class="text-sm opacity-60">季</span><div class="font-medium">{{ sub.season || '-' }}</div></div>
-            <div><span class="text-sm opacity-60">字幕组</span><div class="font-medium">{{ sub.subgroup_name || '-' }}</div></div>
-            <div><span class="text-sm opacity-60">Bangumi ID</span><div class="font-medium">{{ sub.bangumi_id || '-' }}</div></div>
-            <div><span class="text-sm opacity-60">元数据源</span><div class="font-medium">{{ sub.metadata_provider || '-' }}</div></div>
-            <div><span class="text-sm opacity-60">状态</span>
-              <div>
-                <span v-if="sub.completed" class="badge badge-success">已完结</span>
-                <span v-else class="badge">连载中</span>
-                <span v-if="!sub.enabled" class="badge badge-warning ml-1">已暂停</span>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+            <div>
+              <span class="text-xs opacity-50 flex items-center gap-1">
+                <IconSax name="document" :size="12" /> 类型
+              </span>
+              <div class="font-medium mt-0.5">{{ sub.anime_type || '-' }}</div>
+            </div>
+            <div>
+              <span class="text-xs opacity-50">年份</span>
+              <div class="font-medium mt-0.5">{{ sub.year || '-' }}</div>
+            </div>
+            <div>
+              <span class="text-xs opacity-50">季</span>
+              <div class="font-medium mt-0.5">{{ sub.season || '-' }}</div>
+            </div>
+            <div>
+              <span class="text-xs opacity-50 flex items-center gap-1">
+                <IconSax name="user" :size="12" /> 字幕组
+              </span>
+              <div class="font-medium mt-0.5">{{ sub.subgroup_name || '-' }}</div>
+            </div>
+            <div>
+              <span class="text-xs opacity-50">Bangumi ID</span>
+              <div class="font-medium mt-0.5 font-mono text-sm">{{ sub.bangumi_id || '-' }}</div>
+            </div>
+            <div>
+              <span class="text-xs opacity-50">元数据源</span>
+              <div class="font-medium mt-0.5">{{ sub.metadata_provider || '-' }}</div>
+            </div>
+            <div>
+              <span class="text-xs opacity-50">状态</span>
+              <div class="flex gap-1 mt-1">
+                <span v-if="sub.completed" class="badge badge-success badge-sm gap-1">
+                  <IconSax name="check" :size="12" /> 已完结
+                </span>
+                <span v-else class="badge badge-sm">连载中</span>
+                <span v-if="!sub.enabled" class="badge badge-warning badge-sm gap-1">
+                  <IconSax name="pause" :size="12" /> 已暂停
+                </span>
               </div>
             </div>
-            <div><span class="text-sm opacity-60">添加时间</span><div class="font-medium text-sm">{{ new Date(sub.created_at).toLocaleDateString('zh-CN') }}</div></div>
+            <div>
+              <span class="text-xs opacity-50">添加时间</span>
+              <div class="font-medium mt-0.5 text-sm">{{ new Date(sub.created_at).toLocaleDateString('zh-CN') }}</div>
+            </div>
           </div>
 
           <div v-if="sub.total_episodes > 0" class="mt-4">
-            <div class="flex justify-between text-sm mb-1">
+            <div class="flex justify-between text-sm text-base-content/50 mb-1">
               <span>下载进度</span>
               <span>{{ sub.current_episodes }} / {{ sub.total_episodes }}</span>
             </div>
             <progress
-              class="progress progress-primary w-full"
+              class="progress progress-primary w-full h-2"
               :value="sub.current_episodes"
               :max="sub.total_episodes"
             ></progress>
           </div>
 
-          <div v-if="sub.custom_path" class="mt-2 text-sm">
-            <span class="opacity-60">自定义路径：</span><code class="bg-base-300 px-1 rounded">{{ sub.custom_path }}</code>
+          <div v-if="sub.custom_path" class="mt-3 text-sm">
+            <span class="opacity-50">自定义路径：</span>
+            <code class="bg-base-300 px-1.5 py-0.5 rounded text-xs">{{ sub.custom_path }}</code>
           </div>
         </div>
       </div>
 
-      <div v-if="sub.stalled_episodes > 0" class="alert alert-warning mt-3">
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <!-- 超时告警 -->
+      <div v-if="sub.stalled_episodes > 0" class="alert alert-warning mb-6">
+        <IconSax name="warning" class="shrink-0" />
         <span>{{ sub.stalled_episodes }} 集超过 48 小时未完成下载，建议检查种子健康度或更换字幕组</span>
       </div>
 
       <!-- 编辑弹窗 (DaisyUI modal) -->
       <dialog :open="showEdit" class="modal" @click.self="showEdit = false">
         <div class="modal-box">
-          <h3 class="text-lg font-bold mb-4">编辑订阅</h3>
+          <div class="flex items-center gap-2 mb-4">
+            <IconSax name="edit" :size="20" />
+            <h3 class="text-lg font-bold">编辑订阅</h3>
+          </div>
           <SubscriptionEditForm
             :sub="sub"
             @save="handleSaveEdit"
@@ -162,9 +205,12 @@ onMounted(fetchDetail)
       </dialog>
 
       <!-- 剧集列表 -->
-      <div class="card bg-base-100 shadow">
+      <div class="card bg-base-100 shadow-sm border border-base-200">
         <div class="card-body">
-          <h2 class="card-title">剧集列表 ({{ episodes.length }})</h2>
+          <h2 class="card-title text-base mb-3">
+            <IconSax name="document" :size="18" />
+            剧集列表 ({{ episodes.length }})
+          </h2>
           <div v-if="episodes.length === 0" class="text-center py-8 text-base-content/50">
             暂无剧集记录
           </div>
@@ -185,19 +231,19 @@ onMounted(fetchDetail)
                   <td class="font-mono">{{ ep.season > 1 ? 'S' + ep.season : '' }}{{ ep.number ? 'E' + ep.number : '' }}</td>
                   <td class="max-w-xs truncate" :title="ep.original_name">{{ ep.original_name || ep.title || '-' }}</td>
                   <td>
-                    <span class="badge badge-sm" :class="{
-                      'badge-ghost': ep.status === 'pending',
-                      'badge-warning': ep.status === 'downloading',
-                      'badge-success': ep.status === 'completed',
-                      'badge-error': ep.status === 'failed',
-                    }">{{ statusLabels[ep.status] || ep.status }}</span>
+                    <span class="badge badge-sm gap-1" :class="(statusCfg[ep.status] || {}).cls || 'badge-ghost'">
+                      <IconSax :name="(statusCfg[ep.status] || {}).icon || 'more'" :size="12" />
+                      {{ (statusCfg[ep.status] || {}).label || ep.status }}
+                    </span>
                   </td>
                   <td>
-                    <span v-if="ep.is_stalled" class="badge badge-warning badge-sm">⚠ 超时</span>
+                    <span v-if="ep.is_stalled" class="badge badge-warning badge-sm gap-1">
+                      <IconSax name="warning" :size="12" /> 超时
+                    </span>
                     <span v-else class="text-sm opacity-40">-</span>
                   </td>
-                  <td class="text-sm opacity-70">{{ formatSize(ep.file_size) }}</td>
-                  <td class="text-sm opacity-70">{{ new Date(ep.created_at).toLocaleDateString('zh-CN') }}</td>
+                  <td class="text-sm opacity-60">{{ formatSize(ep.file_size) }}</td>
+                  <td class="text-sm opacity-60">{{ new Date(ep.created_at).toLocaleDateString('zh-CN') }}</td>
                 </tr>
               </tbody>
             </table>

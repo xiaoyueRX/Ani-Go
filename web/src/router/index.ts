@@ -22,6 +22,11 @@ const router = createRouter({
           component: () => import('../views/Subscriptions.vue'),
         },
         {
+          path: 'search',
+          name: 'search',
+          component: () => import('../views/Search.vue'),
+        },
+        {
           path: 'subscriptions/new',
           name: 'subscription-create',
           component: () => import('../views/SubscriptionForm.vue'),

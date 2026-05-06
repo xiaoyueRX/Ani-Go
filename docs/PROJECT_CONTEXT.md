@@ -89,6 +89,11 @@
   - [x] EventBus 自动推送 + MultiNotifier 聚合广播
 - [x] **Phase 6: 数据迁移** ✅
   - [x] AutoBangumi SQLite 数据导入工具
+- [x] **Phase 7: 前端美化与搜索修复** ✅
+  - [x] Mikan 中文搜索修复（URL 编码 + CSS 选择器兼容）
+  - [x] IconSax 图标组件（Iconsax Linear，20+ 图标）
+  - [x] 全部视图美化（登录/侧栏/订阅/下载/设置）
+  - [x] 设置页重构（分组卡片 + 配置状态 + 密码显隐）
 - **测试**: 108 个测试全通过
 
 ---
@@ -101,4 +106,4 @@
 
 ---
 
-*Last Updated: 2026-04-29*
+*Last Updated: 2026-05-06*

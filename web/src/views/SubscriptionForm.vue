@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
+import IconSax from '../components/IconSax.vue'
 
 const router = useRouter()
 const titleCN = ref('')
@@ -38,17 +39,24 @@ async function handleSubmit() {
 
 <template>
   <div>
-    <button class="btn btn-ghost btn-sm mb-4" @click="router.push('/')">
-      ← 返回订阅列表
+    <button class="btn btn-ghost btn-sm mb-4 gap-1" @click="router.push('/')">
+      <IconSax name="chevron-left" :size="16" />
+      返回订阅列表
     </button>
 
-    <div class="card bg-base-100 shadow max-w-xl mx-auto">
+    <div class="card bg-base-100 shadow-sm border border-base-200 max-w-xl mx-auto">
       <div class="card-body">
-        <h1 class="card-title text-2xl mb-4">添加订阅</h1>
+        <div class="flex items-center gap-2 mb-4">
+          <IconSax name="add" :size="22" class="text-primary" />
+          <h1 class="card-title text-2xl">添加订阅</h1>
+        </div>
 
         <div v-if="error" class="alert alert-error mb-4">
+          <IconSax name="warning" class="shrink-0" />
           <span>{{ error }}</span>
-          <button class="btn btn-ghost btn-sm" @click="error = ''">✕</button>
+          <button class="btn btn-ghost btn-sm" @click="error = ''">
+            <IconSax name="close" :size="16" />
+          </button>
         </div>
 
         <form @submit.prevent="handleSubmit" class="flex flex-col gap-4">
@@ -72,8 +80,9 @@ async function handleSubmit() {
             <span class="label-text">过滤规则 JSON</span>
             <textarea v-model="filterJson" class="textarea textarea-bordered h-20" placeholder='{"keywords": ["1080p"], "exclude": ["内嵌"]}'></textarea>
           </label>
-          <button type="submit" class="btn btn-primary" :disabled="loading">
+          <button type="submit" class="btn btn-primary gap-1" :disabled="loading">
             <span v-if="loading" class="loading loading-spinner"></span>
+            <IconSax v-else name="add" :size="16" />
             创建订阅
           </button>
         </form>

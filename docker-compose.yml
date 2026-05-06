@@ -12,9 +12,9 @@ services:
       - .env
     volumes:
       # 番剧媒体库根目录（根据你的 NAS/fnOS 路径修改）
-      - /vol2/1000/TV:/TV
+      - 
       # 数据库持久化（可选，SQLite 文件存储在此处）
-      - ./data:/data
+      - 
     environment:
       # 可通过环境变量覆盖 .env 中的值
       - PORT=20001

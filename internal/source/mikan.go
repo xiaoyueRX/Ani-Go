@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -90,7 +91,7 @@ func (m *MikanSource) tryMirrors(ctx context.Context, path string) (*http.Respon
 			lastErr = err
 			continue
 		}
-		req.Header.Set("User-Agent", "Ani-Go/1.0")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
 		resp, err := m.httpClient.Do(req)
 		if err != nil {
@@ -154,19 +155,76 @@ func (m *MikanSource) FetchRSS(ctx context.Context, url string) ([]core.TorrentI
 }
 
 // SearchAnime 在 Mikan 上搜索番剧
+// 优先使用文本搜索，如果需要登录则回退到季节搜索+本地过滤
 func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.TorrentItem, error) {
-	resp, err := m.tryMirrors(ctx, "/Home/Search?searchstr="+title)
-	if err != nil {
-		return nil, fmt.Errorf("搜索请求失败: %w", err)
+	// 先尝试文本搜索：URL 编码中文关键字，否则 Mikan 返回 400
+	encodedTitle := url.QueryEscape(title)
+	path := "/Home/Search?searchstr=" + encodedTitle
+	resp, err := m.tryMirrors(ctx, path)
+	if err == nil {
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err == nil {
+			items := parseMikanSearchHTML(string(body), m.domain)
+			if len(items) > 0 {
+				return items, nil
+			}
+		}
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("读取搜索响应失败: %w", err)
+	// 文本搜索失败或无结果，使用季节搜索+本地过滤
+	return m.searchBySeason(ctx, title)
+}
+
+// searchBySeason 通过季节列表搜索番剧（不需要登录）
+func (m *MikanSource) searchBySeason(ctx context.Context, title string) ([]core.TorrentItem, error) {
+	// 获取当前年份和季节
+	now := time.Now()
+	year := now.Year()
+	season := getSeason(now.Month())
+
+	var allItems []core.TorrentItem
+
+	// 尝试当前季节和上一个季节
+	for i := 0; i < 2; i++ {
+		s := season - i
+		y := year
+		if s < 1 {
+			s = 4
+			y--
+		}
+
+		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%d", y, s)
+		resp, err := m.tryMirrors(ctx, path)
+		if err != nil {
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+
+		items := parseMikanSeasonHTML(string(body), m.domain, title)
+		allItems = append(allItems, items...)
 	}
 
-	return parseMikanSearchHTML(string(body), m.domain), nil
+	return allItems, nil
+}
+
+// getSeason 根据月份返回季节（1-4）
+func getSeason(month time.Month) int {
+	switch {
+	case month >= 1 && month <= 3:
+		return 1 // 冬季
+	case month >= 4 && month <= 6:
+		return 2 // 春季
+	case month >= 7 && month <= 9:
+		return 3 // 夏季
+	default:
+		return 4 // 秋季
+	}
 }
 
 // FetchHistory 爬取 Mikan 番剧详情页获取全量历史种子
@@ -535,16 +593,96 @@ func parseMikanSearchHTML(html, domain string) []core.TorrentItem {
 	}
 
 	var items []core.TorrentItem
+	seen := make(map[string]bool)
+
+	// 方法1：从推荐番剧列表提取（.an-ul 结构）
 	doc.Find(".an-ul li").Each(func(_ int, sel *goquery.Selection) {
 		a := sel.Find("a").First()
 		title := strings.TrimSpace(a.Text())
-		href, _ := a.Attr("href")
-		if title == "" {
+		href, ok := a.Attr("href")
+		if title == "" || !ok {
 			return
 		}
+
+		bangumiID := ""
+		if strings.HasPrefix(href, "/Home/Bangumi/") {
+			bangumiID = strings.TrimPrefix(href, "/Home/Bangumi/")
+		}
+		key := href
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+
 		items = append(items, core.TorrentItem{
 			Title:      title,
 			URL:        "https://" + domain + href,
+			SourceName: "Mikan",
+			BangumiID:  bangumiID,
+		})
+	})
+
+	// 方法2：从搜索结果中提取 Bangumi 链接（直接查找 /Home/Bangumi/ 模式）
+	doc.Find("a[href*=\"/Home/Bangumi/\"]").Each(func(_ int, sel *goquery.Selection) {
+		title := strings.TrimSpace(sel.Text())
+		href, ok := sel.Attr("href")
+		if title == "" || !ok {
+			return
+		}
+
+		bangumiID := strings.TrimPrefix(href, "/Home/Bangumi/")
+		key := href
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+
+		items = append(items, core.TorrentItem{
+			Title:      title,
+			URL:        "https://" + domain + href,
+			SourceName: "Mikan",
+			BangumiID:  bangumiID,
+		})
+	})
+
+	return items
+}
+
+// parseMikanSeasonHTML 从 Mikan 季度列表 HTML 中提取番剧（不需要登录）
+// 使用 goquery 解析 HTML，参考 mikanime.tv 的实际 HTML 结构
+func parseMikanSeasonHTML(html, domain, searchText string) []core.TorrentItem {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		log.Printf("⚠️ Mikan 季度页 HTML 解析失败: %v", err)
+		return nil
+	}
+
+	searchLower := strings.ToLower(searchText)
+	var items []core.TorrentItem
+
+	// 查找所有番剧链接（.an-text 类）
+	doc.Find("a.an-text").Each(func(_ int, sel *goquery.Selection) {
+		title := strings.TrimSpace(sel.Text())
+		href, _ := sel.Attr("href")
+		if title == "" || href == "" {
+			return
+		}
+
+		// 本地过滤：标题包含搜索关键词
+		if searchText != "" && !strings.Contains(strings.ToLower(title), searchLower) {
+			return
+		}
+
+		// 提取 Bangumi ID
+		bangumiID := ""
+		if strings.HasPrefix(href, "/Home/Bangumi/") {
+			bangumiID = strings.TrimPrefix(href, "/Home/Bangumi/")
+		}
+
+		items = append(items, core.TorrentItem{
+			Title:      title,
+			URL:        "https://" + domain + href,
+			BangumiID:  bangumiID,
 			SourceName: "Mikan",
 		})
 	})

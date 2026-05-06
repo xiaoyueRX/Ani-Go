@@ -89,6 +89,11 @@
   - [x] EventBus auto-push + MultiNotifier aggregated broadcast
 - [x] **Phase 6: Data Migration** ✅
   - [x] AutoBangumi SQLite data import tool
+- [x] **Phase 7: Frontend Polish & Search Fix** ✅
+  - [x] Mikan Chinese search fix (URL encoding + CSS selector compatibility)
+  - [x] IconSax icon component (Iconsax Linear, 20+ icons)
+  - [x] Full view polish (login/sidebar/subscriptions/downloads/settings)
+  - [x] Settings page restructure (grouped cards + config status + password toggle)
 - **Tests**: 108 tests passing
 
 ---
@@ -101,4 +106,4 @@
 
 ---
 
-*Last Updated: 2026-04-29*
+*Last Updated: 2026-05-06*

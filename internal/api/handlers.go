@@ -638,6 +638,82 @@ func (s *Server) handleReloadPlugins(w http.ResponseWriter, r *http.Request) {
 
 
 // ============================================================
+// 搜索番剧
+// ============================================================
+
+// handleSearchAnime 搜索番剧资源
+// GET /api/search?q=xxx
+func (s *Server) handleSearchAnime(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "搜索关键词不能为空"})
+		return
+	}
+
+	// 从数据库获取搜索源配置
+	var sources []core.Source
+	mikanDomain := "mikanime.tv" // 默认使用国内可访问的域名
+	var proxyDomain string
+	var mirrorDomains []string
+
+	if v := getSettingValue("MIKAN_DOMAIN"); v != "" {
+		mikanDomain = v
+	}
+	if v := getSettingValue("MIKAN_PROXY_DOMAIN"); v != "" {
+		proxyDomain = v
+	}
+	if v := getSettingValue("MIKAN_MIRROR_DOMAINS"); v != "" {
+		for _, d := range strings.Split(v, ",") {
+			if d = strings.TrimSpace(d); d != "" {
+				mirrorDomains = append(mirrorDomains, d)
+			}
+		}
+	}
+	if len(mirrorDomains) == 0 {
+		mirrorDomains = []string{"mikanime.tv", "mikanani.me"}
+	}
+
+	mikanSrc := source.NewMikanSource(mikanDomain, proxyDomain, mirrorDomains)
+	sources = append(sources, mikanSrc)
+
+	// 额外资源站
+	if v := getSettingValue("NYAA_DOMAIN"); v != "" {
+		sources = append(sources, source.NewNyaaSource(v))
+	}
+	if v := getSettingValue("ACGRIP_DOMAIN"); v != "" {
+		sources = append(sources, source.NewACGRIPSource(v))
+	}
+	if v := getSettingValue("ANIMETOSHO_DOMAIN"); v != "" {
+		sources = append(sources, source.NewAnimeToshoSource(v))
+	}
+
+	multiSrc := source.NewMultiSource(sources...)
+
+	items, err := multiSrc.SearchAnime(r.Context(), q)
+	if err != nil {
+		log.Printf("⚠️  搜索失败 [%s]: %v", q, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "搜索失败: " + err.Error()})
+		return
+	}
+
+	if items == nil {
+		items = []core.TorrentItem{}
+	}
+
+	log.Printf("🔍 搜索完成 [%s]: 找到 %d 个结果", q, len(items))
+	writeJSON(w, http.StatusOK, items)
+}
+
+// getSettingValue 从数据库获取设置值
+func getSettingValue(key string) string {
+	var s database.Setting
+	if err := database.DB.Where("key = ?", key).Limit(1).Find(&s).Error; err != nil {
+		return ""
+	}
+	return s.Value
+}
+
+// ============================================================
 // 任务解析
 // ============================================================
 

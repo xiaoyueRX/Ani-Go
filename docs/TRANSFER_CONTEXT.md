@@ -21,6 +21,7 @@ cp .env.example .env
 - **Phase 4（AI + 多下载器 + 插件 + 多资源站）**: 全部完成 ✅ — AI 4 协议、qBittorrent/Transmission/Aria2、插件系统、死种检测、Nyaa/ACGRIP/AnimeTosho + MultiSource
 - **Phase 5（多平台消息通知 + 任务解析）**: 全部完成 ✅ — 16 平台通知、自然语言任务解析器（正则 + AI）、EventBus 自动推送
 - **Phase 6（数据迁移）**: 全部完成 ✅ — AutoBangumi SQLite 导入
+- **Phase 7（前端美化 + 搜索修复）**: 全部完成 ✅ — Mikan 中文搜索修复（URL 编码 + CSS 选择器兼容）、IconSax 图标系统（Iconsax Linear 20+ 图标）、全面 UI 美化（登录/侧栏/订阅/下载/设置）、设置页重构（分组卡片 + 配置状态 badge + 密码显隐）
 - **测试**: 108 个测试全通过
 
 ## 技术栈
@@ -30,7 +31,7 @@ cp .env.example .env
 - GORM ORM
 - goquery（HTML 解析，Go 版 Jsoup）
 - 架构：接口驱动（Source / Downloader / MetadataProvider / Organizer / Notifier / EventBus）
-- 前端：Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5
+- 前端：Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5 + Iconsax Linear 图标
 - JWT 鉴权（`golang-jwt/jwt/v5` HS256）+ Bcrypt 密码哈希
 
 ## 关键文件

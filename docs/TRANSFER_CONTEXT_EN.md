@@ -21,6 +21,7 @@ cp .env.example .env
 - **Phase 4 (AI + Multi-Downloader + Plugins + Multiple Sources)**: Complete ✅ — AI 4-protocol, qBittorrent/Transmission/Aria2, plugin system, dead torrent detection, Nyaa/ACGRIP/AnimeTosho + MultiSource
 - **Phase 5 (Multi-Platform Messaging + Task Parser)**: Complete ✅ — 16-platform notification, natural language task parser (regex + AI), EventBus auto-push
 - **Phase 6 (Data Migration)**: Complete ✅ — AutoBangumi SQLite import
+- **Phase 7 (Frontend Polish + Search Fix)**: Complete ✅ — Mikan Chinese search fix (URL encoding + CSS selector), IconSax icon system (Iconsax Linear 20+ icons), full UI polish (login/sidebar/subscriptions/downloads/settings), settings page restructure (grouped cards + config status badge + password toggle)
 - **Tests**: 108 tests passing
 
 ## Tech Stack

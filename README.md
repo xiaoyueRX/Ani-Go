@@ -156,9 +156,10 @@ Ani-Go/
 | Phase 1: 核心引擎 MVP | ✅ 完成 |
 | Phase 2: 历史补全 + 元数据 | ✅ 完成 |
 | Phase 3: Web UI + RESTful API | ✅ 完成 |
-| Phase 4: AI + 多下载器 + 插件 + 多资源站 | ✅ 已完成 |
-| Phase 5: 多平台消息通知 | ✅ 已完成 (16 平台) |
-(待验证是否可用)
+| Phase 4: AI + 多下载器 + 插件 + 多资源站 | ✅ 完成 |
+| Phase 5: 多平台消息通知 | ✅ 完成 (16 平台) |
+| Phase 6: 数据迁移工具 | ✅ 完成 |
+| Phase 7: 前端美化 + 搜索修复 | ✅ 完成 |
 ## License
 
 MIT License © xiaoyueRX

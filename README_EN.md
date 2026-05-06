@@ -156,8 +156,10 @@ Ani-Go/
 | Phase 1: Core Engine MVP | ✅ Complete |
 | Phase 2: Historical Completion + Metadata | ✅ Complete |
 | Phase 3: Web UI + RESTful API | ✅ Complete |
-| Phase 4: AI + Multi-Downloader + Plugins | ✅ Complete |
+| Phase 4: AI + Multi-Downloader + Plugins + Multi-Source Sites | ✅ Complete |
 | Phase 5: Multi-Platform Messaging | ✅ Complete (16 platforms) |
+| Phase 6: Data Migration Tool | ✅ Complete |
+| Phase 7: Frontend Polish + Search Fix | ✅ Complete |
 
 ## License
 

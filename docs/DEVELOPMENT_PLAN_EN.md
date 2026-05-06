@@ -123,3 +123,9 @@
 - [x] **Notification Manager**: Listen to EventBus events (download complete/failed/supplement done, etc.), push notifications through all above platforms.
 - [ ] **Notification Template System**: Support custom message templates, configurable per event type and platform. (pending)
 - [ ] **Full Platform Integration Testing**: Verify connectivity and notification push for each platform. (partially pending)
+
+### Phase 7: Frontend Polish & Search Fix ✅
+- [x] **Mikan Chinese Search Fix**: URL-encode Chinese keywords (`url.QueryEscape`) to fix Mikan 400 error; fallback CSS selector for Mikan's updated page structure.
+- [x] **IconSax Component System**: Created `web/src/components/IconSax.vue`, 20+ Iconsax Linear icons replacing all inline SVGs and emoji.
+- [x] **UI Polish**: Login page gradient background + brand icon, sidebar nav icons, subscription card SVG status indicators + hover effects, download list status badge icons, settings page restructure.
+- [x] **Settings Page Restructure**: Vertical sidebar tabs, section grouping (downloader 4 groups / notification 5 groups), configured status ✓ badge, password visibility toggle, config progress indicator.

@@ -1,100 +1,86 @@
 # AGENTS.md
 
-此文件为 AI 助手在处理本仓库代码时提供指导。
-
-## 技术栈与架构
-- **语言**: Go 1.25+
-- **数据库**: SQLite via GORM (`github.com/glebarez/sqlite` - 纯 Go 驱动，无 CGO 依赖)
-- **关键依赖**: `golang-jwt/jwt/v5`（JWT 鉴权）、`goquery`（HTML 解析）、`golang.org/x/crypto`（Bcrypt）
-- **架构**: 接口驱动 (Hexagonal/Clean Architecture)
-- **核心接口**: 定义在 `internal/core/interfaces.go` (Source, Downloader, MetadataProvider, Organizer, Notifier, EventBus)
-- **前端**: Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5（`web/` 目录）
+## 技术栈
+- **后端**: Go 1.25+, 原生 `http.ServeMux`（禁止 Gin/Fiber/Echo）
+- **数据库**: SQLite via GORM (`github.com/glebarez/sqlite` — 纯 Go，**禁止 CGO**)
+- **前端**: Vue3 + Vite 8 + TypeScript 6 + TailwindCSS v4 + DaisyUI v5 + Iconsax Linear (`web/`)
+- **核心依赖**: `golang-jwt/jwt/v5`、`goquery`、`golang.org/x/crypto` (Bcrypt)
 
 ## 常用命令
-- **运行**: `go run .`（在项目根目录执行）
-- **构建**: `go build ./...`
-- **测试**: `go test ./... -v`
-- **单测**: `go test -v -run TestName ./internal/package/`
-- **依赖管理**: `go mod tidy`
-- **前端开发**: `cd web && npm run dev`
-- **前端构建**: `cd web && npm run build`
-- **GFW 环境 Go 代理**: `GOPROXY=https://goproxy.cn,direct go get ./...`
+```bash
+# Go 后端
+go run .                    # 运行（前端已 //go:embed 嵌入）
+go build ./...              # 编译所有包
+go test ./... -v            # 108 个测试全部通过
 
-## 项目约定与注意事项
+# 前端（web/）
+npm install && npm run build  # 构建前端（必须先构建，否则 //go:embed 不生效）
+npm run dev                  # Vite 热更新开发服务器
 
-### 接口优先
-新功能（新下载器、新资源站）必须实现 `internal/core/interfaces.go` 中对应接口，不得直接修改核心逻辑。主程序只依赖接口不依赖实现。
+# Docker 多架构构建 (amd64 + arm64)
+docker buildx build --platform linux/amd64,linux/arm64 -t ani-go .
 
-### 数据库驱动
-必须使用 `github.com/glebarez/sqlite`（纯 Go 驱动），禁止使用 `gorm.io/driver/sqlite`（需要 CGO，会破坏跨平台编译）。
+# GFW 环境
+GOPROXY=https://goproxy.cn,direct go get ./...
+```
 
-### 配置管理
-通过 `internal/config/config.go` 加载，环境变量优先级高于默认值。设置项存储在数据库 `settings` 表中，通过 `/api/settings` 管理。
+## 架构
+- **接口驱动（六边形架构）**: 核心接口定义在 `internal/core/interfaces.go` — `Source`, `Downloader`, `MetadataProvider`, `Organizer`, `Notifier`, `EventBus`
+- **启动流程** (`main.go`): Config → JWT 动态密钥 → DB + 默认管理员 → EventBus → Source → Downloader → Organizer → Scheduler → HTTP 服务
+- **API**: `/api/*` 受 JWT AuthMiddleware 保护（`/api/login`、`/api/health` 除外）；非 `/api/*` 由 `//go:embed web/dist` 静态文件接管，SPA History 路由回退 `index.html`
+- **事件总线**: EventBus 驱动松耦合（`download.completed` → 整理 → `file.organized` → 通知）
 
-### 敏感信息
-Token、密码等严禁硬编码（例如 `MIKAN_RSS_URL`, `QB_PASS`, `TMDB_API_KEY`, `BGMTV_USER_TOKEN`）。始终使用环境变量注入。
+## 关键约定
 
-### 文件编码
-所有源文件必须是无 BOM 的 UTF-8 编码。避免使用 PowerShell 默认的 `>` 重定向。
+### CGO 红线
+绝对禁止引入 CGO 依赖（`mattn/go-sqlite3` 等）。`CGO_ENABLED=0` 必须始终可用。只用 `github.com/glebarez/sqlite`。
 
-### 文档规范
-- **Go 源码注释**: 中文
-- **总结性文档**: 中英双语各一份（如 `README.md` + `README_EN.md`）
-- **CLAUDE.md**: 中文，用于 Claude Code 上下文
+### JWT 鉴权
+`crypto/rand` 动态生成 32B 密钥（重启即重生成，绝不硬编码），落盘 `data/.jwt_secret`。用户密码 Bcrypt 哈希。AuthMiddleware 双重校验（中间件 + `/api/me` 再次校验）。
 
-### GFW 网络环境
-GitHub、Go 代理、Mikan 等境外服务可能被墙：
-- Go 模块：`GOPROXY=https://goproxy.cn,direct`
-- Mikan：内置 `proxyDomain` + `mirrorDomains` 多域名自动回退
-- BGM.tv：`api.bgm.tv` → `api.bangumi.tv` → `api.chii.in` 依次尝试
-- TMDB：通过 `TMDB_MIRROR_DOMAINS` 配置镜像
+### GFW 网络
+Go 模块用 `goproxy.cn`。Mikan/BGM.tv/TMDB 内置多域名镜像自动回退。GitHub push 需 VPN TUN 模式。
 
-### 路径处理
-注意 Docker 容器内路径与宿主机路径的映射关系（例如容器内 `/TV` 对应宿主机 `/vol2/1000/TV`）。
+### 跨平台开发
+Windows 开发 / Linux (PVE LXC) 部署。代码必须双平台编译通过。PowerShell `>` 重定向产生 UTF-8 BOM，禁止使用。
 
-### API 设计
-- Go 1.22+ `http.ServeMux` 方法路由（`GET /path`, `POST /path`）
-- JWT Bearer Token 鉴权（`crypto/rand` 动态密钥，每次重启重新生成）
-- 所有 `/api/*` 路径受 AuthMiddleware 保护（`/api/login` 除外）
-- 请求/响应格式：JSON（`Content-Type: application/json; charset=utf-8`）
+### 前端注意事项
+- **IconSax 组件**: `web/src/components/IconSax.vue`，Iconsax Linear 风格，props: `name` `size` `color`。所有视图统一使用此组件，禁止 raw SVG/emoji。
+- **Node 24 ESM**: DaisyUI v5 的 `@plugin "daisyui"` 在 CSS 中报错，已改用 `@import "daisyui/daisyui.css"`
+- `vite.config.ts` **未配 proxy**，开发时需 Go 后端已运行或手动配置
+- `index.html` 设 `data-theme="dark"` 启用暗色模式
 
-### 事件总线
-使用 EventBus 进行组件间松耦合适信（如 `download.completed` → 触发文件整理 → `file.organized`）。
+### GORM 陷阱
+- `default:true` 标签导致零值 `false` 被 Create 覆盖 → 用 `db.Model().Update("field", false)`
+- 软删除通过 `DeletedAt` 实现；级联删除需手动处理
 
-### GORM 注意事项
-- `default:true` 标签会导致零值 `false` 被覆盖，更新 bool 字段需用 `db.Model().Update("field", false)`
-- 软删除通过 `gorm.Model` 的 `DeletedAt` 字段实现
-- 级联删除需手动处理（如删除订阅时同时删除关联剧集）
+### CI/CD（.github/workflows/docker-build.yml）
+- 仅 `main` 分支 push 或 `v*` 标签触发
+- 先跑 `go test ./... -v`（测试不通过不构建）
+- GitHub Actions + QEMU + Buildx 构建 `linux/amd64,linux/arm64` 多架构镜像，推送到 `ghcr.io`
+- Docker 多阶段构建：前端 (node:24-alpine) → Go 后端 (golang:1.25-alpine) → 精简运行环境 (alpine:3.22)
+- 支持 GitHub Actions 缓存 (`type=gha`)
 
-## 当前项目状态
-- **Phase 0** ✅ — 项目初始化
-- **Phase 1** ✅ — 核心引擎 MVP
-- **Phase 2** ✅ — 历史补全 + 元数据 + 镜像支持 + 死种超时告警 + 自定义正则
-- **Phase 3** ✅ — Web UI + RESTful API + Docker + CI/CD
-- **Phase 4** ✅ — AI 多协议 + qBittorrent/Transmission/Aria2 + 插件系统 + 多资源站
-- **Phase 5** ✅ — 16 平台消息通知 + 自然语言任务解析器
-- **Phase 6** ✅ — 数据迁移工具（AutoBangumi 导入）
-- **测试**：108 个测试全通过
+## 文档
+- **`CLAUDE.md`**: 更深层细节（API 端点表、16 通知平台、AI 4 协议、任务解析器、Mikan 标题正则）
+- **README.md / README_EN.md**: 双语项目说明与环境变量参考
+- **`docs/`**: `DEVELOPMENT_PLAN.md`（进度）、`PROJECT_CONTEXT.md`（项目上下文）、`TRANSFER_CONTEXT.md`（交接文档）——中英双语
 
 ## 关键文件速查
 
 | 文件 | 作用 |
 |------|------|
-| `internal/core/interfaces.go` | 7 核心接口 + 事件常量 + 数据类型定义 |
-| `internal/config/config.go` | 配置结构体 + env 加载 + 默认值 + DB 回退 |
+| `internal/core/interfaces.go` | 7 核心接口 + 事件常量 + 数据类型 |
+| `internal/config/config.go` | 配置加载（环境变量优先）+ DB 回退 |
 | `internal/database/models.go` | 5 个 ORM 模型 |
-| `internal/api/server.go` | HTTP 路由注册 + 中间件链 + 服务生命周期 |
-| `internal/api/handlers.go` | API 处理器（订阅 CRUD、下载、设置、解析、迁移） |
-| `internal/source/mikan.go` | Mikan RSS 解析 + HTML 详情页爬取 + 镜像回退 |
-| `internal/source/multi.go` | 多资源站聚合器（Nyaa/ACGRIP/AnimeTosho） |
-| `internal/scheduler/scheduler.go` | RSS 轮询 + 文件整理 + 补全扫描 + TriggerSupplement |
-| `internal/downloader/qbittorrent.go` | qBittorrent Web API 客户端 |
-| `internal/downloader/transmission.go` | Transmission RPC 客户端 |
-| `internal/downloader/aria2.go` | Aria2 JSON-RPC 客户端 |
-| `internal/metadata/tmdb.go` | TMDB API v3 元数据提供者 |
-| `internal/metadata/bangumi.go` | BGM.tv 元数据提供者 |
-| `internal/notifier/` | 16 平台通知实现（Telegram/Discord/QQ/LINE/WhatsApp 等） |
-| `internal/ai/` | AI 4 协议适配（OpenAI/Google/Anthropic/Ollama） |
+| `internal/api/server.go` | 路由注册 + 中间件链 + 优雅关闭 |
+| `internal/api/handlers.go` | 全部 API 处理器 |
+| `internal/source/mikan.go` | Mikan RSS + HTML 爬取 + 镜像回退（812 行，正则最密集） |
+| `internal/source/multi.go` | Nyaa/ACG.RIP/AnimeTosho 多资源聚合 |
+| `internal/ai/client.go` | AI 4 协议统一客户端（589 行） |
+| `internal/notifier/` | 16 平台通知实现 |
 | `internal/parser/` | 自然语言任务解析器（正则 + AI 回退） |
-| `internal/plugin/` | 插件系统（Webhook + Shell 脚本） |
-| `main.go` | 启动流程：Config → JWT → DB → EventBus → Source → Downloader → Organizer → Scheduler → API |
+| `internal/plugin/` | Webhook + Shell 脚本插件 |
+| `web/src/components/IconSax.vue` | Iconsax Linear 图标组件（20+ 图标） |
+| `web/src/views/SettingsPage.vue` | 设置页（分组卡片+配置状态+密码显隐） |
+| `main.go` | 启动编排（420 行） |

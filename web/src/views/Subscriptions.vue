@@ -2,25 +2,20 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
+import IconSax from '../components/IconSax.vue'
 
 interface Subscription {
   id: number
   title_cn: string
   title_en: string
   title_jp: string
-  year: number
-  season: number
-  bangumi_id: string
-  subgroup_name: string
-  cover_url: string
-  anime_type: string
-  total_episodes: number
-  current_episodes: number
+  year: number; season: number
+  bangumi_id: string; subgroup_name: string
+  cover_url: string; anime_type: string
+  total_episodes: number; current_episodes: number
   stalled_episodes: number
-  enabled: boolean
-  completed: boolean
-  created_at: string
-  updated_at: string
+  enabled: boolean; completed: boolean
+  created_at: string; updated_at: string
 }
 
 const router = useRouter()
@@ -80,16 +75,24 @@ onMounted(fetchSubscriptions)
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-bold">订阅管理</h1>
-      <button class="btn btn-primary" @click="router.push('/subscriptions/new')">
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-        添加订阅
-      </button>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost btn-sm gap-1" @click="router.push('/search')">
+          <IconSax name="search" :size="16" />
+          搜索番剧
+        </button>
+        <button class="btn btn-primary btn-sm gap-1" @click="router.push('/subscriptions/new')">
+          <IconSax name="add" :size="16" />
+          添加订阅
+        </button>
+      </div>
     </div>
 
     <div v-if="error" class="alert alert-error mb-4">
-      <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <IconSax name="warning" class="shrink-0" />
       <span>{{ error }}</span>
-      <button class="btn btn-ghost btn-sm" @click="error = ''">✕</button>
+      <button class="btn btn-ghost btn-sm" @click="error = ''">
+        <IconSax name="close" :size="16" />
+      </button>
     </div>
 
     <div v-if="loading" class="flex justify-center py-16">
@@ -97,75 +100,96 @@ onMounted(fetchSubscriptions)
     </div>
 
     <div v-else-if="subs.length === 0" class="card bg-base-100 shadow">
-      <div class="card-body text-center py-16">
+      <div class="card-body text-center py-20">
+        <IconSax name="category" :size="56" class="mx-auto text-base-content/20 mb-4" />
         <p class="text-base-content/50 text-lg">暂无订阅</p>
-        <p class="text-base-content/40 text-sm mt-1">添加 Mikan RSS 后，订阅会自动同步到这里</p>
+        <p class="text-base-content/40 text-sm mt-1">通过搜索添加番剧订阅</p>
+        <button class="btn btn-primary mt-4 gap-1" @click="router.push('/search')">
+          <IconSax name="search" :size="16" />
+          搜索番剧
+        </button>
       </div>
     </div>
 
+    <!-- 订阅卡片网格 -->
     <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       <div
         v-for="sub in subs" :key="sub.id"
-        class="card bg-base-100 shadow hover:shadow-lg transition-shadow cursor-pointer"
+        class="card bg-base-100 shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer border border-base-200 hover:border-primary/20"
         :class="{ 'opacity-60': !sub.enabled }"
         @click="router.push(`/subscriptions/${sub.id}`)"
       >
         <div class="card-body">
-          <div class="flex items-start justify-between">
-            <h3 class="card-title text-lg">{{ sub.title_cn }}</h3>
-            <div class="flex gap-1" @click.stop>
+          <!-- 标题行 -->
+          <div class="flex items-start justify-between gap-2">
+            <h3 class="card-title text-base truncate" :title="sub.title_cn">{{ sub.title_cn }}</h3>
+            <div class="flex gap-1 shrink-0" @click.stop>
               <button
-                class="btn btn-ghost btn-xs"
-                :class="{ 'text-success': sub.enabled, 'text-error': !sub.enabled }"
+                class="btn btn-ghost btn-xs btn-square"
+                :class="{ 'text-success': sub.enabled }"
                 @click="toggleEnabled(sub)"
                 :title="sub.enabled ? '暂停' : '启用'"
               >
-                {{ sub.enabled ? '⏸' : '▶' }}
+                <IconSax :name="sub.enabled ? 'pause' : 'play'" :size="16" />
               </button>
               <button
-                class="btn btn-ghost btn-xs text-error"
+                class="btn btn-ghost btn-xs btn-square text-error"
                 @click="handleDelete(sub)"
                 :disabled="deletingId === sub.id"
               >
                 <span v-if="deletingId === sub.id" class="loading loading-spinner loading-xs"></span>
-                <span v-else>✕</span>
+                <IconSax v-else name="trash" :size="16" />
               </button>
             </div>
           </div>
 
-          <div v-if="sub.subgroup_name" class="text-sm text-base-content/60">
+          <!-- 字幕组 -->
+          <div v-if="sub.subgroup_name" class="flex items-center gap-1 text-sm text-base-content/50">
+            <IconSax name="user" :size="14" />
             {{ sub.subgroup_name }}
           </div>
 
-          <div v-if="sub.stalled_episodes > 0" class="mt-1">
-            <span class="badge badge-warning badge-sm">
-              ⚠ {{ sub.stalled_episodes }} 集超时未完成
+          <!-- 超时告警 -->
+          <div v-if="sub.stalled_episodes > 0">
+            <span class="badge badge-warning badge-sm gap-1">
+              <IconSax name="warning" :size="12" />
+              {{ sub.stalled_episodes }} 集超时
             </span>
           </div>
 
-          <div v-if="sub.total_episodes > 0" class="mt-2">
-            <div class="flex justify-between text-sm mb-1">
+          <!-- 进度条 -->
+          <div v-if="sub.total_episodes > 0" class="mt-1">
+            <div class="flex justify-between text-xs text-base-content/50 mb-1">
               <span>进度</span>
               <span>{{ sub.current_episodes }} / {{ sub.total_episodes }}</span>
             </div>
             <progress
-              class="progress progress-primary w-full"
+              class="progress progress-primary w-full h-2"
               :value="sub.current_episodes"
               :max="sub.total_episodes"
             ></progress>
           </div>
 
-          <div class="flex gap-2 mt-2" @click.stop>
-            <span v-if="sub.anime_type" class="badge badge-sm">{{ sub.anime_type }}</span>
-            <span v-if="sub.year" class="badge badge-sm">{{ sub.year }}</span>
-            <span v-if="sub.completed" class="badge badge-success badge-sm">已完结</span>
+          <!-- 标签行 -->
+          <div class="flex flex-wrap gap-2 mt-1" @click.stop>
+            <span v-if="sub.anime_type" class="badge badge-sm badge-ghost gap-1">
+              <IconSax name="document" :size="12" />
+              {{ sub.anime_type }}
+            </span>
+            <span v-if="sub.year" class="badge badge-sm badge-ghost">{{ sub.year }}</span>
+            <span v-if="sub.completed" class="badge badge-success badge-sm gap-1">
+              <IconSax name="check" :size="12" />
+              已完结
+            </span>
           </div>
 
+          <!-- 补全按钮 -->
           <button
             v-if="sub.enabled"
-            class="btn btn-outline btn-sm mt-2"
+            class="btn btn-outline btn-xs mt-2 gap-1"
             @click.stop="triggerSupplement(sub)"
           >
+            <IconSax name="history" :size="14" />
             补全历史集数
           </button>
         </div>

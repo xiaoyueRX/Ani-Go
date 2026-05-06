@@ -1,234 +1,181 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import request from '../utils/request'
+import IconSax from '../components/IconSax.vue'
 
 const settings = ref<Record<string, string>>({})
 const loading = ref(true)
 const error = ref('')
 const saved = ref(false)
 const activeTab = ref('mikan')
+const showPasswords = ref<Set<string>>(new Set())
 
-const tabs = [
-  { key: 'mikan', label: 'Mikan', icon: '📡' },
-  { key: 'downloader', label: '下载器', icon: '⬇️' },
-  { key: 'paths', label: '目录', icon: '📁' },
-  { key: 'notify', label: '通知', icon: '🔔' },
-  { key: 'ai', label: 'AI', icon: '🤖' },
-  { key: 'metadata', label: '元数据', icon: '📋' },
-  { key: 'advanced', label: '高级', icon: '⚙️' },
+interface FieldDef {
+  label: string; key: string; placeholder: string; type?: string; hint?: string
+}
+
+interface TabDef {
+  key: string; label: string; icon: string
+  sections: { title: string; desc: string; fields: FieldDef[] }[]
+}
+
+const tabs: TabDef[] = [
+  { key: 'mikan', label: 'Mikan', icon: 'antenna', sections: [{ title: '基础配置', desc: 'Mikan 资源站连接信息', fields: [
+    { label: 'Mikan 个人 RSS 地址', key: 'MIKAN_RSS_URL', placeholder: 'https://mikanani.me/RSS/MyBangumi?token=...', hint: '在 Mikan 网站登录后 → 头像 → RSS订阅 → 复制链接' },
+    { label: 'Mikan 主域名', key: 'MIKAN_DOMAIN', placeholder: 'mikanani.me' },
+    { label: 'Mikan 代理域名', key: 'MIKAN_PROXY_DOMAIN', placeholder: 'GFW 环境代理地址', hint: '国内网络无法直连时使用' },
+    { label: 'Mikan 镜像域名', key: 'MIKAN_MIRROR_DOMAINS', placeholder: 'mikanani.me,mikanime.tv', hint: '逗号分隔，自动回退' },
+  ]}]},
+  { key: 'downloader', label: '下载器', icon: 'download', sections: [
+    { title: '全局设置', desc: '默认下载引擎', fields: [
+      { label: '默认下载器', key: 'DEFAULT_DOWNLOADER', placeholder: 'qbittorrent', hint: 'qbittorrent / transmission / aria2' },
+    ]},
+    { title: 'qBittorrent', desc: '最常用的下载客户端', fields: [
+      { label: 'qBittorrent 地址', key: 'QB_HOST', placeholder: 'http://localhost:8081' },
+      { label: 'qBittorrent 用户名', key: 'QB_USER', placeholder: 'admin' },
+      { label: 'qBittorrent 密码', key: 'QB_PASS', placeholder: '密码', type: 'password' },
+      { label: 'qBittorrent 分类', key: 'QB_CATEGORY', placeholder: 'ani-go' },
+    ]},
+    { title: 'Transmission', desc: '备选下载客户端', fields: [
+      { label: 'Transmission 地址', key: 'TR_HOST', placeholder: 'http://localhost:9091' },
+      { label: 'Transmission 用户名', key: 'TR_USER', placeholder: '用户名' },
+      { label: 'Transmission 密码', key: 'TR_PASS', placeholder: '密码', type: 'password' },
+    ]},
+    { title: 'Aria2', desc: '轻量级下载客户端', fields: [
+      { label: 'Aria2 地址', key: 'ARIA2_HOST', placeholder: 'http://localhost:6800' },
+      { label: 'Aria2 RPC Secret', key: 'ARIA2_SECRET', placeholder: 'rpc-secret', type: 'password' },
+    ]},
+  ]},
+  { key: 'paths', label: '目录', icon: 'folder', sections: [{ title: '存储路径', desc: '番剧文件和数据库的存放位置', fields: [
+    { label: '数据库路径', key: 'DB_PATH', placeholder: '/data/ani-go.db', hint: 'Windows: D:/data/ani-go.db' },
+    { label: '番剧根目录', key: 'TV_BASE_PATH', placeholder: '/TV/Media/番剧' },
+    { label: '剧场版目录', key: 'MOVIE_BASE_PATH', placeholder: '/TV/Media/剧场版' },
+    { label: 'OVA 目录', key: 'OVA_BASE_PATH', placeholder: '/TV/Media/OVA' },
+  ]}]},
+  { key: 'notify', label: '通知', icon: 'notification', sections: [
+    { title: '即时通讯', desc: '即时通讯平台推送', fields: [
+      { label: 'Telegram Bot Token', key: 'TELEGRAM_BOT_TOKEN', placeholder: '123456:ABC...' },
+      { label: 'Telegram Chat ID', key: 'TELEGRAM_CHAT_ID', placeholder: '123456789' },
+      { label: 'Discord Webhook', key: 'DISCORD_WEBHOOK', placeholder: 'https://discord.com/api/webhooks/...' },
+      { label: 'Slack Webhook', key: 'SLACK_WEBHOOK', placeholder: 'https://hooks.slack.com/services/...' },
+      { label: 'QQ OneBot 地址', key: 'ONEBOT_HOST', placeholder: 'http://localhost:3000', hint: 'NapCat / go-cqhttp' },
+      { label: 'QQ OneBot Token', key: 'ONEBOT_TOKEN', placeholder: 'token' },
+      { label: 'QQ 用户 ID', key: 'ONEBOT_USER_ID', placeholder: '123456789', hint: '私聊目标' },
+      { label: 'QQ 群号', key: 'ONEBOT_GROUP_ID', placeholder: '987654321', hint: '群聊目标' },
+    ]},
+    { title: '办公协作', desc: '团队协作平台推送', fields: [
+      { label: '企业微信 Webhook', key: 'WECOM_WEBHOOK', placeholder: 'https://qyapi.weixin.qq.com/...' },
+      { label: '飞书 Webhook', key: 'FEISHU_WEBHOOK', placeholder: 'https://open.feishu.cn/...' },
+      { label: '钉钉 Webhook', key: 'DINGTALK_WEBHOOK', placeholder: 'https://oapi.dingtalk.com/...' },
+      { label: 'Matrix Homeserver', key: 'MATRIX_HOMESERVER', placeholder: 'https://matrix.org' },
+      { label: 'Matrix Token', key: 'MATRIX_TOKEN', placeholder: 'syt_...' },
+      { label: 'Matrix Room ID', key: 'MATRIX_ROOM_ID', placeholder: '!abc123:matrix.org' },
+    ]},
+    { title: '社交平台', desc: '社交媒体消息推送', fields: [
+      { label: 'LINE Channel Token', key: 'LINE_CHANNEL_TOKEN', placeholder: 'LINE API token' },
+      { label: 'LINE User ID', key: 'LINE_USER_ID', placeholder: 'Uxxx' },
+      { label: 'WhatsApp Phone ID', key: 'WHATSAPP_PHONE_ID', placeholder: '123456789' },
+      { label: 'WhatsApp Token', key: 'WHATSAPP_TOKEN', placeholder: 'Meta Cloud API token' },
+      { label: 'WhatsApp 收件人', key: 'WHATSAPP_TO', placeholder: '8613800138000' },
+    ]},
+    { title: '推送通道', desc: '通用推送服务', fields: [
+      { label: 'Server酱 Key', key: 'SERVERCHAN_KEY', placeholder: 'SCT...' },
+      { label: 'Bark Device Key', key: 'BARK_DEVICE_KEY', placeholder: 'iOS key' },
+      { label: 'Pushover Token', key: 'PUSHOVER_TOKEN', placeholder: 'token' },
+      { label: 'Pushover User', key: 'PUSHOVER_USER', placeholder: 'user key' },
+      { label: 'Gotify URL', key: 'GOTIFY_URL', placeholder: 'https://gotify.example.com' },
+      { label: 'Gotify Token', key: 'GOTIFY_TOKEN', placeholder: 'token' },
+      { label: 'ntfy URL', key: 'NTFY_URL', placeholder: 'https://ntfy.sh/mytopic' },
+    ]},
+    { title: '邮件', desc: 'SMTP 邮件推送', fields: [
+      { label: 'SMTP 服务器', key: 'EMAIL_SMTP_HOST', placeholder: 'smtp.gmail.com' },
+      { label: 'SMTP 端口', key: 'EMAIL_SMTP_PORT', placeholder: '587' },
+      { label: 'Email 用户名', key: 'EMAIL_USERNAME', placeholder: 'xxx@gmail.com' },
+      { label: 'Email 密码', key: 'EMAIL_PASSWORD', placeholder: '密码', type: 'password' },
+      { label: 'Email 发件人', key: 'EMAIL_FROM', placeholder: 'xxx@gmail.com' },
+      { label: 'Email 收件人', key: 'EMAIL_TO', placeholder: 'admin@example.com', hint: '多个用逗号分隔' },
+    ]},
+  ]},
+  { key: 'ai', label: 'AI', icon: 'cpu', sections: [
+    { title: 'AI 服务配置', desc: '智能辅助模块连接信息', fields: [
+      { label: 'AI 协议', key: 'AI_PROTOCOL', placeholder: 'auto', hint: 'openai/google/anthropic/ollama/auto' },
+      { label: 'AI Endpoint', key: 'AI_ENDPOINT', placeholder: 'https://api.openai.com/v1/chat/completions' },
+      { label: 'AI API Key', key: 'AI_API_KEY', placeholder: 'sk-...', type: 'password' },
+      { label: 'AI 模型', key: 'AI_MODEL', placeholder: 'gpt-4o-mini' },
+    ]},
+    { title: '特定平台密钥', desc: '各 AI 提供商独立配置', fields: [
+      { label: 'Gemini API Key', key: 'GEMINI_API_KEY', placeholder: 'Google Gemini key', type: 'password' },
+      { label: 'Claude API Key', key: 'CLAUDE_API_KEY', placeholder: 'sk-ant-...', type: 'password' },
+      { label: 'Ollama Host', key: 'OLLAMA_HOST', placeholder: 'http://localhost:11434' },
+      { label: 'Ollama Model', key: 'OLLAMA_MODEL', placeholder: 'llama3' },
+    ]},
+  ]},
+  { key: 'metadata', label: '元数据', icon: 'document', sections: [{ title: '元数据提供者', desc: '番剧元数据来源', fields: [
+    { label: 'TMDB API Key', key: 'TMDB_API_KEY', placeholder: 'TMDB API key', type: 'password' },
+    { label: 'TMDB 镜像域名', key: 'TMDB_MIRROR_DOMAINS', placeholder: '逗号分隔' },
+    { label: 'BGM.tv User Token', key: 'BGMTV_USER_TOKEN', placeholder: 'bangumi token', type: 'password' },
+    { label: 'BGM.tv 镜像域名', key: 'BGMTV_MIRROR_DOMAINS', placeholder: 'api.bgm.tv,api.bangumi.tv' },
+  ]}]},
+  { key: 'advanced', label: '高级', icon: 'setting', sections: [
+    { title: '服务设置', desc: '影响系统运行的核心参数', fields: [
+      { label: '服务器端口', key: 'PORT', placeholder: '20001', hint: '修改后需重启生效' },
+      { label: 'Nyaa 域名', key: 'NYAA_DOMAIN', placeholder: 'nyaa.si', hint: '留空禁用' },
+      { label: 'ACG.RIP 域名', key: 'ACGRIP_DOMAIN', placeholder: 'acg.rip' },
+      { label: 'AnimeTosho 域名', key: 'ANIMETOSHO_DOMAIN', placeholder: 'feed.animetosho.org' },
+    ]},
+    { title: '定时任务', desc: '后台任务执行间隔', fields: [
+      { label: 'RSS 轮询间隔 (分钟)', key: 'RSS_INTERVAL_MIN', placeholder: '30' },
+      { label: '补全间隔 (小时)', key: 'SUPPLEMENT_INTERVAL_HOURS', placeholder: '24' },
+      { label: '整理间隔 (分钟)', key: 'ORGANIZER_INTERVAL_MIN', placeholder: '2' },
+    ]},
+  ]},
 ]
 
-const fieldDefs: Record<string, { label: string; placeholder: string; type?: string; hint?: string }[]> = {
-  mikan: [
-    { label: 'Mikan 个人 RSS 地址', placeholder: 'https://mikanani.me/RSS/MyBangumi?token=...', hint: '必填。在 Mikan 网站登录后 → 头像 → RSS订阅 → 复制链接' },
-    { label: 'Mikan 主域名', placeholder: 'mikanani.me' },
-    { label: 'Mikan 代理域名', placeholder: 'GFW 环境下的代理地址', hint: '国内网络无法直连时使用' },
-    { label: 'Mikan 镜像域名', placeholder: 'mikanani.me,mikanime.tv', hint: '逗号分隔，主域名不可用时自动回退' },
-  ],
-  downloader: [
-    { label: '默认下载器', placeholder: 'qbittorrent', hint: 'qbittorrent / transmission / aria2' },
-    { label: 'qBittorrent 地址', placeholder: 'http://localhost:8081' },
-    { label: 'qBittorrent 用户名', placeholder: 'admin' },
-    { label: 'qBittorrent 密码', placeholder: '密码', type: 'password' },
-    { label: 'qBittorrent 分类', placeholder: 'ani-go' },
-    { label: 'Transmission 地址', placeholder: 'http://localhost:9091' },
-    { label: 'Transmission 用户名', placeholder: '用户名' },
-    { label: 'Transmission 密码', placeholder: '密码', type: 'password' },
-    { label: 'Aria2 地址', placeholder: 'http://localhost:6800' },
-    { label: 'Aria2 RPC Secret', placeholder: 'rpc-secret', type: 'password' },
-  ],
-  paths: [
-    { label: '数据库路径', placeholder: '/data/ani-go.db', hint: 'Windows 示例: D:/data/ani-go.db' },
-    { label: '番剧根目录', placeholder: '/TV/Media/番剧', hint: 'Windows 示例: D:/TV/Media/番剧' },
-    { label: '剧场版目录', placeholder: '/TV/Media/剧场版' },
-    { label: 'OVA 目录', placeholder: '/TV/Media/OVA' },
-  ],
-  notify: [
-    { label: 'Telegram Bot Token', placeholder: '123456:ABC...' },
-    { label: 'Telegram Chat ID', placeholder: '123456789' },
-    { label: 'Discord Webhook', placeholder: 'https://discord.com/api/webhooks/...' },
-    { label: '企业微信 Webhook', placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/...' },
-    { label: '飞书 Webhook', placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/...' },
-    { label: '钉钉 Webhook', placeholder: 'https://oapi.dingtalk.com/robot/...' },
-    { label: 'QQ OneBot 地址', placeholder: 'http://localhost:3000', hint: 'NapCat / go-cqhttp / Lagrange' },
-    { label: 'QQ OneBot Token', placeholder: 'token' },
-    { label: 'QQ 用户 ID', placeholder: '123456789', hint: '私聊目标' },
-    { label: 'QQ 群号', placeholder: '987654321', hint: '群聊目标' },
-    { label: 'Slack Webhook', placeholder: 'https://hooks.slack.com/services/...' },
-    { label: 'Matrix Homeserver', placeholder: 'https://matrix.org' },
-    { label: 'Matrix Token', placeholder: 'syt_...' },
-    { label: 'Matrix Room ID', placeholder: '!abc123:matrix.org' },
-    { label: 'LINE Channel Token', placeholder: 'LINE Messaging API token' },
-    { label: 'LINE User ID', placeholder: 'Uxxx' },
-    { label: 'WhatsApp Phone ID', placeholder: '123456789' },
-    { label: 'WhatsApp Token', placeholder: 'Meta Cloud API token' },
-    { label: 'WhatsApp 收件人', placeholder: '8613800138000' },
-    { label: 'Server酱 Key', placeholder: 'SCT...' },
-    { label: 'Bark Device Key', placeholder: 'iOS 推送 key' },
-    { label: 'Pushover Token', placeholder: 'token' },
-    { label: 'Pushover User', placeholder: 'user key' },
-    { label: 'Gotify URL', placeholder: 'https://gotify.example.com' },
-    { label: 'Gotify Token', placeholder: 'token' },
-    { label: 'ntfy URL', placeholder: 'https://ntfy.sh/mytopic' },
-    { label: 'Email SMTP 服务器', placeholder: 'smtp.gmail.com' },
-    { label: 'Email SMTP 端口', placeholder: '587' },
-    { label: 'Email 用户名', placeholder: 'xxx@gmail.com' },
-    { label: 'Email 密码', placeholder: '密码', type: 'password' },
-    { label: 'Email 发件人', placeholder: 'xxx@gmail.com' },
-    { label: 'Email 收件人', placeholder: 'admin@example.com', hint: '多个用逗号分隔' },
-  ],
-  ai: [
-    { label: 'AI 协议', placeholder: 'auto', hint: 'openai / google / anthropic / ollama / auto' },
-    { label: 'AI Endpoint', placeholder: 'https://api.openai.com/v1/chat/completions' },
-    { label: 'AI API Key', placeholder: 'sk-...', type: 'password' },
-    { label: 'AI 模型', placeholder: 'gpt-4o-mini' },
-    { label: 'Gemini API Key', placeholder: 'Google Gemini key', type: 'password' },
-    { label: 'Claude API Key', placeholder: 'sk-ant-...', type: 'password' },
-    { label: 'Ollama Host', placeholder: 'http://localhost:11434' },
-    { label: 'Ollama Model', placeholder: 'llama3' },
-  ],
-  metadata: [
-    { label: 'TMDB API Key', placeholder: 'TMDB API key', type: 'password' },
-    { label: 'TMDB 镜像域名', placeholder: '逗号分隔' },
-    { label: 'BGM.tv User Token', placeholder: 'bangumi token', type: 'password' },
-    { label: 'BGM.tv 镜像域名', placeholder: 'api.bgm.tv,api.bangumi.tv' },
-  ],
-  advanced: [
-    { label: '服务器端口', placeholder: '20001', hint: '修改后需重启生效' },
-    { label: '额外资源站 (Nyaa)', placeholder: 'nyaa.si', hint: '留空禁用' },
-    { label: '额外资源站 (ACGRIP)', placeholder: 'acg.rip' },
-    { label: '额外资源站 (AnimeTosho)', placeholder: 'feed.animetosho.org' },
-    { label: 'RSS 轮询间隔 (分钟)', placeholder: '30' },
-    { label: '补全间隔 (小时)', placeholder: '24' },
-    { label: '文件整理间隔 (分钟)', placeholder: '2' },
-  ],
+const allFields = computed(() => {
+  const m: Record<string, FieldDef> = {}
+  for (const tab of tabs)
+    for (const section of tab.sections)
+      for (const f of section.fields) m[f.key] = f
+  return m
+})
+
+function getVal(key: string): string { return settings.value[key] || '' }
+function setVal(key: string, val: string) { settings.value[key] = val }
+function isConfigured(key: string): boolean { return getVal(key).length > 0 }
+
+function togglePassword(key: string) {
+  if (showPasswords.value.has(key)) showPasswords.value.delete(key)
+  else showPasswords.value.add(key)
 }
 
-const keyToLabel: Record<string, string> = {}
-for (const [_tab, fields] of Object.entries(fieldDefs)) {
-  for (const f of fields) {
-    keyToLabel[f.label] = f.label
-  }
-}
-
-function fieldKey(label: string): string {
-  const map: Record<string, string> = {
-    'Mikan 个人 RSS 地址': 'MIKAN_RSS_URL',
-    'Mikan 主域名': 'MIKAN_DOMAIN',
-    'Mikan 代理域名': 'MIKAN_PROXY_DOMAIN',
-    'Mikan 镜像域名': 'MIKAN_MIRROR_DOMAINS',
-    '默认下载器': 'DEFAULT_DOWNLOADER',
-    'qBittorrent 地址': 'QB_HOST',
-    'qBittorrent 用户名': 'QB_USER',
-    'qBittorrent 密码': 'QB_PASS',
-    'qBittorrent 分类': 'QB_CATEGORY',
-    'Transmission 地址': 'TR_HOST',
-    'Transmission 用户名': 'TR_USER',
-    'Transmission 密码': 'TR_PASS',
-    'Aria2 地址': 'ARIA2_HOST',
-    'Aria2 RPC Secret': 'ARIA2_SECRET',
-    '数据库路径': 'DB_PATH',
-    '番剧根目录': 'TV_BASE_PATH',
-    '剧场版目录': 'MOVIE_BASE_PATH',
-    'OVA 目录': 'OVA_BASE_PATH',
-    'Telegram Bot Token': 'TELEGRAM_BOT_TOKEN',
-    'Telegram Chat ID': 'TELEGRAM_CHAT_ID',
-    'Discord Webhook': 'DISCORD_WEBHOOK',
-    '企业微信 Webhook': 'WECOM_WEBHOOK',
-    '飞书 Webhook': 'FEISHU_WEBHOOK',
-    '钉钉 Webhook': 'DINGTALK_WEBHOOK',
-    'QQ OneBot 地址': 'ONEBOT_HOST',
-    'QQ OneBot Token': 'ONEBOT_TOKEN',
-    'QQ 用户 ID': 'ONEBOT_USER_ID',
-    'QQ 群号': 'ONEBOT_GROUP_ID',
-    'Slack Webhook': 'SLACK_WEBHOOK',
-    'Matrix Homeserver': 'MATRIX_HOMESERVER',
-    'Matrix Token': 'MATRIX_TOKEN',
-    'Matrix Room ID': 'MATRIX_ROOM_ID',
-    'LINE Channel Token': 'LINE_CHANNEL_TOKEN',
-    'LINE User ID': 'LINE_USER_ID',
-    'WhatsApp Phone ID': 'WHATSAPP_PHONE_ID',
-    'WhatsApp Token': 'WHATSAPP_TOKEN',
-    'WhatsApp 收件人': 'WHATSAPP_TO',
-    'Server酱 Key': 'SERVERCHAN_KEY',
-    'Bark Device Key': 'BARK_DEVICE_KEY',
-    'Pushover Token': 'PUSHOVER_TOKEN',
-    'Pushover User': 'PUSHOVER_USER',
-    'Gotify URL': 'GOTIFY_URL',
-    'Gotify Token': 'GOTIFY_TOKEN',
-    'ntfy URL': 'NTFY_URL',
-    'Email SMTP 服务器': 'EMAIL_SMTP_HOST',
-    'Email SMTP 端口': 'EMAIL_SMTP_PORT',
-    'Email 用户名': 'EMAIL_USERNAME',
-    'Email 密码': 'EMAIL_PASSWORD',
-    'Email 发件人': 'EMAIL_FROM',
-    'Email 收件人': 'EMAIL_TO',
-    'AI 协议': 'AI_PROTOCOL',
-    'AI Endpoint': 'AI_ENDPOINT',
-    'AI API Key': 'AI_API_KEY',
-    'AI 模型': 'AI_MODEL',
-    'Gemini API Key': 'GEMINI_API_KEY',
-    'Claude API Key': 'CLAUDE_API_KEY',
-    'Ollama Host': 'OLLAMA_HOST',
-    'Ollama Model': 'OLLAMA_MODEL',
-    'TMDB API Key': 'TMDB_API_KEY',
-    'TMDB 镜像域名': 'TMDB_MIRROR_DOMAINS',
-    'BGM.tv User Token': 'BGMTV_USER_TOKEN',
-    'BGM.tv 镜像域名': 'BGMTV_MIRROR_DOMAINS',
-    '服务器端口': 'PORT',
-    '额外资源站 (Nyaa)': 'NYAA_DOMAIN',
-    '额外资源站 (ACGRIP)': 'ACGRIP_DOMAIN',
-    '额外资源站 (AnimeTosho)': 'ANIMETOSHO_DOMAIN',
-    'RSS 轮询间隔 (分钟)': 'RSS_INTERVAL_MIN',
-    '补全间隔 (小时)': 'SUPPLEMENT_INTERVAL_HOURS',
-    '文件整理间隔 (分钟)': 'ORGANIZER_INTERVAL_MIN',
-  }
-  return map[label] || label.toUpperCase()
-}
-
-function getVal(label: string): string {
-  return settings.value[fieldKey(label)] || ''
-}
-
-function setVal(label: string, val: string) {
-  settings.value[fieldKey(label)] = val
+function inputType(field: FieldDef): string {
+  if (field.type !== 'password') return 'text'
+  return showPasswords.value.has(field.key) ? 'text' : 'password'
 }
 
 async function fetchSettings() {
-  loading.value = true
-  error.value = ''
+  loading.value = true; error.value = ''
   try {
     const { data } = await request.get('/settings')
     settings.value = (data as Record<string, string>) || {}
   } catch (e: any) {
     error.value = e.response?.data?.error || '加载设置失败'
-  } finally {
-    loading.value = false
-  }
+  } finally { loading.value = false }
 }
 
 async function saveAll() {
-  error.value = ''
-  saved.value = false
+  error.value = ''; saved.value = false
   const changed: Record<string, string> = {}
-  for (const tab of tabs) {
-    for (const field of fieldDefs[tab.key]) {
-      const key = fieldKey(field.label)
-      const val = settings.value[key] ?? ''
-      if (val !== '') {
-        changed[key] = val
-      }
-    }
+  for (const key of Object.keys(allFields.value)) {
+    const val = settings.value[key] ?? ''
+    if (val !== '') changed[key] = val
   }
   if (Object.keys(changed).length === 0) {
-    saved.value = true
-    setTimeout(() => { saved.value = false }, 3000)
-    return
+    saved.value = true; setTimeout(() => { saved.value = false }, 3000); return
   }
   try {
     await request.put('/settings', { settings: changed })
-    saved.value = true
-    setTimeout(() => { saved.value = false }, 3000)
+    saved.value = true; setTimeout(() => { saved.value = false }, 3000)
   } catch (e: any) {
     error.value = e.response?.data?.error || '保存设置失败'
   }
@@ -241,50 +188,73 @@ onMounted(fetchSettings)
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-bold">设置</h1>
-      <button class="btn btn-primary" @click="saveAll">保存所有设置</button>
+      <button class="btn btn-primary btn-sm gap-1" @click="saveAll">
+        <IconSax name="check" :size="16" /> 保存所有设置
+      </button>
     </div>
 
-    <div v-if="saved" class="alert alert-success mb-4">
+    <div v-if="saved" class="alert alert-success mb-4 shadow-sm">
+      <IconSax name="check" class="shrink-0" />
       <span>设置已保存，部分配置需重启后生效</span>
     </div>
-
-    <div v-if="error" class="alert alert-error mb-4">
+    <div v-if="error" class="alert alert-error mb-4 shadow-sm">
+      <IconSax name="warning" class="shrink-0" />
       <span>{{ error }}</span>
-      <button class="btn btn-ghost btn-sm" @click="error = ''">✕</button>
+      <button class="btn btn-ghost btn-sm" @click="error = ''">
+        <IconSax name="close" :size="16" />
+      </button>
     </div>
 
     <div v-if="loading" class="flex justify-center py-16">
       <span class="loading loading-spinner loading-lg"></span>
     </div>
 
-    <div v-else>
-      <!-- Tabs -->
-      <div class="tabs tabs-box mb-4 bg-base-200">
-        <a
-          v-for="tab in tabs" :key="tab.key"
-          class="tab" :class="{ 'tab-active': activeTab === tab.key }"
-          @click="activeTab = tab.key"
-        >{{ tab.icon }} {{ tab.label }}</a>
+    <div v-else class="flex flex-col lg:flex-row gap-6">
+      <div class="flex flex-row lg:flex-col gap-1 overflow-x-auto lg:w-36 shrink-0">
+        <button v-for="tab in tabs" :key="tab.key"
+          class="btn btn-sm gap-2 justify-start"
+          :class="activeTab === tab.key ? 'btn-primary' : 'btn-ghost'"
+          @click="activeTab = tab.key">
+          <IconSax :name="tab.icon" :size="16" />
+          {{ tab.label }}
+        </button>
       </div>
 
-      <!-- Tab content -->
-      <div class="card bg-base-100 shadow">
-        <div class="card-body">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div v-for="field in fieldDefs[activeTab]" :key="field.label">
-              <label class="label">
-                <span class="label-text font-medium">{{ field.label }}</span>
+      <div class="flex-1 min-w-0 space-y-6">
+        <div v-for="section in tabs.find(t => t.key === activeTab)?.sections" :key="section.title">
+          <div class="mb-3">
+            <h2 class="text-base font-semibold flex items-center gap-2">
+              {{ section.title }}
+              <span class="badge badge-xs"
+                :class="section.fields.some(f => isConfigured(f.key)) ? 'badge-success' : 'badge-ghost'">
+                {{ section.fields.filter(f => isConfigured(f.key)).length }}/{{ section.fields.length }}
+              </span>
+            </h2>
+            <p class="text-xs text-base-content/40">{{ section.desc }}</p>
+          </div>
+
+          <div class="bg-base-100 rounded-box border border-base-200 divide-y divide-base-200">
+            <div v-for="field in section.fields" :key="field.key"
+              class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-2.5">
+              <label class="sm:w-36 shrink-0 text-sm flex items-center gap-1.5">
+                <span class="truncate">{{ field.label }}</span>
+                <IconSax v-if="isConfigured(field.key)" name="check" :size="12" class="text-success shrink-0" />
               </label>
-              <input
-                :type="field.type || 'text'"
-                :value="getVal(field.label)"
-                @input="(e: Event) => setVal(field.label, (e.target as HTMLInputElement).value)"
-                :placeholder="field.placeholder"
-                class="input input-bordered w-full"
-              />
-              <label v-if="field.hint" class="label">
-                <span class="label-text-alt text-base-content/50">{{ field.hint }}</span>
-              </label>
+              <div class="flex-1 flex items-center gap-1">
+                <div class="relative flex-1 max-w-sm">
+                  <input :type="inputType(field)" :value="getVal(field.key)"
+                    @input="(e: Event) => setVal(field.key, (e.target as HTMLInputElement).value)"
+                    :placeholder="field.placeholder"
+                    class="input input-bordered input-sm w-full pr-8"
+                    :class="{ 'border-success/50': isConfigured(field.key) }" />
+                  <button v-if="field.type === 'password' && getVal(field.key)"
+                    class="absolute right-1 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs btn-square"
+                    @click="togglePassword(field.key)">
+                    <IconSax :name="showPasswords.has(field.key) ? 'lock' : 'user'" :size="14" />
+                  </button>
+                </div>
+              </div>
+              <p v-if="field.hint" class="text-xs text-base-content/40 sm:w-44 shrink-0 hidden sm:block">{{ field.hint }}</p>
             </div>
           </div>
         </div>
