@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
 import IconSax from '../components/IconSax.vue'
@@ -87,7 +87,12 @@ async function triggerSupplement(sub: Subscription) {
   }
 }
 
-onMounted(fetchSubscriptions)
+let refreshTimer: ReturnType<typeof setInterval>
+onMounted(() => {
+  fetchSubscriptions()
+  refreshTimer = setInterval(fetchSubscriptions, 30000)
+})
+onUnmounted(() => clearInterval(refreshTimer))
 </script>
 
 <template>

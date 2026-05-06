@@ -54,6 +54,17 @@ type mikanEnclosure struct {
 // MikanSource 实现 core.Source 接口
 // ============================================================
 
+// 全局搜索缓存（跨实例共享，30s TTL）
+var (
+	searchCache   sync.Map
+	cacheEntryTTL = 30 * time.Second
+)
+
+type cacheEntry struct {
+	items     []core.TorrentItem
+	expiresAt time.Time
+}
+
 type MikanSource struct {
 	httpClient    *http.Client
 	domain        string
@@ -157,6 +168,15 @@ func (m *MikanSource) FetchRSS(ctx context.Context, url string) ([]core.TorrentI
 // SearchAnime 在 Mikan 上搜索番剧
 // 优先使用文本搜索，如果需要登录则回退到季节搜索+本地过滤
 func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.TorrentItem, error) {
+	// 全局缓存（跨实例共享，30s TTL）
+	if cached, ok := searchCache.Load(title); ok {
+		entry := cached.(cacheEntry)
+		if time.Now().Before(entry.expiresAt) {
+			return entry.items, nil
+		}
+		searchCache.Delete(title)
+	}
+
 	// 先尝试文本搜索：URL 编码中文关键字，否则 Mikan 返回 400
 	encodedTitle := url.QueryEscape(title)
 	path := "/Home/Search?searchstr=" + encodedTitle
@@ -167,13 +187,18 @@ func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.Tor
 		if err == nil {
 			items := parseMikanSearchHTML(string(body), m.domain)
 			if len(items) > 0 {
+				searchCache.Store(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
 				return items, nil
 			}
 		}
 	}
 
 	// 文本搜索失败或无结果，使用季节搜索+本地过滤
-	return m.searchBySeason(ctx, title)
+	items, err := m.searchBySeason(ctx, title)
+	if err == nil && len(items) > 0 {
+		searchCache.Store(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+	}
+	return items, err
 }
 
 // searchBySeason 通过季节列表搜索番剧（不需要登录）

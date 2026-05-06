@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -49,6 +50,7 @@ type createSubscriptionRequest struct {
 	TitleCN      string `json:"title_cn"`
 	BangumiID    string `json:"bangumi_id"`
 	SubgroupName string `json:"subgroup_name"`
+	RSSURL       string `json:"rss_url"`
 	FilterJSON   string `json:"filter_json"`
 	CustomPath   string `json:"custom_path"`
 }
@@ -194,9 +196,26 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		TitleCN:      req.TitleCN,
 		BangumiID:    req.BangumiID,
 		SubgroupName: req.SubgroupName,
+		RSSURL:       req.RSSURL,
 		FilterJSON:   req.FilterJSON,
 		CustomPath:   req.CustomPath,
 		Enabled:      true,
+	}
+
+	// 如果有 BangumiID 但前端未提供 RSS URL，后台异步解析 Mikan 字幕组 RSS
+	if sub.BangumiID != "" && sub.RSSURL == "" {
+		go func(bangumiID string) {
+			rssURL, err := s.mikanSrc.ResolveFirstRSSURL(context.Background(), bangumiID)
+			if err != nil {
+				log.Printf("⚠️  自动解析 RSS URL 失败 [%s]: %v (可手动设置)", bangumiID, err)
+				return
+			}
+			if err := database.DB.Model(&database.Subscription{}).Where("id = ?", sub.ID).Update("rss_url", rssURL).Error; err != nil {
+				log.Printf("⚠️  保存 RSS URL 失败: %v", err)
+			} else {
+				log.Printf("✅ 已自动解析 RSS URL [%s]: %s", bangumiID, rssURL)
+			}
+		}(sub.BangumiID)
 	}
 
 	if err := database.DB.Create(&sub).Error; err != nil {

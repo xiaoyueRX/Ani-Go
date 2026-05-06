@@ -48,3 +48,21 @@
 
 ---
 
+
+## Session 4: 搜索→订阅字幕组选择 + 缓存
+
+### 4.1 字幕组选择弹窗
+- **新增**: 搜索页点击"订阅"弹出字幕组选择 modal
+- **新增**: 调用 `GET /api/mikan/groups?bangumi_id=xxx` 获取字幕组列表
+- **新增**: 用户选字幕组后传 `rss_url` 创建订阅
+- **文件**: `web/src/views/Search.vue`, `internal/api/handlers.go`
+
+### 4.2 RSS URL 自动解析
+- **新增**: 创建订阅时若提供 `BangumiID` 但无 `RSS URL`，后台异步自动解析
+- **新增**: `createSubscriptionRequest` 增加 `rss_url` 字段
+- **文件**: `internal/api/handlers.go`
+
+### 4.3 Mikan 搜索缓存
+- **新增**: 全局 `sync.Map` 搜索缓存，30s TTL，跨请求共享
+- **效果**: 第一次搜索 ~2.8s → 缓存命中 ~0.47s（~6x 提速）
+- **文件**: `internal/source/mikan.go`
