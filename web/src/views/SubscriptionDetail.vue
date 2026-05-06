@@ -33,6 +33,16 @@ const episodes = ref<Episode[]>([])
 const loading = ref(true)
 const error = ref('')
 const showEdit = ref(false)
+const editDialog = ref<HTMLDialogElement | null>(null)
+
+function openEditDialog() {
+  showEdit.value = true
+  editDialog.value?.showModal()
+}
+function closeEditDialog() {
+  showEdit.value = false
+  editDialog.value?.close()
+}
 
 async function fetchDetail() {
   loading.value = true
@@ -52,7 +62,7 @@ async function handleSaveEdit(updated: Record<string, any>) {
   try {
     const { data } = await request.put(`/subscriptions/${id}`, updated)
     sub.value = data
-    showEdit.value = false
+    closeEditDialog()
   } catch (e: any) {
     alert(e.response?.data?.error || '更新失败')
   }
@@ -102,7 +112,7 @@ onMounted(fetchDetail)
               <div v-if="sub.title_jp" class="text-base-content/40 text-sm">{{ sub.title_jp }}</div>
             </div>
             <div class="flex gap-2 shrink-0">
-              <button class="btn btn-outline btn-sm gap-1" @click="showEdit = true">
+              <button class="btn btn-outline btn-sm gap-1" @click="openEditDialog">
                 <IconSax name="edit" :size="14" />
                 编辑
               </button>
@@ -190,18 +200,22 @@ onMounted(fetchDetail)
       </div>
 
       <!-- 编辑弹窗 (DaisyUI modal) -->
-      <dialog :open="showEdit" class="modal" @click.self="showEdit = false">
+      <dialog ref="editDialog" class="modal" @click.self="closeEditDialog">
         <div class="modal-box">
           <div class="flex items-center gap-2 mb-4">
             <IconSax name="edit" :size="20" />
             <h3 class="text-lg font-bold">编辑订阅</h3>
           </div>
           <SubscriptionEditForm
+            v-if="showEdit"
             :sub="sub"
             @save="handleSaveEdit"
-            @cancel="showEdit = false"
+            @cancel="closeEditDialog"
           />
         </div>
+        <form method="dialog" class="modal-backdrop">
+          <button @click="closeEditDialog">关闭</button>
+        </form>
       </dialog>
 
       <!-- 剧集列表 -->
