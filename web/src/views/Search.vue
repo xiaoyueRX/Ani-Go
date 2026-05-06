@@ -39,10 +39,17 @@ async function handleSearch() {
   loading.value = true
   error.value = ''
   try {
-    const { data } = await request.get('/search', { params: { q: query.value } })
+    const { data } = await request.get('/search', {
+      params: { q: query.value },
+      timeout: 25000,
+    })
     results.value = data || []
   } catch (e: any) {
-    error.value = e.response?.data?.error || '搜索失败'
+    if (e.code === 'ECONNABORTED') {
+      error.value = '搜索超时，请稍后重试'
+    } else {
+      error.value = e.response?.data?.error || '搜索失败'
+    }
   } finally {
     loading.value = false
   }
@@ -61,10 +68,13 @@ async function openSubscribe(item: TorrentItem) {
   showGroupModal.value = true
   groupLoading.value = true
   try {
-    const { data } = await request.get('/mikan/groups', { params: { bangumi_id: item.bangumi_id } })
+    const { data } = await request.get('/mikan/groups', {
+      params: { bangumi_id: item.bangumi_id },
+      timeout: 15000,
+    })
     subgroups.value = data || []
   } catch (e: any) {
-    groupError.value = '获取字幕组列表失败'
+    groupError.value = e.code === 'ECONNABORTED' ? '获取字幕组列表超时' : '获取字幕组列表失败'
   } finally {
     groupLoading.value = false
   }

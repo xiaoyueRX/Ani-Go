@@ -66,3 +66,19 @@
 - **新增**: 全局 `sync.Map` 搜索缓存，30s TTL，跨请求共享
 - **效果**: 第一次搜索 ~2.8s → 缓存命中 ~0.47s（~6x 提速）
 - **文件**: `internal/source/mikan.go`
+
+## Session 5: 代码审查与持续完善
+
+### 5.1 订阅列表自动刷新
+- **新增**: 每 30s `setInterval` 自动轮询订阅列表
+- **新增**: `onUnmounted` 清理定时器
+- **文件**: `web/src/views/Subscriptions.vue`
+
+### 5.2 全量代码审查
+- Go vet: 零警告
+- TypeScript: 零错误
+- Go build: 构建成功
+- 审查范围: 所有新增/修改的 10+ 文件
+
+### 待处理
+- GitHub push: GFW 阻断，commit ddbf461 已本地保存
