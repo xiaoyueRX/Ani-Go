@@ -26,6 +26,8 @@ const results = ref<TorrentItem[]>([])
 const loading = ref(false)
 const error = ref('')
 const subscribed = ref<Set<string>>(new Set())
+const lastSearchTime = ref('')
+const searchDuration = ref(0)
 
 // 字幕组选择弹窗
 const showGroupModal = ref(false)
@@ -38,15 +40,18 @@ async function handleSearch() {
   if (!query.value.trim()) return
   loading.value = true
   error.value = ''
+  const start = Date.now()
   try {
     const { data } = await request.get('/search', {
       params: { q: query.value },
       timeout: 25000,
     })
     results.value = data || []
+    lastSearchTime.value = new Date().toLocaleTimeString('zh-CN')
+    searchDuration.value = Date.now() - start
   } catch (e: any) {
     if (e.code === 'ECONNABORTED') {
-      error.value = '搜索超时，请稍后重试'
+      error.value = '搜索超时（Mikan 未响应），请稍后重试'
     } else {
       error.value = e.response?.data?.error || '搜索失败'
     }
@@ -150,8 +155,13 @@ function sourceBadge(source: string): string {
 
     <!-- 搜索结果 -->
     <div v-if="results.length > 0" class="mb-4">
-      <div class="text-sm text-base-content/50 mb-3 flex items-center gap-1">
-        <IconSax name="category" :size="14" /> 找到 {{ results.length }} 个结果
+      <div class="text-sm text-base-content/50 mb-3 flex items-center gap-2 flex-wrap">
+        <span class="flex items-center gap-1">
+          <IconSax name="category" :size="14" /> {{ results.length }} 个结果
+        </span>
+        <span v-if="lastSearchTime" class="text-xs opacity-60">
+          搜索耗时 {{ (searchDuration / 1000).toFixed(1) }}s · {{ lastSearchTime }}
+        </span>
       </div>
 
       <div class="grid gap-3">
