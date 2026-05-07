@@ -66,6 +66,7 @@ async function handleLogin() {
             登录
           </button>
         </form>
+      <p class="text-center text-xs text-base-content/20 mt-5">Ani-Go · 番剧追番下载管理系统</p>
       </div>
     </div>
   </div>

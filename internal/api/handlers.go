@@ -535,6 +535,37 @@ func isEpisodeStalled(ep database.Episode, timeout time.Duration) bool {
 	}
 }
 
+// handleUpdateEpisodeStatus 手动更新剧集状态
+// PUT /api/episodes/{id}/status  body: {"status": "completed"}
+func (s *Server) handleUpdateEpisodeStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的剧集 ID"})
+		return
+	}
+
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+		return
+	}
+
+	valid := map[string]bool{"pending": true, "downloading": true, "completed": true, "failed": true}
+	if !valid[req.Status] {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的状态值"})
+		return
+	}
+
+	if err := database.DB.Model(&database.Episode{}).Where("id = ?", id).Update("status", req.Status).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "更新失败"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": req.Status})
+}
+
 // ============================================================
 // 设置
 // ============================================================

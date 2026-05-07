@@ -111,6 +111,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", s.handleDeleteSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/trigger-supplement", s.handleTriggerSupplement)
 
+	// 剧集管理
+	mux.HandleFunc("PUT /api/episodes/{id}/status", s.handleUpdateEpisodeStatus)
+
 	// 下载队列
 	mux.HandleFunc("GET /api/downloads", s.handleListDownloads)
 

@@ -34,6 +34,25 @@ const loading = ref(true)
 const error = ref('')
 const showEdit = ref(false)
 const editDialog = ref<HTMLDialogElement | null>(null)
+const updatingEps = ref<Set<number>>(new Set())
+
+const statusCycle: Record<string, string> = {
+  pending: 'downloading',
+  downloading: 'completed',
+  completed: 'pending',
+  failed: 'pending',
+}
+
+async function cycleEpisodeStatus(ep: Episode) {
+  const nextStatus = statusCycle[ep.status] || 'pending'
+  updatingEps.value.add(ep.id)
+  try {
+    await request.put(`/episodes/${ep.id}/status`, { status: nextStatus })
+    ep.status = nextStatus
+  } catch { /* ignore */ } finally {
+    updatingEps.value.delete(ep.id)
+  }
+}
 
 function openEditDialog() {
   showEdit.value = true
@@ -245,10 +264,15 @@ onMounted(fetchDetail)
                   <td class="font-mono">{{ ep.season > 1 ? 'S' + ep.season : '' }}{{ ep.number ? 'E' + ep.number : '' }}</td>
                   <td class="max-w-xs truncate" :title="ep.original_name">{{ ep.original_name || ep.title || '-' }}</td>
                   <td>
-                    <span class="badge badge-sm gap-1" :class="(statusCfg[ep.status] || {}).cls || 'badge-ghost'">
-                      <IconSax :name="(statusCfg[ep.status] || {}).icon || 'more'" :size="12" />
+                    <button class="badge badge-sm gap-1 cursor-pointer hover:opacity-70 transition-opacity"
+                      :class="(statusCfg[ep.status] || {}).cls || 'badge-ghost'"
+                      @click="cycleEpisodeStatus(ep)"
+                      :disabled="updatingEps.has(ep.id)"
+                      :title="'点击切换为: ' + ((statusCfg[statusCycle[ep.status]] || {}).label || statusCycle[ep.status])">
+                      <span v-if="updatingEps.has(ep.id)" class="loading loading-spinner loading-xs"></span>
+                      <IconSax v-else :name="(statusCfg[ep.status] || {}).icon || 'more'" :size="12" />
                       {{ (statusCfg[ep.status] || {}).label || ep.status }}
-                    </span>
+                    </button>
                   </td>
                   <td>
                     <span v-if="ep.is_stalled" class="badge badge-warning badge-sm gap-1">
