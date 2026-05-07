@@ -780,7 +780,7 @@ func (s *Server) handleMikanGroups(w http.ResponseWriter, r *http.Request) {
 // handleSchedule 获取当前季度新番时间表
 // GET /api/schedule
 func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
-	schedule, err := s.mikanSrc.FetchWeekSchedule(r.Context())
+	schedule, err := s.yucSrc.FetchWeekSchedule(r.Context())
 	if err != nil || len(schedule) == 0 {
 		if err != nil {
 			log.Printf("⚠️  获取时间表失败: %v，使用空数据", err)

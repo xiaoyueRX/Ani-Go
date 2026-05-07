@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
 import IconSax from '../components/IconSax.vue'
@@ -53,7 +53,12 @@ async function fetchSchedule() {
   } finally { loading.value = false }
 }
 
-onMounted(fetchSchedule)
+let refreshTimer: ReturnType<typeof setInterval>
+onMounted(() => {
+  fetchSchedule()
+  refreshTimer = setInterval(fetchSchedule, 30 * 60 * 1000)
+})
+onUnmounted(() => clearInterval(refreshTimer))
 </script>
 
 <template>

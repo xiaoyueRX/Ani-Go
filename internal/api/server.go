@@ -23,7 +23,8 @@ type Server struct {
 	triggerSupplement func(ctx context.Context, subID uint) error
 	pluginManager     *plugin.Manager
 	taskParser        core.TaskParser
-	mikanSrc          *source.MikanSource // Mikan 资源源，用于字幕组查询
+	mikanSrc          *source.MikanSource  // Mikan 资源源，用于字幕组查询
+	yucSrc            *source.YucWikiSource // yuc.wiki 资源源，用于时间表
 }
 
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
@@ -140,7 +141,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	s.mikanSrc = source.NewMikanSource("mikanime.tv", "", nil)
 	mux.HandleFunc("GET /api/mikan/groups", s.handleMikanGroups)
 
-	// 新番时间表
+	// 新番时间表（使用 yuc.wiki 数据源）
+	s.yucSrc = source.NewYucWikiSource()
 	mux.HandleFunc("GET /api/schedule", s.handleSchedule)
 }
 
