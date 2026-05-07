@@ -93,6 +93,37 @@ func StartServer(ctx context.Context, host string, port int, dl core.Downloader,
 		srv.Shutdown(shutdownCtx)
 	}()
 
+	// 启动时自动测速，选择最快的 Mikan 镜像
+	go func() {
+		if s.mikanSrc == nil {
+			return
+		}
+		time.Sleep(2 * time.Second)
+		log.Println("📡 正在测速 Mikan 镜像...")
+		results := s.mikanSrc.TestLatency(context.Background())
+		best := source.BestDomain(results, s.mikanSrc.GetDomain())
+		for _, r := range results {
+			status := "✅"
+			if !r.OK {
+				status = "❌"
+			}
+			log.Printf("  %s %s: %dms", status, r.Domain, r.Latency)
+		}
+		if best != s.mikanSrc.GetDomain() {
+			log.Printf("🚀 自动切换镜像: %s → %dms", best, func() int64 {
+				for _, r := range results {
+					if r.Domain == best {
+						return r.Latency
+					}
+				}
+				return 0
+			}())
+			s.mikanSrc.SetDomain(best)
+		} else {
+			log.Printf("✅ 当前镜像 %s 表现最佳", best)
+		}
+	}()
+
 	return srv
 }
 
@@ -144,6 +175,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 新番时间表（使用 yuc.wiki 数据源）
 	s.yucSrc = source.NewYucWikiSource()
 	mux.HandleFunc("GET /api/schedule", s.handleSchedule)
+
+	// Mikan 镜像测速
+	mux.HandleFunc("POST /api/mikan/test-mirrors", s.handleTestMirrors)
+	mux.HandleFunc("POST /api/mikan/select-mirror", s.handleSelectMirror)
 }
 
 // ============================================================

@@ -822,6 +822,32 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleTestMirrors 测试所有 Mikan 镜像延迟
+// POST /api/mikan/test-mirrors
+func (s *Server) handleTestMirrors(w http.ResponseWriter, r *http.Request) {
+	if s.mikanSrc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "Mikan 服务未初始化"})
+		return
+	}
+	results := s.mikanSrc.TestLatency(r.Context())
+	writeJSON(w, http.StatusOK, results)
+}
+
+// handleSelectMirror 选择镜像域名（保存到数据库）
+// POST /api/mikan/select-mirror  body: {"domain": "mikanime.tv"}
+func (s *Server) handleSelectMirror(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Domain string `json:"domain"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Domain == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "domain 不能为空"})
+		return
+	}
+	// 保存到 settings 表
+	database.DB.Save(&database.Setting{Key: "MIKAN_DOMAIN", Value: req.Domain})
+	writeJSON(w, http.StatusOK, map[string]string{"domain": req.Domain})
+}
+
 // getSettingValue 从数据库获取设置值
 func getSettingValue(key string) string {
 	var s database.Setting

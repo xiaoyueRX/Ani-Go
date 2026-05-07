@@ -10,6 +10,35 @@ const saved = ref(false)
 const activeTab = ref('mikan')
 const showPasswords = ref<Set<string>>(new Set())
 
+// 镜像测速
+const mirrorTesting = ref(false)
+const mirrorResults = ref<{ domain: string; latency_ms: number; ok: boolean }[]>([])
+const selectedMirror = ref('')
+
+async function testMirrors() {
+  mirrorTesting.value = true
+  mirrorResults.value = []
+  try {
+    const { data } = await request.post('/mikan/test-mirrors', {}, { timeout: 15000 })
+    mirrorResults.value = data || []
+  } catch (e: any) {
+    error.value = '测速失败'
+  } finally {
+    mirrorTesting.value = false
+  }
+}
+
+async function selectMirror(domain: string) {
+  try {
+    await request.post('/mikan/select-mirror', { domain })
+    setVal('MIKAN_DOMAIN', domain)
+    selectedMirror.value = domain
+    alert(`已切换到: ${domain}`)
+  } catch (e: any) {
+    error.value = '切换失败'
+  }
+}
+
 interface FieldDef {
   label: string; key: string; placeholder: string; type?: string; hint?: string
 }
@@ -222,6 +251,50 @@ onMounted(fetchSettings)
       </div>
 
       <div class="flex-1 min-w-0 space-y-6">
+        <!-- Mikan 镜像测速卡 -->
+        <div v-if="activeTab === 'mikan'" class="card bg-base-100 shadow-sm border border-base-200">
+          <div class="card-body p-4">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-semibold flex items-center gap-2">
+                <IconSax name="refresh" :size="16" class="text-primary" />
+                镜像测速
+              </h3>
+              <button class="btn btn-xs btn-primary gap-1" @click="testMirrors" :disabled="mirrorTesting">
+                <span v-if="mirrorTesting" class="loading loading-spinner loading-xs"></span>
+                <IconSax v-else name="refresh" :size="12" />
+                测速
+              </button>
+            </div>
+
+            <p class="text-xs text-base-content/40 mb-3">
+              启动时自动测速选择最快镜像，也可手动测速选择
+            </p>
+
+            <div v-if="mirrorResults.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div v-for="r in mirrorResults" :key="r.domain"
+                class="flex items-center justify-between p-2 rounded-lg border"
+                :class="r.ok ? 'border-base-300 hover:border-primary/50 cursor-pointer' : 'border-error/20 opacity-60'"
+                @click="r.ok && selectMirror(r.domain)">
+                <div class="flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full" :class="r.ok ? 'bg-success' : 'bg-error'"></span>
+                  <span class="text-sm font-mono">{{ r.domain }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span v-if="r.ok" class="text-xs" :class="r.latency_ms < 500 ? 'text-success' : r.latency_ms < 1000 ? 'text-warning' : 'text-error'">
+                    {{ r.latency_ms }}ms
+                  </span>
+                  <span v-else class="text-xs text-error">不可达</span>
+                  <span v-if="getVal('MIKAN_DOMAIN') === r.domain" class="badge badge-xs badge-primary">当前</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-else-if="!mirrorTesting" class="text-xs text-base-content/30 text-center py-2">
+              点击「测速」检查各镜像延迟
+            </div>
+          </div>
+        </div>
+
         <div v-for="section in tabs.find(t => t.key === activeTab)?.sections" :key="section.title">
           <div class="mb-3">
             <h2 class="text-base font-semibold flex items-center gap-2">

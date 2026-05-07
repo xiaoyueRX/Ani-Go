@@ -84,6 +84,79 @@ func NewMikanSource(domain, proxyDomain string, mirrorDomains []string) *MikanSo
 
 func (m *MikanSource) Name() string { return "Mikan" }
 
+// GetDomain 获取当前主域名
+func (m *MikanSource) GetDomain() string { return m.domain }
+
+// SetDomain 设置主域名（用于启动时自动切换到最快的镜像）
+func (m *MikanSource) SetDomain(domain string) { m.domain = domain }
+
+// MirrorLatency 镜像延迟测试结果
+type MirrorLatency struct {
+	Domain  string `json:"domain"`
+	Latency int64  `json:"latency_ms"` // 毫秒
+	OK      bool   `json:"ok"`
+}
+
+// TestLatency 并发测试所有镜像延迟，返回结果（不改变内部状态）
+func (m *MikanSource) TestLatency(ctx context.Context) []MirrorLatency {
+	domains := make([]string, 0, 2+len(m.mirrorDomains))
+	if m.proxyDomain != "" {
+		domains = append(domains, m.proxyDomain)
+	}
+	domains = append(domains, m.domain)
+	domains = append(domains, m.mirrorDomains...)
+
+	// 去重
+	seen := make(map[string]bool)
+	unique := make([]string, 0, len(domains))
+	for _, d := range domains {
+		if !seen[d] {
+			seen[d] = true
+			unique = append(unique, d)
+		}
+	}
+
+	results := make([]MirrorLatency, len(unique))
+	var wg sync.WaitGroup
+	for i, domain := range unique {
+		wg.Add(1)
+		go func(idx int, d string) {
+			defer wg.Done()
+			start := time.Now()
+			url := fmt.Sprintf("https://%s/", d)
+			req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+			if err != nil {
+				results[idx] = MirrorLatency{Domain: d, Latency: 99999, OK: false}
+				return
+			}
+			req.Header.Set("User-Agent", "Mozilla/5.0")
+			resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+			elapsed := time.Since(start).Milliseconds()
+			if err != nil {
+				results[idx] = MirrorLatency{Domain: d, Latency: elapsed, OK: false}
+				return
+			}
+			resp.Body.Close()
+			results[idx] = MirrorLatency{Domain: d, Latency: elapsed, OK: true}
+		}(i, domain)
+	}
+	wg.Wait()
+	return results
+}
+
+// BestDomain 从延迟结果中选择最快的域名
+func BestDomain(results []MirrorLatency, fallback string) string {
+	best := fallback
+	bestLatency := int64(99999)
+	for _, r := range results {
+		if r.OK && r.Latency < bestLatency {
+			bestLatency = r.Latency
+			best = r.Domain
+		}
+	}
+	return best
+}
+
 // tryMirrors 依次尝试通过代理域名、主域名、镜像域名发起 HTTP GET 请求
 // 在 GFW 环境下主域名可能不可达，自动回退到镜像域名
 func (m *MikanSource) tryMirrors(ctx context.Context, path string) (*http.Response, error) {
