@@ -681,81 +681,93 @@ type WeekDayItem struct {
 }
 
 // FetchWeekSchedule 获取当前季度番剧按星期分组列表
+// 依次尝试当前/上一季度，直到拿到数据为止
 func (m *MikanSource) FetchWeekSchedule(ctx context.Context) ([]WeekDayItem, error) {
 	now := time.Now()
 	year := now.Year()
 	season := getSeason(now.Month())
-
-	path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%d", year, season)
-	resp, err := m.tryMirrors(ctx, path)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
-	}
 
 	weekLabel := map[int]string{
 		1: "星期一", 2: "星期二", 3: "星期三", 4: "星期四",
 		5: "星期五", 6: "星期六", 7: "星期日",
 	}
 
-	var result []WeekDayItem
-	doc.Find(".sk-bangumi").Each(func(_ int, sel *goquery.Selection) {
-		dowStr, exists := sel.Attr("data-dayofweek")
-		if !exists {
-			return
-		}
-		dow, _ := strconv.Atoi(dowStr)
-
-		// 提取星期标签
-		label := weekLabel[dow]
-		if label == "" {
-			label = dowStr
+	// 最多尝试 3 个季度（当前、上季、上上季）
+	for i := 0; i < 3; i++ {
+		s := season - i
+		y := year
+		for s < 1 {
+			s += 4
+			y--
 		}
 
-		var items []core.TorrentItem
-		sel.Find("a.an-text").Each(func(_ int, a *goquery.Selection) {
-			title := strings.TrimSpace(a.Text())
-			href, _ := a.Attr("href")
-			if title == "" || href == "" {
+		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%d", y, s)
+		resp, err := m.tryMirrors(ctx, path)
+		if err != nil {
+			continue
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil || len(body) < 2000 {
+			continue
+		}
+
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+		if err != nil {
+			continue
+		}
+
+		var result []WeekDayItem
+		doc.Find(".sk-bangumi").Each(func(_ int, sel *goquery.Selection) {
+			dowStr, exists := sel.Attr("data-dayofweek")
+			if !exists {
 				return
 			}
-			bangumiID := ""
-			if strings.HasPrefix(href, "/Home/Bangumi/") {
-				bangumiID = strings.TrimPrefix(href, "/Home/Bangumi/")
+			dow, _ := strconv.Atoi(dowStr)
+			label := weekLabel[dow]
+			if label == "" {
+				label = dowStr
 			}
 
-			// 获取更新日期
-			updateDate := ""
-			parent := a.ParentsFiltered(".an-info-group")
-			if parent.Length() > 0 {
-				updateDate = strings.TrimSpace(parent.Find(".date-text").Text())
-			}
+			var items []core.TorrentItem
+			sel.Find("a.an-text").Each(func(_ int, a *goquery.Selection) {
+				title := strings.TrimSpace(a.Text())
+				href, _ := a.Attr("href")
+				if title == "" || href == "" {
+					return
+				}
+				bangumiID := ""
+				if strings.HasPrefix(href, "/Home/Bangumi/") {
+					bangumiID = strings.TrimPrefix(href, "/Home/Bangumi/")
+				}
 
-			items = append(items, core.TorrentItem{
-				Title:      title,
-				URL:        "https://" + m.domain + href,
-				BangumiID:  bangumiID,
-				SourceName: "Mikan",
-				InfoHash:   updateDate,
+				parent := a.ParentsFiltered(".an-info-group")
+				updateDate := ""
+				if parent.Length() > 0 {
+					updateDate = strings.TrimSpace(parent.Find(".date-text").Text())
+				}
+
+				items = append(items, core.TorrentItem{
+					Title:      title,
+					URL:        "https://" + m.domain + href,
+					BangumiID:  bangumiID,
+					SourceName: "Mikan",
+					InfoHash:   updateDate,
+				})
 			})
+
+			if len(items) > 0 {
+				result = append(result, WeekDayItem{DayOfWeek: dow, Label: label, Items: items})
+			}
 		})
 
-		if len(items) > 0 {
-			result = append(result, WeekDayItem{DayOfWeek: dow, Label: label, Items: items})
+		if len(result) > 0 {
+			return result, nil
 		}
-	})
+	}
 
-	return result, nil
+	return nil, fmt.Errorf("所有季节均无数据")
 }
 
 // parseMikanSeasonHTML 从 Mikan 季度列表 HTML 中提取番剧（不需要登录）
