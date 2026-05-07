@@ -42,6 +42,14 @@ const subscribedSchedule = computed(() => {
 
 const subscribedCount = computed(() => Object.keys(subscribedIds.value).length)
 
+function proxyImage(url: string): string {
+  if (!url) return ''
+  if (url.includes('hdslb.com') || url.includes('bilibili')) {
+    return `/api/proxy/image?url=${encodeURIComponent(url)}`
+  }
+  return url
+}
+
 async function fetchSchedule() {
   loading.value = true; error.value = ''
   try {
@@ -119,7 +127,7 @@ onUnmounted(() => clearInterval(refreshTimer))
                 class="card bg-base-200/50 rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all active:scale-[0.97]"
                 @click="router.push(`/search?q=${encodeURIComponent(item.title)}`)">
                 <div class="aspect-[3/4] bg-base-300 relative">
-                  <img v-if="item.cover_url" :src="item.cover_url" :alt="item.title" class="w-full h-full object-cover" loading="lazy"
+                  <img v-if="item.cover_url" :src="proxyImage(item.cover_url)" :alt="item.title" class="w-full h-full object-cover" loading="lazy"
                     @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
                   <div class="absolute inset-0 flex items-center justify-center text-base-content/20" v-if="!item.cover_url">
                     <IconSax name="antenna" :size="32" />
@@ -168,7 +176,7 @@ onUnmounted(() => clearInterval(refreshTimer))
                 class="card bg-base-200/50 rounded-lg overflow-hidden cursor-pointer ring-1 ring-primary/20 hover:ring-2 hover:ring-primary/50 transition-all active:scale-[0.97]"
                 @click="router.push(`/search?q=${encodeURIComponent(item.title)}`)">
                 <div class="aspect-[3/4] bg-base-300 relative">
-                  <img v-if="item.cover_url" :src="item.cover_url" :alt="item.title" class="w-full h-full object-cover" loading="lazy"
+                  <img v-if="item.cover_url" :src="proxyImage(item.cover_url)" :alt="item.title" class="w-full h-full object-cover" loading="lazy"
                     @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
                   <div class="absolute inset-0 flex items-center justify-center text-base-content/20" v-else>
                     <IconSax name="antenna" :size="32" />

@@ -179,6 +179,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Mikan 镜像测速
 	mux.HandleFunc("POST /api/mikan/test-mirrors", s.handleTestMirrors)
 	mux.HandleFunc("POST /api/mikan/select-mirror", s.handleSelectMirror)
+
+	// 图片代理（Bilibili CDN 热链保护绕过）
+	mux.HandleFunc("GET /api/proxy/image", s.handleProxyImage)
 }
 
 // ============================================================

@@ -40,10 +40,10 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		path := r.URL.Path
 
 		// 放行登录接口和健康检查
-		if path == "/api/login" || path == "/api/login/" || path == "/api/health" || path == "/api/health/" {
-			next.ServeHTTP(w, r)
-			return
-		}
+	if path == "/api/login" || path == "/api/login/" || path == "/api/health" || path == "/api/health/" || strings.HasPrefix(path, "/api/proxy/image") {
+		next.ServeHTTP(w, r)
+		return
+	}
 
 		// 仅拦截 /api/* 路径
 		if !strings.HasPrefix(path, "/api/") {

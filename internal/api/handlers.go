@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -843,9 +844,38 @@ func (s *Server) handleSelectMirror(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "domain 不能为空"})
 		return
 	}
-	// 保存到 settings 表
 	database.DB.Save(&database.Setting{Key: "MIKAN_DOMAIN", Value: req.Domain})
 	writeJSON(w, http.StatusOK, map[string]string{"domain": req.Domain})
+}
+
+// handleProxyImage 代理图片请求（绕过 Bilibili CDN 热链保护）
+// GET /api/proxy/image?url=https://i0.hdslb.com/...
+func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
+	imageURL := r.URL.Query().Get("url")
+	if imageURL == "" {
+		http.Error(w, "missing url", http.StatusBadRequest)
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, imageURL, nil)
+	if err != nil {
+		http.Error(w, "invalid url", http.StatusBadRequest)
+		return
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, "fetch failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.Header().Set("Cache-Control", "public, max-age=604800")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 // getSettingValue 从数据库获取设置值
