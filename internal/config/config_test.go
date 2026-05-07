@@ -16,8 +16,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.Database.Path != "ani-go.db" {
 		t.Errorf("数据库路径 = %s", cfg.Database.Path)
 	}
-	if cfg.Mikan.Domain != "mikanani.me" {
-		t.Errorf("Mikan 域名 = %s", cfg.Mikan.Domain)
+	if cfg.Mikan.Domain != "mikanime.tv" {
+		t.Errorf("Mikan 域名 = %s, 期望 mikanime.tv", cfg.Mikan.Domain)
 	}
 	if len(cfg.Mikan.MirrorDomains) != 2 {
 		t.Errorf("Mikan 镜像数 = %d, 期望 2", len(cfg.Mikan.MirrorDomains))

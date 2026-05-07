@@ -203,7 +203,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	// 如果有 BangumiID 但前端未提供 RSS URL，后台异步解析 Mikan 字幕组 RSS
-	if sub.BangumiID != "" && sub.RSSURL == "" {
+	if sub.BangumiID != "" && sub.RSSURL == "" && s.mikanSrc != nil {
 		go func(bangumiID string) {
 			rssURL, err := s.mikanSrc.ResolveFirstRSSURL(context.Background(), bangumiID)
 			if err != nil {
@@ -763,6 +763,11 @@ func (s *Server) handleMikanGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.mikanSrc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "Mikan 服务未初始化"})
+		return
+	}
+
 	groups, err := s.mikanSrc.FetchSubgroups(r.Context(), bangumiID)
 	if err != nil {
 		log.Printf("⚠️  获取 Mikan 字幕组失败 [%s]: %v", bangumiID, err)
@@ -780,6 +785,10 @@ func (s *Server) handleMikanGroups(w http.ResponseWriter, r *http.Request) {
 // handleSchedule 获取当前季度新番时间表
 // GET /api/schedule
 func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
+	if s.yucSrc == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"days": []source.WeekDayItem{}, "subscribed": map[string]bool{}})
+		return
+	}
 	schedule, err := s.yucSrc.FetchWeekSchedule(r.Context())
 	if err != nil || len(schedule) == 0 {
 		if err != nil {
