@@ -89,7 +89,7 @@
   - [x] EventBus auto-push + MultiNotifier aggregated broadcast
 - [x] **Phase 6: Data Migration** ✅
   - [x] AutoBangumi SQLite data import tool
-- [x] **Phase 7: Frontend Polish + Search Fix + Schedule** ✅
+- [x] **Phase 7: Frontend Polish + Search Fix + Schedule + Mirror Speed Test** ✅
   - [x] Mikan Chinese search fix (URL encoding + CSS selector compatibility)
   - [x] IconSax icon component (Iconsax Linear, 20+ icons)
   - [x] Full view polish (login/sidebar/subscriptions/downloads/settings)
@@ -99,6 +99,7 @@
   - [x] PWA support (manifest + service worker)
   - [x] Remember password
   - [x] Episode status management
+  - [x] Mikan Mirror Speed Test (auto speed test on startup + manual speed test in settings)
 - **Tests**: 108 tests passing
 
 ---

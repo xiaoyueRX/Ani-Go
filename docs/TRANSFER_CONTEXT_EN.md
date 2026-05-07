@@ -21,7 +21,7 @@ cp .env.example .env
 - **Phase 4 (AI + Multi-Downloader + Plugins + Multiple Sources)**: Complete ✅ — AI 4-protocol, qBittorrent/Transmission/Aria2, plugin system, dead torrent detection, Nyaa/ACGRIP/AnimeTosho + MultiSource
 - **Phase 5 (Multi-Platform Messaging + Task Parser)**: Complete ✅ — 16-platform notification, natural language task parser (regex + AI), EventBus auto-push
 - **Phase 6 (Data Migration)**: Complete ✅ — AutoBangumi SQLite import
-- **Phase 7 (Frontend Polish + Search Fix + Schedule)**: Complete ✅ — Mikan search fix, IconSax icons, UI polish, settings restructure, new season schedule (yuc.wiki + poster images + auto-refresh), search→subscribe flow (group selection + RSS resolution), PWA support, remember password, episode status management
+- **Phase 7 (Frontend Polish + Search Fix + Schedule + Mirror Speed Test)**: Complete ✅ — Mikan search fix, IconSax icons, UI polish, settings restructure, new season schedule (yuc.wiki + poster images + auto-refresh), search→subscribe flow (group selection + RSS resolution), PWA support, remember password, episode status management, Mikan mirror speed test (auto speed test on startup + manual speed test in settings)
 - **Tests**: 108 tests passing
 
 ## Tech Stack

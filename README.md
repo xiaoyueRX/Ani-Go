@@ -1,6 +1,7 @@
 # Ani-Go
 
 > 全自动番剧追番下载管理系统
+> [English Version](README_EN.md)
 
 **Ani-Go** 是一个基于 Go 开发的开源番剧管理工具，支持自动追新番、历史全量补全、多下载器、多资源站，文件整理后可被 Jellyfin/fnOS 直接识别。
 

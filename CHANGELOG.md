@@ -39,6 +39,13 @@ Ani-Go 的更新日志。所有版本遵循 [语义化版本](https://semver.org
 - `PUT /api/episodes/{id}/status` 端点
 - 点击剧集状态 badge 循环切换 pending→downloading→completed
 
+#### Mikan 镜像测速
+- 启动时自动并发测速所有镜像域名，选择延迟最低的作为主域名
+- 设置页手动测速：显示各域名延迟（绿/黄/红色标识），点击可切换
+- `POST /api/mikan/test-mirrors` 测速 API
+- `POST /api/mikan/select-mirror` 手动选择 API（保存到数据库）
+- 默认镜像新增 `mikanani.kas.pub`
+
 ### 修复
 
 - `/api/health` 加入 AuthMiddleware 白名单，无需 token 可访问

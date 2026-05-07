@@ -21,7 +21,7 @@ cp .env.example .env
 - **Phase 4（AI + 多下载器 + 插件 + 多资源站）**: 全部完成 ✅ — AI 4 协议、qBittorrent/Transmission/Aria2、插件系统、死种检测、Nyaa/ACGRIP/AnimeTosho + MultiSource
 - **Phase 5（多平台消息通知 + 任务解析）**: 全部完成 ✅ — 16 平台通知、自然语言任务解析器（正则 + AI）、EventBus 自动推送
 - **Phase 6（数据迁移）**: 全部完成 ✅ — AutoBangumi SQLite 导入
-- **Phase 7（前端美化 + 搜索修复 + 新番时间表）**: 全部完成 ✅ — Mikan 搜索修复、IconSax 图标、UI 美化、设置页重构、新番时间表（yuc.wiki + 海报图 + 自动刷新）、搜索→订阅全流程（字幕组选择 + RSS 解析）、PWA 支持、记住密码、剧集状态管理
+- **Phase 7（前端美化 + 搜索修复 + 新番时间表 + 镜像测速）**: 全部完成 ✅ — Mikan 搜索修复、IconSax 图标、UI 美化、设置页重构、新番时间表（yuc.wiki + 海报图 + 自动刷新）、搜索→订阅全流程（字幕组选择 + RSS 解析）、PWA 支持、记住密码、剧集状态管理、Mikan 镜像测速（启动自动测速 + 设置页手动测速）
 - **测试**: 108 个测试全通过
 
 ## 技术栈

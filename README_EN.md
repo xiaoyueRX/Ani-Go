@@ -1,11 +1,13 @@
 # Ani-Go
 
 > Fully automated anime tracking and download management system
+> [中文版](README.md)
 
 **Ani-Go** is an open-source anime management tool built with Go, supporting automatic new episode tracking, historical batch completion, multiple download clients, multiple source sites, and file organization compatible with Jellyfin/fnOS.
 
 ## Features
 
+- 📺 **New Season Schedule**: yuc.wiki data source, weekly grouping with poster images, auto-refresh every 30 min
 - 🔄 **Auto Tracking**: Bind to Mikan personal RSS and automatically track subscriptions from the Mikan web interface
 - 📦 **Historical Completion**: Crawl Mikan anime pages to backfill episodes not covered by RSS feeds
 - ⬇️ **Multiple Downloaders**: qBittorrent / Transmission / Aria2

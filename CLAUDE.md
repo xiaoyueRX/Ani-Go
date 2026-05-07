@@ -162,7 +162,7 @@ Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5。前端已通过 `//go:e
 - **Phase 6** ✅ — 数据迁移工具（AutoBangumi SQLite 导入）+ 额外通知平台补全
 - **测试**：108 个测试全通过
 
-### Phase 7: 前端美化 + 搜索修复 + 新番时间表 ✅
+### Phase 7: 前端美化 + 搜索修复 + 新番时间表 + 镜像测速 ✅
 - [x] **搜索功能修复**：Mikan 中文搜索 URL 编码（`url.QueryEscape`）+ CSS 选择器兼容
 - [x] **IconSax 图标系统**：20+ Iconsax Linear 图标全面替换 inline SVG/emoji
 - [x] **UI 全面美化**：登录页渐变背景、侧栏导航、订阅卡片、下载列表、设置页
@@ -172,5 +172,6 @@ Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5。前端已通过 `//go:e
 - [x] **PWA 支持**：manifest.json + service worker，Chrome/Edge 可安装为独立应用
 - [x] **登录页记住密码**：localStorage 保存，下次自动填充
 - [x] **剧集状态管理**：`PUT /api/episodes/{id}/status` 手动切换状态
+- [x] **Mikan 镜像测速**：启动自动测速选最快镜像 + 设置页手动测速
 
 详见 `CHANGELOG.md` 和 `docs/DEVELOPMENT_PLAN.md`。
