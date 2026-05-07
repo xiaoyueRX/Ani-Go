@@ -76,6 +76,7 @@ Windows 开发 / Linux (PVE LXC) 部署。代码必须双平台编译通过。Po
 | `internal/api/server.go` | 路由注册 + 中间件链 + 优雅关闭 |
 | `internal/api/handlers.go` | 全部 API 处理器 |
 | `internal/source/mikan.go` | Mikan RSS + HTML 爬取 + 镜像回退（812 行，正则最密集） |
+| `internal/source/yucwiki.go` | yuc.wiki 新番时间表爬虫（海报图+星期分组） |
 | `internal/source/multi.go` | Nyaa/ACG.RIP/AnimeTosho 多资源聚合 |
 | `internal/ai/client.go` | AI 4 协议统一客户端（589 行） |
 | `internal/notifier/` | 16 平台通知实现 |

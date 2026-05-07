@@ -162,10 +162,15 @@ Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5。前端已通过 `//go:e
 - **Phase 6** ✅ — 数据迁移工具（AutoBangumi SQLite 导入）+ 额外通知平台补全
 - **测试**：108 个测试全通过
 
-### Phase 7: 前端美化与搜索修复 ✅
-- [x] **搜索功能修复**：Mikan 中文搜索 URL 编码修复（`url.QueryEscape`），CSS 选择器兼容改版后的 Mikan 页面。
-- [x] **IconSax 图标系统**：创建 `web/src/components/IconSax.vue`，20+ Iconsax Linear 图标，全面替换所有视图的 inline SVG 和 emoji。
-- [x] **UI 全面美化**：登录页（渐变背景+品牌图标）、侧栏导航、订阅卡片（状态 SVG + 悬停效果）、下载列表（状态标签图标）、设置页（分组卡片 + 配置状态 badge + 密码显隐）。
-- [x] **设置页重构**：纵向侧边栏标签、区域分组（下载器 4 组/通知 5 组）、已配置状态标识、密码显隐切换。
+### Phase 7: 前端美化 + 搜索修复 + 新番时间表 ✅
+- [x] **搜索功能修复**：Mikan 中文搜索 URL 编码（`url.QueryEscape`）+ CSS 选择器兼容
+- [x] **IconSax 图标系统**：20+ Iconsax Linear 图标全面替换 inline SVG/emoji
+- [x] **UI 全面美化**：登录页渐变背景、侧栏导航、订阅卡片、下载列表、设置页
+- [x] **设置页重构**：纵向侧边栏标签、区域分组、配置状态 badge、密码显隐
+- [x] **新番时间表**：yuc.wiki 数据源，按星期分组，标准海报图，30 分钟自动刷新
+- [x] **搜索→订阅全流程**：字幕组选择弹窗 + RSS URL 自动解析 + 搜索缓存
+- [x] **PWA 支持**：manifest.json + service worker，Chrome/Edge 可安装为独立应用
+- [x] **登录页记住密码**：localStorage 保存，下次自动填充
+- [x] **剧集状态管理**：`PUT /api/episodes/{id}/status` 手动切换状态
 
-详见 `docs/DEVELOPMENT_PLAN.md`。
+详见 `CHANGELOG.md` 和 `docs/DEVELOPMENT_PLAN.md`。

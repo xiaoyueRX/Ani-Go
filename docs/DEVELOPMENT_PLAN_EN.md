@@ -124,8 +124,13 @@
 - [ ] **Notification Template System**: Support custom message templates, configurable per event type and platform. (pending)
 - [ ] **Full Platform Integration Testing**: Verify connectivity and notification push for each platform. (partially pending)
 
-### Phase 7: Frontend Polish & Search Fix ✅
+### Phase 7: Frontend Polish + Search Fix + Schedule ✅
 - [x] **Mikan Chinese Search Fix**: URL-encode Chinese keywords (`url.QueryEscape`) to fix Mikan 400 error; fallback CSS selector for Mikan's updated page structure.
 - [x] **IconSax Component System**: Created `web/src/components/IconSax.vue`, 20+ Iconsax Linear icons replacing all inline SVGs and emoji.
 - [x] **UI Polish**: Login page gradient background + brand icon, sidebar nav icons, subscription card SVG status indicators + hover effects, download list status badge icons, settings page restructure.
 - [x] **Settings Page Restructure**: Vertical sidebar tabs, section grouping (downloader 4 groups / notification 5 groups), configured status ✓ badge, password visibility toggle, config progress indicator.
+- [x] **New Season Schedule**: yuc.wiki data source, weekday grouping, standard poster images, 30-min auto-refresh.
+- [x] **Search → Subscribe Flow**: Subtitle group selection modal + RSS URL auto-resolution + search cache.
+- [x] **PWA Support**: manifest.json + service worker, Chrome/Edge installable as standalone app.
+- [x] **Remember Password**: localStorage save, auto-fill on next visit.
+- [x] **Episode Status Management**: `PUT /api/episodes/{id}/status` manual status toggle.

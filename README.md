@@ -6,6 +6,7 @@
 
 ## 特性
 
+- 📺 **新番时间表**：yuc.wiki 数据源，按星期分组显示当前季度新番，标准海报图
 - 🔄 **自动追番**：绑定 Mikan 个人 RSS，在 Mikan 网页订阅即自动追踪
 - 📦 **历史补全**：爬取 Mikan 番剧页面，补全 RSS 覆盖不到的老集数
 - ⬇️ **多下载器**：qBittorrent / Transmission / Aria2
@@ -14,6 +15,7 @@
 - 🤖 **AI 辅助**（可选）：支持 OpenAI / Google / Anthropic / Ollama 四大协议，辅助分类识别
 - 🧩 **插件系统**：开放钩子，支持第三方扩展
 - 🌐 **Web UI**：Vue3 + DaisyUI，浏览器管理订阅、下载队列、设置
+- 📱 **PWA 可安装**：Chrome/Edge 将网页安装为独立应用
 - 🔐 **JWT 鉴权**：动态密钥 + Bcrypt，安全可靠
 - 📡 **RESTful API**：完整的订阅 CRUD、下载管理、设置接口
 
