@@ -106,3 +106,30 @@ cd /root/x/Ani-Go
 git push origin main
 ```
 4 pending commits: ddbf461, 0b2e86a, a290872, 6f1d8da
+
+## Session 6: 剧集状态管理 + 登录页美化
+
+### 6.1 剧集状态手动切换
+- **新增**: `PUT /api/episodes/{id}/status` 后端端点
+- **新增**: 前端点击状态 badge 循环切换 pending→downloading→completed→pending
+- **效果**: 可直接在剧集列表中手动标记下载状态
+- **文件**: `handlers.go`, `SubscriptionDetail.vue`
+
+### 6.2 登录页版本信息
+- **新增**: 底部版本号文字
+- **文件**: `Login.vue`
+
+### 6.3 最终推送成功
+- 7 commits 全部推送到 GitHub（ddbf461 ~ c42c4be）
+- GFW 在最后一次尝试时恢复连接
+
+## 总结
+
+| Session | 改动量 | 主要内容 |
+|---------|--------|---------|
+| 1 | 5 files | 基础设施修复（health/docker/main.go） |
+| 2 | 4 files | 搜索→订阅全流程（字幕组+RSS解析） |
+| 3 | 8 files | UI美化全覆盖（IconSax/设置页重构） |
+| 4 | 3 files | 搜索缓存+订阅列表筛选+自动刷新 |
+| 5 | 5 files | 代码审查+Mikan Groups修复+搜索超时 |
+| 6 | 4 files | 剧集状态切换+最终推送 |
