@@ -720,7 +720,7 @@ func (s *Server) handleSearchAnime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(mirrorDomains) == 0 {
-		mirrorDomains = []string{"mikanime.tv", "mikanani.me"}
+		mirrorDomains = []string{"mikanime.tv", "mikanani.kas.pub", "mikanani.me"}
 	}
 
 	mikanSrc := source.NewMikanSource(mikanDomain, proxyDomain, mirrorDomains)
