@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import request from '../utils/request'
 import IconSax from '../components/IconSax.vue'
 
@@ -21,6 +21,7 @@ interface SubgroupInfo {
 }
 
 const router = useRouter()
+const route = useRoute()
 const query = ref('')
 const results = ref<TorrentItem[]>([])
 const loading = ref(false)
@@ -28,6 +29,15 @@ const error = ref('')
 const subscribed = ref<Set<string>>(new Set())
 const lastSearchTime = ref('')
 const searchDuration = ref(0)
+
+// 从查询参数自动搜索
+onMounted(() => {
+  const q = route.query.q as string
+  if (q) {
+    query.value = q
+    handleSearch()
+  }
+})
 
 // 字幕组选择弹窗
 const showGroupModal = ref(false)

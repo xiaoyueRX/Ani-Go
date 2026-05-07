@@ -742,10 +742,25 @@ func (m *MikanSource) FetchWeekSchedule(ctx context.Context) ([]WeekDayItem, err
 					bangumiID = strings.TrimPrefix(href, "/Home/Bangumi/")
 				}
 
+				// 提取更新日期
 				parent := a.ParentsFiltered(".an-info-group")
 				updateDate := ""
 				if parent.Length() > 0 {
 					updateDate = strings.TrimSpace(parent.Find(".date-text").Text())
+				}
+
+				// 提取封面图（从同级的 b-lazy span 的 data-src 属性）
+				cover := ""
+				listItem := a.ParentsFiltered("li").First()
+				if listItem.Length() > 0 {
+					src, exists := listItem.Find(".b-lazy").Attr("data-src")
+					if exists && src != "" {
+						if strings.HasPrefix(src, "/") {
+							cover = "https://" + m.domain + src
+						} else {
+							cover = src
+						}
+					}
 				}
 
 				items = append(items, core.TorrentItem{
@@ -754,6 +769,7 @@ func (m *MikanSource) FetchWeekSchedule(ctx context.Context) ([]WeekDayItem, err
 					BangumiID:  bangumiID,
 					SourceName: "Mikan",
 					InfoHash:   updateDate,
+					CoverURL:   cover,
 				})
 			})
 

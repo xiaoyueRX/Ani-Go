@@ -5,7 +5,7 @@ import request from '../utils/request'
 import IconSax from '../components/IconSax.vue'
 
 interface TorrentItem {
-  title: string; url: string; source: string; bangumi_id: string; info_hash: string
+  title: string; url: string; source: string; bangumi_id: string; info_hash: string; cover_url: string
 }
 
 interface WeekDay {
@@ -109,13 +109,26 @@ onMounted(fetchSchedule)
               {{ day.label }}
               <span class="text-xs text-base-content/40 font-normal">({{ day.items.length }} 部)</span>
             </h2>
-            <div class="flex flex-wrap gap-2">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               <div v-for="item in day.items" :key="item.bangumi_id"
-                class="badge badge-lg gap-1.5 py-3 px-3 cursor-pointer hover:bg-primary/10 transition-colors"
-                :class="subscribedIds[item.bangumi_id] ? 'badge-primary' : 'badge-ghost'"
-                @click="subscribedIds[item.bangumi_id] ? router.push(`/subscriptions?q=${encodeURIComponent(item.title)}`) : router.push(`/search?q=${encodeURIComponent(item.title)}`)">
-                <IconSax :name="subscribedIds[item.bangumi_id] ? 'check' : 'add'" :size="14" />
-                <span class="text-sm max-w-[200px] truncate">{{ item.title }}</span>
+                class="card bg-base-200/50 rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all active:scale-[0.97]"
+                @click="router.push(`/search?q=${encodeURIComponent(item.title)}`)">
+                <div class="aspect-[3/4] bg-base-300 relative">
+                  <img v-if="item.cover_url" :src="item.cover_url" :alt="item.title" class="w-full h-full object-cover" loading="lazy"
+                    @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+                  <div class="absolute inset-0 flex items-center justify-center text-base-content/20" v-if="!item.cover_url">
+                    <IconSax name="antenna" :size="32" />
+                  </div>
+                  <div class="absolute top-1 right-1">
+                    <span v-if="subscribedIds[item.bangumi_id]"
+                      class="badge badge-primary badge-xs gap-0.5">
+                      <IconSax name="check" :size="10" />
+                    </span>
+                  </div>
+                </div>
+                <div class="p-1.5">
+                  <p class="text-xs leading-tight line-clamp-2">{{ item.title }}</p>
+                </div>
               </div>
             </div>
           </div>
@@ -145,12 +158,25 @@ onMounted(fetchSchedule)
               {{ label }}
               <span class="text-xs text-base-content/40 font-normal">({{ items.length }} 部)</span>
             </h2>
-            <div class="flex flex-wrap gap-2">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               <div v-for="item in items" :key="item.bangumi_id"
-                class="badge badge-lg gap-1.5 py-3 px-3 badge-primary cursor-pointer hover:opacity-80 transition-opacity"
-                @click="router.push(`/subscriptions?q=${encodeURIComponent(item.title)}`)">
-                <IconSax name="check" :size="14" />
-                <span class="text-sm max-w-[200px] truncate">{{ item.title }}</span>
+                class="card bg-base-200/50 rounded-lg overflow-hidden cursor-pointer ring-1 ring-primary/20 hover:ring-2 hover:ring-primary/50 transition-all active:scale-[0.97]"
+                @click="router.push(`/search?q=${encodeURIComponent(item.title)}`)">
+                <div class="aspect-[3/4] bg-base-300 relative">
+                  <img v-if="item.cover_url" :src="item.cover_url" :alt="item.title" class="w-full h-full object-cover" loading="lazy"
+                    @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+                  <div class="absolute inset-0 flex items-center justify-center text-base-content/20" v-else>
+                    <IconSax name="antenna" :size="32" />
+                  </div>
+                  <div class="absolute top-1 right-1">
+                    <span class="badge badge-primary badge-xs gap-0.5">
+                      <IconSax name="check" :size="10" />
+                    </span>
+                  </div>
+                </div>
+                <div class="p-1.5">
+                  <p class="text-xs leading-tight line-clamp-2">{{ item.title }}</p>
+                </div>
               </div>
             </div>
           </div>

@@ -16,6 +16,7 @@ type TorrentItem struct {
 	PublishedAt time.Time `json:"pub_date"`
 	SourceName  string    `json:"source"`
 	BangumiID   string    `json:"bangumi_id"`
+	CoverURL    string    `json:"cover_url,omitempty"`
 }
 
 type Anime struct {
