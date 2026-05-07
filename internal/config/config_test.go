@@ -19,8 +19,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.Mikan.Domain != "mikanime.tv" {
 		t.Errorf("Mikan 域名 = %s, 期望 mikanime.tv", cfg.Mikan.Domain)
 	}
-	if len(cfg.Mikan.MirrorDomains) != 2 {
-		t.Errorf("Mikan 镜像数 = %d, 期望 2", len(cfg.Mikan.MirrorDomains))
+	if len(cfg.Mikan.MirrorDomains) != 3 {
+		t.Errorf("Mikan 镜像数 = %d, 期望 3", len(cfg.Mikan.MirrorDomains))
 	}
 	if cfg.Downloaders.Default != "qbittorrent" {
 		t.Errorf("默认下载器 = %s", cfg.Downloaders.Default)
