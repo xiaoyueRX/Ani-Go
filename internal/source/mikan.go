@@ -240,8 +240,13 @@ func (m *MikanSource) FetchRSS(ctx context.Context, url string) ([]core.TorrentI
 
 // SearchAnime 在 Mikan 上搜索番剧
 // 优先使用文本搜索，如果需要登录则回退到季节搜索+本地过滤
+// cleanSearchTitle 剥离季数/集数后缀
+func cleanSearchTitle(title string) string {
+	re := regexp.MustCompile(`(?i)\s+(第[一二三四五六七八九十\d]+[季期部篇]|S\d{1,2}|Season\s*\d+|Part\s*\d+|OVA|OAD|SP|特别篇|剧场版|合集)$`)
+	return strings.TrimSpace(re.ReplaceAllString(title, ""))
+}
+
 func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.TorrentItem, error) {
-	// 全局缓存（跨实例共享，30s TTL）
 	if cached, ok := searchCache.Load(title); ok {
 		entry := cached.(cacheEntry)
 		if time.Now().Before(entry.expiresAt) {
@@ -250,7 +255,6 @@ func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.Tor
 		searchCache.Delete(title)
 	}
 
-	// 先尝试文本搜索：URL 编码中文关键字，否则 Mikan 返回 400
 	encodedTitle := url.QueryEscape(title)
 	path := "/Home/Search?searchstr=" + encodedTitle
 	resp, err := m.tryMirrors(ctx, path)
@@ -266,7 +270,25 @@ func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.Tor
 		}
 	}
 
-	// 文本搜索失败或无结果，使用季节搜索+本地过滤
+	// 完整标题无结果，剥离季数/集数后缀模糊搜索
+	cleaned := cleanSearchTitle(title)
+	if cleaned != title {
+		encodedCleaned := url.QueryEscape(cleaned)
+		path = "/Home/Search?searchstr=" + encodedCleaned
+		resp, err = m.tryMirrors(ctx, path)
+		if err == nil {
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err == nil {
+				items := parseMikanSearchHTML(string(body), m.domain)
+				if len(items) > 0 {
+					searchCache.Store(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+					return items, nil
+				}
+			}
+		}
+	}
+
 	items, err := m.searchBySeason(ctx, title)
 	if err == nil && len(items) > 0 {
 		searchCache.Store(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
@@ -712,11 +734,26 @@ func parseMikanSearchHTML(html, domain string) []core.TorrentItem {
 		}
 		seen[key] = true
 
+		// 提取封面图
+		cover := ""
+		coverEl := sel.Find("span[data-src]")
+		if coverEl.Length() > 0 {
+			src, exists := coverEl.Attr("data-src")
+			if exists && src != "" {
+				if strings.HasPrefix(src, "/") {
+					cover = "https://" + domain + src
+				} else {
+					cover = src
+				}
+			}
+		}
+
 		items = append(items, core.TorrentItem{
 			Title:      title,
 			URL:        "https://" + domain + href,
 			SourceName: "Mikan",
 			BangumiID:  bangumiID,
+			CoverURL:   cover,
 		})
 	})
 

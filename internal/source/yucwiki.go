@@ -5,14 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 )
 
@@ -76,94 +74,59 @@ func (y *YucWikiSource) FetchWeekSchedule(ctx context.Context) ([]WeekDayItem, e
 }
 
 func parseYucWiki(html string) ([]WeekDayItem, error) {
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err != nil {
-		return nil, err
+	weekLabel := map[int]string{
+		1: "星期一", 2: "星期二", 3: "星期三", 4: "星期四",
+		5: "星期五", 6: "星期六", 7: "星期日",
 	}
 
-	// === 1. 提取详情卡片的 标题→封面 映射 ===
+	weekdays := []string{"周一", "周二", "周三", "周四", "周五", "周六", "周日"}
+
+	// 提取详情卡片: 标题→封面 映射
 	titleCover := make(map[string]string)
-	doc.Find("div.div_date").Each(func(_ int, card *goquery.Selection) {
-		// 标题在 .date_title_ 中
-		titleEl := card.Find(".date_title_")
-		title := strings.TrimSpace(titleEl.Text())
-		if title == "" {
-			return
-		}
-		// 取主标题（br 前的内容，不含副标题）
-		if idx := strings.Index(title, "\n"); idx > 0 {
-			title = title[:idx]
-		}
-		title = strings.TrimSpace(title)
-		if title == "" {
-			return
-		}
-
-		// 封面图在 img[data-src] 中（优先取 hdslb 的图）
-		cover := ""
-		card.Find("img[data-src]").Each(func(_ int, img *goquery.Selection) {
-			src, exists := img.Attr("data-src")
-			if exists && strings.Contains(src, "hdslb.com") {
-				cover = src
-			}
-		})
-
-		if cover != "" && title != "" {
-			titleCover[title] = cover
-		}
-	})
-
-	// 也提取 og:image 作为备用
-	ogImages := []string{}
-	doc.Find("meta[property='og:image']").Each(func(_ int, sel *goquery.Selection) {
-		content, exists := sel.Attr("content")
-		if exists {
-			ogImages = append(ogImages, content)
-		}
-	})
-
-	// === 2. 解析文本时间表 ===
-	weekLabel := map[string]int{
-		"周一": 1, "周二": 2, "周三": 3, "周四": 4,
-		"周五": 5, "周六": 6, "周日": 7,
-	}
-	dayOrder := []string{"周一", "周二", "周三", "周四", "周五", "周六", "周日"}
-
-	// 获取页面文本
-	pageText := doc.Find("body").Text()
-	pageText = strings.ReplaceAll(pageText, "\n", " ")
-	pageText = strings.ReplaceAll(pageText, "\t", " ")
-
-	// 按星期分割
-	var result []WeekDayItem
-	imgIdx := 0
-
-	for _, dayName := range dayOrder {
-		// 找到星期标题的位置
-		dayPattern := dayName + " "
-		idx := strings.Index(pageText, dayPattern)
-		if idx < 0 {
+	for _, card := range regexp.MustCompile(`<div class="div_date"[^>]*>(.*?)</div>\s*</div>\s*</div>`).FindAllString(html, -1) {
+		titleM := regexp.MustCompile(`date_title_[^"]*"[^>]*>(.*?)</td>`).FindStringSubmatch(card)
+		if titleM == nil {
 			continue
 		}
-		start := idx + len(dayName) + 3 // 跳过 "周一 (月) "
+		title := strings.TrimSpace(regexp.MustCompile(`<[^>]+>`).ReplaceAllString(titleM[1], ""))
+		if title == "" {
+			continue
+		}
+
+		imgM := regexp.MustCompile(`data-src="(https?://i0\.hdslb\.com[^"]+)"`).FindStringSubmatch(card)
+		if imgM != nil {
+			titleCover[title] = imgM[1]
+		}
+	}
+
+	// 解析时间表文本
+	cleanText := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(html, " ")
+	cleanText = regexp.MustCompile(`\s+`).ReplaceAllString(cleanText, " ")
+
+	var result []WeekDayItem
+
+	for i, wd := range weekdays {
+		// 找到该星期的区间
+		wdStart := strings.Index(cleanText, wd+" (")
+		if wdStart < 0 {
+			continue
+		}
 
 		// 找到下一个星期或结尾
-		end := len(pageText)
-		for _, nextDay := range dayOrder {
-			if nextDay == dayName {
-				continue
-			}
-			if ni := strings.Index(pageText[start:], nextDay+" "); ni > 0 && start+ni < end {
-				end = start + ni
+		wdEnd := len(cleanText)
+		for j := i + 1; j < len(weekdays); j++ {
+			nextIdx := strings.Index(cleanText[wdStart+1:], weekdays[j]+" (")
+			if nextIdx >= 0 {
+				wdEnd = wdStart + 1 + nextIdx
+				break
 			}
 		}
 
-		section := pageText[start:end]
+		section := cleanText[wdStart:wdEnd]
 
-		// 解析该天的每个番剧条目
-		// 格式: 21:00~4/6~标题 区域
-		re := regexp.MustCompile(`(\d+:\d+)~([\d/]+)~(.+?)(?:\s+(?:环大陆|港台|大陆|网络)\s*)`)
-		matches := re.FindAllStringSubmatch(section, -1)
+		// 提取每个番剧条目: 时间~日期~标题 区域
+		entryRe := regexp.MustCompile(`(\d+:\d+)~([\d/]+)~(.+?)(?:\s+(?:环大陆|港台|大陆|网络)\s*)`)
+		matches := entryRe.FindAllStringSubmatch(section, -1)
 
 		var items []core.TorrentItem
 		for _, m := range matches {
@@ -172,46 +135,42 @@ func parseYucWiki(html string) ([]WeekDayItem, error) {
 				continue
 			}
 
-			// 尝试匹配封面
+			// 匹配封面图
 			cover := ""
-			if c, ok := titleCover[title]; ok {
-				cover = c
-			} else {
-				// 尝试部分匹配
+			for t, c := range titleCover {
+				if strings.Contains(title, t) || strings.Contains(t, title) {
+					cover = c
+					break
+				}
+			}
+			// 部分匹配
+			if cover == "" {
 				for t, c := range titleCover {
-					if strings.Contains(title, t) || strings.Contains(t, title) {
-						cover = c
-						break
+					if len(t) > 4 && len(title) > 4 {
+						if t[:4] == title[:4] {
+							cover = c
+							break
+						}
 					}
 				}
 			}
 
-			// 备用：用 og:image 按位置匹配
-			if cover == "" && imgIdx < len(ogImages) {
-				cover = ogImages[imgIdx]
-			}
-			imgIdx++
-
 			items = append(items, core.TorrentItem{
 				Title:      title,
 				SourceName: "YucWiki",
-				InfoHash:   strings.TrimSpace(m[1]), // 放送时间
-				BangumiID:  strings.TrimSpace(m[2]), // 开始日期
+				InfoHash:   strings.TrimSpace(m[1]),
+				BangumiID:  strings.TrimSpace(m[2]),
 				CoverURL:   cover,
 			})
 		}
 
 		if len(items) > 0 {
 			result = append(result, WeekDayItem{
-				DayOfWeek: weekLabel[dayName],
-				Label:     dayName,
+				DayOfWeek: i + 1,
+				Label:     weekLabel[i+1],
 				Items:     items,
 			})
 		}
-	}
-
-	if len(result) == 0 {
-		log.Printf("⚠️ yuc.wiki 解析结果为空，请检查页面结构")
 	}
 
 	return result, nil
