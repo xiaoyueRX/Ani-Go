@@ -21,6 +21,7 @@ function logout() {
 }
 
 const nav = [
+  { path: '/schedule', label: '新番时间表', icon: 'calendar' },
   { path: '/subscriptions', label: '订阅管理', icon: 'category' },
   { path: '/search', label: '搜索番剧', icon: 'search' },
   { path: '/downloads', label: '下载队列', icon: 'download' },
@@ -50,7 +51,7 @@ const nav = [
       </div>
 
       <!-- page content -->
-      <div class="p-4 md:p-8">
+      <div class="p-3 sm:p-4 md:p-8">
         <router-view />
       </div>
     </div>

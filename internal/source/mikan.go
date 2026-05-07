@@ -673,6 +673,91 @@ func parseMikanSearchHTML(html, domain string) []core.TorrentItem {
 	return items
 }
 
+// WeekDayItem 表示某一天播放的番剧列表
+type WeekDayItem struct {
+	DayOfWeek int            `json:"day_of_week"`
+	Label     string         `json:"label"`
+	Items     []core.TorrentItem `json:"items"`
+}
+
+// FetchWeekSchedule 获取当前季度番剧按星期分组列表
+func (m *MikanSource) FetchWeekSchedule(ctx context.Context) ([]WeekDayItem, error) {
+	now := time.Now()
+	year := now.Year()
+	season := getSeason(now.Month())
+
+	path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%d", year, season)
+	resp, err := m.tryMirrors(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+
+	weekLabel := map[int]string{
+		1: "星期一", 2: "星期二", 3: "星期三", 4: "星期四",
+		5: "星期五", 6: "星期六", 7: "星期日",
+	}
+
+	var result []WeekDayItem
+	doc.Find(".sk-bangumi").Each(func(_ int, sel *goquery.Selection) {
+		dowStr, exists := sel.Attr("data-dayofweek")
+		if !exists {
+			return
+		}
+		dow, _ := strconv.Atoi(dowStr)
+
+		// 提取星期标签
+		label := weekLabel[dow]
+		if label == "" {
+			label = dowStr
+		}
+
+		var items []core.TorrentItem
+		sel.Find("a.an-text").Each(func(_ int, a *goquery.Selection) {
+			title := strings.TrimSpace(a.Text())
+			href, _ := a.Attr("href")
+			if title == "" || href == "" {
+				return
+			}
+			bangumiID := ""
+			if strings.HasPrefix(href, "/Home/Bangumi/") {
+				bangumiID = strings.TrimPrefix(href, "/Home/Bangumi/")
+			}
+
+			// 获取更新日期
+			updateDate := ""
+			parent := a.ParentsFiltered(".an-info-group")
+			if parent.Length() > 0 {
+				updateDate = strings.TrimSpace(parent.Find(".date-text").Text())
+			}
+
+			items = append(items, core.TorrentItem{
+				Title:      title,
+				URL:        "https://" + m.domain + href,
+				BangumiID:  bangumiID,
+				SourceName: "Mikan",
+				InfoHash:   updateDate,
+			})
+		})
+
+		if len(items) > 0 {
+			result = append(result, WeekDayItem{DayOfWeek: dow, Label: label, Items: items})
+		}
+	})
+
+	return result, nil
+}
+
 // parseMikanSeasonHTML 从 Mikan 季度列表 HTML 中提取番剧（不需要登录）
 // 使用 goquery 解析 HTML，参考 mikanime.tv 的实际 HTML 结构
 func parseMikanSeasonHTML(html, domain, searchText string) []core.TorrentItem {

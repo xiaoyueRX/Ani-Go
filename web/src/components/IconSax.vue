@@ -15,6 +15,7 @@ const icons: Record<string, string> = {
   'logout': 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4m7 12l5-5m0 0l-5-5m5 5H9',
   // 订阅
   'add': 'M12 5v14M5 12h14',
+  'calendar': 'M3 8h18M8 2v4m8-4v4M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
   'check': 'M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   'close': 'M18 6L6 18M6 6l12 12',
   'pause': 'M10 4H6v16h4V4zm8 0h-4v16h4V4z',

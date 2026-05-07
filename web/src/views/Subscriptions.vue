@@ -149,35 +149,36 @@ onUnmounted(() => clearInterval(refreshTimer))
     </div>
 
     <!-- 订阅卡片网格 -->
-    <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div v-else class="grid gap-3 md:gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
       <div
         v-for="sub in filteredSubs" :key="sub.id"
-        class="card bg-base-100 shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer border border-base-200 hover:border-primary/20"
+        class="card bg-base-100 shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer border border-base-200 hover:border-primary/20 active:scale-[0.98]"
         :class="{ 'opacity-60': !sub.enabled }"
         @click="router.push(`/subscriptions/${sub.id}`)"
       >
-        <div class="card-body">
+        <div class="card-body p-3 sm:p-4">
           <!-- 标题行 -->
-          <div class="flex items-start justify-between gap-2">
-            <h3 class="card-title text-base truncate" :title="sub.title_cn">{{ sub.title_cn }}</h3>
-            <div class="flex gap-1 shrink-0" @click.stop>
+          <div class="flex items-start justify-between gap-1">
+            <h3 class="card-title text-sm sm:text-base truncate" :title="sub.title_cn">{{ sub.title_cn }}</h3>
+            <div class="flex gap-0.5 shrink-0" @click.stop>
               <button
-                class="btn btn-ghost btn-xs btn-square"
+                class="btn btn-ghost btn-xs btn-square min-w-[32px] min-h-[32px]"
                 :class="{ 'text-success': sub.enabled }"
                 @click="toggleEnabled(sub)"
                 :title="sub.enabled ? '暂停' : '启用'"
               >
-                <IconSax :name="sub.enabled ? 'pause' : 'play'" ::size="16" />
+                <IconSax :name="sub.enabled ? 'pause' : 'play'" :size="16" />
               </button>
               <button
-                class="btn btn-ghost btn-xs btn-square text-error"
+                class="btn btn-ghost btn-xs btn-square min-w-[32px] min-h-[32px] text-error"
                 @click="handleDelete(sub)"
                 :disabled="deletingId === sub.id"
               >
                 <span v-if="deletingId === sub.id" class="loading loading-spinner loading-xs"></span>
-                <IconSax v-else name="trash" ::size="16" />
+                <IconSax v-else name="trash" :size="16" />
               </button>
             </div>
+          </div>
           </div>
 
           <!-- 字幕组 -->

@@ -14,7 +14,12 @@ const router = createRouter({
       children: [
         {
           path: '',
-          redirect: '/subscriptions',
+          redirect: '/schedule',
+        },
+        {
+          path: 'schedule',
+          name: 'schedule',
+          component: () => import('../views/Schedule.vue'),
         },
         {
           path: 'subscriptions',

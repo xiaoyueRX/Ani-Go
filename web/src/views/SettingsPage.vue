@@ -210,7 +210,7 @@ onMounted(fetchSettings)
     </div>
 
     <div v-else class="flex flex-col lg:flex-row gap-6">
-      <div class="flex flex-row lg:flex-col gap-1 overflow-x-auto lg:w-36 shrink-0">
+      <div class="flex flex-row lg:flex-col gap-1 overflow-x-auto lg:w-36 shrink-0 -mx-3 px-3 lg:mx-0 lg:px-0">
         <button v-for="tab in tabs" :key="tab.key"
           class="btn btn-sm gap-2 justify-start"
           :class="activeTab === tab.key ? 'btn-primary' : 'btn-ghost'"

@@ -164,11 +164,11 @@ function sourceBadge(source: string): string {
         </span>
       </div>
 
-      <div class="grid gap-3">
+      <div class="grid gap-2 sm:gap-3">
         <div v-for="(item, idx) in results" :key="idx"
-          class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow border border-base-200">
-          <div class="card-body py-3 px-4">
-            <div class="flex items-start justify-between gap-4">
+          class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow border border-base-200 active:scale-[0.99]">
+          <div class="card-body py-2.5 px-3 sm:py-3 sm:px-4">
+            <div class="flex items-start justify-between gap-2 sm:gap-4">
               <div class="flex-1 min-w-0">
                 <div class="font-medium text-sm">{{ item.title }}</div>
                 <div class="flex flex-wrap gap-2 mt-2">

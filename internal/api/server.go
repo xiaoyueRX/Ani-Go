@@ -139,6 +139,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Mikan 字幕组查询（根据 BangumiID 获取字幕组 RSS URL）
 	s.mikanSrc = source.NewMikanSource("mikanime.tv", "", nil)
 	mux.HandleFunc("GET /api/mikan/groups", s.handleMikanGroups)
+
+	// 新番时间表
+	mux.HandleFunc("GET /api/schedule", s.handleSchedule)
 }
 
 // ============================================================

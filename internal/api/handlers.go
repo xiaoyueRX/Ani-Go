@@ -777,6 +777,42 @@ func (s *Server) handleMikanGroups(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, groups)
 }
 
+// handleSchedule 获取当前季度新番时间表
+// GET /api/schedule
+func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
+	schedule, err := s.mikanSrc.FetchWeekSchedule(r.Context())
+	if err != nil || len(schedule) == 0 {
+		if err != nil {
+			log.Printf("⚠️  获取时间表失败: %v，使用空数据", err)
+		}
+		schedule = []source.WeekDayItem{}
+	}
+
+	// 同时获取订阅列表，标注已订阅的番剧
+	var subs []database.Subscription
+	database.DB.Find(&subs)
+	subscribed := make(map[string]bool)
+	for _, sub := range subs {
+		if sub.BangumiID != "" {
+			subscribed[sub.BangumiID] = true
+		}
+	}
+
+	// 给 schedule 中的每个 item 标注订阅状态
+	for _, day := range schedule {
+		for i := range day.Items {
+			if subscribed[day.Items[i].BangumiID] {
+				day.Items[i].InfoHash = "subscribed"
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"days":       schedule,
+		"subscribed": subscribed,
+	})
+}
+
 // getSettingValue 从数据库获取设置值
 func getSettingValue(key string) string {
 	var s database.Setting
