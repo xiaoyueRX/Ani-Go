@@ -101,11 +101,11 @@ onUnmounted(() => clearInterval(refreshTimer))
       <h1 class="text-2xl font-bold">订阅管理</h1>
       <div class="flex gap-2">
         <button class="btn btn-ghost btn-sm gap-1" @click="router.push('/search')">
-          <IconSax name="search" ::size="16" />
+          <IconSax name="search" :size="16" />
           搜索番剧
         </button>
         <button class="btn btn-primary btn-sm gap-1" @click="router.push('/subscriptions/new')">
-          <IconSax name="add" ::size="16" />
+          <IconSax name="add" :size="16" />
           添加订阅
         </button>
       </div>
@@ -179,18 +179,17 @@ onUnmounted(() => clearInterval(refreshTimer))
               </button>
             </div>
           </div>
-          </div>
 
           <!-- 字幕组 -->
           <div v-if="sub.subgroup_name" class="flex items-center gap-1 text-sm text-base-content/50">
-            <IconSax name="user" ::size="14" />
+            <IconSax name="user" :size="14" />
             {{ sub.subgroup_name }}
           </div>
 
           <!-- 超时告警 -->
           <div v-if="sub.stalled_episodes > 0">
             <span class="badge badge-warning badge-sm gap-1">
-              <IconSax name="warning" ::size="12" />
+              <IconSax name="warning" :size="12" />
               {{ sub.stalled_episodes }} 集超时
             </span>
           </div>
@@ -211,12 +210,12 @@ onUnmounted(() => clearInterval(refreshTimer))
           <!-- 标签行 -->
           <div class="flex flex-wrap gap-2 mt-1" @click.stop>
             <span v-if="sub.anime_type" class="badge badge-sm badge-ghost gap-1">
-              <IconSax name="document" ::size="12" />
+              <IconSax name="document" :size="12" />
               {{ sub.anime_type }}
             </span>
             <span v-if="sub.year" class="badge badge-sm badge-ghost">{{ sub.year }}</span>
             <span v-if="sub.completed" class="badge badge-success badge-sm gap-1">
-              <IconSax name="check" ::size="12" />
+              <IconSax name="check" :size="12" />
               已完结
             </span>
           </div>
@@ -227,7 +226,7 @@ onUnmounted(() => clearInterval(refreshTimer))
             class="btn btn-outline btn-xs mt-2 gap-1"
             @click.stop="triggerSupplement(sub)"
           >
-            <IconSax name="history" ::size="14" />
+            <IconSax name="history" :size="14" />
             补全历史集数
           </button>
         </div>

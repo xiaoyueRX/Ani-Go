@@ -28,29 +28,33 @@ func staticHandler() http.Handler {
 	fileServer := http.FileServer(http.FS(staticFS))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 尝试打开请求的文件
 		path := r.URL.Path
 
-		// 根路径直接返回 index.html
 		if path == "/" {
 			path = "/index.html"
 		}
 
-		f, err := staticFS.Open(path[1:]) // 去掉前导 /
+		f, err := staticFS.Open(path[1:])
 		if err != nil {
-			// 文件不存在，回退到 index.html（SPA 路由）
 			indexData, indexErr := fs.ReadFile(staticFS, "index.html")
 			if indexErr != nil {
 				http.Error(w, "内部错误", http.StatusInternalServerError)
 				return
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.Write(indexData)
 			return
 		}
 		f.Close()
 
-		// 文件存在，正常服务
+		// index.html 禁止缓存（确保新版本立即生效）
+		if path == "/index.html" || path == "/" {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		} else {
+			// 静态资源（js/css/图片）允许缓存 7 天
+			w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
+		}
 		fileServer.ServeHTTP(w, r)
 	})
 }

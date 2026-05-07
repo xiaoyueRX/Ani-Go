@@ -118,6 +118,7 @@ const tabs: TabDef[] = [
   ]}]},
   { key: 'advanced', label: '高级', icon: 'setting', sections: [
     { title: '服务设置', desc: '影响系统运行的核心参数', fields: [
+      { label: '监听地址', key: 'HOST', placeholder: '0.0.0.0', hint: '修改后需重启生效' },
       { label: '服务器端口', key: 'PORT', placeholder: '20001', hint: '修改后需重启生效' },
       { label: 'Nyaa 域名', key: 'NYAA_DOMAIN', placeholder: 'nyaa.si', hint: '留空禁用' },
       { label: 'ACG.RIP 域名', key: 'ACGRIP_DOMAIN', placeholder: 'acg.rip' },

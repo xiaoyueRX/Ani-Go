@@ -19,9 +19,15 @@ const loading = ref(true)
 const error = ref('')
 const activeTab = ref<'schedule' | 'mysub'>('schedule')
 
-const weekOrder = [1, 2, 3, 4, 5, 6, 7]
+const weekOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+const dayNames: Record<number, string> = {
+  0: '其他', 1: '星期一', 2: '星期二', 3: '星期三', 4: '星期四',
+  5: '星期五', 6: '星期六', 7: '星期日', 8: '未定',
+}
 const sortedDays = computed(() =>
-  [...weekDays.value].sort((a, b) => weekOrder.indexOf(a.day_of_week) - weekOrder.indexOf(b.day_of_week))
+  [...weekDays.value]
+    .map(d => ({ ...d, label: dayNames[d.day_of_week] || d.label }))
+    .sort((a, b) => weekOrder.indexOf(a.day_of_week) - weekOrder.indexOf(b.day_of_week))
 )
 
 // 已订阅的番剧按放送日分组

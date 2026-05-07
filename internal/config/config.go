@@ -256,6 +256,9 @@ func Load() *Config {
 	if v := os.Getenv("DB_PATH"); v != "" {
 		cfg.Database.Path = v
 	}
+	if v := os.Getenv("HOST"); v != "" {
+		cfg.Server.Host = v
+	}
 	if v := os.Getenv("PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
 			cfg.Server.Port = port
