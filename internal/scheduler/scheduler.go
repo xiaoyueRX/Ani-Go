@@ -4,7 +4,9 @@ package scheduler
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -336,7 +338,7 @@ func (s *Scheduler) pollSupplement(ctx context.Context) {
 
 	var subs []database.Subscription
 	database.DB.Where(
-		"enabled = ? AND completed = ? AND total_episodes > 0 AND current_episodes < total_episodes",
+		"enabled = ? AND completed = ? AND (total_episodes = 0 OR current_episodes < total_episodes)",
 		true, false,
 	).Find(&subs)
 
@@ -371,6 +373,15 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 		return
 	}
 
+	if sub.TotalEpisodes == 0 && s.metadataProvider != nil {
+		anime, err := s.metadataProvider.GetAnime(ctx, sub.BangumiID)
+		if err == nil && anime.TotalEps > 0 {
+			sub.TotalEpisodes = anime.TotalEps
+			database.DB.Model(&sub).Update("total_episodes", anime.TotalEps)
+			log.Printf("✅ 已更新订阅 [%s] 总集数: %d", sub.TitleCN, anime.TotalEps)
+		}
+	}
+
 	filter := buildFilter(sub)
 
 	if s.bus != nil {
@@ -390,6 +401,8 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 		log.Printf("❌ 获取历史种子失败 [%s]: %v", sub.TitleCN, err)
 		return
 	}
+
+	log.Printf("ℹ️  补全 [%s]: 获取到 %d 个历史种子", sub.TitleCN, len(items))
 
 	newCount := 0
 	for _, item := range items {
@@ -428,7 +441,7 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 		Count(&count)
 	database.DB.Model(&sub).Update("current_episodes", count)
 
-	if int(count) >= sub.TotalEpisodes {
+	if sub.TotalEpisodes > 0 && int(count) >= sub.TotalEpisodes {
 		database.DB.Model(&sub).Update("completed", true)
 		if s.bus != nil {
 			s.bus.Publish(core.Event{
@@ -468,13 +481,17 @@ func buildFilter(sub database.Subscription) core.Filter {
 // createEpisodeRecordWithParsed 使用解析好的季数和集数创建或更新 Episode 记录
 func createEpisodeRecordWithParsed(subID uint, item core.TorrentItem, season int, number float32) {
 	now := time.Now()
+	hash := item.InfoHash
+	if hash == "" {
+		hash = fmt.Sprintf("url:%x", md5.Sum([]byte(item.URL)))
+	}
 	ep := database.Episode{
 		SubscriptionID:    subID,
 		Season:            season,
 		Number:            number,
 		Title:             item.Title,
 		Status:            "downloading",
-		TorrentHash:       item.InfoHash,
+		TorrentHash:       hash,
 		TorrentURL:        item.URL,
 		OriginalName:      item.Title,
 		FileSize:          item.Size,
@@ -484,10 +501,8 @@ func createEpisodeRecordWithParsed(subID uint, item core.TorrentItem, season int
 	if item.InfoHash != "" {
 		database.DB.Where("torrent_hash = ?", item.InfoHash).FirstOrCreate(&ep)
 	} else if item.URL != "" {
-		// Use TorrentURL as identifier when Hash is missing (e.g. from RSS)
 		database.DB.Where("torrent_url = ?", item.URL).FirstOrCreate(&ep)
 	} else {
-		// Fallback
 		database.DB.Where("original_name = ?", item.Title).FirstOrCreate(&ep)
 	}
 }
@@ -562,10 +577,15 @@ func isEpisodeExists(infoHash string) bool {
 
 // recordDownload 记录已下载的种子
 func recordDownload(item core.TorrentItem) {
+	hash := item.InfoHash
+	if hash == "" {
+		hash = fmt.Sprintf("url:%x", md5.Sum([]byte(item.URL)))
+	}
 	rec := database.DownloadRecord{
-		TorrentURL: item.URL,
-		SourceName: item.SourceName,
-		AddedAt:    time.Now(),
+		TorrentHash: hash,
+		TorrentURL:  item.URL,
+		SourceName:  item.SourceName,
+		AddedAt:     time.Now(),
 	}
 	if result := database.DB.Create(&rec); result.Error != nil {
 		log.Printf("⚠️  记录下载失败: %v", result.Error)

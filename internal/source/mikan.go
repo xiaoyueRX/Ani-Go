@@ -983,21 +983,27 @@ func parseMikanDetailHTML(html string, filter core.Filter, domain string) []core
 			if anchorID == "" {
 				return
 			}
-			// 找到对应的表格区域
-			doc.Find("a[name=\"" + anchorID + "\"]").Each(func(_ int, namedAnchor *goquery.Selection) {
-				table := namedAnchor.NextAllFiltered("table").First()
+			log.Printf("🔎 尝试解析字幕组: %s, data-anchor: %s", groupName, anchorID)
+			// 找到对应的表格区域 (anchorID 形如 #1203，选择对应的 div，再找下一个 .episode-table 内的 table)
+			doc.Find(anchorID).Each(func(_ int, namedAnchor *goquery.Selection) {
+				table := namedAnchor.NextAllFiltered(".episode-table").First().Find("table").First()
 				if table.Length() == 0 {
+					log.Printf("⚠️ 找不到 table (anchorID=%s)", anchorID)
 					return
 				}
+				log.Printf("✅ 找到 table (anchorID=%s)", anchorID)
 				extractTorrentTable(table, groupName, domain, filter, &items)
 			})
 			return
 		}
 
+		log.Printf("🔎 尝试解析字幕组: %s, anchor: %s", groupName, anchorID)
 		table := anchor.NextAllFiltered("table").First()
 		if table.Length() == 0 {
+			log.Printf("⚠️ 找不到 table (anchorID=%s)", anchorID)
 			return
 		}
+		log.Printf("✅ 找到 table (anchorID=%s)", anchorID)
 		extractTorrentTable(table, groupName, domain, filter, &items)
 	})
 
@@ -1013,7 +1019,29 @@ func extractTorrentTable(table *goquery.Selection, groupName, domain string, fil
 		// 提取种子标题（第一个 a 标签的文本）
 		title := strings.TrimSpace(tr.Find("a").First().Text())
 		if title == "" {
+			log.Printf("⚠️ 标题为空，跳过 (HTML: %s)", tr.Text())
 			return
+		}
+		
+		// 关键词过滤
+		if len(filter.IncludeKeywords) > 0 {
+			matched := false
+			for _, kw := range filter.IncludeKeywords {
+				if strings.Contains(title, kw) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				log.Printf("⚠️ 标题 [%s] 不匹配包含关键词: %v", title, filter.IncludeKeywords)
+				return
+			}
+		}
+		for _, kw := range filter.ExcludeKeywords {
+			if strings.Contains(title, kw) {
+				log.Printf("⚠️ 标题 [%s] 匹配排除关键词: %s", title, kw)
+				return
+			}
 		}
 
 		// 提取种子下载链接
