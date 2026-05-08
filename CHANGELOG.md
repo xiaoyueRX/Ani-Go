@@ -48,6 +48,9 @@ Ani-Go 的更新日志。所有版本遵循 [语义化版本](https://semver.org
 
 ### 修复
 
+- **严重**: 调度器 `pollRSS` 和 `pollDownloads` 缺失 Hash 时死循环与空指针修复
+- **前端图片防盗链**: 所有外部图片（Mikan, BGM.tv, Bilibili）通过后端 `/api/proxy/image` 伪装 Referer 绕过防盗链拦截
+- **前端订阅列表空数据**: 修复 `createSubscriptionRequest` 未接收 `CoverURL` 导致列表渲染异常的 BUG，并优先使用 Mikan 源匹配
 - `/api/health` 加入 AuthMiddleware 白名单，无需 token 可访问
 - Mikan 中文搜索：`url.QueryEscape` 编码关键字解决 400 错误
 - Mikan 搜索 CSS 选择器：备选 `a[href*="/Home/Bangumi/"]` 兼容新页面

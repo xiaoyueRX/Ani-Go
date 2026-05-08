@@ -54,6 +54,7 @@ type createSubscriptionRequest struct {
 	RSSURL       string `json:"rss_url"`
 	FilterJSON   string `json:"filter_json"`
 	CustomPath   string `json:"custom_path"`
+	CoverURL     string `json:"cover_url"`
 }
 
 type updateSubscriptionRequest struct {
@@ -200,6 +201,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		RSSURL:       req.RSSURL,
 		FilterJSON:   req.FilterJSON,
 		CustomPath:   req.CustomPath,
+		CoverURL:     req.CoverURL,
 		Enabled:      true,
 	}
 
@@ -786,14 +788,27 @@ func (s *Server) handleMikanGroups(w http.ResponseWriter, r *http.Request) {
 // handleSchedule 获取当前季度新番时间表
 // GET /api/schedule
 func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
-	if s.yucSrc == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"days": []source.WeekDayItem{}, "subscribed": map[string]bool{}})
-		return
-	}
-	schedule, err := s.yucSrc.FetchWeekSchedule(r.Context())
-	if err != nil || len(schedule) == 0 {
+	var schedule []source.WeekDayItem
+	var err error
+
+	if s.mikanSrc != nil {
+		schedule, err = s.mikanSrc.FetchWeekSchedule(r.Context())
 		if err != nil {
-			log.Printf("⚠️  获取时间表失败: %v，使用空数据", err)
+			log.Printf("⚠️  Mikan 获取时间表失败: %v，尝试使用 yucwiki", err)
+		}
+	}
+
+	if (err != nil || len(schedule) == 0) && s.yucSrc != nil {
+		schedule, err = s.yucSrc.FetchWeekSchedule(r.Context())
+		if err != nil {
+			log.Printf("⚠️  Yucwiki 获取时间表失败: %v", err)
+		}
+	}
+
+	if len(schedule) == 0 {
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "获取时间表失败: " + err.Error()})
+			return
 		}
 		schedule = []source.WeekDayItem{}
 	}
@@ -806,12 +821,15 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 		if sub.BangumiID != "" {
 			subscribed[sub.BangumiID] = true
 		}
+		if sub.TitleCN != "" {
+			subscribed[sub.TitleCN] = true
+		}
 	}
 
 	// 给 schedule 中的每个 item 标注订阅状态
 	for _, day := range schedule {
 		for i := range day.Items {
-			if subscribed[day.Items[i].BangumiID] {
+			if subscribed[day.Items[i].BangumiID] || subscribed[day.Items[i].Title] {
 				day.Items[i].InfoHash = "subscribed"
 			}
 		}
@@ -864,6 +882,13 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0")
+	if strings.Contains(imageURL, "hdslb.com") || strings.Contains(imageURL, "bilibili.com") {
+		req.Header.Set("Referer", "https://www.bilibili.com")
+	} else if strings.Contains(imageURL, "lain.bgm.tv") || strings.Contains(imageURL, "bgm.tv") {
+		req.Header.Set("Referer", "https://bgm.tv/")
+	} else if strings.Contains(imageURL, "mikan") {
+		req.Header.Set("Referer", "https://mikanime.tv/")
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

@@ -1,0 +1,230 @@
+2026/05/08 08:29:51 ✅ 前端静态文件已嵌入二进制 (go:embed web/dist)
+
+    ╔═══════════════════════════════════════════════════════════════╗
+    ║                                                               ║
+    ║      ___   _   _      ____                                     ║
+    ║     / _ \ | \ | |    / ___|  ___  _ __   ___                   ║
+    ║    / /_\ \|  \| |___| |  _  / _ \| '_ \ / _ \                  ║
+    ║   / _____ \ |\  |___| |_| || (_) | | | | (_) |                 ║
+    ║  /_/     \_\_| \_|    \____| \___/|_| |_|\___/                  ║
+    ║                                                               ║
+    ║       全自动番剧追番下载管理系统                                 ║
+    ║       Auto Anime Subscription & Download Manager               ║
+    ║                                                               ║
+    ╚═══════════════════════════════════════════════════════════════╝
+  Version: dev | Port: 20001 | GitHub: github.com/xiaoyueRX/Ani-Go
+
+2026/05/08 08:29:51 配置加载完成 | 端口: 20001 | 数据库: ani-go.db
+2026/05/08 08:29:51 ✅ JWT 动态密钥已生成 (crypto/rand 32B)
+2026/05/08 08:29:51 ✅ 数据库初始化完成: ani-go.db
+━━━━━━━━━━━━━━━━━ 当前配置 ━━━━━━━━━━━━━━━━━
+⚠️  Mikan 个人 RSS: 未配置
+   设置方法: export MIKAN_RSS_URL="https://mikanani.me/RSS/MyBangumi?token=YOUR_TOKEN"
+⚠️  qBittorrent: 未配置
+   番剧目录: ./TV/番剧
+   RSS 间隔: 30m0s | 整理间隔: 2m0s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026/05/08 08:29:51 ✅ 事件总线已初始化
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/main.go:73 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "custom_regex_0" ORDER BY `settings`.`key` LIMIT 1
+2026/05/08 08:29:51 ✅ Mikan 资源源已就绪 (域名: mikanime.tv, 镜像: 3 个)
+2026/05/08 08:29:51 📡 MultiSource 已聚合 1 个资源站: [Mikan]
+2026/05/08 08:29:51 ℹ️  未启用额外资源站（仅使用 Mikan）
+2026/05/08 08:29:51 ⚠️  qBittorrent 未配置，下载功能不可用
+2026/05/08 08:29:51 ✅ 文件整理器已就绪
+2026/05/08 08:29:51 ℹ️  AI 模块未启用，核心功能不受影响
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_0" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_1" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_2" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_3" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.036ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_4" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_5" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.036ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_6" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_7" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_8" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_9" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.036ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_10" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_11" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.036ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_12" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_13" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_14" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.036ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_15" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_16" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.036ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_17" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_18" ORDER BY `settings`.`key` LIMIT 1
+
+2026/05/08 08:29:51 [31;1m/root/x/Ani-Go/internal/plugin/manager.go:71 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `settings` WHERE key = "plugin_19" ORDER BY `settings`.`key` LIMIT 1
+2026/05/08 08:29:51 ℹ️  未启用通知渠道
+2026/05/08 08:29:51 🧠 任务解析器已就绪（仅正则模式）
+2026/05/08 08:29:51 ✅ 前端静态文件处理器已挂载（非 /api/* 路径 → SPA 回退）
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Ani-Go 启动成功 — Phase 3 全栈引擎运行中
+   Web UI: http://0.0.0.0:20001
+   API: http://0.0.0.0:20001/api/login
+   默认账号: admin / admin
+   前端已嵌入二进制 (go:embed) | 单文件部署
+   定时任务: RSS 轮询 | 文件整理
+   按 Ctrl+C 退出
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026/05/08 08:29:51 🌐 HTTP 服务启动: http://0.0.0.0:20001
+2026/05/08 08:29:51    API 文档: http://0.0.0.0:20001/api/login (POST)
+2026/05/08 08:29:51 ⏰ 调度器已启动
+2026/05/08 08:29:51 ⚠️  Mikan RSS URL 未配置，跳过 RSS 轮询
+2026/05/08 08:29:53 📡 正在测速 Mikan 镜像...
+2026/05/08 08:29:54   ✅ mikanime.tv: 852ms
+2026/05/08 08:29:54 ✅ 当前镜像 mikanime.tv 表现最佳
+2026/05/08 08:30:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:30:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:30:21 🔍 开始补全扫描...
+2026/05/08 08:30:21 ✅ 补全扫描完成: 无需补全的订阅
+2026/05/08 08:30:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:30:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:30:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:30:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:31:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:31:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:31:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:31:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:31:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:31:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:32:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:32:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:32:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:32:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:32:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:32:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:33:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:33:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:33:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:33:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:33:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:33:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:34:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:34:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:34:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:34:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:34:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:34:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:35:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:35:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:35:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:35:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:35:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:35:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:35:56 ⚠️  JWT 校验失败: token signature is invalid: signature is invalid (来源: 240e:41d:4020:43b6:2820:52ff:fea7:30e3, 240e:41d:4020:43b6:2820:52ff:fea7:30e3)
+2026/05/08 08:35:56 ⚠️  JWT 校验失败: token signature is invalid: signature is invalid (来源: 240e:41d:4020:43b6:2820:52ff:fea7:30e3, 240e:41d:4020:43b6:2820:52ff:fea7:30e3)
+2026/05/08 08:36:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:36:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:36:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:36:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:36:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:36:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:37:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:37:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:37:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:37:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:37:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:37:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:38:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:38:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:38:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:38:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:38:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:38:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:39:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:39:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:39:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:39:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:39:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:39:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:40:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:40:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:40:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:40:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:40:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:40:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:41:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:41:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:41:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:41:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:41:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:41:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:42:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:42:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:42:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:42:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:42:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:42:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:43:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:43:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:43:16 ✅ 用户 admin 登录成功
+2026/05/08 08:43:17 🔐 用户 admin 通过 API 鉴权: GET /api/me
+2026/05/08 08:43:17 🔐 用户 admin 通过 API 鉴权: GET /api/schedule
+2026/05/08 08:43:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:43:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:43:40 🔐 用户 admin 通过 API 鉴权: GET /api/search
+2026/05/08 08:43:40 📡 MultiSource 已聚合 1 个资源站: [Mikan]
+2026/05/08 08:43:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:43:41 🔍 搜索完成 [婚姻剧毒]: 找到 1 个结果
+2026/05/08 08:43:45 🔐 用户 admin 通过 API 鉴权: GET /api/mikan/groups
+2026/05/08 08:43:47 🔐 用户 admin 通过 API 鉴权: POST /api/subscriptions
+2026/05/08 08:43:47 ✅ 已创建订阅: 婚姻剧毒 (ID=2)
+2026/05/08 08:43:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:43:51 🔐 用户 admin 通过 API 鉴权: GET /api/schedule
+2026/05/08 08:43:58 🔐 用户 admin 通过 API 鉴权: GET /api/search
+2026/05/08 08:43:58 📡 MultiSource 已聚合 1 个资源站: [Mikan]
+2026/05/08 08:43:59 🔍 搜索完成 [婚姻剧毒]: 找到 1 个结果
+2026/05/08 08:43:59 🔐 用户 admin 通过 API 鉴权: GET /api/schedule
+2026/05/08 08:44:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:44:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:44:21 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:44:31 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:44:41 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:44:51 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:45:01 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:45:11 ❌ 获取下载列表失败: 登录请求失败: Post "http://localhost:8081/api/v2/auth/login": dial tcp [::1]:8081: connect: connection refused
+2026/05/08 08:45:13 🔐 用户 admin 通过 API 鉴权: GET /api/search
+2026/05/08 08:45:13 📡 MultiSource 已聚合 1 个资源站: [Mikan]
+2026/05/08 08:45:14 🔐 用户 admin 通过 API 鉴权: GET /api/schedule
+2026/05/08 08:45:14 🔍 搜索完成 [尖帽子的魔法工房]: 找到 1 个结果

@@ -927,11 +927,25 @@ func parseMikanSeasonHTML(html, domain, searchText string) []core.TorrentItem {
 			bangumiID = strings.TrimPrefix(href, "/Home/Bangumi/")
 		}
 
+		cover := ""
+		listItem := sel.ParentsFiltered("li").First()
+		if listItem.Length() > 0 {
+			src, exists := listItem.Find(".b-lazy, span[data-src]").Attr("data-src")
+			if exists && src != "" {
+				if strings.HasPrefix(src, "/") {
+					cover = "https://" + domain + src
+				} else {
+					cover = src
+				}
+			}
+		}
+
 		items = append(items, core.TorrentItem{
 			Title:      title,
 			URL:        "https://" + domain + href,
 			BangumiID:  bangumiID,
 			SourceName: "Mikan",
+			CoverURL:   cover,
 		})
 	})
 	return items

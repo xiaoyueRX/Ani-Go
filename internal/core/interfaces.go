@@ -20,18 +20,18 @@ type TorrentItem struct {
 }
 
 type Anime struct {
-	ID          string
-	Provider    string
-	TitleCN     string
-	TitleEN     string
-	TitleJP     string
-	Year        int
-	Season      int
-	TotalEps    int
-	Type        string
-	Description string
-	CoverURL    string
-	SeriesID    string
+	ID          string `json:"id"`
+	Provider    string `json:"provider"`
+	TitleCN     string `json:"title_cn"`
+	TitleEN     string `json:"title_en"`
+	TitleJP     string `json:"title_jp"`
+	Year        int    `json:"year"`
+	Season      int    `json:"season"`
+	TotalEps    int    `json:"total_eps"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	CoverURL    string `json:"cover_url"`
+	SeriesID    string `json:"series_id"`
 }
 
 type Episode struct {

@@ -123,6 +123,23 @@ git push origin main
 - 7 commits 全部推送到 GitHub（ddbf461 ~ c42c4be）
 - GFW 在最后一次尝试时恢复连接
 
+## Session 7: 严重 Bug 修复与图片防盗链突破
+
+### 7.1 后端崩溃与调度器修复
+- **问题**: `pollRSS` 在缺失 InfoHash 时导致数据库关联丢失与死循环。
+- **修复**: 重构了 `pollRSS` 和 `pollDownloads` 逻辑，修复了 Mikan RSS 缺乏 Hash 时的平滑过渡；修复了空指针异常；重写了调度器逻辑。
+- **文件**: `internal/scheduler/scheduler.go`
+
+### 7.2 前端图片防盗链突破
+- **问题**: Mikan, BGM.tv, Bilibili 开启防盗链，导致所有封面图无法加载。
+- **修复**: 在前端所有组件 (`Search.vue`, `Schedule.vue`, `Subscriptions.vue`) 拦截所有外部图片，转发到后端的 `/api/proxy/image` 端点。后端端点智能伪装 `Referer` 头绕过拦截。
+- **文件**: `internal/api/handlers.go`, `web/src/views/Search.vue`, `Schedule.vue`, `Subscriptions.vue`
+
+### 7.3 订阅列表为空修复
+- **问题**: 创建订阅时 API 未接收并保存 `CoverURL`，导致前端数据解析异常渲染为空列表。
+- **修复**: 补全 `createSubscriptionRequest` 的字段。修改 `handleSchedule` 优先使用 Mikan 源获取更全的时间表数据并实现 BangumiID 准确绑定。
+- **文件**: `internal/api/handlers.go`, `internal/source/multi.go`
+
 ## 总结
 
 | Session | 改动量 | 主要内容 |

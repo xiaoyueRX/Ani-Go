@@ -92,6 +92,7 @@ func (ms *MultiSource) searchAll(ctx context.Context, search func(core.Source) (
 	allItems := make([]core.TorrentItem, 0)
 	seen := make(map[string]bool)
 
+	var lastErr error
 	for _, s := range ms.sources {
 		if !s.IsAvailable(ctx) {
 			continue
@@ -100,6 +101,7 @@ func (ms *MultiSource) searchAll(ctx context.Context, search func(core.Source) (
 		items, err := search(s)
 		if err != nil {
 			log.Printf("⚠️  资源站 [%s] 搜索失败: %v", s.Name(), err)
+			lastErr = err
 			continue
 		}
 
@@ -114,6 +116,10 @@ func (ms *MultiSource) searchAll(ctx context.Context, search func(core.Source) (
 			seen[dedupeKey] = true
 			allItems = append(allItems, item)
 		}
+	}
+
+	if len(allItems) == 0 && lastErr != nil {
+		return nil, lastErr
 	}
 
 	return allItems, nil

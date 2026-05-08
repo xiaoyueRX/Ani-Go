@@ -34,7 +34,7 @@ const sortedDays = computed(() =>
 const subscribedSchedule = computed(() => {
   const map: Record<string, TorrentItem[]> = {}
   for (const day of weekDays.value) {
-    const items = day.items.filter(i => subscribedIds.value[i.bangumi_id])
+    const items = day.items.filter(i => i.info_hash === 'subscribed' || subscribedIds.value[i.bangumi_id])
     if (items.length > 0) map[day.label] = items
   }
   return map
@@ -44,8 +44,9 @@ const subscribedCount = computed(() => Object.keys(subscribedIds.value).length)
 
 function proxyImage(url: string): string {
   if (!url) return ''
-  if (url.includes('hdslb.com') || url.includes('bilibili')) {
-    return `/api/proxy/image?url=${encodeURIComponent(url)}`
+  if (url.startsWith('http') || url.startsWith('//')) {
+    const target = url.startsWith('//') ? 'https:' + url : url
+    return `/api/proxy/image?url=${encodeURIComponent(target)}`
   }
   return url
 }
@@ -133,7 +134,7 @@ onUnmounted(() => clearInterval(refreshTimer))
                     <IconSax name="antenna" :size="32" />
                   </div>
                   <div class="absolute top-1 right-1">
-                    <span v-if="subscribedIds[item.bangumi_id]"
+                    <span v-if="item.info_hash === 'subscribed' || subscribedIds[item.bangumi_id]"
                       class="badge badge-primary badge-xs gap-0.5">
                       <IconSax name="check" :size="10" />
                     </span>

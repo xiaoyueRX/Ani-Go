@@ -6,12 +6,16 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/ai"
 	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 )
 
 // Scheduler 调度器，管理所有定时任务
@@ -52,6 +56,9 @@ func (s *Scheduler) Start(ctx context.Context) {
 
 	suppTicker := time.NewTicker(s.cfg.Scheduler.SupplementInterval)
 	defer suppTicker.Stop()
+	
+	downloadTicker := time.NewTicker(10 * time.Second)
+	defer downloadTicker.Stop()
 
 	// 启动后立即执行一次 RSS 轮询
 	go s.pollRSS(ctx)
@@ -73,6 +80,8 @@ func (s *Scheduler) Start(ctx context.Context) {
 			go s.pollOrganizer(ctx)
 		case <-suppTicker.C:
 			go s.pollSupplement(ctx)
+		case <-downloadTicker.C:
+			go s.pollDownloads(ctx)
 		}
 	}
 }
@@ -94,6 +103,12 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 
 	log.Printf("📡 获取到 %d 个种子", len(items))
 
+	var subs []database.Subscription
+	if err := database.DB.Where("enabled = ?", true).Find(&subs).Error; err != nil {
+		log.Printf("❌ 获取订阅列表失败: %v", err)
+		return
+	}
+
 	newCount := 0
 	for _, item := range items {
 		// 去重检查：通过 torrent URL 判断是否已下载
@@ -101,15 +116,49 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 			continue
 		}
 
+		// 匹配订阅
+		var matchedSub *database.Subscription
+		for _, sub := range subs {
+			// 避免空字符串匹配导致所有都命中
+			if sub.TitleCN != "" && strings.Contains(strings.ToLower(item.Title), strings.ToLower(sub.TitleCN)) {
+				matchedSub = &sub
+				break
+			}
+			if sub.TitleEN != "" && strings.Contains(strings.ToLower(item.Title), strings.ToLower(sub.TitleEN)) {
+				matchedSub = &sub
+				break
+			}
+			if sub.TitleJP != "" && strings.Contains(strings.ToLower(item.Title), strings.ToLower(sub.TitleJP)) {
+				matchedSub = &sub
+				break
+			}
+		}
+
+		savePath := s.cfg.Organizer.TVBasePath
+		if matchedSub != nil && matchedSub.CustomPath != "" {
+			savePath = matchedSub.CustomPath
+		}
+
 		// 下发下载任务
-		if err := s.downloader.Add(ctx, item, s.cfg.Organizer.TVBasePath); err != nil {
-			log.Printf("❌ 添加下载失败 [%s]: %v", item.Title, err)
-			continue
+		if s.downloader != nil {
+			if err := s.downloader.Add(ctx, item, savePath); err != nil {
+				log.Printf("❌ 添加下载失败 [%s]: %v", item.Title, err)
+				continue
+			}
+		} else {
+			log.Printf("⚠️ 未配置下载器，跳过添加任务 [%s]", item.Title)
 		}
 
 		// 记录到数据库
 		recordDownload(item)
 		newCount++
+
+		if matchedSub != nil {
+			season, epNum := parser.ExtractEpisode(item.Title)
+			createEpisodeRecordWithParsed(matchedSub.ID, item, season, epNum)
+		} else {
+			log.Printf("⚠️ 未找到匹配的订阅，跳过集数记录创建: %s", item.Title)
+		}
 
 		// 发布事件
 		if s.bus != nil {
@@ -129,6 +178,57 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 		log.Printf("✅ RSS 轮询完成: 新增 %d 个下载", newCount)
 	} else {
 		log.Println("✅ RSS 轮询完成: 无新内容")
+	}
+}
+
+// pollDownloads 查询下载状态并更新数据库
+func (s *Scheduler) pollDownloads(ctx context.Context) {
+	if s.downloader == nil {
+		return
+	}
+
+	tasks, err := s.downloader.List(ctx)
+	if err != nil {
+		log.Printf("❌ 获取下载列表失败: %v", err)
+		return
+	}
+
+	for _, task := range tasks {
+		// 判断是否下载完成：completed(完全做种), stalledUP(做种中但没流量), uploading(正在做种上传)
+		if task.Status == "completed" || task.Status == "stalledUP" || task.Status == "uploading" || task.Progress >= 1.0 {
+			// 更新数据库状态
+			var ep database.Episode
+			err := database.DB.Where("torrent_hash = ? AND status = ?", task.Hash, "downloading").First(&ep).Error
+			if err != nil {
+				// 尝试通过原始名称匹配，用于处理 RSS 等未提前获取到 Hash 的场景
+				if err2 := database.DB.Where("(torrent_hash = '' OR torrent_hash IS NULL) AND original_name = ? AND status = ?", task.Name, "downloading").First(&ep).Error; err2 == nil {
+					database.DB.Model(&ep).Update("torrent_hash", task.Hash)
+					err = nil
+				}
+			}
+
+			if err == nil && ep.ID != 0 {
+				now := time.Now()
+				database.DB.Model(&ep).Updates(map[string]interface{}{
+					"status":               "downloaded",
+					"download_finished_at": &now,
+				})
+
+				log.Printf("📥 下载完成: %s", task.Name)
+
+				if s.bus != nil {
+					s.bus.Publish(core.Event{
+						Type: core.EventDownloadCompleted,
+						Payload: map[string]any{
+							"episode_id": ep.ID,
+							"title":      ep.Title,
+							"hash":       task.Hash, // 使用 task.Hash，确保即使刚更新也能传正确值
+						},
+						Time: now,
+					})
+				}
+			}
+		}
 	}
 }
 
@@ -153,18 +253,74 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 	log.Printf("📂 发现 %d 个待整理的文件", len(episodes))
 
 	for _, ep := range episodes {
-		// TODO: 实现完整的文件整理逻辑
 		// 1. 根据 Subscription 获取番剧元数据
-		// 2. 应用路径模板
-		// 3. 创建目录、移动/硬链接文件
+		var sub database.Subscription
+		if err := database.DB.First(&sub, ep.SubscriptionID).Error; err != nil {
+			log.Printf("⚠️  整理跳过，找不到对应的订阅记录: %d", ep.SubscriptionID)
+			continue
+		}
+
+		anime := core.Anime{
+			ID:       sub.BangumiID,
+			Provider: "mikan",
+			TitleCN:  sub.TitleCN,
+			TitleEN:  sub.TitleEN,
+			TitleJP:  sub.TitleJP,
+			Year:     sub.Year,
+			Season:   sub.Season,
+			Type:     sub.AnimeType,
+		}
+
+		coreEp := core.Episode{
+			AnimeID: anime.ID,
+			Season:  ep.Season,
+			Number:  ep.Number,
+			Title:   ep.Title,
+		}
+
+		// 2. 从下载器获取真实保存路径
+		task, err := s.downloader.GetStatus(ctx, ep.TorrentHash)
+		if err != nil {
+			log.Printf("⚠️  获取种子状态失败: %v", err)
+			continue
+		}
+
+		// 这里处理任务的真实路径
+		// 因为 task.SavePath 是基础保存目录，task.Name 是文件/文件夹名
+		realPath := filepath.Join(task.SavePath, task.Name)
+		
+		// 如果是目录，我们要找到里面最大的视频文件作为真正要整理的文件
+		info, err := os.Stat(realPath)
+		if err == nil && info.IsDir() {
+			realPath = findLargestVideoFile(realPath)
+		}
+
+		if realPath == "" {
+			log.Printf("⚠️  无法在目录中找到有效的视频文件: %s", task.Name)
+			continue
+		}
+
+		// 3. 应用路径模板并整理
+		newPath, err := s.organizer.Organize(ctx, realPath, anime, coreEp)
+		if err != nil {
+			log.Printf("❌ 文件整理失败 [%s]: %v", ep.Title, err)
+			continue
+		}
+
 		// 4. 更新 Episode 记录
+		now := time.Now()
+		database.DB.Model(&ep).Updates(map[string]interface{}{
+			"status":       "organized",
+			"final_path":   newPath,
+			"organized_at": &now,
+		})
 
 		if s.bus != nil {
 			s.bus.Publish(core.Event{
 				Type: core.EventFileOrganized,
 				Payload: map[string]any{
 					"episode_id": ep.ID,
-					"final_path": ep.FinalPath,
+					"final_path": newPath,
 				},
 				Time: time.Now(),
 			})
@@ -255,7 +411,10 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 		}
 
 		recordDownload(item)
-		createEpisodeRecord(sub.ID, item)
+		
+		// 使用新增的正则工具解析季数和集数
+		season, epNum := parser.ExtractEpisode(item.Title)
+		createEpisodeRecordWithParsed(sub.ID, item, season, epNum)
 		newCount++
 	}
 
@@ -306,11 +465,35 @@ func buildFilter(sub database.Subscription) core.Filter {
 	return filter
 }
 
-// createEpisodeRecord 创建或更新 Episode 记录
-func createEpisodeRecord(subID uint, item core.TorrentItem) {
-	if item.InfoHash == "" {
-		return
+// createEpisodeRecordWithParsed 使用解析好的季数和集数创建或更新 Episode 记录
+func createEpisodeRecordWithParsed(subID uint, item core.TorrentItem, season int, number float32) {
+	now := time.Now()
+	ep := database.Episode{
+		SubscriptionID:    subID,
+		Season:            season,
+		Number:            number,
+		Title:             item.Title,
+		Status:            "downloading",
+		TorrentHash:       item.InfoHash,
+		TorrentURL:        item.URL,
+		OriginalName:      item.Title,
+		FileSize:          item.Size,
+		DownloadStartedAt: &now,
 	}
+
+	if item.InfoHash != "" {
+		database.DB.Where("torrent_hash = ?", item.InfoHash).FirstOrCreate(&ep)
+	} else if item.URL != "" {
+		// Use TorrentURL as identifier when Hash is missing (e.g. from RSS)
+		database.DB.Where("torrent_url = ?", item.URL).FirstOrCreate(&ep)
+	} else {
+		// Fallback
+		database.DB.Where("original_name = ?", item.Title).FirstOrCreate(&ep)
+	}
+}
+
+// createEpisodeRecord 创建或更新 Episode 记录 (旧版本兼容)
+func createEpisodeRecord(subID uint, item core.TorrentItem) {
 	now := time.Now()
 	ep := database.Episode{
 		SubscriptionID:    subID,
@@ -324,12 +507,40 @@ func createEpisodeRecord(subID uint, item core.TorrentItem) {
 		FileSize:          item.Size,
 		DownloadStartedAt: &now,
 	}
-	database.DB.Where("torrent_hash = ?", item.InfoHash).FirstOrCreate(&ep)
+
+	if item.InfoHash != "" {
+		database.DB.Where("torrent_hash = ?", item.InfoHash).FirstOrCreate(&ep)
+	} else if item.URL != "" {
+		database.DB.Where("torrent_url = ?", item.URL).FirstOrCreate(&ep)
+	} else {
+		database.DB.Where("original_name = ?", item.Title).FirstOrCreate(&ep)
+	}
 }
 
 // ============================================================
 // 辅助函数
 // ============================================================
+
+// findLargestVideoFile 遍历目录找出最大的视频文件
+func findLargestVideoFile(dirPath string) string {
+	var largestFile string
+	var maxSize int64
+	videoExts := map[string]bool{".mp4": true, ".mkv": true, ".avi": true, ".rmvb": true}
+
+	filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if videoExts[ext] && info.Size() > maxSize {
+			maxSize = info.Size()
+			largestFile = path
+		}
+		return nil
+	})
+
+	return largestFile
+}
 
 // isDuplicate 检查种子 URL 是否已存在下载记录
 func isDuplicate(torrentURL string) bool {

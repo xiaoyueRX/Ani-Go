@@ -13,6 +13,7 @@ interface TorrentItem {
   source: string
   bangumi_id: string
   info_hash: string
+  cover_url?: string
 }
 
 interface SubgroupInfo {
@@ -45,6 +46,15 @@ const selectedItem = ref<TorrentItem | null>(null)
 const subgroups = ref<SubgroupInfo[]>([])
 const groupLoading = ref(false)
 const groupError = ref('')
+
+function proxyImage(url: string | undefined): string {
+  if (!url) return ''
+  if (url.startsWith('http') || url.startsWith('//')) {
+    const target = url.startsWith('//') ? 'https:' + url : url
+    return `/api/proxy/image?url=${encodeURIComponent(target)}`
+  }
+  return url
+}
 
 async function handleSearch() {
   if (!query.value.trim()) return
@@ -103,6 +113,7 @@ async function subscribe(item: TorrentItem, rssUrl: string) {
       subgroup_name: rssUrl ? '' : undefined,
       rss_url: rssUrl || undefined,
       filter_json: JSON.stringify({ source_url: item.url }),
+      cover_url: item.cover_url || '',
     })
     subscribed.value.add(item.title)
     showGroupModal.value = false
@@ -179,6 +190,12 @@ function sourceBadge(source: string): string {
           class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow border border-base-200 active:scale-[0.99]">
           <div class="card-body py-2.5 px-3 sm:py-3 sm:px-4">
             <div class="flex items-start justify-between gap-2 sm:gap-4">
+              <div class="w-12 h-16 sm:w-16 sm:h-24 shrink-0 bg-base-300 rounded overflow-hidden relative">
+                <img v-if="item.cover_url" :src="proxyImage(item.cover_url)" :alt="item.title" class="w-full h-full object-cover" loading="lazy" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+                <div class="absolute inset-0 flex items-center justify-center text-base-content/20" v-else>
+                  <IconSax name="antenna" :size="24" />
+                </div>
+              </div>
               <div class="flex-1 min-w-0">
                 <div class="font-medium text-sm">{{ item.title }}</div>
                 <div class="flex flex-wrap gap-2 mt-2">

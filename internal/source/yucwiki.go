@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 )
 
@@ -78,6 +79,29 @@ func parseYucWiki(html string) ([]WeekDayItem, error) {
 		5: "星期五", 6: "星期六", 7: "星期日",
 	}
 
+	// 解析 html 获取封面图映射
+	coverMap := make(map[string]string)
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err == nil {
+		doc.Find(".date_title, .date_title_").Each(func(i int, s *goquery.Selection) {
+			// 将 <br> 替换为空格，并去除多余空白
+			s.Find("br").ReplaceWithHtml(" ")
+			title := strings.TrimSpace(s.Text())
+			// yucwiki 的标题可能有换行，清洗一下
+			title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
+			
+			parentDiv := s.ParentsFiltered("div").Parent()
+			img := parentDiv.Find("img").First()
+			src, _ := img.Attr("data-src")
+			if src == "" {
+				src, _ = img.Attr("src")
+			}
+			if title != "" && src != "" {
+				coverMap[title] = src
+			}
+		})
+	}
+
 	// 去除 HTML 标签得到纯文本
 	cleanText := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(html, " ")
 	cleanText = regexp.MustCompile(`\s+`).ReplaceAllString(cleanText, " ")
@@ -120,11 +144,16 @@ func parseYucWiki(html string) ([]WeekDayItem, error) {
 				continue
 			}
 
+			// 匹配封面图，清理标题空白
+			cleanTitle := regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
+			cover := coverMap[cleanTitle]
+
 			items = append(items, core.TorrentItem{
 				Title:      title,
 				SourceName: "YucWiki",
 				InfoHash:   strings.TrimSpace(m[1]),
 				BangumiID:  strings.TrimSpace(m[2]),
+				CoverURL:   cover,
 			})
 		}
 

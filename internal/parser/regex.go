@@ -17,6 +17,15 @@ var (
 	reResolution = regexp.MustCompile(`(?i)(\d{3,4}p|4[kK])`)
 	reEpisode    = regexp.MustCompile(`第\s*(\d+)\s*[集話话]`)
 	reYear       = regexp.MustCompile(`\((\d{4})\)|（(\d{4})）`)
+
+	// 用于解析种子文件名的集数和季数
+	reTorrentSeason = regexp.MustCompile(`(?i)(?:S|Season)\s*0*(\d+)`)
+	reTorrentEpisode = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)(?:E|EP|Episode)\s*0*(\d+(?:\.\d+)?)`), // E01, EP01, Episode 01
+		regexp.MustCompile(`(?i)\[0*(\d+(?:\.\d+)?)\]`),                 // [01], [02.5]
+		regexp.MustCompile(`(?i)-\s*0*(\d+(?:\.\d+)?)`),                 // - 01
+		regexp.MustCompile(`第\s*0*(\d+(?:\.\d+)?)\s*[集话話]`),         // 第01集
+	}
 )
 
 var cnNum = map[rune]int{
@@ -137,4 +146,25 @@ func cleanTitle(s string) string {
 	s = strings.TrimSpace(s)
 	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
 	return s
+}
+
+// ExtractEpisode 尝试从种子标题中解析出季数和集数
+func ExtractEpisode(title string) (season int, episode float32) {
+	season = 1 // 默认第一季
+
+	if m := reTorrentSeason.FindStringSubmatch(title); len(m) >= 2 {
+		if s, err := strconv.Atoi(m[1]); err == nil {
+			season = s
+		}
+	}
+
+	for _, re := range reTorrentEpisode {
+		if m := re.FindStringSubmatch(title); len(m) >= 2 {
+			if ep, err := strconv.ParseFloat(m[1], 32); err == nil {
+				return season, float32(ep)
+			}
+		}
+	}
+
+	return season, 0
 }
