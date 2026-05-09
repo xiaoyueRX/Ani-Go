@@ -2,7 +2,14 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
-import IconSax from '../components/IconSax.vue'
+import { 
+  Search, Plus, AlertTriangle, 
+  X, LayoutGrid, RefreshCw 
+} from 'lucide-vue-next'
+import SubscriptionCard from '../components/SubscriptionCard.vue'
+
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
 
 interface Subscription {
   id: number
@@ -29,7 +36,7 @@ const filterType = ref<'all' | 'active' | 'completed'>('all')
 const filteredSubs = computed(() => {
   let list = subs.value
   // 状态筛选
-  if (filterType.value === 'active') list = list.filter(s => s.enabled)
+  if (filterType.value === 'active') list = list.filter(s => s.enabled && !s.completed)
   else if (filterType.value === 'completed') list = list.filter(s => s.completed)
   // 文字搜索
   const q = filterText.value.trim().toLowerCase()
@@ -44,13 +51,15 @@ const filteredSubs = computed(() => {
 })
 
 async function fetchSubscriptions() {
-  loading.value = true
+  if (loading.value === false) {
+     // Background refresh - don't show loading spinner
+  }
   error.value = ''
   try {
     const { data } = await request.get('/subscriptions')
     subs.value = data || []
   } catch (e: any) {
-    error.value = e.response?.data?.error || '加载订阅列表失败'
+    error.value = e.response?.data?.error || t('subscriptions.error.load')
   } finally {
     loading.value = false
   }
@@ -61,18 +70,18 @@ async function toggleEnabled(sub: Subscription) {
     await request.put(`/subscriptions/${sub.id}`, { enabled: !sub.enabled })
     sub.enabled = !sub.enabled
   } catch (e: any) {
-    error.value = e.response?.data?.error || '操作失败'
+    error.value = e.response?.data?.error || t('subscriptions.error.operation')
   }
 }
 
 async function handleDelete(sub: Subscription) {
-  if (!confirm(`确定要删除「${sub.title_cn}」吗？关联的剧集记录也会一并删除。`)) return
+  if (!confirm(t('subscriptions.deleteConfirm', { title: sub.title_cn }))) return
   deletingId.value = sub.id
   try {
     await request.delete(`/subscriptions/${sub.id}`)
     subs.value = subs.value.filter(s => s.id !== sub.id)
   } catch (e: any) {
-    error.value = e.response?.data?.error || '删除失败'
+    error.value = e.response?.data?.error || t('subscriptions.error.delete')
   } finally {
     deletingId.value = null
   }
@@ -81,9 +90,9 @@ async function handleDelete(sub: Subscription) {
 async function triggerSupplement(sub: Subscription) {
   try {
     await request.post(`/subscriptions/${sub.id}/trigger-supplement`)
-    alert('补全任务已触发，将在后台执行')
+    alert(t('subscriptions.supplementTriggered'))
   } catch (e: any) {
-    error.value = e.response?.data?.error || '触发补全失败'
+    error.value = e.response?.data?.error || t('subscriptions.error.supplement')
   }
 }
 
@@ -96,141 +105,156 @@ onUnmounted(() => clearInterval(refreshTimer))
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold">订阅管理</h1>
-      <div class="flex gap-2">
-        <button class="btn btn-ghost btn-sm gap-1" @click="router.push('/search')">
-          <IconSax name="search" :size="16" />
-          搜索番剧
+  <div class="space-y-10">
+    <!-- Header Section -->
+    <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <div class="space-y-1">
+        <h1 class="text-4xl font-black tracking-tighter italic">{{ $t('subs.title') }}</h1>
+        <p class="text-xs font-bold tracking-[0.3em] uppercase opacity-30">{{ $t('subs.subtitle') }}</p>
+      </div>
+      
+      <div class="flex items-center gap-3">
+        <button 
+          class="btn btn-ghost border-base-300 rounded-2xl gap-3 px-6 hover:bg-base-200 transition-all active:scale-95" 
+          @click="router.push('/search')"
+        >
+          <Search :size="20" />
+          <span class="text-xs font-black uppercase tracking-widest">{{ $t('subs.find') }}</span>
         </button>
-        <button class="btn btn-primary btn-sm gap-1" @click="router.push('/subscriptions/new')">
-          <IconSax name="add" :size="16" />
-          添加订阅
+        <button 
+          class="btn btn-primary rounded-2xl gap-3 px-6 shadow-xl shadow-lg hover:scale-105 active:scale-95 transition-all" 
+          @click="router.push('/subscriptions/new')"
+        >
+          <Plus :size="20" />
+          <span class="text-xs font-black uppercase tracking-widest">{{ $t('subs.new') }}</span>
         </button>
       </div>
     </div>
 
-    <!-- 搜索/筛选栏 -->
-    <div class="flex flex-col sm:flex-row gap-3 mb-4">
-      <label class="input input-bordered input-sm flex items-center gap-2 flex-1">
-        <IconSax name="search" :size="16" class="opacity-50" />
-        <input v-model="filterText" type="text" class="grow" placeholder="搜索订阅名称/字幕组..." />
-      </label>
-      <div class="flex gap-1">
-        <button class="btn btn-xs" :class="filterType === 'all' ? 'btn-primary' : 'btn-ghost'" @click="filterType = 'all'">全部</button>
-        <button class="btn btn-xs" :class="filterType === 'active' ? 'btn-primary' : 'btn-ghost'" @click="filterType = 'active'">进行中</button>
-        <button class="btn btn-xs" :class="filterType === 'completed' ? 'btn-primary' : 'btn-ghost'" @click="filterType = 'completed'">已完结</button>
+    <!-- Toolbar Section -->
+    <div class="flex flex-col lg:flex-row items-center gap-4 bg-base-100 p-3 rounded-[2rem] border border-base-200/50 shadow-sm">
+      <div class="relative w-full lg:w-96 group">
+        <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-base-content/20 group-focus-within:text-primary transition-colors">
+          <Search :size="20" />
+        </div>
+        <input 
+          v-model="filterText" 
+          type="text" 
+          :placeholder="$t('subs.searchPlaceholder')" 
+          class="input w-full bg-base-200/50 border-transparent focus:border-primary/30 focus:bg-base-100 focus:ring-0 rounded-2xl pl-12 transition-all font-bold text-sm h-12"
+        />
+      </div>
+
+      <div class="flex p-1.5 bg-base-200/50 rounded-2xl gap-1 w-full lg:w-auto overflow-x-auto no-scrollbar">
+        <button 
+          v-for="t in ['all', 'active', 'completed']" 
+          :key="t"
+          class="flex-1 lg:flex-none px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap"
+          :class="filterType === t ? 'bg-base-100 text-primary shadow-sm ring-1 ring-base-300' : 'text-base-content/40 hover:text-base-content'"
+          @click="filterType = t as any"
+        >
+          {{ t === 'all' ? $t('subs.filter.all') : t === 'active' ? $t('subs.filter.active') : $t('subs.filter.completed') }}
+        </button>
+      </div>
+
+      <div class="hidden lg:flex ml-auto px-4 items-center gap-2">
+         <div class="flex -space-x-3">
+            <div v-for="i in 3" :key="i" class="w-8 h-8 rounded-full border-2 border-base-100 bg-base-200 flex items-center justify-center overflow-hidden">
+               <img :src="`https://api.dicebear.com/7.x/bottts/svg?seed=${i+10}`" class="w-full h-full object-cover" />
+            </div>
+         </div>
+         <span class="text-[10px] font-black text-base-content/20 uppercase tracking-widest ml-2">{{ $t('subs.itemsTracked', { count: subs.length }) }}</span>
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-error mb-4">
-      <IconSax name="warning" class="shrink-0" />
-      <span>{{ error }}</span>
-      <button class="btn btn-ghost btn-sm" @click="error = ''">
-        <IconSax name="close" :size="16" />
+    <!-- Status Alerts -->
+    <div v-if="error" class="alert bg-error/10 border-error/20 text-error rounded-3xl p-6 flex items-start gap-4">
+      <div class="p-3 bg-error/20 rounded-2xl">
+        <AlertTriangle :size="24" />
+      </div>
+      <div class="flex-1">
+        <h3 class="font-black text-sm uppercase tracking-widest">{{ $t('subs.error.op') }}</h3>
+        <p class="text-sm font-bold opacity-80 mt-1">{{ error }}</p>
+      </div>
+      <button class="btn btn-ghost btn-circle btn-sm" @click="error = ''">
+        <X :size="16" />
       </button>
     </div>
 
-    <div v-if="loading" class="flex justify-center py-16">
-      <span class="loading loading-spinner loading-lg"></span>
+    <!-- Main Content Section -->
+    <div v-if="loading" class="grid gap-6 grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 animate-pulse">
+      <div v-for="i in 8" :key="i" class="aspect-[3/5] bg-base-200 rounded-[2.5rem]"></div>
     </div>
 
-    <div v-else-if="filteredSubs.length === 0" class="card bg-base-100 shadow-sm border border-base-200">
-      <div class="card-body text-center py-16">
-        <IconSax name="search" :size="48" class="mx-auto text-base-content/20 mb-4" />
-        <p class="text-base-content/50 text-lg">{{ subs.length > 0 ? '未找到匹配的订阅' : '暂无订阅' }}</p>
-        <p class="text-base-content/40 text-sm mt-1">{{ subs.length > 0 ? '尝试其他关键词' : '通过搜索添加番剧订阅' }}</p>
-        <button v-if="subs.length === 0" class="btn btn-primary mt-4 gap-1" @click="router.push('/search')">
-          <IconSax name="search" :size="16" />
-          搜索番剧
-        </button>
+    <div v-else-if="filteredSubs.length === 0" class="flex flex-col items-center justify-center py-32 text-center bg-base-100/30 rounded-[3rem] border-2 border-dashed border-base-200">
+      <div class="w-32 h-32 bg-base-200/50 rounded-full flex items-center justify-center mb-8 rotate-12">
+        <LayoutGrid :size="64" class="opacity-10" />
       </div>
-    </div>
-
-    <!-- 订阅卡片网格 -->
-    <div v-else class="grid gap-3 md:gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
-      <div
-        v-for="sub in filteredSubs" :key="sub.id"
-        class="card bg-base-100 shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer border border-base-200 hover:border-primary/20 active:scale-[0.98]"
-        :class="{ 'opacity-60': !sub.enabled }"
-        @click="router.push(`/subscriptions/${sub.id}`)"
+      <h3 class="text-2xl font-black tracking-tight mb-2">
+        {{ subs.length > 0 ? $t('subs.empty.noResults') : $t('subs.empty.noSubs') }}
+      </h3>
+      <p class="text-sm font-bold text-base-content/40 max-w-xs mx-auto mb-10 leading-relaxed">
+        {{ subs.length > 0 ? $t('subs.empty.noResultsDesc') : $t('subs.empty.noSubsDesc') }}
+      </p>
+      <button 
+        v-if="subs.length === 0" 
+        class="btn btn-primary btn-lg rounded-3xl px-12 shadow-2xl shadow-lg gap-4" 
+        @click="router.push('/search')"
       >
-        <div class="card-body p-3 sm:p-4">
-          <!-- 标题行 -->
-          <div class="flex items-start justify-between gap-1">
-            <h3 class="card-title text-sm sm:text-base truncate" :title="sub.title_cn">{{ sub.title_cn }}</h3>
-            <div class="flex gap-0.5 shrink-0" @click.stop>
-              <button
-                class="btn btn-ghost btn-xs btn-square min-w-[32px] min-h-[32px]"
-                :class="{ 'text-success': sub.enabled }"
-                @click="toggleEnabled(sub)"
-                :title="sub.enabled ? '暂停' : '启用'"
-              >
-                <IconSax :name="sub.enabled ? 'pause' : 'play'" :size="16" />
-              </button>
-              <button
-                class="btn btn-ghost btn-xs btn-square min-w-[32px] min-h-[32px] text-error"
-                @click="handleDelete(sub)"
-                :disabled="deletingId === sub.id"
-              >
-                <span v-if="deletingId === sub.id" class="loading loading-spinner loading-xs"></span>
-                <IconSax v-else name="trash" :size="16" />
-              </button>
-            </div>
-          </div>
+        <Search :size="24" />
+        <span class="font-black uppercase tracking-widest">{{ $t('subs.empty.discover') }}</span>
+      </button>
+      <button 
+        v-else 
+        class="btn btn-ghost btn-md rounded-2xl px-10 gap-4 border-base-300" 
+        @click="filterText = ''; filterType = 'all'"
+      >
+        <RefreshCw :size="20" />
+        <span class="font-black uppercase tracking-widest text-xs">{{ $t('subs.empty.clear') }}</span>
+      </button>
+    </div>
 
-          <!-- 字幕组 -->
-          <div v-if="sub.subgroup_name" class="flex items-center gap-1 text-sm text-base-content/50">
-            <IconSax name="user" :size="14" />
-            {{ sub.subgroup_name }}
-          </div>
-
-          <!-- 超时告警 -->
-          <div v-if="sub.stalled_episodes > 0">
-            <span class="badge badge-warning badge-sm gap-1">
-              <IconSax name="warning" :size="12" />
-              {{ sub.stalled_episodes }} 集超时
-            </span>
-          </div>
-
-          <!-- 进度条 -->
-          <div v-if="sub.total_episodes > 0" class="mt-1">
-            <div class="flex justify-between text-xs text-base-content/50 mb-1">
-              <span>进度</span>
-              <span>{{ sub.current_episodes }} / {{ sub.total_episodes }}</span>
-            </div>
-            <progress
-              class="progress progress-primary w-full h-2"
-              :value="sub.current_episodes"
-              :max="sub.total_episodes"
-            ></progress>
-          </div>
-
-          <!-- 标签行 -->
-          <div class="flex flex-wrap gap-2 mt-1" @click.stop>
-            <span v-if="sub.anime_type" class="badge badge-sm badge-ghost gap-1">
-              <IconSax name="document" :size="12" />
-              {{ sub.anime_type }}
-            </span>
-            <span v-if="sub.year" class="badge badge-sm badge-ghost">{{ sub.year }}</span>
-            <span v-if="sub.completed" class="badge badge-success badge-sm gap-1">
-              <IconSax name="check" :size="12" />
-              已完结
-            </span>
-          </div>
-
-          <!-- 补全按钮 -->
-          <button
-            v-if="sub.enabled"
-            class="btn btn-outline btn-xs mt-2 gap-1"
-            @click.stop="triggerSupplement(sub)"
-          >
-            <IconSax name="history" :size="14" />
-            补全历史集数
-          </button>
-        </div>
-      </div>
+    <!-- Subscription Grid -->
+    <div v-else>
+      <TransitionGroup
+        name="list"
+        tag="div"
+        class="grid gap-6 sm:gap-8 grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"
+      >
+        <SubscriptionCard
+          v-for="sub in filteredSubs"
+          :key="sub.id"
+          :sub="sub"
+          :deleting="deletingId === sub.id"
+          @click="router.push(`/subscriptions/${sub.id}`)"
+          @toggle="toggleEnabled(sub)"
+          @delete="handleDelete(sub)"
+          @supplement="triggerSupplement(sub)"
+        />
+      </TransitionGroup>
     </div>
   </div>
 </template>
+
+<style scoped>
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateY(40px) scale(0.9);
+}
+.list-move {
+  transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+</style>

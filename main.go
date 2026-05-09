@@ -253,7 +253,9 @@ func main() {
 	}
 
 	// 启动 HTTP API 服务（含 JWT 鉴权中间件 + 嵌入式前端静态文件）
-	_ = api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, dl, sched.TriggerSupplement, pluginMgr, taskParser, staticHandler())
+	if err := api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, dl, sched.TriggerSupplement, pluginMgr, taskParser, mikanSource, multiSource, staticHandler()); err != nil {
+		log.Fatalf("❌ HTTP API 服务启动失败: %v", err)
+	}
 
 	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("✅ Ani-Go 启动成功 — Phase 3 全栈引擎运行中")
@@ -381,6 +383,16 @@ func setupNotifier(cfg *config.Config) *notifier.MultiNotifier {
 	}
 	if cfg.Notifier.WhatsAppPhoneID != "" && cfg.Notifier.WhatsAppToken != "" && cfg.Notifier.WhatsAppTo != "" {
 		mn.Add(notifier.NewWhatsAppNotifier(cfg.Notifier.WhatsAppPhoneID, cfg.Notifier.WhatsAppToken, cfg.Notifier.WhatsAppTo))
+	}
+	
+	// Add Signal
+	if os.Getenv("SIGNAL_API_URL") != "" {
+		mn.Add(notifier.NewSignalNotifier())
+	}
+	
+	// Add WeChat Official Account
+	if os.Getenv("WECHAT_APP_ID") != "" {
+		mn.Add(notifier.NewWeChatNotifier())
 	}
 
 	return mn

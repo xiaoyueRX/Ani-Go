@@ -1,0 +1,23 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"github.com/xiaoyueRX/Ani-Go/internal/source"
+)
+
+func main() {
+	y := source.NewYucWikiSource()
+	items, err := y.FetchWeekSchedule(context.Background())
+	if err != nil {
+		fmt.Println("Err:", err)
+		return
+	}
+	for _, d := range items {
+		fmt.Println("Day:", d.Label)
+		for _, item := range d.Items {
+			fmt.Printf("  Title: %s | ID: %s | Cover: %s\n", item.Title, item.BangumiID, item.CoverURL)
+		}
+		break // just one day
+	}
+}

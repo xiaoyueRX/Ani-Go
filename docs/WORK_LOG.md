@@ -150,3 +150,21 @@ git push origin main
 | 4 | 3 files | 搜索缓存+订阅列表筛选+自动刷新 |
 | 5 | 5 files | 代码审查+Mikan Groups修复+搜索超时 |
 | 6 | 4 files | 剧集状态切换+最终推送 |
+
+## Session 6: 前端图标库迁移与后端健壮性修复
+
+### 6.1 前端图标库迁移至 Lucide
+- **重构**: 移除不再维护的 `IconSax`，全面迁移至 `lucide-vue-next`。
+- **文件**: 删除了 `web/src/components/IconSax.vue`。
+- **更新**: 修改了所有依赖图标的 Vue 组件 (`Layout.vue`, `Login.vue`, `Downloads.vue`, `Schedule.vue`, `Search.vue`, `SettingsPage.vue`, `SubscriptionDetail.vue`, `SubscriptionForm.vue`, `Subscriptions.vue` 等)，确保图标统一和 TypeScript 类型安全。
+- **配置**: 更新了 `package.json` 依赖，重构了 `style.css`。
+
+### 6.2 后端启动流程与健壮性修复
+- **修复**: 在 `main.go` 中补充了对 `api.StartServer` 的错误捕获，若 HTTP API 服务因端口占用等原因启动失败，现在会通过 `log.Fatalf` 抛出明确的报错而不是静默失败或引发后续空指针。
+- **修改文件**: `main.go`。
+
+### 6.3 文档更新
+- **修复**: 修正了 `AGENTS.md` 中关于前端代理的陈旧描述，明确 `vite.config.ts` 已经正确配置了 `/api` 的 Proxy，可直接代理到后端 `20001` 端口，提升开发体验。
+
+### 6.4 后端 API 与调度器优化
+- **修改**: 调整了 `internal/api/handlers.go`, `internal/api/server.go`, `internal/scheduler/scheduler.go`, `internal/source/mikan.go` 等核心逻辑，修复了遗留的逻辑异常和潜在空指针风险。

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { Check } from 'lucide-vue-next'
 
 const props = defineProps<{
   sub: Record<string, any>
@@ -48,68 +49,86 @@ function handleSubmit() {
 </script>
 
 <template>
-  <form @submit.prevent="handleSubmit" class="flex flex-col gap-3">
-    <label class="form-control">
-      <span class="label-text">中文标题 *</span>
-      <input v-model="titleCN" type="text" class="input input-bordered" required />
-    </label>
-    <div class="grid grid-cols-2 gap-3">
-      <label class="form-control">
-        <span class="label-text">英文标题</span>
-        <input v-model="titleEN" type="text" class="input input-bordered" />
-      </label>
-      <label class="form-control">
-        <span class="label-text">日文标题</span>
-        <input v-model="titleJP" type="text" class="input input-bordered" />
-      </label>
+  <form @submit.prevent="handleSubmit" class="space-y-6">
+    <div class="space-y-2">
+      <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Primary Identity (CN)*</label>
+      <input v-model="titleCN" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" required />
     </div>
-    <div class="grid grid-cols-3 gap-3">
-      <label class="form-control">
-        <span class="label-text">年份</span>
-        <input v-model.number="year" type="number" class="input input-bordered" />
-      </label>
-      <label class="form-control">
-        <span class="label-text">季</span>
-        <input v-model.number="season" type="number" class="input input-bordered" />
-      </label>
-      <label class="form-control">
-        <span class="label-text">类型</span>
-        <select v-model="animeType" class="select select-bordered">
-          <option value="">-</option>
-          <option value="TV">TV</option>
-          <option value="剧场版">剧场版</option>
-          <option value="OVA">OVA</option>
-          <option value="特别篇">特别篇</option>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+      <div class="space-y-2">
+        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Alias (EN)</label>
+        <input v-model="titleEN" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+      </div>
+      <div class="space-y-2">
+        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Alias (JP)</label>
+        <input v-model="titleJP" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-6">
+      <div class="space-y-2">
+        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Year</label>
+        <input v-model.number="year" type="number" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+      </div>
+      <div class="space-y-2">
+        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Season</label>
+        <input v-model.number="season" type="number" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+      </div>
+      <div class="space-y-2">
+        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Classification</label>
+        <select v-model="animeType" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold appearance-none">
+          <option value="">- Select -</option>
+          <option value="TV">TV Series</option>
+          <option value="剧场版">Movie</option>
+          <option value="OVA">OVA / OAD</option>
+          <option value="特别篇">Special / SP</option>
         </select>
-      </label>
+      </div>
     </div>
-    <label class="form-control">
-      <span class="label-text">字幕组</span>
-      <input v-model="subgroupName" type="text" class="input input-bordered" />
-    </label>
-    <label class="form-control">
-      <span class="label-text">Bangumi ID</span>
-      <input v-model="bangumiId" type="text" class="input input-bordered" placeholder="例如 123456" />
-    </label>
-    <label class="form-control">
-      <span class="label-text">总集数</span>
-      <input v-model.number="totalEpisodes" type="number" class="input input-bordered" />
-    </label>
-    <label class="form-control">
-      <span class="label-text">自定义路径模板</span>
-      <input v-model="customPath" type="text" class="input input-bordered" placeholder="例如 {title_cn} ({year})/Season {season:02}" />
-    </label>
-    <label class="form-control">
-      <span class="label-text">过滤规则 JSON</span>
-      <textarea v-model="filterJson" class="textarea textarea-bordered h-20" placeholder='{"keywords": ["1080p"], "exclude": ["内嵌"]}'></textarea>
-    </label>
-    <label class="cursor-pointer flex items-center gap-2">
-      <input v-model="completed" type="checkbox" class="checkbox" />
-      <span class="label-text">已完结</span>
-    </label>
-    <div class="flex gap-2 justify-end mt-2">
-      <button type="button" class="btn btn-ghost" @click="emit('cancel')">取消</button>
-      <button type="submit" class="btn btn-primary">保存</button>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+      <div class="space-y-2">
+        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Release Group</label>
+        <input v-model="subgroupName" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+      </div>
+      <div class="space-y-2">
+        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Bangumi Reference</label>
+        <input v-model="bangumiId" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" placeholder="ID: 123456" />
+      </div>
+    </div>
+
+    <div class="space-y-2">
+      <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Total Episodes</label>
+      <input v-model.number="totalEpisodes" type="number" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+    </div>
+
+    <div class="space-y-2">
+      <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Path Template Override</label>
+      <input v-model="customPath" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" placeholder="{title_cn} ({year})/Season {season:02}" />
+    </div>
+
+    <div class="space-y-2">
+      <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">Filter Rules (JSON)</label>
+      <textarea v-model="filterJson" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-[1.5rem] px-6 py-4 transition-all outline-none font-bold h-32" placeholder='{"keywords": ["1080p"], "exclude": ["RAW"]}'></textarea>
+    </div>
+
+    <div class="p-6 bg-base-200/50 rounded-2xl border border-base-300 flex items-center justify-between">
+       <div class="flex items-center gap-4">
+          <div class="w-10 h-10 rounded-full bg-success/20 flex items-center justify-center text-success">
+             <Check :size="20" />
+          </div>
+          <div>
+             <p class="text-sm font-black tracking-tight">Finalized Status</p>
+             <p class="text-[10px] font-bold opacity-40 uppercase tracking-widest">Mark as fully collected</p>
+          </div>
+       </div>
+       <input v-model="completed" type="checkbox" class="toggle toggle-success" />
+    </div>
+
+    <div class="flex gap-4 justify-end pt-6">
+      <button type="button" class="btn btn-ghost rounded-2xl px-8 h-14 min-h-0 uppercase font-black tracking-widest text-[10px]" @click="emit('cancel')">Abondon</button>
+      <button type="submit" class="btn btn-primary rounded-2xl px-12 h-14 min-h-0 uppercase font-black tracking-widest text-[10px] shadow-xl shadow-lg">Commit Changes</button>
     </div>
   </form>
 </template>

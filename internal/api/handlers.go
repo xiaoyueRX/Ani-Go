@@ -205,26 +205,32 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		Enabled:      true,
 	}
 
+	if err := database.DB.Create(&sub).Error; err != nil {
+		log.Printf("❌ 创建订阅失败: %v", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建订阅失败"})
+		return
+	}
+
 	// 如果有 BangumiID 但前端未提供 RSS URL，后台异步解析 Mikan 字幕组 RSS
 	if sub.BangumiID != "" && sub.RSSURL == "" && s.mikanSrc != nil {
-		go func(bangumiID string) {
+		go func(subID uint, bangumiID string) {
 			rssURL, err := s.mikanSrc.ResolveFirstRSSURL(context.Background(), bangumiID)
 			if err != nil {
 				log.Printf("⚠️  自动解析 RSS URL 失败 [%s]: %v (可手动设置)", bangumiID, err)
 				return
 			}
-			if err := database.DB.Model(&database.Subscription{}).Where("id = ?", sub.ID).Update("rss_url", rssURL).Error; err != nil {
+			if err := database.DB.Model(&database.Subscription{}).Where("id = ?", subID).Update("rss_url", rssURL).Error; err != nil {
 				log.Printf("⚠️  保存 RSS URL 失败: %v", err)
 			} else {
 				log.Printf("✅ 已自动解析 RSS URL [%s]: %s", bangumiID, rssURL)
 			}
-		}(sub.BangumiID)
+		}(sub.ID, sub.BangumiID)
 	}
 
-	if err := database.DB.Create(&sub).Error; err != nil {
-		log.Printf("❌ 创建订阅失败: %v", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建订阅失败"})
-		return
+	if s.triggerSupplement != nil {
+		go func(subID uint) {
+			_ = s.triggerSupplement(context.Background(), subID)
+		}(sub.ID)
 	}
 
 	log.Printf("✅ 已创建订阅: %s (ID=%d)", sub.TitleCN, sub.ID)
@@ -703,46 +709,12 @@ func (s *Server) handleSearchAnime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 从数据库获取搜索源配置
-	var sources []core.Source
-	mikanDomain := "mikanime.tv" // 默认使用国内可访问的域名
-	var proxyDomain string
-	var mirrorDomains []string
-
-	if v := getSettingValue("MIKAN_DOMAIN"); v != "" {
-		mikanDomain = v
-	}
-	if v := getSettingValue("MIKAN_PROXY_DOMAIN"); v != "" {
-		proxyDomain = v
-	}
-	if v := getSettingValue("MIKAN_MIRROR_DOMAINS"); v != "" {
-		for _, d := range strings.Split(v, ",") {
-			if d = strings.TrimSpace(d); d != "" {
-				mirrorDomains = append(mirrorDomains, d)
-			}
-		}
-	}
-	if len(mirrorDomains) == 0 {
-		mirrorDomains = []string{"mikanime.tv", "mikanani.kas.pub", "mikanani.me"}
+	if s.multiSrc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "搜索服务未配置"})
+		return
 	}
 
-	mikanSrc := source.NewMikanSource(mikanDomain, proxyDomain, mirrorDomains)
-	sources = append(sources, mikanSrc)
-
-	// 额外资源站
-	if v := getSettingValue("NYAA_DOMAIN"); v != "" {
-		sources = append(sources, source.NewNyaaSource(v))
-	}
-	if v := getSettingValue("ACGRIP_DOMAIN"); v != "" {
-		sources = append(sources, source.NewACGRIPSource(v))
-	}
-	if v := getSettingValue("ANIMETOSHO_DOMAIN"); v != "" {
-		sources = append(sources, source.NewAnimeToshoSource(v))
-	}
-
-	multiSrc := source.NewMultiSource(sources...)
-
-	items, err := multiSrc.SearchAnime(r.Context(), q)
+	items, err := s.multiSrc.SearchAnime(r.Context(), q)
 	if err != nil {
 		log.Printf("⚠️  搜索失败 [%s]: %v", q, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "搜索失败: " + err.Error()})

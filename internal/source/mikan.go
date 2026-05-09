@@ -592,8 +592,8 @@ func ParseMikanTitle(rawTitle string) TitleInfo {
 			}
 		}
 
-		// 检测 .5 集数
-		if strings.Contains(m[0], ".5") {
+		// 检测 .5 集数 (仅当当前集数为整数时才加 0.5，避免从自定义正则或模式匹配中双重计算)
+		if strings.Contains(m[0], ".5") && info.Episode == float32(int(info.Episode)) {
 			info.Episode += 0.5
 		}
 
@@ -984,9 +984,16 @@ func parseMikanDetailHTML(html string, filter core.Filter, domain string) []core
 				return
 			}
 			log.Printf("🔎 尝试解析字幕组: %s, data-anchor: %s", groupName, anchorID)
-			// 找到对应的表格区域 (anchorID 形如 #1203，选择对应的 div，再找下一个 .episode-table 内的 table)
-			doc.Find(anchorID).Each(func(_ int, namedAnchor *goquery.Selection) {
+			selector := anchorID
+			if !strings.HasPrefix(selector, "#") {
+				selector = "a[name=\"" + anchorID + "\"]"
+			}
+			// 找到对应的表格区域
+			doc.Find(selector).Each(func(_ int, namedAnchor *goquery.Selection) {
 				table := namedAnchor.NextAllFiltered(".episode-table").First().Find("table").First()
+				if table.Length() == 0 {
+					table = namedAnchor.NextAllFiltered("table").First()
+				}
 				if table.Length() == 0 {
 					log.Printf("⚠️ 找不到 table (anchorID=%s)", anchorID)
 					return
@@ -1055,25 +1062,6 @@ func extractTorrentTable(table *goquery.Selection, groupName, domain string, fil
 				torrentURL = href
 			}
 		})
-
-		// 关键词过滤
-		if len(filter.IncludeKeywords) > 0 {
-			matched := false
-			for _, kw := range filter.IncludeKeywords {
-				if strings.Contains(title, kw) {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				return
-			}
-		}
-		for _, kw := range filter.ExcludeKeywords {
-			if strings.Contains(title, kw) {
-				return
-			}
-		}
 
 		// 提取文件大小（第三个 td）
 		sizeText := strings.TrimSpace(tr.Find("td").Eq(2).Text())

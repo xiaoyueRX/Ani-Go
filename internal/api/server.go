@@ -24,17 +24,20 @@ type Server struct {
 	pluginManager     *plugin.Manager
 	taskParser        core.TaskParser
 	mikanSrc          *source.MikanSource  // Mikan 资源源，用于字幕组查询
+	multiSrc          core.Source          // 聚合资源源，用于搜索
 	yucSrc            *source.YucWikiSource // yuc.wiki 资源源，用于时间表
 }
 
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
 // staticHandler 为嵌入式前端静态文件服务，若为 nil 则仅提供 API 服务
-func StartServer(ctx context.Context, host string, port int, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error, pluginMgr *plugin.Manager, parser core.TaskParser, staticHandler http.Handler) *http.Server {
+func StartServer(ctx context.Context, host string, port int, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error, pluginMgr *plugin.Manager, parser core.TaskParser, mikan *source.MikanSource, multi core.Source, staticHandler http.Handler) *http.Server {
 	s := &Server{
 		downloader:        dl,
 		triggerSupplement: triggerSupp,
 		pluginManager:     pluginMgr,
 		taskParser:        parser,
+		mikanSrc:          mikan,
+		multiSrc:          multi,
 	}
 
 	mux := http.NewServeMux()
@@ -169,7 +172,6 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/search", s.handleSearchAnime)
 
 	// Mikan 字幕组查询（根据 BangumiID 获取字幕组 RSS URL）
-	s.mikanSrc = source.NewMikanSource("mikanime.tv", "", nil)
 	mux.HandleFunc("GET /api/mikan/groups", s.handleMikanGroups)
 
 	// 新番时间表（使用 yuc.wiki 数据源）

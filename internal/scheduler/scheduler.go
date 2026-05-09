@@ -118,21 +118,30 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 			continue
 		}
 
-		// 匹配订阅
+		// 匹配订阅：寻找匹配长度最长的订阅标题（解决 Fate vs Fate/Zero 匹配歧义）
 		var matchedSub *database.Subscription
-		for _, sub := range subs {
-			// 避免空字符串匹配导致所有都命中
+		var maxMatchLen int
+		for i := range subs {
+			sub := &subs[i]
+			currentMatchLen := 0
+			
 			if sub.TitleCN != "" && strings.Contains(strings.ToLower(item.Title), strings.ToLower(sub.TitleCN)) {
-				matchedSub = &sub
-				break
+				currentMatchLen = len(sub.TitleCN)
 			}
 			if sub.TitleEN != "" && strings.Contains(strings.ToLower(item.Title), strings.ToLower(sub.TitleEN)) {
-				matchedSub = &sub
-				break
+				if len(sub.TitleEN) > currentMatchLen {
+					currentMatchLen = len(sub.TitleEN)
+				}
 			}
 			if sub.TitleJP != "" && strings.Contains(strings.ToLower(item.Title), strings.ToLower(sub.TitleJP)) {
-				matchedSub = &sub
-				break
+				if len(sub.TitleJP) > currentMatchLen {
+					currentMatchLen = len(sub.TitleJP)
+				}
+			}
+
+			if currentMatchLen > maxMatchLen {
+				matchedSub = sub
+				maxMatchLen = currentMatchLen
 			}
 		}
 

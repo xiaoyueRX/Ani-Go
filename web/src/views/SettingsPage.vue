@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
-import IconSax from '../components/IconSax.vue'
+import { 
+  Check, Antenna, Download, 
+  Folder, Bell, Cpu, 
+  Settings, Timer, Lock, 
+  FileText, Eye, EyeOff 
+} from 'lucide-vue-next'
 
+const { t } = useI18n()
 const settings = ref<Record<string, string>>({})
 const loading = ref(true)
 const error = ref('')
@@ -22,7 +29,7 @@ async function testMirrors() {
     const { data } = await request.post('/mikan/test-mirrors', {}, { timeout: 15000 })
     mirrorResults.value = data || []
   } catch (e: any) {
-    error.value = '测速失败'
+    error.value = t('settings.error.testFailed')
   } finally {
     mirrorTesting.value = false
   }
@@ -33,9 +40,8 @@ async function selectMirror(domain: string) {
     await request.post('/mikan/select-mirror', { domain })
     setVal('MIKAN_DOMAIN', domain)
     selectedMirror.value = domain
-    alert(`已切换到: ${domain}`)
   } catch (e: any) {
-    error.value = '切换失败'
+    error.value = t('settings.error.switchFailed')
   }
 }
 
@@ -44,126 +50,88 @@ interface FieldDef {
 }
 
 interface TabDef {
-  key: string; label: string; icon: string
+  key: string; label: string; icon: any
   sections: { title: string; desc: string; fields: FieldDef[] }[]
 }
 
-const tabs: TabDef[] = [
-  { key: 'mikan', label: 'Mikan', icon: 'antenna', sections: [{ title: '基础配置', desc: 'Mikan 资源站连接信息', fields: [
-    { label: 'Mikan 个人 RSS 地址', key: 'MIKAN_RSS_URL', placeholder: 'https://mikanani.me/RSS/MyBangumi?token=...', hint: '在 Mikan 网站登录后 → 头像 → RSS订阅 → 复制链接' },
-    { label: 'Mikan 主域名', key: 'MIKAN_DOMAIN', placeholder: 'mikanani.me' },
-    { label: 'Mikan 代理域名', key: 'MIKAN_PROXY_DOMAIN', placeholder: 'GFW 环境代理地址', hint: '国内网络无法直连时使用' },
-    { label: 'Mikan 镜像域名', key: 'MIKAN_MIRROR_DOMAINS', placeholder: 'mikanani.me,mikanime.tv', hint: '逗号分隔，自动回退' },
+const tabs = computed<TabDef[]>(() => [
+  { key: 'mikan', label: t('settings.tabs.mikan'), icon: Antenna, sections: [{ title: t('settings.sections.mikan'), desc: t('settings.sections.mikanDesc'), fields: [
+    { label: t('settings.fields.rss'), key: 'MIKAN_RSS_URL', placeholder: 'https://mikanani.me/RSS/MyBangumi?token=***' },
+    { label: t('settings.fields.domain'), key: 'MIKAN_DOMAIN', placeholder: 'mikanani.me' },
+    { label: t('settings.fields.proxy'), key: 'MIKAN_PROXY_DOMAIN', placeholder: 'Optional proxy address' },
+    { label: t('settings.fields.mirrors'), key: 'MIKAN_MIRROR_DOMAINS', placeholder: 'mikanani.me,mikanime.tv' },
   ]}]},
-  { key: 'downloader', label: '下载器', icon: 'download', sections: [
-    { title: '全局设置', desc: '默认下载引擎', fields: [
-      { label: '默认下载器', key: 'DEFAULT_DOWNLOADER', placeholder: 'qbittorrent', hint: 'qbittorrent / transmission / aria2' },
+  { key: 'downloader', label: t('settings.tabs.downloader'), icon: Download, sections: [
+    { title: t('settings.sections.engine'), desc: t('settings.sections.engineDesc'), fields: [
+      { label: t('settings.fields.downloader'), key: 'DEFAULT_DOWNLOADER', placeholder: 'qbittorrent' },
     ]},
-    { title: 'qBittorrent', desc: '最常用的下载客户端', fields: [
-      { label: 'qBittorrent 地址', key: 'QB_HOST', placeholder: 'http://localhost:8081' },
-      { label: 'qBittorrent 用户名', key: 'QB_USER', placeholder: 'admin' },
-      { label: 'qBittorrent 密码', key: 'QB_PASS', placeholder: '密码', type: 'password' },
-      { label: 'qBittorrent 分类', key: 'QB_CATEGORY', placeholder: 'ani-go' },
+    { title: t('settings.sections.qb'), desc: t('settings.sections.qbDesc'), fields: [
+      { label: t('settings.fields.host'), key: 'QB_HOST', placeholder: 'http://localhost:8081' },
+      { label: t('settings.fields.user'), key: 'QB_USER', placeholder: 'admin' },
+      { label: t('settings.fields.pass'), key: 'QB_PASS', placeholder: 'Access key', type: 'password' },
+      { label: t('settings.fields.category'), key: 'QB_CATEGORY', placeholder: 'ani-go' },
     ]},
-    { title: 'Transmission', desc: '备选下载客户端', fields: [
-      { label: 'Transmission 地址', key: 'TR_HOST', placeholder: 'http://localhost:9091' },
-      { label: 'Transmission 用户名', key: 'TR_USER', placeholder: '用户名' },
-      { label: 'Transmission 密码', key: 'TR_PASS', placeholder: '密码', type: 'password' },
+    { title: t('settings.sections.tr'), desc: t('settings.sections.trDesc'), fields: [
+      { label: t('settings.fields.host'), key: 'TR_HOST', placeholder: 'http://localhost:9091' },
+      { label: t('settings.fields.user'), key: 'TR_USER', placeholder: 'Username' },
+      { label: t('settings.fields.pass'), key: 'TR_PASS', placeholder: 'Access key', type: 'password' },
     ]},
-    { title: 'Aria2', desc: '轻量级下载客户端', fields: [
-      { label: 'Aria2 地址', key: 'ARIA2_HOST', placeholder: 'http://localhost:6800' },
-      { label: 'Aria2 RPC Secret', key: 'ARIA2_SECRET', placeholder: 'rpc-secret', type: 'password' },
+    { title: t('settings.sections.aria2'), desc: t('settings.sections.aria2Desc'), fields: [
+      { label: t('settings.fields.rpc'), key: 'ARIA2_HOST', placeholder: 'http://localhost:6800' },
+      { label: t('settings.fields.secret'), key: 'ARIA2_SECRET', placeholder: 'Secret key', type: 'password' },
     ]},
   ]},
-  { key: 'paths', label: '目录', icon: 'folder', sections: [{ title: '存储路径', desc: '番剧文件和数据库的存放位置', fields: [
-    { label: '数据库路径', key: 'DB_PATH', placeholder: '/data/ani-go.db', hint: 'Windows: D:/data/ani-go.db' },
-    { label: '番剧根目录', key: 'TV_BASE_PATH', placeholder: '/TV/Media/番剧' },
-    { label: '剧场版目录', key: 'MOVIE_BASE_PATH', placeholder: '/TV/Media/剧场版' },
-    { label: 'OVA 目录', key: 'OVA_BASE_PATH', placeholder: '/TV/Media/OVA' },
+  { key: 'paths', label: t('settings.tabs.paths'), icon: Folder, sections: [{ title: t('settings.sections.storage'), desc: t('settings.sections.storageDesc'), fields: [
+    { label: t('settings.fields.db'), key: 'DB_PATH', placeholder: '/data/ani-go.db' },
+    { label: t('settings.fields.tv'), key: 'TV_BASE_PATH', placeholder: '/TV/Media/Anime' },
+    { label: t('settings.fields.movie'), key: 'MOVIE_BASE_PATH', placeholder: '/TV/Media/Movies' },
+    { label: t('settings.fields.ova'), key: 'OVA_BASE_PATH', placeholder: '/TV/Media/OVA' },
   ]}]},
-  { key: 'notify', label: '通知', icon: 'notification', sections: [
-    { title: '即时通讯', desc: '即时通讯平台推送', fields: [
-      { label: 'Telegram Bot Token', key: 'TELEGRAM_BOT_TOKEN', placeholder: '123456:ABC...' },
-      { label: 'Telegram Chat ID', key: 'TELEGRAM_CHAT_ID', placeholder: '123456789' },
-      { label: 'Discord Webhook', key: 'DISCORD_WEBHOOK', placeholder: 'https://discord.com/api/webhooks/...' },
-      { label: 'Slack Webhook', key: 'SLACK_WEBHOOK', placeholder: 'https://hooks.slack.com/services/...' },
-      { label: 'QQ OneBot 地址', key: 'ONEBOT_HOST', placeholder: 'http://localhost:3000', hint: 'NapCat / go-cqhttp' },
-      { label: 'QQ OneBot Token', key: 'ONEBOT_TOKEN', placeholder: 'token' },
-      { label: 'QQ 用户 ID', key: 'ONEBOT_USER_ID', placeholder: '123456789', hint: '私聊目标' },
-      { label: 'QQ 群号', key: 'ONEBOT_GROUP_ID', placeholder: '987654321', hint: '群聊目标' },
+  { key: 'notify', label: t('settings.tabs.notify'), icon: Bell, sections: [
+    { title: t('settings.sections.im'), desc: t('settings.sections.imDesc'), fields: [
+      { label: t('settings.fields.tgToken'), key: 'TELEGRAM_BOT_TOKEN', placeholder: '123456:ABC...' },
+      { label: t('settings.fields.tgId'), key: 'TELEGRAM_CHAT_ID', placeholder: '123456789' },
+      { label: t('settings.fields.discord'), key: 'DISCORD_WEBHOOK', placeholder: 'Endpoint URL' },
+      { label: t('settings.fields.slack'), key: 'SLACK_WEBHOOK', placeholder: 'Endpoint URL' },
+      { label: t('settings.fields.onebotHost'), key: 'ONEBOT_HOST', placeholder: 'http://localhost:3000' },
+      { label: t('settings.fields.onebotToken'), key: 'ONEBOT_TOKEN', placeholder: 'Access token' },
     ]},
-    { title: '办公协作', desc: '团队协作平台推送', fields: [
-      { label: '企业微信 Webhook', key: 'WECOM_WEBHOOK', placeholder: 'https://qyapi.weixin.qq.com/...' },
-      { label: '飞书 Webhook', key: 'FEISHU_WEBHOOK', placeholder: 'https://open.feishu.cn/...' },
-      { label: '钉钉 Webhook', key: 'DINGTALK_WEBHOOK', placeholder: 'https://oapi.dingtalk.com/...' },
-      { label: 'Matrix Homeserver', key: 'MATRIX_HOMESERVER', placeholder: 'https://matrix.org' },
-      { label: 'Matrix Token', key: 'MATRIX_TOKEN', placeholder: 'syt_...' },
-      { label: 'Matrix Room ID', key: 'MATRIX_ROOM_ID', placeholder: '!abc123:matrix.org' },
-    ]},
-    { title: '社交平台', desc: '社交媒体消息推送', fields: [
-      { label: 'LINE Channel Token', key: 'LINE_CHANNEL_TOKEN', placeholder: 'LINE API token' },
-      { label: 'LINE User ID', key: 'LINE_USER_ID', placeholder: 'Uxxx' },
-      { label: 'WhatsApp Phone ID', key: 'WHATSAPP_PHONE_ID', placeholder: '123456789' },
-      { label: 'WhatsApp Token', key: 'WHATSAPP_TOKEN', placeholder: 'Meta Cloud API token' },
-      { label: 'WhatsApp 收件人', key: 'WHATSAPP_TO', placeholder: '8613800138000' },
-    ]},
-    { title: '推送通道', desc: '通用推送服务', fields: [
-      { label: 'Server酱 Key', key: 'SERVERCHAN_KEY', placeholder: 'SCT...' },
-      { label: 'Bark Device Key', key: 'BARK_DEVICE_KEY', placeholder: 'iOS key' },
-      { label: 'Pushover Token', key: 'PUSHOVER_TOKEN', placeholder: 'token' },
-      { label: 'Pushover User', key: 'PUSHOVER_USER', placeholder: 'user key' },
-      { label: 'Gotify URL', key: 'GOTIFY_URL', placeholder: 'https://gotify.example.com' },
-      { label: 'Gotify Token', key: 'GOTIFY_TOKEN', placeholder: 'token' },
-      { label: 'ntfy URL', key: 'NTFY_URL', placeholder: 'https://ntfy.sh/mytopic' },
-    ]},
-    { title: '邮件', desc: 'SMTP 邮件推送', fields: [
-      { label: 'SMTP 服务器', key: 'EMAIL_SMTP_HOST', placeholder: 'smtp.gmail.com' },
-      { label: 'SMTP 端口', key: 'EMAIL_SMTP_PORT', placeholder: '587' },
-      { label: 'Email 用户名', key: 'EMAIL_USERNAME', placeholder: 'xxx@gmail.com' },
-      { label: 'Email 密码', key: 'EMAIL_PASSWORD', placeholder: '密码', type: 'password' },
-      { label: 'Email 发件人', key: 'EMAIL_FROM', placeholder: 'xxx@gmail.com' },
-      { label: 'Email 收件人', key: 'EMAIL_TO', placeholder: 'admin@example.com', hint: '多个用逗号分隔' },
+    { title: t('settings.sections.enterprise'), desc: t('settings.sections.enterpriseDesc'), fields: [
+      { label: t('settings.fields.wecom'), key: 'WECOM_WEBHOOK', placeholder: 'Endpoint URL' },
+      { label: t('settings.fields.feishu'), key: 'FEISHU_WEBHOOK', placeholder: 'Endpoint URL' },
+      { label: t('settings.fields.dingtalk'), key: 'DINGTALK_WEBHOOK', placeholder: 'Endpoint URL' },
     ]},
   ]},
-  { key: 'ai', label: 'AI', icon: 'cpu', sections: [
-    { title: 'AI 服务配置', desc: '智能辅助模块连接信息', fields: [
-      { label: 'AI 协议', key: 'AI_PROTOCOL', placeholder: 'auto', hint: 'openai/google/anthropic/ollama/auto' },
-      { label: 'AI Endpoint', key: 'AI_ENDPOINT', placeholder: 'https://api.openai.com/v1/chat/completions' },
-      { label: 'AI API Key', key: 'AI_API_KEY', placeholder: 'sk-...', type: 'password' },
-      { label: 'AI 模型', key: 'AI_MODEL', placeholder: 'gpt-4o-mini' },
+  { key: 'ai', label: t('settings.tabs.ai'), icon: Cpu, sections: [
+    { title: t('settings.sections.ai'), desc: t('settings.sections.aiDesc'), fields: [
+      { label: t('settings.fields.protocol'), key: 'AI_PROTOCOL', placeholder: 'auto' },
+      { label: t('settings.fields.endpoint'), key: 'AI_ENDPOINT', placeholder: 'https://api.openai.com/v1/chat/completions' },
+      { label: t('settings.fields.key'), key: 'AI_API_KEY', placeholder: 'API key', type: 'password' },
+      { label: t('settings.fields.model'), key: 'AI_MODEL', placeholder: 'gpt-4o-mini' },
     ]},
-    { title: '特定平台密钥', desc: '各 AI 提供商独立配置', fields: [
-      { label: 'Gemini API Key', key: 'GEMINI_API_KEY', placeholder: 'Google Gemini key', type: 'password' },
-      { label: 'Claude API Key', key: 'CLAUDE_API_KEY', placeholder: 'sk-ant-...', type: 'password' },
-      { label: 'Ollama Host', key: 'OLLAMA_HOST', placeholder: 'http://localhost:11434' },
-      { label: 'Ollama Model', key: 'OLLAMA_MODEL', placeholder: 'llama3' },
-    ]},
-  ]},
-  { key: 'metadata', label: '元数据', icon: 'document', sections: [{ title: '元数据提供者', desc: '番剧元数据来源', fields: [
-    { label: 'TMDB API Key', key: 'TMDB_API_KEY', placeholder: 'TMDB API key', type: 'password' },
-    { label: 'TMDB 镜像域名', key: 'TMDB_MIRROR_DOMAINS', placeholder: '逗号分隔' },
-    { label: 'BGM.tv User Token', key: 'BGMTV_USER_TOKEN', placeholder: 'bangumi token', type: 'password' },
-    { label: 'BGM.tv 镜像域名', key: 'BGMTV_MIRROR_DOMAINS', placeholder: 'api.bgm.tv,api.bangumi.tv' },
-  ]}]},
-  { key: 'advanced', label: '高级', icon: 'setting', sections: [
-    { title: '服务设置', desc: '影响系统运行的核心参数', fields: [
-      { label: '监听地址', key: 'HOST', placeholder: '0.0.0.0', hint: '修改后需重启生效' },
-      { label: '服务器端口', key: 'PORT', placeholder: '20001', hint: '修改后需重启生效' },
-      { label: 'Nyaa 域名', key: 'NYAA_DOMAIN', placeholder: 'nyaa.si', hint: '留空禁用' },
-      { label: 'ACG.RIP 域名', key: 'ACGRIP_DOMAIN', placeholder: 'acg.rip' },
-      { label: 'AnimeTosho 域名', key: 'ANIMETOSHO_DOMAIN', placeholder: 'feed.animetosho.org' },
-    ]},
-    { title: '定时任务', desc: '后台任务执行间隔', fields: [
-      { label: 'RSS 轮询间隔 (分钟)', key: 'RSS_INTERVAL_MIN', placeholder: '30' },
-      { label: '补全间隔 (小时)', key: 'SUPPLEMENT_INTERVAL_HOURS', placeholder: '24' },
-      { label: '整理间隔 (分钟)', key: 'ORGANIZER_INTERVAL_MIN', placeholder: '2' },
+    { title: t('settings.sections.vendor'), desc: t('settings.sections.vendorDesc'), fields: [
+      { label: t('settings.fields.gemini'), key: 'GEMINI_API_KEY', placeholder: 'Google key', type: 'password' },
+      { label: t('settings.fields.claude'), key: 'CLAUDE_API_KEY', placeholder: 'Anthropic key', type: 'password' },
+      { label: t('settings.fields.ollama'), key: 'OLLAMA_HOST', placeholder: 'http://localhost:11434' },
     ]},
   ]},
-]
+  { key: 'advanced', label: t('settings.tabs.advanced'), icon: Settings, sections: [
+    { title: t('settings.sections.kernel'), desc: t('settings.sections.kernelDesc'), fields: [
+      { label: t('settings.fields.bind'), key: 'HOST', placeholder: '0.0.0.0' },
+      { label: t('settings.fields.port'), key: 'PORT', placeholder: '20001' },
+      { label: t('settings.fields.nyaa'), key: 'NYAA_DOMAIN', placeholder: 'nyaa.si' },
+    ]},
+    { title: t('settings.sections.schedule'), desc: t('settings.sections.scheduleDesc'), fields: [
+      { label: t('settings.fields.rssInterval'), key: 'RSS_INTERVAL_MIN', placeholder: '30' },
+      { label: t('settings.fields.syncInterval'), key: 'SUPPLEMENT_INTERVAL_HOURS', placeholder: '24' },
+      { label: t('settings.fields.ioInterval'), key: 'ORGANIZER_INTERVAL_MIN', placeholder: '2' },
+    ]},
+  ]},
+])
 
 const allFields = computed(() => {
   const m: Record<string, FieldDef> = {}
-  for (const tab of tabs)
+  for (const tab of tabs.value)
     for (const section of tab.sections)
       for (const f of section.fields) m[f.key] = f
   return m
@@ -189,7 +157,7 @@ async function fetchSettings() {
     const { data } = await request.get('/settings')
     settings.value = (data as Record<string, string>) || {}
   } catch (e: any) {
-    error.value = e.response?.data?.error || '加载设置失败'
+    error.value = e.response?.data?.error || t('settings.error.loadFailed')
   } finally { loading.value = false }
 }
 
@@ -200,14 +168,11 @@ async function saveAll() {
     const val = settings.value[key] ?? ''
     if (val !== '') changed[key] = val
   }
-  if (Object.keys(changed).length === 0) {
-    saved.value = true; setTimeout(() => { saved.value = false }, 3000); return
-  }
   try {
     await request.put('/settings', { settings: changed })
     saved.value = true; setTimeout(() => { saved.value = false }, 3000)
   } catch (e: any) {
-    error.value = e.response?.data?.error || '保存设置失败'
+    error.value = e.response?.data?.error || t('settings.error.saveFailed')
   }
 }
 
@@ -215,120 +180,143 @@ onMounted(fetchSettings)
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold">设置</h1>
-      <button class="btn btn-primary btn-sm gap-1" @click="saveAll">
-        <IconSax name="check" :size="16" /> 保存所有设置
+  <div class="space-y-10 pb-20">
+    <!-- Header Section -->
+    <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <div class="space-y-1">
+        <h1 class="text-4xl font-black tracking-tighter italic">{{ $t('settings.title') }}</h1>
+        <p class="text-xs font-bold tracking-[0.3em] uppercase opacity-30">{{ $t('settings.subtitle') }}</p>
+      </div>
+      
+      <button 
+        class="btn btn-primary rounded-2xl gap-3 px-8 shadow-xl shadow-lg hover:scale-105 active:scale-95 transition-all group" 
+        @click="saveAll"
+      >
+        <Check :size="20" class="group-hover:scale-125 transition-transform" />
+        <span class="text-xs font-black uppercase tracking-widest">{{ $t('settings.commit') }}</span>
       </button>
     </div>
 
-    <div v-if="saved" class="alert alert-success mb-4 shadow-sm">
-      <IconSax name="check" class="shrink-0" />
-      <span>设置已保存，部分配置需重启后生效</span>
-    </div>
-    <div v-if="error" class="alert alert-error mb-4 shadow-sm">
-      <IconSax name="warning" class="shrink-0" />
-      <span>{{ error }}</span>
-      <button class="btn btn-ghost btn-sm" @click="error = ''">
-        <IconSax name="close" :size="16" />
-      </button>
+    <!-- Status Alerts -->
+    <Transition name="fade">
+       <div v-if="saved" class="alert bg-success/10 border-success/20 text-success rounded-[2rem] p-6 shadow-xl shadow-lg">
+          <Check :size="24" class="shrink-0" />
+          <div class="flex-1">
+             <h3 class="font-black text-sm uppercase tracking-widest">{{ $t('settings.updateSuccess') }}</h3>
+             <p class="text-sm font-bold opacity-80 mt-1">{{ $t('settings.updateSuccessDesc') }}</p>
+          </div>
+       </div>
+    </Transition>
+
+    <div v-if="loading" class="flex justify-center py-32">
+      <span class="loading loading-spinner loading-lg text-primary"></span>
     </div>
 
-    <div v-if="loading" class="flex justify-center py-16">
-      <span class="loading loading-spinner loading-lg"></span>
-    </div>
-
-    <div v-else class="flex flex-col lg:flex-row gap-6">
-      <div class="flex flex-row lg:flex-col gap-1 overflow-x-auto lg:w-36 shrink-0 -mx-3 px-3 lg:mx-0 lg:px-0">
+    <div v-else class="flex flex-col lg:flex-row gap-10">
+      <!-- Navigation Sidebar -->
+      <div class="flex flex-row lg:flex-col gap-2 overflow-x-auto lg:w-56 shrink-0 no-scrollbar">
         <button v-for="tab in tabs" :key="tab.key"
-          class="btn btn-sm gap-2 justify-start"
-          :class="activeTab === tab.key ? 'btn-primary' : 'btn-ghost'"
+          class="flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 relative group overflow-hidden whitespace-nowrap lg:w-full"
+          :class="activeTab === tab.key ? 'bg-primary text-primary-content shadow-xl shadow-lg font-black' : 'bg-base-100 hover:bg-base-200 text-base-content/50 hover:text-base-content border border-base-200/50'"
           @click="activeTab = tab.key">
-          <IconSax :name="tab.icon" :size="16" />
-          {{ tab.label }}
+          <component :is="tab.icon" :size="20" />
+          <span class="text-xs uppercase tracking-widest">{{ tab.label }}</span>
+          <div v-if="activeTab === tab.key" class="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white/40 rounded-l-full hidden lg:block"></div>
         </button>
       </div>
 
-      <div class="flex-1 min-w-0 space-y-6">
-        <!-- Mikan 镜像测速卡 -->
-        <div v-if="activeTab === 'mikan'" class="card bg-base-100 shadow-sm border border-base-200">
-          <div class="card-body p-4">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="text-sm font-semibold flex items-center gap-2">
-                <IconSax name="refresh" :size="16" class="text-primary" />
-                镜像测速
-              </h3>
-              <button class="btn btn-xs btn-primary gap-1" @click="testMirrors" :disabled="mirrorTesting">
-                <span v-if="mirrorTesting" class="loading loading-spinner loading-xs"></span>
-                <IconSax v-else name="refresh" :size="12" />
-                测速
-              </button>
+      <!-- Main Config Area -->
+      <div class="flex-1 min-w-0 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        
+        <!-- Special: Mikan Latency Card -->
+        <div v-if="activeTab === 'mikan'" class="bg-base-100 rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden group">
+          <div class="p-8 sm:p-10 space-y-8">
+            <div class="flex items-center justify-between">
+               <div class="flex items-center gap-4">
+               <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
+                  <Timer :size="24" />
+               </div>
+               <div>
+                     <h3 class="text-xl font-black tracking-tight italic">{{ $t('settings.mikan.mirrorAudit') }}</h3>
+                     <p class="text-[10px] font-black uppercase tracking-widest opacity-30 mt-1">{{ $t('settings.mikan.autoRoute') }}</p>
+                  </div>
+               </div>
+               <button class="btn btn-primary btn-sm rounded-xl px-6 uppercase font-black tracking-widest text-[9px] h-10 min-h-0" @click="testMirrors" :disabled="mirrorTesting">
+                 <span v-if="mirrorTesting" class="loading loading-spinner loading-xs"></span>
+                 <template v-else>{{ $t('settings.mikan.runDiagnostics') }}</template>
+               </button>
             </div>
 
-            <p class="text-xs text-base-content/40 mb-3">
-              启动时自动测速选择最快镜像，也可手动测速选择
-            </p>
-
-            <div v-if="mirrorResults.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div v-if="mirrorResults.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div v-for="r in mirrorResults" :key="r.domain"
-                class="flex items-center justify-between p-2 rounded-lg border"
-                :class="r.ok ? 'border-base-300 hover:border-primary/50 cursor-pointer' : 'border-error/20 opacity-60'"
+                class="group/item flex items-center justify-between p-5 rounded-2xl border transition-all duration-300"
+                :class="r.ok ? 'bg-base-200/30 border-base-300 hover:border-primary/50 cursor-pointer active:scale-95' : 'bg-error/5 border-error/20 opacity-60 cursor-not-allowed'"
                 @click="r.ok && selectMirror(r.domain)">
-                <div class="flex items-center gap-2">
-                  <span class="w-2 h-2 rounded-full" :class="r.ok ? 'bg-success' : 'bg-error'"></span>
-                  <span class="text-sm font-mono">{{ r.domain }}</span>
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center gap-2">
+                     <div class="w-2 h-2 rounded-full shadow-[0_0_8px]" :class="r.ok ? 'bg-success shadow-lg' : 'bg-error shadow-lg'"></div>
+                     <span class="text-sm font-black font-mono tracking-tight group-hover/item:text-primary transition-colors">{{ r.domain }}</span>
+                  </div>
+                  <span v-if="getVal('MIKAN_DOMAIN') === r.domain" class="text-[9px] font-black uppercase tracking-widest text-primary ml-4">{{ $t('settings.mikan.currentRoute') }}</span>
                 </div>
-                <div class="flex items-center gap-2">
-                  <span v-if="r.ok" class="text-xs" :class="r.latency_ms < 500 ? 'text-success' : r.latency_ms < 1000 ? 'text-warning' : 'text-error'">
-                    {{ r.latency_ms }}ms
-                  </span>
-                  <span v-else class="text-xs text-error">不可达</span>
-                  <span v-if="getVal('MIKAN_DOMAIN') === r.domain" class="badge badge-xs badge-primary">当前</span>
+                <div class="text-right">
+                  <p v-if="r.ok" class="text-lg font-black tracking-tighter" :class="r.latency_ms < 500 ? 'text-success' : r.latency_ms < 1000 ? 'text-warning' : 'text-error'">
+                    {{ r.latency_ms }}<span class="text-[10px] ml-0.5 opacity-50 uppercase tracking-widest">ms</span>
+                  </p>
+                  <p v-else class="text-xs font-black uppercase tracking-widest text-error">{{ $t('settings.mikan.unreachable') }}</p>
                 </div>
               </div>
             </div>
-
-            <div v-else-if="!mirrorTesting" class="text-xs text-base-content/30 text-center py-2">
-              点击「测速」检查各镜像延迟
+            
+            <div v-else-if="!mirrorTesting" class="flex flex-col items-center justify-center py-12 text-center bg-base-200/30 rounded-3xl border border-dashed border-base-300">
+               <p class="text-[10px] font-black uppercase tracking-widest opacity-20 italic">{{ $t('settings.mikan.noData') }}</p>
             </div>
           </div>
         </div>
 
-        <div v-for="section in tabs.find(t => t.key === activeTab)?.sections" :key="section.title">
-          <div class="mb-3">
-            <h2 class="text-base font-semibold flex items-center gap-2">
-              {{ section.title }}
-              <span class="badge badge-xs"
-                :class="section.fields.some(f => isConfigured(f.key)) ? 'badge-success' : 'badge-ghost'">
-                {{ section.fields.filter(f => isConfigured(f.key)).length }}/{{ section.fields.length }}
-              </span>
-            </h2>
-            <p class="text-xs text-base-content/40">{{ section.desc }}</p>
+        <!-- Section Fields -->
+        <div v-for="section in tabs.find(t => t.key === activeTab)?.sections" :key="section.title" class="space-y-6">
+          <div class="px-4 flex items-end justify-between">
+            <div class="space-y-1">
+              <h2 class="text-2xl font-black tracking-tight italic flex items-center gap-4">
+                {{ section.title }}
+                <div class="h-1 w-12 bg-primary/20 rounded-full"></div>
+              </h2>
+              <p class="text-[10px] font-black uppercase tracking-widest opacity-30">{{ section.desc }}</p>
+            </div>
+            <div class="px-4 py-1.5 rounded-full bg-base-200 border border-base-300/50 flex items-center gap-2">
+               <span class="text-[10px] font-black uppercase tracking-widest text-base-content/40">{{ $t('settings.status.syncStatus') }}:</span>
+               <span class="text-[10px] font-black text-primary">{{ section.fields.filter(f => isConfigured(f.key)).length }}/{{ section.fields.length }}</span>
+            </div>
           </div>
 
-          <div class="bg-base-100 rounded-box border border-base-200 divide-y divide-base-200">
+          <div class="bg-base-100 rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden divide-y divide-base-200/50">
             <div v-for="field in section.fields" :key="field.key"
-              class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-2.5">
-              <label class="sm:w-36 shrink-0 text-sm flex items-center gap-1.5">
-                <span class="truncate">{{ field.label }}</span>
-                <IconSax v-if="isConfigured(field.key)" name="check" :size="12" class="text-success shrink-0" />
-              </label>
-              <div class="flex-1 flex items-center gap-1">
-                <div class="relative flex-1 max-w-sm">
+              class="group/field flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-10 p-6 sm:p-8 hover:bg-base-200/30 transition-colors">
+              
+              <div class="sm:w-56 shrink-0 space-y-1">
+                <p class="text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                   {{ field.label }}
+                   <Check v-if="isConfigured(field.key)" :size="12" class="text-success" />
+                </p>
+                <p v-if="field.hint" class="text-[9px] font-bold opacity-30 uppercase leading-relaxed">{{ field.hint }}</p>
+              </div>
+
+              <div class="flex-1 relative group">
+                  <div class="absolute inset-y-0 left-5 flex items-center text-base-content/10 group-focus-within:text-primary transition-colors">
+                     <component :is="field.type === 'password' ? Lock : FileText" :size="20" />
+                  </div>
                   <input :type="inputType(field)" :value="getVal(field.key)"
                     @input="(e: Event) => setVal(field.key, (e.target as HTMLInputElement).value)"
                     :placeholder="field.placeholder"
-                    class="input input-bordered input-sm w-full pr-8"
-                    :class="{ 'border-success/50': isConfigured(field.key) }" />
+                    class="w-full bg-base-200/50 border border-transparent focus:border-primary/20 focus:bg-base-100 focus:ring-4 focus:ring-primary/5 rounded-2xl pl-14 pr-12 py-4 transition-all outline-none font-bold placeholder:text-base-content/10" />
+                  
                   <button v-if="field.type === 'password' && getVal(field.key)"
-                    class="absolute right-1 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs btn-square"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 btn btn-ghost btn-circle btn-xs hover:bg-primary/20 hover:text-primary transition-all"
                     @click="togglePassword(field.key)">
-                    <IconSax :name="showPasswords.has(field.key) ? 'lock' : 'user'" :size="14" />
+                    <component :is="showPasswords.has(field.key) ? Eye : EyeOff" :size="16" />
                   </button>
-                </div>
               </div>
-              <p v-if="field.hint" class="text-xs text-base-content/40 sm:w-44 shrink-0 hidden sm:block">{{ field.hint }}</p>
             </div>
           </div>
         </div>
@@ -336,3 +324,11 @@ onMounted(fetchSettings)
     </div>
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active, .fade-leave-active { transition: opacity 0.5s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+</style>
