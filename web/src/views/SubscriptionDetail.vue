@@ -102,7 +102,6 @@ const statusCfg: Record<string, { label: string; icon: string; cls: string }> = 
   completed: { label: t('detail.logs.status.finished'), icon: Check, cls: 'bg-success/10 text-success border-success/20' },
   failed: { label: t('detail.logs.status.failed'), icon: AlertTriangle, cls: 'bg-error/10 text-error border-error/20' },
 }
-}
 
 function formatSize(bytes: number): string {
   if (!bytes) return '-'
@@ -288,7 +287,6 @@ onMounted(fetchDetail)
             <h2 class="text-2xl font-black tracking-tight italic uppercase">{{ $t('detail.logs.title') }}</h2>
             <span class="text-[10px] font-black uppercase tracking-widest text-base-content/20 mt-1">{{ $t('detail.logs.count', { count: episodes.length }) }}</span>
          </div>
-         <div class="bg-base-100 rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden">
          <div class="bg-base-100 rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden">
             <div class="overflow-x-auto">
              <table class="table table-lg w-full">

@@ -139,7 +139,14 @@ const allFields = computed(() => {
 
 function getVal(key: string): string { return settings.value[key] || '' }
 function setVal(key: string, val: string) { settings.value[key] = val }
-function isConfigured(key: string): boolean { return getVal(key).length > 0 }
+function isConfigured(key: string): boolean {
+  const val = settings.value[key]
+  const field = allFields.value[key]
+  if (field?.type === 'password') {
+    return val !== undefined
+  }
+  return val !== undefined && val.length > 0
+}
 
 function togglePassword(key: string) {
   if (showPasswords.value.has(key)) showPasswords.value.delete(key)
@@ -165,8 +172,15 @@ async function saveAll() {
   error.value = ''; saved.value = false
   const changed: Record<string, string> = {}
   for (const key of Object.keys(allFields.value)) {
-    const val = settings.value[key] ?? ''
-    if (val !== '') changed[key] = val
+    const val = settings.value[key]
+    const field = allFields.value[key]
+    // 密码字段如果为空（说明未修改），则不包含在请求中，防止覆盖旧密码
+    if (field.type === 'password' && (val === '' || val === undefined)) {
+      continue
+    }
+    if (val !== undefined && val !== '') {
+      changed[key] = val
+    }
   }
   try {
     await request.put('/settings', { settings: changed })
@@ -308,8 +322,8 @@ onMounted(fetchSettings)
                   </div>
                   <input :type="inputType(field)" :value="getVal(field.key)"
                     @input="(e: Event) => setVal(field.key, (e.target as HTMLInputElement).value)"
-                    :placeholder="field.placeholder"
-                    class="w-full bg-base-200/50 border border-transparent focus:border-primary/20 focus:bg-base-100 focus:ring-4 focus:ring-primary/5 rounded-2xl pl-14 pr-12 py-4 transition-all outline-none font-bold placeholder:text-base-content/10" />
+                    :placeholder="(field.type === 'password' && settings[field.key] !== undefined) ? '已配置，输入新值覆盖' : field.placeholder"
+                    class="w-full bg-base-200/50 border border-transparent focus:border-primary/20 focus:bg-base-100 focus:ring-4 focus:ring-primary/5 rounded-2xl pl-14 pr-12 py-4 transition-all outline-none font-bold placeholder:text-base-content/20" />
                   
                   <button v-if="field.type === 'password' && getVal(field.key)"
                     class="absolute right-3 top-1/2 -translate-y-1/2 btn btn-ghost btn-circle btn-xs hover:bg-primary/20 hover:text-primary transition-all"

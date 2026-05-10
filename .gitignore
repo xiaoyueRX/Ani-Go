@@ -1,6 +1,7 @@
 # 编译产物
 ani-go
 ani-go.exe
+ani-go-bin
 anigo
 bin/
 *.exe
@@ -10,11 +11,24 @@ bin/
 *.db-shm
 *.db-wal
 
+# 日志文件
+*.log
+
+# 临时测试文件
+mikan.html
+test_yuc.go.bak
+*.bak
+
 # 配置/密钥（绝对不能提交到 GitHub！）
 .env
 config.yaml
 config.local.yaml
 *.token
+
+# Node（根目录忽略，web/ 内保留）
+/node_modules/
+/package-lock.json
+/package.json
 
 # Go 工具
 vendor/

@@ -591,7 +591,13 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 	result := make(map[string]string, len(settings))
 	for _, setting := range settings {
-		result[setting.Key] = setting.Value
+		val := setting.Value
+		keyUpper := strings.ToUpper(setting.Key)
+		// 脱敏敏感字段：包含 PASS, SECRET, KEY 的键返回空字符串
+		if strings.Contains(keyUpper, "PASS") || strings.Contains(keyUpper, "SECRET") || strings.Contains(keyUpper, "KEY") {
+			val = ""
+		}
+		result[setting.Key] = val
 	}
 	writeJSON(w, http.StatusOK, result)
 }
