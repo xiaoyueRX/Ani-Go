@@ -39,16 +39,18 @@ func CheckPassword(password, hash string) bool {
 	return err == nil
 }
 
-// Claims 自定义 JWT Claims，包含用户名
+// Claims 自定义 JWT Claims，包含用户名和 Token 版本
 type Claims struct {
-	Username string `json:"username"`
+	Username     string `json:"username"`
+	TokenVersion int    `json:"token_version"`
 	jwt.RegisteredClaims
 }
 
 // GenerateToken 签发 JWT（有效期 24 小时）
-func GenerateToken(username string) (string, error) {
+func GenerateToken(username string, tokenVersion int) (string, error) {
 	claims := Claims{
-		Username: username,
+		Username:     username,
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),

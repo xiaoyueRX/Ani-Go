@@ -16,7 +16,11 @@ type TorrentItem struct {
 	PublishedAt time.Time `json:"pub_date"`
 	SourceName  string    `json:"source"`
 	BangumiID   string    `json:"bangumi_id"`
+	EpisodeURL  string    `json:"episode_url,omitempty"`
 	CoverURL    string    `json:"cover_url,omitempty"`
+	AiredTime   string    `json:"aired_time,omitempty"`
+	AiredDate   string    `json:"aired_date,omitempty"`
+	GroupName   string    `json:"group_name"`
 }
 
 type Anime struct {
@@ -151,3 +155,8 @@ type TaskParser interface {
 	Parse(ctx context.Context, input string) (ParseResult, error)
 	Name() string
 }
+
+const (
+	RSSModeClassic  = "classic"
+	RSSModePersonal = "personal"
+)

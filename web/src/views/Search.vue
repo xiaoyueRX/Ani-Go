@@ -22,6 +22,8 @@ interface TorrentItem {
   bangumi_id: string
   info_hash: string
   cover_url?: string
+  aired_time?: string
+  aired_date?: string
 }
 
 interface SubgroupInfo {

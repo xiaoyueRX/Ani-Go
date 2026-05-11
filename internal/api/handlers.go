@@ -7,11 +7,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/auth"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/migrate"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
@@ -57,6 +59,28 @@ type createSubscriptionRequest struct {
 	CoverURL     string `json:"cover_url"`
 }
 
+type batchSubscriptionItem struct {
+	TitleCN   string   `json:"title_cn"`
+	BangumiID string   `json:"bangumi_id"`
+	CoverURL  string   `json:"cover_url"`
+	Subgroups []string `json:"subgroups"`
+}
+
+type batchSubscriptionRequest struct {
+	Items []batchSubscriptionItem `json:"items"`
+}
+
+type batchSubscriptionResponse struct {
+	Success []batchSubResult `json:"success"`
+	Failed  []batchSubResult `json:"failed"`
+}
+
+type batchSubResult struct {
+	Title string `json:"title"`
+	ID    uint   `json:"id,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
 type updateSubscriptionRequest struct {
 	TitleCN         *string `json:"title_cn"`
 	TitleEN         *string `json:"title_en"`
@@ -77,6 +101,23 @@ type updateSubscriptionRequest struct {
 	CustomPath      *string `json:"custom_path"`
 }
 
+type batchDeleteRequest struct {
+	IDs         []uint `json:"ids"`
+	DeleteFiles bool   `json:"delete_files"`
+}
+
+type batchRestoreRequest struct {
+	IDs []uint `json:"ids"`
+}
+
+type batchDeleteResponse struct {
+	Deleted int `json:"deleted"`
+}
+
+type batchRestoreResponse struct {
+	Restored int `json:"restored"`
+}
+
 // episodeResponse API 返回的剧集数据结构
 type episodeResponse struct {
 	ID               uint    `json:"id"`
@@ -91,6 +132,7 @@ type episodeResponse struct {
 	FinalPath        string  `json:"final_path"`
 	FileSize         int64   `json:"file_size"`
 	IsStalled        bool    `json:"is_stalled"`
+	GroupName        string  `json:"group_name"`
 	DownloadStartedAt string  `json:"download_started_at,omitempty"`
 	CreatedAt        string  `json:"created_at"`
 }
@@ -134,6 +176,7 @@ func toEpisodeResponse(ep database.Episode) episodeResponse {
 		OriginalName:   ep.OriginalName,
 		FinalPath:      ep.FinalPath,
 		FileSize:       ep.FileSize,
+		GroupName:      ep.GroupName,
 		CreatedAt:      ep.CreatedAt.Format(time.RFC3339),
 	}
 	if ep.DownloadStartedAt != nil {
@@ -178,6 +221,83 @@ func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request)
 		result = append(result, r)
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleGetSubgroups 获取系统中可用的字幕组列表
+// GET /api/subgroups
+func (s *Server) handleGetSubgroups(w http.ResponseWriter, r *http.Request) {
+	var names []string
+	database.DB.Model(&database.Episode{}).
+		Where("group_name != ''").
+		Distinct("group_name").
+		Pluck("group_name", &names)
+	if names == nil {
+		names = []string{}
+	}
+	writeJSON(w, http.StatusOK, names)
+}
+
+// handleBatchCreateSubscriptions 批量创建订阅
+// POST /api/subscriptions/batch
+func (s *Server) handleBatchCreateSubscriptions(w http.ResponseWriter, r *http.Request) {
+	var req batchSubscriptionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+		return
+	}
+
+	// 限制批量数量
+	maxItems := 20
+	if len(req.Items) > maxItems {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("批量订阅最多 %d 部", maxItems)})
+		return
+	}
+	if len(req.Items) == 0 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "未提供任何订阅项"})
+		return
+	}
+
+	resp := batchSubscriptionResponse{
+		Success: []batchSubResult{},
+		Failed:  []batchSubResult{},
+	}
+
+	for _, item := range req.Items {
+		if item.TitleCN == "" {
+			resp.Failed = append(resp.Failed, batchSubResult{Title: item.TitleCN, Error: "番剧标题不能为空"})
+			continue
+		}
+
+		// 检查是否已订阅（通过 BangumiID 或标题）
+		var existing database.Subscription
+		query := database.DB.Where("bangumi_id = ?", item.BangumiID)
+		if item.BangumiID == "" {
+			query = database.DB.Where("title_cn = ?", item.TitleCN)
+		}
+		if query.First(&existing).RowsAffected > 0 {
+			resp.Failed = append(resp.Failed, batchSubResult{Title: item.TitleCN, Error: "已存在订阅"})
+			continue
+		}
+
+		subgroup := strings.Join(item.Subgroups, ",")
+
+		sub := database.Subscription{
+			TitleCN:      item.TitleCN,
+			BangumiID:    item.BangumiID,
+			SubgroupName: subgroup,
+			CoverURL:     item.CoverURL,
+			Enabled:      true,
+		}
+
+		if err := database.DB.Create(&sub).Error; err != nil {
+			resp.Failed = append(resp.Failed, batchSubResult{Title: item.TitleCN, Error: err.Error()})
+			continue
+		}
+
+		resp.Success = append(resp.Success, batchSubResult{Title: item.TitleCN, ID: sub.ID})
+	}
+
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // handleCreateSubscription 创建新订阅
@@ -386,12 +506,28 @@ func (s *Server) handleDeleteSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	deleteFiles := r.URL.Query().Get("delete_files") == "true"
+
+	// 先删 qB 种子和文件（有操作失败只记录日志，不中断流程）
+	if deleteFiles && s.downloader != nil {
+		var episodes []database.Episode
+		database.DB.Where("subscription_id = ?", id).Find(&episodes)
+		for _, ep := range episodes {
+			if ep.TorrentHash == "" {
+				continue
+			}
+			if err := s.downloader.Delete(r.Context(), ep.TorrentHash, true); err != nil {
+				log.Printf("⚠️  删除种子失败 (hash=%s): %v", ep.TorrentHash, err)
+			}
+		}
+	}
+
 	// 删除关联剧集
 	database.DB.Where("subscription_id = ?", id).Delete(&database.Episode{})
 	// 删除订阅
 	database.DB.Delete(&sub)
 
-	log.Printf("🗑️  已删除订阅: %s (ID=%d)", sub.TitleCN, sub.ID)
+	log.Printf("🗑️  已删除订阅: %s (ID=%d, deleteFiles=%v)", sub.TitleCN, sub.ID, deleteFiles)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "订阅已删除"})
 }
 
@@ -421,7 +557,10 @@ func (s *Server) handleTriggerSupplement(w http.ResponseWriter, r *http.Request)
 	}
 
 	go func() {
-		if err := s.triggerSupplement(r.Context(), uint(id)); err != nil {
+		// 不能用 r.Context() — HTTP 响应返回后会被 Cancel
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		if err := s.triggerSupplement(ctx, uint(id)); err != nil {
 			log.Printf("❌ 手动补全失败 [%s]: %v", sub.TitleCN, err)
 		}
 	}()
@@ -496,6 +635,19 @@ func getStallTimeout() time.Duration {
 		}
 	}
 	return 48 * time.Hour
+}
+
+func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"version": s.version,
+		"changelog": []string{
+			"新增引导弹窗单次会话逻辑，不再频繁打扰",
+			"新增版本更新日志提示，及时了解新功能",
+			"新增自动检查更新功能，支持检测 GitHub 最新版本",
+			"优化设置页布局，增加自动更新开关",
+			"修复部分 UI 显示问题",
+		},
+	})
 }
 
 // countStalledEpisodes 统计订阅下所有卡住的剧集数
@@ -623,6 +775,78 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✅ 已更新 %d 项设置", len(req.Settings))
 	writeJSON(w, http.StatusOK, map[string]string{"message": "设置已更新"})
+}
+
+// handleGetLogs 获取系统日志（最近 100 行，过滤认证和心跳噪音）
+// GET /api/logs?lines=50
+func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	linesStr := r.URL.Query().Get("lines")
+	lines := 100
+	if linesStr != "" {
+		if n, err := strconv.Atoi(linesStr); err == nil && n > 0 && n <= 500 {
+			lines = n
+		}
+	}
+
+	f, err := os.Open(s.logPath)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"lines": []string{},
+			"total": 0,
+		})
+		return
+	}
+	defer f.Close()
+
+	// 逆向 Seek 读取尾部 N 行（类 tail -n）
+	const chunkSize = 4096
+	stat, _ := f.Stat()
+	fileSize := stat.Size()
+
+	var tail []byte
+	pos := fileSize
+	buf := make([]byte, chunkSize)
+	linesFound := 0
+
+	for pos > 0 && linesFound <= lines {
+		readSize := int64(chunkSize)
+		if pos < chunkSize {
+			readSize = pos
+			buf = make([]byte, readSize)
+		}
+		pos -= readSize
+		f.Seek(pos, 0)
+		f.Read(buf)
+		tail = append(buf, tail...)
+		linesFound = 0
+		for _, b := range tail {
+			if b == '\n' {
+				linesFound++
+			}
+		}
+		if pos == 0 {
+			break
+		}
+	}
+
+	content := strings.TrimRight(string(tail), "\n")
+	allLines := []string{}
+	if content != "" {
+		allLines = strings.Split(content, "\n")
+	}
+
+	// 提取最后 N 行
+	total := len(allLines)
+	start := 0
+	if total > lines {
+		start = total - lines
+	}
+	recent := allLines[start:]
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"lines": recent,
+		"total": total,
+	})
 }
 
 // handleGetCustomRegex 获取当前自定义正则规则
@@ -763,23 +987,40 @@ func (s *Server) handleMikanGroups(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, groups)
 }
 
-// handleSchedule 获取当前季度新番时间表
-// GET /api/schedule
+// handleSchedule 获取指定季度新番时间表
+// GET /api/schedule?year=2025&season=2
 func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
+	year, _ := strconv.Atoi(r.URL.Query().Get("year"))
+	season, _ := strconv.Atoi(r.URL.Query().Get("season"))
+
 	var schedule []source.WeekDayItem
 	var err error
 
-	if s.mikanSrc != nil {
-		schedule, err = s.mikanSrc.FetchWeekSchedule(r.Context())
+	if s.yucSrc != nil {
+		schedule, err = s.yucSrc.FetchWeekSchedule(r.Context(), year, season)
 		if err != nil {
-			log.Printf("⚠️  Mikan 获取时间表失败: %v，尝试使用 yucwiki", err)
+			log.Printf("⚠️  Yucwiki 获取时间表失败: %v，尝试使用 mikan", err)
+		} else {
+			// yucwiki 获取成功后，额外获取 SP 条目
+			spGroups, spErr := s.yucSrc.FetchSPItems(r.Context())
+			if spErr == nil {
+				for _, g := range spGroups {
+					schedule = append(schedule, source.WeekDayItem{
+						DayOfWeek: 0,
+						Label:     fmt.Sprintf("%s · %s", g.Month, g.Type),
+						Items:     g.Items,
+					})
+				}
+			} else if spErr != nil {
+				log.Printf("⚠️  Yucwiki 获取 SP 失败: %v", spErr)
+			}
 		}
 	}
 
-	if (err != nil || len(schedule) == 0) && s.yucSrc != nil {
-		schedule, err = s.yucSrc.FetchWeekSchedule(r.Context())
+	if (err != nil || len(schedule) == 0) && s.mikanSrc != nil {
+		schedule, err = s.mikanSrc.FetchWeekSchedule(r.Context(), year, season)
 		if err != nil {
-			log.Printf("⚠️  Yucwiki 获取时间表失败: %v", err)
+			log.Printf("⚠️  Mikan 获取时间表失败: %v", err)
 		}
 	}
 
@@ -791,31 +1032,50 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 		schedule = []source.WeekDayItem{}
 	}
 
-	// 同时获取订阅列表，标注已订阅的番剧
+	// 同时获取订阅列表，标注已订阅的番剧（支持 ID 匹配和标准化标题模糊匹配）
 	var subs []database.Subscription
 	database.DB.Find(&subs)
-	subscribed := make(map[string]bool)
+
+	subscribed := make(map[string]uint)
+	normSubs := make(map[string]uint)
+	subStats := make(map[uint]map[string]int) // subID → {downloaded, total}
 	for _, sub := range subs {
 		if sub.BangumiID != "" {
-			subscribed[sub.BangumiID] = true
+			subscribed[sub.BangumiID] = sub.ID
 		}
 		if sub.TitleCN != "" {
-			subscribed[sub.TitleCN] = true
+			subscribed[sub.TitleCN] = sub.ID
+			normSubs[normalizeTitle(sub.TitleCN)] = sub.ID
+		}
+		// 统计已下载集数和总集数
+		var downloaded int64
+		database.DB.Model(&database.Episode{}).
+			Where("subscription_id = ? AND status IN ?", sub.ID, []string{"downloaded", "downloading"}).
+			Count(&downloaded)
+		subStats[sub.ID] = map[string]int{
+			"downloaded": int(downloaded),
+			"total":      sub.TotalEpisodes,
 		}
 	}
 
-	// 给 schedule 中的每个 item 标注订阅状态
 	for _, day := range schedule {
 		for i := range day.Items {
-			if subscribed[day.Items[i].BangumiID] || subscribed[day.Items[i].Title] {
-				day.Items[i].InfoHash = "subscribed"
+			item := &day.Items[i]
+			if id, ok := subscribed[item.BangumiID]; ok {
+				item.InfoHash = fmt.Sprintf("%d", id)
+			} else if id, ok := subscribed[item.Title]; ok {
+				item.InfoHash = fmt.Sprintf("%d", id)
+			} else if id, ok := normSubs[normalizeTitle(item.Title)]; ok {
+				item.InfoHash = fmt.Sprintf("%d", id)
 			}
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"days":       schedule,
-		"subscribed": subscribed,
+		"days":              schedule,
+		"subscribed":        subscribed,
+		"subscriptionCount": len(subs),
+		"sub_stats":         subStats,
 	})
 }
 
@@ -844,12 +1104,27 @@ func (s *Server) handleSelectMirror(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"domain": req.Domain})
 }
 
-// handleProxyImage 代理图片请求（绕过 Bilibili CDN 热链保护）
+// handleProxyImage 代理图片请求（绕过 Bilibili CDN 热链保护，加白名单限制）
 // GET /api/proxy/image?url=https://i0.hdslb.com/...
 func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 	imageURL := r.URL.Query().Get("url")
 	if imageURL == "" {
 		http.Error(w, "missing url", http.StatusBadRequest)
+		return
+	}
+
+	// 域名白名单校验
+	allowedDomains := []string{"i0.hdslb.com", "lain.bgm.tv", "img.mikanani.me", "image.tmdb.org", "bilibili.com", "bgm.tv", "mikanime.tv"}
+	allowed := false
+	for _, domain := range allowedDomains {
+		if strings.Contains(imageURL, domain) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		log.Printf("⚠️  非法图片代理请求被拦截: %s", imageURL)
+		http.Error(w, "domain not allowed", http.StatusForbidden)
 		return
 	}
 
@@ -859,7 +1134,8 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid url", http.StatusBadRequest)
 		return
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
 	if strings.Contains(imageURL, "hdslb.com") || strings.Contains(imageURL, "bilibili.com") {
 		req.Header.Set("Referer", "https://www.bilibili.com")
 	} else if strings.Contains(imageURL, "lain.bgm.tv") || strings.Contains(imageURL, "bgm.tv") {
@@ -879,6 +1155,16 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=604800")
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+}
+
+// normalizeTitle 用于增强番剧标题匹配的鲁棒性（去除空格、统一简繁/变体等）
+func normalizeTitle(s string) string {
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "　", "")
+	s = strings.ReplaceAll(s, "：", ":")
+	s = strings.ReplaceAll(s, "坊", "房") // 统一常见歧义字
+	s = strings.ReplaceAll(s, "・", "")
+	return strings.ToLower(s)
 }
 
 // getSettingValue 从数据库获取设置值
@@ -966,11 +1252,140 @@ func (s *Server) handleMigrateData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("✅ 数据迁移成功: 迁移了 %d 条订阅", stats.Subscriptions)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message":       "迁移完成",
-		"subscriptions": stats.Subscriptions,
-		"episodes":      stats.Episodes,
-		"downloads":     stats.Downloads,
-		"errors":        stats.Errors,
+		"message": "迁移成功",
+		"stats":   stats,
 	})
+}
+
+type changePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req changePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+		return
+	}
+	if req.OldPassword == "" || req.NewPassword == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "密码不能为空"})
+		return
+	}
+	if len(req.NewPassword) < 6 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "新密码不能少于6位"})
+		return
+	}
+	if req.OldPassword == req.NewPassword {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "新密码不能与旧密码相同"})
+		return
+	}
+	claims, ok := r.Context().Value("claims").(*auth.Claims)
+	if !ok || claims == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+		return
+	}
+	var user database.User
+	if err := database.DB.Where("username = ?", claims.Username).First(&user).Error; err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+		return
+	}
+	if !auth.CheckPassword(req.OldPassword, user.PasswordHash) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "旧密码错误"})
+		return
+	}
+	hash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "密码加密失败"})
+		return
+	}
+	user.PasswordHash = hash
+	user.TokenVersion++
+	if err := database.DB.Save(&user).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存失败"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "密码修改成功"})
+}
+
+func (s *Server) handleBatchDeleteSubscriptions(w http.ResponseWriter, r *http.Request) {
+	var req batchDeleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的请求体"})
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "ID 列表不能为空"})
+		return
+	}
+	if len(req.IDs) > 100 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "单次最多删除 100 个订阅"})
+		return
+	}
+
+	// 先删 qB 种子和文件（有操作失败只记录日志，不中断流程）
+	if req.DeleteFiles && s.downloader != nil {
+		var episodes []database.Episode
+		database.DB.Where("subscription_id IN ?", req.IDs).Find(&episodes)
+		for _, ep := range episodes {
+			if ep.TorrentHash == "" {
+				continue
+			}
+			if err := s.downloader.Delete(r.Context(), ep.TorrentHash, true); err != nil {
+				log.Printf("⚠️  批量删除种子失败 (hash=%s): %v", ep.TorrentHash, err)
+			}
+		}
+	}
+
+	// 事务：软删除订阅 + 关联剧集
+	tx := database.DB.Begin()
+	if err := tx.Where("id IN ?", req.IDs).Delete(&database.Subscription{}).Error; err != nil {
+		tx.Rollback()
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "删除失败"})
+		return
+	}
+	if err := tx.Where("subscription_id IN ?", req.IDs).Delete(&database.Episode{}).Error; err != nil {
+		tx.Rollback()
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "删除关联剧集失败"})
+		return
+	}
+	tx.Commit()
+
+	log.Printf("🗑️  批量删除订阅: %v（deleteFiles=%v）", req.IDs, req.DeleteFiles)
+	writeJSON(w, http.StatusOK, batchDeleteResponse{Deleted: len(req.IDs)})
+}
+
+func (s *Server) handleBatchRestoreSubscriptions(w http.ResponseWriter, r *http.Request) {
+	var req batchRestoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的请求体"})
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "ID 列表不能为空"})
+		return
+	}
+	if len(req.IDs) > 100 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "单次最多恢复 100 个订阅"})
+		return
+	}
+
+	// 事务：恢复订阅 + 关联剧集（都用 Unscoped 绕过软删除过滤）
+	tx := database.DB.Begin()
+	if err := tx.Unscoped().Model(&database.Subscription{}).Where("id IN ?", req.IDs).Update("deleted_at", nil).Error; err != nil {
+		tx.Rollback()
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "恢复失败"})
+		return
+	}
+	if err := tx.Unscoped().Model(&database.Episode{}).Where("subscription_id IN ?", req.IDs).Update("deleted_at", nil).Error; err != nil {
+		tx.Rollback()
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "恢复关联剧集失败"})
+		return
+	}
+	tx.Commit()
+
+	log.Printf("↩️  批量恢复订阅: %v", req.IDs)
+	writeJSON(w, http.StatusOK, batchRestoreResponse{Restored: len(req.IDs)})
 }

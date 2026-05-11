@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/joho/godotenv"
 	"github.com/xiaoyueRX/Ani-Go/internal/ai"
 	"github.com/xiaoyueRX/Ani-Go/internal/api"
 	"github.com/xiaoyueRX/Ani-Go/internal/auth"
@@ -26,14 +28,29 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
 
-var version = "dev"
+var version = "v0.2.0"
 
 func main() {
 	printBanner()
 
+	// 加载 .env
+	if err := godotenv.Load(); err != nil {
+		log.Println("ℹ️  未找到 .env 文件，将使用系统环境变量")
+	}
+
 	// 加载配置
 	cfg := config.Load()
 	log.Printf("配置加载完成 | 端口: %d | 数据库: %s", cfg.Server.Port, cfg.Database.Path)
+
+	// 初始化日志文件（双写 stdout + 文件）
+	if cfg.Server.LogPath != "" {
+		logFile, err := os.OpenFile(cfg.Server.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			log.SetOutput(io.MultiWriter(os.Stdout, logFile))
+		} else {
+			log.Printf("⚠️ 日志文件 %s 创建失败: %v", cfg.Server.LogPath, err)
+		}
+	}
 
 	// 初始化 JWT 动态密钥（crypto/rand 生成，绝不硬编码）
 	if err := auth.InitSecret(); err != nil {
@@ -79,6 +96,10 @@ func main() {
 	// 初始化 Mikan 资源源（主源，个人 RSS 订阅）
 	mikanSource := source.NewMikanSource(cfg.Mikan.Domain, cfg.Mikan.ProxyDomain, cfg.Mikan.MirrorDomains)
 	log.Printf("✅ Mikan 资源源已就绪 (域名: %s, 镜像: %d 个)", cfg.Mikan.Domain, len(cfg.Mikan.MirrorDomains))
+
+	// 初始化 YucWiki 资源源（用于新番时间表）
+	yucSource := source.NewYucWikiSource()
+	log.Printf("✅ YucWiki 资源源已就绪")
 
 	// 初始化多资源站聚合器（用于补全搜索）
 	extraSources := make([]core.Source, 0, 3)
@@ -253,9 +274,7 @@ func main() {
 	}
 
 	// 启动 HTTP API 服务（含 JWT 鉴权中间件 + 嵌入式前端静态文件）
-	if err := api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, dl, sched.TriggerSupplement, pluginMgr, taskParser, mikanSource, multiSource, staticHandler()); err != nil {
-		log.Fatalf("❌ HTTP API 服务启动失败: %v", err)
-	}
+	api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, version, dl, sched.TriggerSupplement, pluginMgr, taskParser, mikanSource, yucSource, multiSource, staticHandler(), cfg.Server.LogPath)
 
 	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("✅ Ani-Go 启动成功 — Phase 3 全栈引擎运行中")

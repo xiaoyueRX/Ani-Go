@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/database"
 )
 
 // CORSMiddleware 处理跨域请求，兼容 Lucky 反向代理
@@ -73,9 +76,17 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		log.Printf("🔐 用户 %s 通过 API 鉴权: %s %s", claims.Username, r.Method, r.URL.Path)
+		// 校验 Token 版本
+		var user database.User
+		if err := database.DB.Where("username = ? AND token_version = ?", claims.Username, claims.TokenVersion).First(&user).Error; err != nil {
+			log.Printf("⚠️  Token 版本不匹配或用户已失效: %s", claims.Username)
+			http.Error(w, `{"error":"登录已过期，请重新登录"}`, http.StatusUnauthorized)
+			return
+		}
 
-		next.ServeHTTP(w, r)
+		// 将 claims 注入 context 供后续 handler 使用
+		ctx := context.WithValue(r.Context(), "claims", claims)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

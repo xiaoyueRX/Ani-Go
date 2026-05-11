@@ -64,16 +64,31 @@ func (m *Manager) LoadFromSettings() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	var settings []database.Setting
+	database.DB.Where("key LIKE ?", "plugin\\_%").Find(&settings)
+	if len(settings) == 0 {
+		m.plugins = nil
+		return
+	}
+
+	// 将 settings 按 key 索引到槽位
+	slotMap := make(map[int]database.Setting, len(settings))
+	for _, s := range settings {
+		var idx int
+		if n, err := fmt.Sscanf(s.Key, "plugin_%d", &idx); err == nil && n == 1 {
+			slotMap[idx] = s
+		}
+	}
+
 	var configs []PluginConfig
 	for i := 0; i < 20; i++ {
-		var setting database.Setting
-		key := fmt.Sprintf("plugin_%d", i)
-		if err := database.DB.Where("key = ?", key).First(&setting).Error; err != nil {
+		setting, ok := slotMap[i]
+		if !ok {
 			continue
 		}
 		var cfg PluginConfig
 		if err := json.Unmarshal([]byte(setting.Value), &cfg); err != nil {
-			log.Printf("⚠️  插件配置解析失败 [%s]: %v", key, err)
+			log.Printf("⚠️  插件配置解析失败 [%s]: %v", setting.Key, err)
 			continue
 		}
 		if cfg.Name == "" {

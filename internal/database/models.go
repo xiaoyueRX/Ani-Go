@@ -44,6 +44,7 @@ type Episode struct {
 	OriginalName       string
 	FinalPath          string
 	FileSize           int64
+	GroupName          string
 	DownloadStartedAt  *time.Time
 	DownloadFinishedAt *time.Time
 	OrganizedAt        *time.Time
@@ -67,4 +68,5 @@ type User struct {
 	gorm.Model
 	Username     string `gorm:"uniqueIndex;not null"`
 	PasswordHash string `gorm:"not null"`
+	TokenVersion int    `gorm:"default:1"`
 }

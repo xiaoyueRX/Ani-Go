@@ -26,18 +26,23 @@ type Server struct {
 	mikanSrc          *source.MikanSource  // Mikan 资源源，用于字幕组查询
 	multiSrc          core.Source          // 聚合资源源，用于搜索
 	yucSrc            *source.YucWikiSource // yuc.wiki 资源源，用于时间表
+	version           string
+	logPath           string
 }
 
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
 // staticHandler 为嵌入式前端静态文件服务，若为 nil 则仅提供 API 服务
-func StartServer(ctx context.Context, host string, port int, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error, pluginMgr *plugin.Manager, parser core.TaskParser, mikan *source.MikanSource, multi core.Source, staticHandler http.Handler) *http.Server {
+func StartServer(ctx context.Context, host string, port int, version string, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error, pluginMgr *plugin.Manager, parser core.TaskParser, mikan *source.MikanSource, yuc *source.YucWikiSource, multi core.Source, staticHandler http.Handler, logPath string) *http.Server {
 	s := &Server{
 		downloader:        dl,
 		triggerSupplement: triggerSupp,
 		pluginManager:     pluginMgr,
 		taskParser:        parser,
 		mikanSrc:          mikan,
+		yucSrc:            yuc,
 		multiSrc:          multi,
+		version:           version,
+		logPath:           logPath,
 	}
 
 	mux := http.NewServeMux()
@@ -137,13 +142,18 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 用户信息
 	mux.HandleFunc("GET /api/me", handleMe)
+	mux.HandleFunc("POST /api/user/change-password", s.handleChangePassword)
 
 	// 订阅管理 CRUD
 	mux.HandleFunc("GET /api/subscriptions", s.handleListSubscriptions)
 	mux.HandleFunc("POST /api/subscriptions", s.handleCreateSubscription)
+	mux.HandleFunc("POST /api/subscriptions/batch", s.handleBatchCreateSubscriptions)
+	mux.HandleFunc("GET /api/subgroups", s.handleGetSubgroups)
 	mux.HandleFunc("GET /api/subscriptions/{id}", s.handleGetSubscription)
 	mux.HandleFunc("PUT /api/subscriptions/{id}", s.handleUpdateSubscription)
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", s.handleDeleteSubscription)
+	mux.HandleFunc("POST /api/subscriptions/batch-delete", s.handleBatchDeleteSubscriptions)
+	mux.HandleFunc("POST /api/subscriptions/batch-restore", s.handleBatchRestoreSubscriptions)
 	mux.HandleFunc("POST /api/subscriptions/{id}/trigger-supplement", s.handleTriggerSupplement)
 
 	// 剧集管理
@@ -157,6 +167,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/settings", s.handleUpdateSettings)
 	mux.HandleFunc("GET /api/settings/custom-regex", s.handleGetCustomRegex)
 	mux.HandleFunc("POST /api/settings/custom-regex/reload", s.handleReloadCustomRegex)
+	mux.HandleFunc("GET /api/logs", s.handleGetLogs)
 
 	// 插件管理
 	mux.HandleFunc("GET /api/plugins", s.handleGetPlugins)
@@ -175,7 +186,6 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/mikan/groups", s.handleMikanGroups)
 
 	// 新番时间表（使用 yuc.wiki 数据源）
-	s.yucSrc = source.NewYucWikiSource()
 	mux.HandleFunc("GET /api/schedule", s.handleSchedule)
 
 	// Mikan 镜像测速
@@ -184,6 +194,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 图片代理（Bilibili CDN 热链保护绕过）
 	mux.HandleFunc("GET /api/proxy/image", s.handleProxyImage)
+
+	// 版本信息
+	mux.HandleFunc("GET /api/version", s.handleGetVersion)
 }
 
 // ============================================================
@@ -239,7 +252,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := auth.GenerateToken(req.Username)
+	token, err := auth.GenerateToken(req.Username, user.TokenVersion)
 	if err != nil {
 		log.Printf("❌ JWT 签发失败: %v", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "Token 生成失败"})

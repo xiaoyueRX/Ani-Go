@@ -4,15 +4,18 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
 import { 
-  Menu, User, LogOut, Antenna, Languages,
-  Calendar, LayoutGrid, Search, Download, Settings 
+  Menu, User, LogOut, Antenna, Languages, ExternalLink,
+  Calendar, LayoutGrid, Search, Download, Settings, Sparkles, X
 } from 'lucide-vue-next'
+import { useVersion, CURRENT_VERSION } from '../composables/useVersion'
 
 const router = useRouter()
 const route = useRoute()
 const { t, locale } = useI18n()
 const username = ref('')
 const isDrawerOpen = ref(false)
+
+const { latestVersion, hasNewVersion, checkGitHubUpdate } = useVersion()
 
 function toggleLanguage() {
   locale.value = locale.value === 'zh' ? 'en' : 'zh'
@@ -24,6 +27,16 @@ onMounted(async () => {
     const { data } = await request.get('/me')
     username.value = data.username
   } catch { /* 401 handled by interceptor */ }
+
+  // Check for updates if enabled in backend settings
+  try {
+    const { data: settings } = await request.get('/settings')
+    if (settings.AUTO_CHECK_UPDATE === 'true') {
+      checkGitHubUpdate()
+    }
+  } catch (e) {
+    console.error('Failed to fetch settings for update check:', e)
+  }
 })
 
 function logout() {
@@ -104,7 +117,7 @@ function closeDrawer() {
             </div>
             <div>
               <h1 class="text-2xl font-black tracking-tighter leading-none italic">Ani-Go</h1>
-              <p class="text-[9px] font-black tracking-[0.3em] opacity-30 uppercase mt-1.5 ml-0.5">Automated Sync</p>
+              <p class="text-[9px] font-black tracking-[0.3em] opacity-30 uppercase mt-1.5 ml-0.5">Automated Sync {{ CURRENT_VERSION }}</p>
             </div>
           </div>
         </div>
@@ -168,6 +181,27 @@ function closeDrawer() {
           </div>
         </div>
       </aside>
+    </div>
+
+    <!-- Update Notification Toast -->
+    <div v-if="hasNewVersion" class="fixed bottom-6 right-6 z-[100] animate-in fade-in slide-in-from-bottom-10 duration-500">
+      <div class="bg-base-100 border border-primary/20 shadow-2xl rounded-[1.5rem] p-4 flex items-center gap-4 max-w-sm">
+        <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shrink-0">
+          <Sparkles :size="20" />
+        </div>
+        <div class="flex-1">
+          <h4 class="text-xs font-black uppercase tracking-widest opacity-40">新版本可用</h4>
+          <p class="text-sm font-bold">{{ latestVersion }} 已发布</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <a href="https://github.com/xiaoyueRX/Ani-Go/releases" target="_blank" class="btn btn-primary btn-sm rounded-xl">
+            <ExternalLink :size="14" />
+          </a>
+          <button @click="hasNewVersion = false" class="btn btn-ghost btn-sm btn-circle rounded-xl">
+            <X :size="16" />
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

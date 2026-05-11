@@ -64,6 +64,8 @@ export default {
       kernelDesc: 'Low-level system configuration',
       schedule: 'Scheduling',
       scheduleDesc: 'Background task cycles',
+      update: 'System Update',
+      updateDesc: 'Control software update checking behavior',
     },
     fields: {
       rss: 'Personal RSS',
@@ -103,6 +105,8 @@ export default {
       rssInterval: 'RSS Delta (Min)',
       syncInterval: 'Sync Delta (Hr)',
       ioInterval: 'IO Delta (Min)',
+      autoUpdate: 'Auto Check Update',
+      autoUpdateHint: 'If enabled, it will periodically check for the latest GitHub version',
     },
     tabs: {
       mikan: 'Mikan',
@@ -111,6 +115,7 @@ export default {
       notify: 'Signals',
       ai: 'Intelligence',
       advanced: 'System',
+      account: 'Security',
     },
     mikan: {
       mirrorAudit: 'Mirror Latency Audit',
@@ -163,6 +168,7 @@ export default {
       friday: 'Friday',
       saturday: 'Saturday',
       sunday: 'Sunday',
+      sp: 'Movie/OVA/Special',
       others: 'Others',
       tbd: 'TBD',
     }
@@ -229,6 +235,9 @@ export default {
     subtitle: 'Manage your anime library',
     find: 'Find Anime',
     new: 'New Entry',
+    batchDelete: 'Batch Delete',
+    batchDeleteConfirm: 'Delete {count} subscriptions?',
+    undoDelete: 'Undo',
     searchPlaceholder: 'Search by title or subgroup...',
     filter: {
       all: 'Everything',
@@ -308,6 +317,8 @@ export default {
         verified: 'Verified',
       },
       empty: 'Database is empty',
+      ungrouped: 'Other Groups',
+      episodes: 'episodes',
     },
     edit: {
       title: 'Modify Entry',

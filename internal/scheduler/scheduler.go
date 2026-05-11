@@ -7,17 +7,25 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+
+	"github.com/PuerkitoBio/goquery"
+	"gorm.io/gorm"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/ai"
 	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/parser"
+	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
 
 // Scheduler 调度器，管理所有定时任务
@@ -89,6 +97,8 @@ func (s *Scheduler) Start(ctx context.Context) {
 }
 
 // pollRSS 执行单次 RSS 轮询
+// RSSMode 为 "classic" 时启用自动建番剧（未匹配种子自动创建订阅）
+// RSSMode 为 "personal" 时仅下载已匹配订阅的种子
 func (s *Scheduler) pollRSS(ctx context.Context) {
 	if s.mikanRSSURL == "" {
 		log.Println("⚠️  Mikan RSS URL 未配置，跳过 RSS 轮询")
@@ -168,7 +178,21 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 			season, epNum := parser.ExtractEpisode(item.Title)
 			createEpisodeRecordWithParsed(matchedSub.ID, item, season, epNum)
 		} else {
-			log.Printf("⚠️ 未找到匹配的订阅，跳过集数记录创建: %s", item.Title)
+			// 根据 RSS 模式决定是否自动创建订阅
+			// "classic" 模式：未匹配种子自动建番剧
+			// "personal" 模式：仅跳过，不创建
+			if s.cfg.Mikan.RSSMode == core.RSSModeClassic {
+				autoSubID, err := autoCreateSubscription(ctx, s, item)
+				if err != nil {
+					log.Printf("⚠️ 自动创建订阅失败 [%s]: %v", item.Title, err)
+				} else {
+					season, epNum := parser.ExtractEpisode(item.Title)
+					createEpisodeRecordWithParsed(autoSubID, item, season, epNum)
+					log.Printf("✅ 自动创建订阅 [%s]: ID=%d", item.Title, autoSubID)
+				}
+			} else {
+				log.Printf("ℹ️  个人RSS模式: 跳过未匹配种子: %s", item.Title)
+			}
 		}
 
 		// 发布事件
@@ -382,12 +406,39 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 		return
 	}
 
-	if sub.TotalEpisodes == 0 && s.metadataProvider != nil {
+	if s.metadataProvider != nil {
 		anime, err := s.metadataProvider.GetAnime(ctx, sub.BangumiID)
-		if err == nil && anime.TotalEps > 0 {
-			sub.TotalEpisodes = anime.TotalEps
-			database.DB.Model(&sub).Update("total_episodes", anime.TotalEps)
-			log.Printf("✅ 已更新订阅 [%s] 总集数: %d", sub.TitleCN, anime.TotalEps)
+		if err == nil {
+			updates := map[string]interface{}{}
+			if sub.TotalEpisodes == 0 && anime.TotalEps > 0 {
+				updates["total_episodes"] = anime.TotalEps
+				sub.TotalEpisodes = anime.TotalEps
+			}
+			if sub.Year == 0 && anime.Year > 0 {
+				updates["year"] = anime.Year
+				sub.Year = anime.Year
+			}
+			if sub.AnimeType == "" && anime.Type != "" {
+				updates["anime_type"] = anime.Type
+				sub.AnimeType = anime.Type
+			}
+			if sub.Description == "" && anime.Description != "" {
+				updates["description"] = anime.Description
+				sub.Description = anime.Description
+			}
+			if sub.CoverURL == "" && anime.CoverURL != "" {
+				updates["cover_url"] = anime.CoverURL
+				sub.CoverURL = anime.CoverURL
+			}
+			if sub.MetadataProvider == "" {
+				updates["metadata_provider"] = s.metadataProvider.Name()
+				sub.MetadataProvider = s.metadataProvider.Name()
+			}
+
+			if len(updates) > 0 {
+				database.DB.Model(&sub).Updates(updates)
+				log.Printf("✅ 已通过 %s 补全订阅 [%s] 的元数据: %+v", s.metadataProvider.Name(), sub.TitleCN, updates)
+			}
 		}
 	}
 
@@ -504,6 +555,7 @@ func createEpisodeRecordWithParsed(subID uint, item core.TorrentItem, season int
 		TorrentURL:        item.URL,
 		OriginalName:      item.Title,
 		FileSize:          item.Size,
+		GroupName:         item.GroupName,
 		DownloadStartedAt: &now,
 	}
 
@@ -529,6 +581,7 @@ func createEpisodeRecord(subID uint, item core.TorrentItem) {
 		TorrentURL:        item.URL,
 		OriginalName:      item.Title,
 		FileSize:          item.Size,
+		GroupName:         item.GroupName,
 		DownloadStartedAt: &now,
 	}
 
@@ -599,4 +652,266 @@ func recordDownload(item core.TorrentItem) {
 	if result := database.DB.Create(&rec); result.Error != nil {
 		log.Printf("⚠️  记录下载失败: %v", result.Error)
 	}
+}
+
+// ============================================================
+// 自动订阅：从 Mikan RSS 未匹配的种子自动创建订阅
+// ============================================================
+
+// autoCreateSubscription 自动创建订阅
+// 从种子详情页爬取 Mikan BangumiID，然后创建 Subscription 记录
+func autoCreateSubscription(ctx context.Context, s *Scheduler, item core.TorrentItem) (uint, error) {
+	// 1. 提取 CleanTitle
+	parsed := source.ParseMikanTitle(item.Title)
+	cleanTitle := parsed.Title
+	if cleanTitle == "" {
+		cleanTitle = strings.TrimSpace(item.Title)
+	}
+
+	// 2. 尝试从种子详情页爬取 Mikan BangumiID
+	mikanBangumiID := extractMikanBangumiID(ctx, s, item)
+
+	// 3. 如果没有详情页 URL 或爬取失败，回退到标题搜索
+	if mikanBangumiID == "" {
+		log.Printf("ℹ️  [自动订阅] 尝试通过标题搜索 BangumiID: %s", cleanTitle)
+		return createSubscriptionFromTitle(ctx, s, item, cleanTitle)
+	}
+
+	// 4. 检查是否已订阅该 BangumiID
+	var count int64
+	database.DB.Model(&database.Subscription{}).Where("bangumi_id = ?", mikanBangumiID).Count(&count)
+	if count > 0 {
+		return 0, fmt.Errorf("BangumiID=%s 已订阅", mikanBangumiID)
+	}
+
+	// 5. 创建订阅（事务内）
+	var subID uint
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// 事务内再次检查重复
+		var existing database.Subscription
+		result := tx.Where("bangumi_id = ?", mikanBangumiID).First(&existing)
+		if result.RowsAffected > 0 {
+			return fmt.Errorf("BangumiID=%s 已存在订阅", mikanBangumiID)
+		}
+
+		// 获取字幕组 RSS URL
+		rssURL := ""
+		mikanSrc, ok := s.source.(*source.MikanSource)
+		if ok {
+			if url, err := mikanSrc.ResolveFirstRSSURL(ctx, mikanBangumiID); err == nil {
+				rssURL = url
+			}
+		}
+
+		sub := database.Subscription{
+			TitleCN:   cleanTitle,
+			BangumiID: mikanBangumiID,
+			RSSURL:    rssURL,
+			Enabled:   true,
+			SourceName: "Mikan",
+		}
+
+		if err := tx.Create(&sub).Error; err != nil {
+			return fmt.Errorf("创建订阅失败: %w", err)
+		}
+		subID = sub.ID
+		log.Printf("✅ [自动订阅] 已创建订阅 ID=%d: %s (BangumiID=%s)", subID, cleanTitle, mikanBangumiID)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	// 6. 触发补全扫描（非事务，可失败）
+	if s.metadataProvider != nil && s.mikanRSSURL != "" {
+		go func(subID uint) {
+			suppCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			var sub database.Subscription
+			if database.DB.First(&sub, subID).Error == nil {
+				s.supplementOne(suppCtx, sub)
+			}
+		}(subID)
+	}
+
+	return subID, nil
+}
+
+// extractMikanBangumiID 从 Mikan 种子详情页提取 BangumiID
+// 详情页 URL 在 TorrentItem.EpisodeURL 中，格式如 https://mikanime.tv/Home/Episode/<hash>
+// 页面中包含: <button data-bangumiid="3899" ...> 或 <a href="/Home/Bangumi/3899">
+func extractMikanBangumiID(ctx context.Context, s *Scheduler, item core.TorrentItem) string {
+	if item.EpisodeURL == "" {
+		return ""
+	}
+
+	// 使用 MikanSource 的抓取能力（镜像回退等）
+	mikanSrc, ok := s.source.(*source.MikanSource)
+	if !ok {
+		return ""
+	}
+
+	// 解析详情页 URL 的路径
+	u, err := url.Parse(item.EpisodeURL)
+	if err != nil {
+		return ""
+	}
+
+	// 用 MikanSource 的域名构造完整 URL
+	domain := mikanSrc.GetDomain()
+	detailURL := fmt.Sprintf("https://%s%s", domain, u.Path)
+
+	// 自己发起 HTTP 请求抓取详情页
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, detailURL, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		log.Printf("⚠️  [自动订阅] 抓取详情页失败: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return ""
+	}
+
+	// 优先从 data-bangumiid 属性提取（最精确）
+	var bangumiID string
+	doc.Find("button.js-subscribe_bangumi_page").Each(func(_ int, sel *goquery.Selection) {
+		if id, exists := sel.Attr("data-bangumiid"); exists && id != "" {
+			bangumiID = id
+		}
+	})
+
+	// 回退：从 /Home/Bangumi/<id> 链接中提取
+	if bangumiID == "" {
+		re := regexp.MustCompile(`/Home/Bangumi/(\d+)`)
+		doc.Find("a[href*='/Home/Bangumi/']").Each(func(_ int, sel *goquery.Selection) {
+			if href, exists := sel.Attr("href"); exists {
+				if m := re.FindStringSubmatch(href); m != nil {
+					bangumiID = m[1]
+				}
+			}
+		})
+	}
+
+	return bangumiID
+}
+
+// createSubscriptionFromTitle 当无法从详情页获取 BangumiID 时，通过标题搜索回退创建
+func createSubscriptionFromTitle(ctx context.Context, s *Scheduler, item core.TorrentItem, cleanTitle string) (uint, error) {
+	if s.metadataProvider == nil || cleanTitle == "" {
+		return 0, fmt.Errorf("无法识别番剧: %s", cleanTitle)
+	}
+
+	results, err := s.metadataProvider.SearchAnime(ctx, cleanTitle)
+	if err != nil {
+		return 0, fmt.Errorf("搜索番剧失败: %w", err)
+	}
+	if len(results) == 0 {
+		return 0, fmt.Errorf("未找到匹配的番剧: %s", cleanTitle)
+	}
+
+	// 选最佳匹配
+	best := bestMatch(results, cleanTitle)
+	if best == nil {
+		return 0, fmt.Errorf("无法确定最佳匹配: %s", cleanTitle)
+	}
+
+	// 检查是否已订阅
+	var count int64
+	database.DB.Model(&database.Subscription{}).Where("bangumi_id = ?", best.ID).Count(&count)
+	if count > 0 {
+		return 0, fmt.Errorf("BangumiID=%s 已订阅", best.ID)
+	}
+
+	// 创建订阅
+	var subID uint
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		var existing database.Subscription
+		result := tx.Where("bangumi_id = ?", best.ID).First(&existing)
+		if result.RowsAffected > 0 {
+			return fmt.Errorf("BangumiID=%s 已存在", best.ID)
+		}
+
+		sub := database.Subscription{
+			TitleCN:          best.TitleCN,
+			TitleEN:          best.TitleEN,
+			TitleJP:          best.TitleJP,
+			BangumiID:        best.ID,
+			Year:             best.Year,
+			Season:           best.Season,
+			CoverURL:         best.CoverURL,
+			Description:      best.Description,
+			Enabled:          true,
+			SourceName:       "Mikan",
+			MetadataID:       best.ID,
+			MetadataProvider: s.metadataProvider.Name(),
+			TotalEpisodes:    best.TotalEps,
+		}
+
+		// 补全 Mikan RSS URL
+		mikanSrc, ok := s.source.(*source.MikanSource)
+		if ok {
+			if rssURL, err := mikanSrc.ResolveFirstRSSURL(ctx, best.ID); err == nil {
+				sub.RSSURL = rssURL
+			}
+		}
+
+		if err := tx.Create(&sub).Error; err != nil {
+			return fmt.Errorf("创建订阅失败: %w", err)
+		}
+		subID = sub.ID
+		log.Printf("✅ [自动订阅] 已通过标题搜索创建订阅 ID=%d: %s (BangumiID=%s)", subID, best.TitleCN, best.ID)
+		return nil
+	})
+	return subID, err
+}
+
+// bestMatch 从 Bangumi 搜索结果中选最佳匹配
+func bestMatch(results []core.Anime, cleanTitle string) *core.Anime {
+	if len(results) == 0 {
+		return nil
+	}
+
+	cleanLower := strings.ToLower(cleanTitle)
+
+	// 1. TitleCN 完全匹配优先
+	for i := range results {
+		if strings.ToLower(results[i].TitleCN) == cleanLower ||
+			strings.ToLower(results[i].TitleEN) == cleanLower {
+			return &results[i]
+		}
+	}
+
+	// 2. CleanTitle 包含在 TitleCN 中且长度最长
+	var best *core.Anime
+	var maxLen int
+	for i := range results {
+		title := strings.ToLower(results[i].TitleCN)
+		if strings.Contains(title, cleanLower) || strings.Contains(cleanLower, title) {
+			if len(title) > maxLen {
+				maxLen = len(title)
+				best = &results[i]
+			}
+		}
+	}
+
+	if best != nil {
+		return best
+	}
+
+	// 3. 直接返回第一个结果（兜底）
+	return &results[0]
 }

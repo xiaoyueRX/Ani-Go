@@ -232,6 +232,7 @@ func (m *MikanSource) FetchRSS(ctx context.Context, url string) ([]core.TorrentI
 			Size:        item.Enclosure.Length,
 			PublishedAt: pubAt,
 			SourceName:  "Mikan",
+			EpisodeURL:  item.Link,
 		})
 	}
 
@@ -783,24 +784,22 @@ func parseMikanSearchHTML(html, domain string) []core.TorrentItem {
 	return items
 }
 
-// WeekDayItem 表示某一天播放的番剧列表
-type WeekDayItem struct {
-	DayOfWeek int            `json:"day_of_week"`
-	Label     string         `json:"label"`
-	Items     []core.TorrentItem `json:"items"`
-}
-
-// FetchWeekSchedule 获取当前季度番剧按星期分组列表
-// 依次尝试当前/上一季度，直到拿到数据为止
-func (m *MikanSource) FetchWeekSchedule(ctx context.Context) ([]WeekDayItem, error) {
-	now := time.Now()
-	year := now.Year()
-	season := getSeason(now.Month())
-
+// FetchWeekSchedule 获取指定季度番剧按星期分组列表
+// 如果未指定 year/season (即为0)，则依次尝试当前/上一季度，直到拿到数据为止
+func (m *MikanSource) FetchWeekSchedule(ctx context.Context, year, season int) ([]WeekDayItem, error) {
 	weekLabel := map[int]string{
 		1: "星期一", 2: "星期二", 3: "星期三", 4: "星期四",
 		5: "星期五", 6: "星期六", 7: "星期日",
 	}
+
+	if year > 0 && season > 0 {
+		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%d", year, season)
+		return m.fetchPath(ctx, path, weekLabel)
+	}
+
+	now := time.Now()
+	year = now.Year()
+	season = getSeason(now.Month())
 
 	// 最多尝试 3 个季度（当前、上季、上上季）
 	for i := 0; i < 3; i++ {
@@ -812,89 +811,97 @@ func (m *MikanSource) FetchWeekSchedule(ctx context.Context) ([]WeekDayItem, err
 		}
 
 		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%d", y, s)
-		resp, err := m.tryMirrors(ctx, path)
-		if err != nil {
-			continue
-		}
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil || len(body) < 2000 {
-			continue
-		}
-
-		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
-		if err != nil {
-			continue
-		}
-
-		var result []WeekDayItem
-		doc.Find(".sk-bangumi").Each(func(_ int, sel *goquery.Selection) {
-			dowStr, exists := sel.Attr("data-dayofweek")
-			if !exists {
-				return
-			}
-			dow, _ := strconv.Atoi(dowStr)
-			label := weekLabel[dow]
-			if label == "" {
-				label = dowStr
-			}
-
-			var items []core.TorrentItem
-			sel.Find("a.an-text").Each(func(_ int, a *goquery.Selection) {
-				title := strings.TrimSpace(a.Text())
-				href, _ := a.Attr("href")
-				if title == "" || href == "" {
-					return
-				}
-				bangumiID := ""
-				if strings.HasPrefix(href, "/Home/Bangumi/") {
-					bangumiID = strings.TrimPrefix(href, "/Home/Bangumi/")
-				}
-
-				// 提取更新日期
-				parent := a.ParentsFiltered(".an-info-group")
-				updateDate := ""
-				if parent.Length() > 0 {
-					updateDate = strings.TrimSpace(parent.Find(".date-text").Text())
-				}
-
-				// 提取封面图（从同级的 b-lazy span 的 data-src 属性）
-				cover := ""
-				listItem := a.ParentsFiltered("li").First()
-				if listItem.Length() > 0 {
-					src, exists := listItem.Find(".b-lazy").Attr("data-src")
-					if exists && src != "" {
-						if strings.HasPrefix(src, "/") {
-							cover = "https://" + m.domain + src
-						} else {
-							cover = src
-						}
-					}
-				}
-
-				items = append(items, core.TorrentItem{
-					Title:      title,
-					URL:        "https://" + m.domain + href,
-					BangumiID:  bangumiID,
-					SourceName: "Mikan",
-					InfoHash:   updateDate,
-					CoverURL:   cover,
-				})
-			})
-
-			if len(items) > 0 {
-				result = append(result, WeekDayItem{DayOfWeek: dow, Label: label, Items: items})
-			}
-		})
-
-		if len(result) > 0 {
+		result, err := m.fetchPath(ctx, path, weekLabel)
+		if err == nil && len(result) > 0 {
 			return result, nil
 		}
 	}
-
-	return nil, fmt.Errorf("所有季节均无数据")
+	return nil, fmt.Errorf("failed to fetch schedule from Mikan")
 }
+
+func (m *MikanSource) fetchPath(ctx context.Context, path string, weekLabel map[int]string) ([]WeekDayItem, error) {
+	resp, err := m.tryMirrors(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) < 2000 {
+		return nil, fmt.Errorf("body too short")
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+
+	var result []WeekDayItem
+	doc.Find(".sk-bangumi").Each(func(_ int, sel *goquery.Selection) {
+		dowStr, exists := sel.Attr("data-dayofweek")
+		if !exists {
+			return
+		}
+		dow, _ := strconv.Atoi(dowStr)
+		label := weekLabel[dow]
+		if label == "" {
+			label = dowStr
+		}
+
+		var items []core.TorrentItem
+		sel.Find("a.an-text").Each(func(_ int, a *goquery.Selection) {
+			title := strings.TrimSpace(a.Text())
+			href, _ := a.Attr("href")
+			if title == "" || href == "" {
+				return
+			}
+			bangumiID := ""
+			if strings.HasPrefix(href, "/Home/Bangumi/") {
+				bangumiID = strings.TrimPrefix(href, "/Home/Bangumi/")
+			}
+
+			// 提取更新日期
+			parent := a.ParentsFiltered(".an-info-group")
+			updateDate := ""
+			if parent.Length() > 0 {
+				updateDate = strings.TrimSpace(parent.Find(".date-text").Text())
+			}
+
+			// 提取封面图（从同级的 b-lazy span 的 data-src 属性）
+			cover := ""
+			listItem := a.ParentsFiltered("li").First()
+			if listItem.Length() > 0 {
+				src, exists := listItem.Find(".b-lazy").Attr("data-src")
+				if exists && src != "" {
+					if strings.HasPrefix(src, "/") {
+						cover = "https://" + m.domain + src
+					} else {
+						cover = src
+					}
+				}
+			}
+
+			items = append(items, core.TorrentItem{
+				Title:      title,
+				URL:        "https://" + m.domain + href,
+				BangumiID:  bangumiID,
+				SourceName: "Mikan",
+				AiredDate:  updateDate,
+				InfoHash:   "", // Clear InfoHash as it is not a hash
+				CoverURL:   cover,
+			})
+		})
+
+		if len(items) > 0 {
+			result = append(result, WeekDayItem{DayOfWeek: dow, Label: label, Items: items})
+		}
+	})
+	return result, nil
+}
+
 
 // parseMikanSeasonHTML 从 Mikan 季度列表 HTML 中提取番剧（不需要登录）
 // 使用 goquery 解析 HTML，参考 mikanime.tv 的实际 HTML 结构
@@ -1085,6 +1092,7 @@ func extractTorrentTable(table *goquery.Selection, groupName, domain string, fil
 			Size:        parseSize(sizeText),
 			PublishedAt: pubAt,
 			SourceName:  "Mikan",
+			GroupName:   info.Subgroup,
 		})
 	})
 }

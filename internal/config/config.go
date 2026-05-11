@@ -1,10 +1,13 @@
 package config
 
 import (
+	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/core"
 )
 
 type Config struct {
@@ -21,10 +24,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host string
-	Port int
+	Host    string
+	Port    int
+	LogPath string
 }
-
 type DatabaseConfig struct {
 	Path string
 }
@@ -34,6 +37,7 @@ type MikanConfig struct {
 	Domain         string
 	ProxyDomain    string
 	MirrorDomains  []string // 镜像域名列表，GFW 环境下自动回退
+	RSSMode        string   // "personal" 个人RSS（仅已有订阅）或 "classic" 经典RSS（全平台，自动建番剧）
 }
 
 type DownloadersConfig struct {
@@ -171,6 +175,14 @@ func Load() *Config {
 	if v := os.Getenv("MIKAN_MIRROR_DOMAINS"); v != "" {
 		cfg.Mikan.MirrorDomains = splitEnv(v)
 	}
+	if v := os.Getenv("MIKAN_RSS_MODE"); v != "" {
+		cfg.Mikan.RSSMode = v
+	}
+	// 校验：非 classic 且非 personal 时回退到 classic
+	if cfg.Mikan.RSSMode != core.RSSModeClassic && cfg.Mikan.RSSMode != core.RSSModePersonal {
+		log.Printf("⚠️ 无效的 MIKAN_RSS_MODE=%q，回退为 classic", cfg.Mikan.RSSMode)
+		cfg.Mikan.RSSMode = core.RSSModeClassic
+	}
 	if v := os.Getenv("QB_HOST"); v != "" {
 		cfg.Downloaders.QBittorrent.Host = v
 		cfg.Downloaders.QBittorrent.Enabled = true
@@ -263,6 +275,9 @@ func Load() *Config {
 		if port, err := strconv.Atoi(v); err == nil {
 			cfg.Server.Port = port
 		}
+	}
+	if v := os.Getenv("LOG_PATH"); v != "" {
+		cfg.Server.LogPath = v
 	}
 	if v := os.Getenv("NYAA_DOMAIN"); v != "" {
 		cfg.Sources.Nyaa.Domain = v
@@ -381,10 +396,11 @@ func Load() *Config {
 
 func defaults() *Config {
 	return &Config{
-		Server:   ServerConfig{Host: "0.0.0.0", Port: 20001},
+		Server:   ServerConfig{Host: "0.0.0.0", Port: 20001, LogPath: "./data/ani-go.log"},
 		Database: DatabaseConfig{Path: "ani-go.db"},
 		Mikan: MikanConfig{
 			Domain: "mikanime.tv", MirrorDomains: []string{"mikanime.tv", "mikanani.kas.pub", "mikanani.me"},
+			RSSMode: core.RSSModeClassic,
 		},
 		Downloaders: DownloadersConfig{
 			Default: "qbittorrent",
@@ -437,6 +453,9 @@ func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
 	}
 	if v, ok := getter("MIKAN_MIRROR_DOMAINS"); ok {
 		c.Mikan.MirrorDomains = splitEnv(v)
+	}
+	if v, ok := getter("MIKAN_RSS_MODE"); ok && c.Mikan.RSSMode == "" {
+		c.Mikan.RSSMode = v
 	}
 	// 下载器
 	if v, ok := getter("DEFAULT_DOWNLOADER"); ok && c.Downloaders.Default == "qbittorrent" {

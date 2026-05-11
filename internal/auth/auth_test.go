@@ -4,7 +4,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/database"
 )
+
+func TestMain(m *testing.M) {
+	database.Init(":memory:")
+	m.Run()
+}
 
 func TestHashAndCheckPassword(t *testing.T) {
 	hash, err := HashPassword("admin123")
@@ -33,7 +40,7 @@ func TestDynamicSecretInit(t *testing.T) {
 
 func TestGenerateAndValidateToken(t *testing.T) {
 	InitSecret()
-	token, err := GenerateToken("testuser")
+	token, err := GenerateToken("testuser", 1)
 	if err != nil {
 		t.Fatalf("Token 生成失败: %v", err)
 	}
@@ -61,7 +68,7 @@ func TestValidateInvalidToken(t *testing.T) {
 
 func TestValidateWrongSecret(t *testing.T) {
 	InitSecret()
-	token, _ := GenerateToken("user")
+	token, _ := GenerateToken("user", 1)
 
 	// 换一个新 Secret 模拟重启后旧 Token 失效
 	InitSecret()
@@ -101,7 +108,12 @@ func TestAuthMiddleware_BypassLogin(t *testing.T) {
 
 func TestAuthMiddleware_ValidToken(t *testing.T) {
 	InitSecret()
-	token, _ := GenerateToken("admin")
+	// 创建测试用户
+	database.DB.Create(&database.User{
+		Username:     "admin",
+		TokenVersion: 1,
+	})
+	token, _ := GenerateToken("admin", 1)
 
 	handler := AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

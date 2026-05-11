@@ -64,9 +64,12 @@ export default {
       kernelDesc: '底层系统配置',
       schedule: '任务调度',
       scheduleDesc: '后台任务循环周期',
+      update: '系统更新',
+      updateDesc: '控制软件更新检查行为',
     },
     fields: {
       rss: '个人 RSS',
+      rssMode: 'RSS 模式',
       domain: '主域名',
       proxy: '代理节点',
       mirrors: '镜像节点',
@@ -103,6 +106,8 @@ export default {
       rssInterval: 'RSS 间隔 (分)',
       syncInterval: '同步间隔 (时)',
       ioInterval: '整理间隔 (分)',
+      autoUpdate: '自动检查更新',
+      autoUpdateHint: '开启后将定期检查 GitHub 最新版本',
     },
     tabs: {
       mikan: 'Mikan',
@@ -111,6 +116,7 @@ export default {
       notify: '通知',
       ai: '智能',
       advanced: '系统',
+      account: '安全',
     },
     mikan: {
       mirrorAudit: '镜像延迟审计',
@@ -119,6 +125,10 @@ export default {
       currentRoute: '当前活跃路由',
       unreachable: '无法连接',
       noData: '无遥测数据。点击运行开始审计。',
+    },
+    rssMode: {
+      personal: '个人 RSS（仅匹配已有订阅番剧）',
+      classic: '经典 RSS（全平台种子，自动创建订阅番剧）',
     },
     status: {
       syncStatus: '同步状态',
@@ -163,9 +173,24 @@ export default {
       friday: '周五',
       saturday: '周六',
       sunday: '周日',
+      sp: 'SP/OVA/剧场版',
       others: '其他',
       tbd: '待定',
-    }
+    },
+    batch: {
+      button: '批量订阅',
+      selectDefault: '选择默认字幕组',
+      selectDefaultDesc: '批量订阅将优先使用该字幕组的 RSS',
+      manualInput: '暂无字幕组数据，请手动输入',
+      selected: '已选 {count} 部',
+      confirm: '确认订阅',
+      cancel: '取消',
+      result: '批量订阅完成',
+      success: '成功 {count} 部',
+      failed: '失败 {count} 部',
+      error: '订阅失败',
+      submitting: '提交中...',
+    },
   },
   search: {
     title: '探索',
@@ -229,6 +254,9 @@ export default {
     subtitle: '管理你的番剧库',
     find: '发现番剧',
     new: '新增订阅',
+    batchDelete: '批量删除',
+    batchDeleteConfirm: '确定删除 {count} 个订阅？',
+    undoDelete: '撤回',
     searchPlaceholder: '搜索标题或字幕组...',
     filter: {
       all: '全部',
@@ -308,6 +336,8 @@ export default {
         verified: '已验证',
       },
       empty: '数据库为空',
+      ungrouped: '其他字幕组',
+      episodes: '个剧集',
     },
     edit: {
       title: '修改条目',

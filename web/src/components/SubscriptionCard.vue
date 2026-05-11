@@ -31,7 +31,18 @@ interface Subscription {
 const props = defineProps<{
   sub: Subscription
   deleting?: boolean
+  pending?: boolean
+  batchDeleteMode?: boolean
+  batchSelected?: boolean
 }>()
+
+function proxyImage(url: string | undefined): string {
+  if (!url) return ''
+  if (url.includes('api/proxy/image')) return url
+  let target = url
+  if (url.startsWith('//')) target = 'https:' + url
+  return `/api/proxy/image?url=${encodeURIComponent(target)}`
+}
 
 const emit = defineEmits<{
   (e: 'click'): void
@@ -57,7 +68,7 @@ const progressColor = computed(() => {
 <template>
   <div
     class="group relative flex flex-col bg-base-100 rounded-[2.5rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:shadow-primary hover:border-primary/30 transition-all duration-500 cursor-pointer active:scale-[0.98] h-full"
-    :class="{ 'opacity-80 grayscale-[0.4]': !sub.enabled }"
+    :class="{ 'opacity-80 grayscale-[0.4]': !sub.enabled, 'opacity-40 pointer-events-none': pending }"
     @click="emit('click')"
   >
     <!-- Cover Image Wrapper -->
@@ -67,7 +78,7 @@ const progressColor = computed(() => {
       
       <img
         v-if="sub.cover_url"
-        :src="sub.cover_url"
+        :src="proxyImage(sub.cover_url)"
         :alt="sub.title_cn"
         class="w-full h-full object-cover transition-all duration-1000 group-hover:scale-110 group-hover:rotate-1"
         :class="{ 'opacity-0': !isImageLoaded, 'opacity-100': isImageLoaded }"
@@ -92,6 +103,14 @@ const progressColor = computed(() => {
           <AlertTriangle :size="12" />
           {{ $t('card.stalled', { count: sub.stalled_episodes }) }}
         </div>
+      </div>
+
+      <!-- Batch Delete Selection Mode Visual -->
+      <div v-if="batchDeleteMode" class="absolute inset-0 z-20 pointer-events-none rounded-[2.5rem] transition-all duration-300"
+           :class="batchSelected ? 'border-4 border-error bg-error/10' : 'border-4 border-transparent'">
+         <div v-if="batchSelected" class="absolute top-4 right-4 bg-error text-error-content rounded-full p-1 shadow-lg">
+           <Check :size="20" />
+         </div>
       </div>
 
       <!-- Floating Actions (Hover) -->
