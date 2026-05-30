@@ -32,7 +32,7 @@ type Server struct {
 
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
 // staticHandler 为嵌入式前端静态文件服务，若为 nil 则仅提供 API 服务
-func StartServer(ctx context.Context, host string, port int, version string, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error, pluginMgr *plugin.Manager, parser core.TaskParser, mikan *source.MikanSource, yuc *source.YucWikiSource, multi core.Source, staticHandler http.Handler, logPath string) *http.Server {
+func StartServer(ctx context.Context, host string, port int, version string, allowedOrigins []string, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error, pluginMgr *plugin.Manager, parser core.TaskParser, mikan *source.MikanSource, yuc *source.YucWikiSource, multi core.Source, staticHandler http.Handler, logPath string) *http.Server {
 	s := &Server{
 		downloader:        dl,
 		triggerSupplement: triggerSupp,
@@ -49,7 +49,7 @@ func StartServer(ctx context.Context, host string, port int, version string, dl 
 	s.registerRoutes(mux)
 
 	apiHandler := auth.ProxyHeadersMiddleware(
-		auth.CORSMiddleware(
+		auth.CORSMiddleware(allowedOrigins)(
 			auth.AuthMiddleware(mux),
 		),
 	)

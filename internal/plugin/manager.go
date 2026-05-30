@@ -181,6 +181,7 @@ func (m *Manager) executeWebhook(p PluginConfig, payload []byte) {
 }
 
 func (m *Manager) executeScript(p PluginConfig, payload []byte) {
+	log.Printf("📋 AUDIT: 插件 [%s] 执行脚本命令: %s", p.Name, p.Command)
 	cmd := exec.CommandContext(m.ctx, "sh", "-c", p.Command)
 	cmd.Stdin = bytes.NewReader(payload)
 	var stderr bytes.Buffer
@@ -190,7 +191,7 @@ func (m *Manager) executeScript(p PluginConfig, payload []byte) {
 		log.Printf("⚠️  插件 [%s] 脚本执行失败: %v | stderr: %s", p.Name, err, stderr.String())
 		return
 	}
-	log.Printf("🔌 插件 [%s] 脚本 → %s | 输出: %s", p.Name, p.Command, strings.TrimSpace(string(out)))
+	log.Printf("📋 AUDIT: 插件 [%s] 脚本执行成功 | 输出: %s", p.Name, strings.TrimSpace(string(out)))
 }
 
 // GetPlugins 返回当前已加载的插件列表

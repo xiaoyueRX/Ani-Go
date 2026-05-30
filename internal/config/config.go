@@ -24,9 +24,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host    string
-	Port    int
-	LogPath string
+	Host           string
+	Port           int
+	LogPath        string
+	AllowedOrigins []string // CORS 允许的 Origin 列表
 }
 type DatabaseConfig struct {
 	Path string
@@ -279,6 +280,9 @@ func Load() *Config {
 	if v := os.Getenv("LOG_PATH"); v != "" {
 		cfg.Server.LogPath = v
 	}
+	if v := os.Getenv("CORS_ALLOWED_ORIGINS"); v != "" {
+		cfg.Server.AllowedOrigins = splitEnv(v)
+	}
 	if v := os.Getenv("NYAA_DOMAIN"); v != "" {
 		cfg.Sources.Nyaa.Domain = v
 		cfg.Sources.Nyaa.Enabled = true
@@ -396,7 +400,7 @@ func Load() *Config {
 
 func defaults() *Config {
 	return &Config{
-		Server:   ServerConfig{Host: "0.0.0.0", Port: 20001, LogPath: "./data/ani-go.log"},
+		Server:   ServerConfig{Host: "0.0.0.0", Port: 20001, LogPath: "./data/ani-go.log", AllowedOrigins: []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:20001"}},
 		Database: DatabaseConfig{Path: "ani-go.db"},
 		Mikan: MikanConfig{
 			Domain: "mikanime.tv", MirrorDomains: []string{"mikanime.tv", "mikanani.kas.pub", "mikanani.me"},

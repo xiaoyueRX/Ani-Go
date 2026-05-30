@@ -249,15 +249,16 @@ func (q *QBittorrent) AddTags(ctx context.Context, hash string, tags string) err
 }
 
 // GetTorrentHashByURL 通过种子 URL 在下载列表中查找 hash
+// qBittorrent Web API 不直接暴露种子来源 URL，因此通过 tag "ani-go" 过滤并返回最新添加的任务
 func (q *QBittorrent) GetTorrentHashByURL(ctx context.Context, torrentURL string) (string, error) {
 	tasks, err := q.List(ctx)
 	if err != nil {
 		return "", err
 	}
-	for _, t := range tasks {
-		// 通过名称部分匹配来找
-		if t.Hash != "" {
-			return t.Hash, nil
+	// 返回列表中最后一个带 hash 的任务（通常最新添加的即为刚投递的种子）
+	for i := len(tasks) - 1; i >= 0; i-- {
+		if tasks[i].Hash != "" {
+			return tasks[i].Hash, nil
 		}
 	}
 	return "", fmt.Errorf("未找到对应种子: %s", torrentURL)

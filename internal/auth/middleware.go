@@ -9,31 +9,46 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 )
 
-// CORSMiddleware 处理跨域请求，兼容 Lucky 反向代理
-// 允许多种来源：本地开发、Docker 容器、反代域名
-func CORSMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			origin = r.Header.Get("Referer")
-		}
+// CORSMiddleware 处理跨域请求
+// allowedOrigins 非空时进行 Origin 白名单校验，为空则允许所有来源
+func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	// 预构建 origin 集合用于快速查找
+	originSet := make(map[string]bool, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		originSet[o] = true
+	}
 
-		// 允许所有来源（Lucky 反代场景下来源不固定）
-		// 生产环境如需限制可在此配置白名单
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-		w.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Type")
-		w.Header().Set("Access-Control-Max-Age", "86400")
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				origin = r.Header.Get("Referer")
+			}
 
-		// OPTIONS 预检请求直接返回
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+			if len(originSet) > 0 {
+				// 白名单模式：仅允许配置的 Origin
+				if originSet[origin] {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Vary", "Origin")
+				}
+			} else {
+				// 无白名单时允许所有来源（向后兼容）
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+			w.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Type")
+			w.Header().Set("Access-Control-Max-Age", "86400")
 
-		next.ServeHTTP(w, r)
-	})
+			// OPTIONS 预检请求直接返回
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // AuthMiddleware JWT 鉴权中间件

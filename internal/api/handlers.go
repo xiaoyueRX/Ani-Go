@@ -558,7 +558,7 @@ func (s *Server) handleTriggerSupplement(w http.ResponseWriter, r *http.Request)
 
 	go func() {
 		// 不能用 r.Context() — HTTP 响应返回后会被 Cancel
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if err := s.triggerSupplement(ctx, uint(id)); err != nil {
 			log.Printf("❌ 手动补全失败 [%s]: %v", sub.TitleCN, err)
@@ -1039,6 +1039,29 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 	subscribed := make(map[string]uint)
 	normSubs := make(map[string]uint)
 	subStats := make(map[uint]map[string]int) // subID → {downloaded, total}
+
+	// 批量统计已下载集数（避免 N+1 查询）
+	type episodeCountResult struct {
+		SubscriptionID uint
+		Count          int64
+	}
+	var epResults []episodeCountResult
+	subIDs := make([]uint, len(subs))
+	for i, sub := range subs {
+		subIDs[i] = sub.ID
+	}
+	if len(subIDs) > 0 {
+		database.DB.Model(&database.Episode{}).
+			Select("subscription_id, count(*) as count").
+			Where("subscription_id IN ? AND status IN ?", subIDs, []string{"downloaded", "downloading"}).
+			Group("subscription_id").
+			Find(&epResults)
+	}
+	downloadedMap := make(map[uint]int, len(epResults))
+	for _, r := range epResults {
+		downloadedMap[r.SubscriptionID] = int(r.Count)
+	}
+
 	for _, sub := range subs {
 		if sub.BangumiID != "" {
 			subscribed[sub.BangumiID] = sub.ID
@@ -1047,13 +1070,8 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 			subscribed[sub.TitleCN] = sub.ID
 			normSubs[normalizeTitle(sub.TitleCN)] = sub.ID
 		}
-		// 统计已下载集数和总集数
-		var downloaded int64
-		database.DB.Model(&database.Episode{}).
-			Where("subscription_id = ? AND status IN ?", sub.ID, []string{"downloaded", "downloading"}).
-			Count(&downloaded)
 		subStats[sub.ID] = map[string]int{
-			"downloaded": int(downloaded),
+			"downloaded": downloadedMap[sub.ID],
 			"total":      sub.TotalEpisodes,
 		}
 	}

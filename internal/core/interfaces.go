@@ -117,13 +117,16 @@ type Notifier interface {
 	Send(ctx context.Context, title, message string) error
 }
 
-type EventBus interface {
-	Publish(event Event)
-	Subscribe(eventType string, handler EventHandler)
-	Unsubscribe(eventType string, handler EventHandler)
-}
+// SubscriptionID 订阅唯一标识，用于精确取消订阅
+type SubscriptionID uint64
 
 type EventHandler func(event Event)
+
+type EventBus interface {
+	Publish(event Event)
+	Subscribe(eventType string, handler EventHandler) SubscriptionID
+	Unsubscribe(eventType string, id SubscriptionID)
+}
 
 const (
 	EventSubscriptionAdded   = "subscription.added"

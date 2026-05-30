@@ -2,6 +2,8 @@ package notifier
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
@@ -32,14 +34,13 @@ func NewMultiNotifier(notifiers ...core.Notifier) *MultiNotifier {
 func (mn *MultiNotifier) Name() string { return "MultiNotifier" }
 
 func (mn *MultiNotifier) Send(ctx context.Context, title, message string) error {
+	var errs []error
 	for _, n := range mn.notifiers {
-		go func(notifier core.Notifier) {
-			if err := notifier.Send(ctx, title, message); err != nil {
-				log.Printf("⚠️  [%s] 通知发送失败: %v", notifier.Name(), err)
-			}
-		}(n)
+		if err := n.Send(ctx, title, message); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", n.Name(), err))
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (mn *MultiNotifier) Add(n core.Notifier) {

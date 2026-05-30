@@ -3,6 +3,7 @@ package event
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 )
@@ -69,4 +70,40 @@ func TestBusDifferentTypes(t *testing.T) {
 	if received {
 		t.Error("不应收到其他类型的事件")
 	}
+}
+
+func TestBusUnsubscribeByID(t *testing.T) {
+	bus := New()
+
+	callCount := 0
+	var mu sync.Mutex
+
+	id := bus.Subscribe("test.unsub", func(event core.Event) {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+	})
+
+	// 第一次发布，应该被调用
+	bus.Publish(core.Event{Type: "test.unsub"})
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	if callCount != 1 {
+		t.Errorf("发布后期望调用 1 次，实际 %d 次", callCount)
+	}
+	mu.Unlock()
+
+	// 取消订阅
+	bus.Unsubscribe("test.unsub", id)
+
+	// 第二次发布，不应被调用
+	bus.Publish(core.Event{Type: "test.unsub"})
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	if callCount != 1 {
+		t.Errorf("取消订阅后期望调用仍为 1 次，实际 %d 次", callCount)
+	}
+	mu.Unlock()
 }

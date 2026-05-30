@@ -5,20 +5,31 @@ package event
 import (
 	"log"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 )
 
+// SubscriptionID 全局递增计数器
+var subCounter atomic.Uint64
+
+// sub 订阅条目，包含唯一 ID 和处理函数
+type sub struct {
+	id core.SubscriptionID
+	fn core.EventHandler
+}
+
 // Bus 事件总线实现
 type Bus struct {
 	mu       sync.RWMutex
-	handlers map[string][]core.EventHandler
+	handlers map[string][]sub
 }
 
 // New 创建事件总线实例
 func New() *Bus {
 	return &Bus{
-		handlers: make(map[string][]core.EventHandler),
+		handlers: make(map[string][]sub),
 	}
 }
 
@@ -29,33 +40,47 @@ func (b *Bus) Publish(event core.Event) {
 	b.mu.RUnlock()
 
 	for _, h := range handlers {
-		go func(handler core.EventHandler) {
+		go func(s sub) {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Printf("⚠️  EventBus 处理器 panic (事件: %s): %v", event.Type, r)
 				}
 			}()
-			handler(event)
+
+			// 带超时的处理器执行，防止 goroutine 泄漏
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				s.fn(event)
+			}()
+
+			select {
+			case <-done:
+				// 正常完成
+			case <-time.After(5 * time.Second):
+				log.Printf("⚠️  EventBus 处理器超时 (事件: %s, subID: %d)", event.Type, s.id)
+			}
 		}(h)
 	}
 }
 
-// Subscribe 订阅指定事件类型
-func (b *Bus) Subscribe(eventType string, handler core.EventHandler) {
+// Subscribe 订阅指定事件类型，返回唯一 SubscriptionID
+func (b *Bus) Subscribe(eventType string, handler core.EventHandler) core.SubscriptionID {
+	id := core.SubscriptionID(subCounter.Add(1))
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.handlers[eventType] = append(b.handlers[eventType], handler)
+	b.handlers[eventType] = append(b.handlers[eventType], sub{id: id, fn: handler})
+	return id
 }
 
-// Unsubscribe 取消订阅指定事件类型
-func (b *Bus) Unsubscribe(eventType string, handler core.EventHandler) {
+// Unsubscribe 通过 SubscriptionID 取消订阅
+func (b *Bus) Unsubscribe(eventType string, id core.SubscriptionID) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	handlers := b.handlers[eventType]
 	for i, h := range handlers {
-		// 通过函数指针地址比较来移除
-		if &h == &handler {
+		if h.id == id {
 			b.handlers[eventType] = append(handlers[:i], handlers[i+1:]...)
 			return
 		}

@@ -54,10 +54,13 @@ type mikanEnclosure struct {
 // MikanSource 实现 core.Source 接口
 // ============================================================
 
-// 全局搜索缓存（跨实例共享，30s TTL）
-var (
-	searchCache   sync.Map
-	cacheEntryTTL = 30 * time.Second
+// ============================================================
+// 搜索缓存（LRU + TTL，限制容量防止内存无限增长）
+// ============================================================
+
+const (
+	searchCacheMaxSize = 128           // 最大缓存条目数
+	cacheEntryTTL      = 30 * time.Second
 )
 
 type cacheEntry struct {
@@ -65,7 +68,77 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
+// lruCache 简单 LRU 缓存（非线程安全，由调用方加锁）
+type lruCache struct {
+	maxSize int
+	keys    []string                // 按访问顺序排列，尾部最新
+	entries map[string]cacheEntry
+}
+
+func newLRUCache(maxSize int) *lruCache {
+	return &lruCache{
+		maxSize: maxSize,
+		keys:    make([]string, 0, maxSize),
+		entries: make(map[string]cacheEntry, maxSize),
+	}
+}
+
+func (c *lruCache) Get(key string) (cacheEntry, bool) {
+	entry, ok := c.entries[key]
+	if !ok {
+		return cacheEntry{}, false
+	}
+	if time.Now().After(entry.expiresAt) {
+		c.delete(key)
+		return cacheEntry{}, false
+	}
+	// 移到尾部（最近使用）
+	c.touch(key)
+	return entry, true
+}
+
+func (c *lruCache) Set(key string, entry cacheEntry) {
+	if _, exists := c.entries[key]; exists {
+		c.entries[key] = entry
+		c.touch(key)
+		return
+	}
+	// 淘汰最旧条目
+	for len(c.keys) >= c.maxSize {
+		oldest := c.keys[0]
+		c.delete(oldest)
+	}
+	c.keys = append(c.keys, key)
+	c.entries[key] = entry
+}
+
+func (c *lruCache) delete(key string) {
+	delete(c.entries, key)
+	for i, k := range c.keys {
+		if k == key {
+			c.keys = append(c.keys[:i], c.keys[i+1:]...)
+			return
+		}
+	}
+}
+
+func (c *lruCache) touch(key string) {
+	for i, k := range c.keys {
+		if k == key {
+			c.keys = append(c.keys[:i], c.keys[i+1:]...)
+			c.keys = append(c.keys, key)
+			return
+		}
+	}
+}
+
+var (
+	searchCacheMu sync.Mutex
+	searchCache   = newLRUCache(searchCacheMaxSize)
+)
+
 type MikanSource struct {
+	mu            sync.RWMutex
 	httpClient    *http.Client
 	domain        string
 	proxyDomain   string
@@ -85,10 +158,18 @@ func NewMikanSource(domain, proxyDomain string, mirrorDomains []string) *MikanSo
 func (m *MikanSource) Name() string { return "Mikan" }
 
 // GetDomain 获取当前主域名
-func (m *MikanSource) GetDomain() string { return m.domain }
+func (m *MikanSource) GetDomain() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.domain
+}
 
 // SetDomain 设置主域名（用于启动时自动切换到最快的镜像）
-func (m *MikanSource) SetDomain(domain string) { m.domain = domain }
+func (m *MikanSource) SetDomain(domain string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.domain = domain
+}
 
 // MirrorLatency 镜像延迟测试结果
 type MirrorLatency struct {
@@ -99,12 +180,18 @@ type MirrorLatency struct {
 
 // TestLatency 并发测试所有镜像延迟，返回结果（不改变内部状态）
 func (m *MikanSource) TestLatency(ctx context.Context) []MirrorLatency {
-	domains := make([]string, 0, 2+len(m.mirrorDomains))
-	if m.proxyDomain != "" {
-		domains = append(domains, m.proxyDomain)
+	m.mu.RLock()
+	domain := m.domain
+	proxyDomain := m.proxyDomain
+	mirrorDomains := m.mirrorDomains
+	m.mu.RUnlock()
+
+	domains := make([]string, 0, 2+len(mirrorDomains))
+	if proxyDomain != "" {
+		domains = append(domains, proxyDomain)
 	}
-	domains = append(domains, m.domain)
-	domains = append(domains, m.mirrorDomains...)
+	domains = append(domains, domain)
+	domains = append(domains, mirrorDomains...)
 
 	// 去重
 	seen := make(map[string]bool)
@@ -160,12 +247,18 @@ func BestDomain(results []MirrorLatency, fallback string) string {
 // tryMirrors 依次尝试通过代理域名、主域名、镜像域名发起 HTTP GET 请求
 // 在 GFW 环境下主域名可能不可达，自动回退到镜像域名
 func (m *MikanSource) tryMirrors(ctx context.Context, path string) (*http.Response, error) {
-	domains := make([]string, 0, 2+len(m.mirrorDomains))
-	if m.proxyDomain != "" {
-		domains = append(domains, m.proxyDomain)
+	m.mu.RLock()
+	domain := m.domain
+	proxyDomain := m.proxyDomain
+	mirrorDomains := m.mirrorDomains
+	m.mu.RUnlock()
+
+	domains := make([]string, 0, 2+len(mirrorDomains))
+	if proxyDomain != "" {
+		domains = append(domains, proxyDomain)
 	}
-	domains = append(domains, m.domain)
-	domains = append(domains, m.mirrorDomains...)
+	domains = append(domains, domain)
+	domains = append(domains, mirrorDomains...)
 
 	var lastErr error
 	for _, domain := range domains {
@@ -248,13 +341,16 @@ func cleanSearchTitle(title string) string {
 }
 
 func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.TorrentItem, error) {
-	if cached, ok := searchCache.Load(title); ok {
-		entry := cached.(cacheEntry)
-		if time.Now().Before(entry.expiresAt) {
-			return entry.items, nil
-		}
-		searchCache.Delete(title)
+	searchCacheMu.Lock()
+	if cached, ok := searchCache.Get(title); ok {
+		searchCacheMu.Unlock()
+		return cached.items, nil
 	}
+	searchCacheMu.Unlock()
+
+	m.mu.RLock()
+	domain := m.domain
+	m.mu.RUnlock()
 
 	encodedTitle := url.QueryEscape(title)
 	path := "/Home/Search?searchstr=" + encodedTitle
@@ -263,9 +359,11 @@ func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.Tor
 		defer resp.Body.Close()
 		body, err := io.ReadAll(resp.Body)
 		if err == nil {
-			items := parseMikanSearchHTML(string(body), m.domain)
+			items := parseMikanSearchHTML(string(body), domain)
 			if len(items) > 0 {
-				searchCache.Store(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+				searchCacheMu.Lock()
+				searchCache.Set(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+				searchCacheMu.Unlock()
 				return items, nil
 			}
 		}
@@ -281,9 +379,11 @@ func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.Tor
 			defer resp.Body.Close()
 			body, err := io.ReadAll(resp.Body)
 			if err == nil {
-				items := parseMikanSearchHTML(string(body), m.domain)
+				items := parseMikanSearchHTML(string(body), domain)
 				if len(items) > 0 {
-					searchCache.Store(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+					searchCacheMu.Lock()
+					searchCache.Set(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+					searchCacheMu.Unlock()
 					return items, nil
 				}
 			}
@@ -292,7 +392,9 @@ func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.Tor
 
 	items, err := m.searchBySeason(ctx, title)
 	if err == nil && len(items) > 0 {
-		searchCache.Store(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+		searchCacheMu.Lock()
+		searchCache.Set(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+		searchCacheMu.Unlock()
 	}
 	return items, err
 }
@@ -361,7 +463,11 @@ func (m *MikanSource) FetchHistory(ctx context.Context, bangumiID string, filter
 		return nil, fmt.Errorf("读取详情页响应失败: %w", err)
 	}
 
-	return parseMikanDetailHTML(string(body), filter, m.domain), nil
+	m.mu.RLock()
+	domain := m.domain
+	m.mu.RUnlock()
+
+	return parseMikanDetailHTML(string(body), filter, domain), nil
 }
 
 func (m *MikanSource) IsAvailable(ctx context.Context) bool {

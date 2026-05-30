@@ -130,9 +130,11 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 }
 
 func TestCORSMiddleware_Options(t *testing.T) {
-	handler := CORSMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
+	})
+	// 空白名单 → 允许所有来源（向后兼容）
+	handler := CORSMiddleware(nil)(inner)
 
 	req := httptest.NewRequest("OPTIONS", "/api/login", nil)
 	rec := httptest.NewRecorder()
@@ -143,5 +145,32 @@ func TestCORSMiddleware_Options(t *testing.T) {
 	}
 	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
 		t.Error("CORS Allow-Origin 应设为 *")
+	}
+}
+
+func TestCORSMiddleware_Whitelist(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := CORSMiddleware([]string{"http://localhost:3000"})(inner)
+
+	// 允许的 origin
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Allow-Origin") != "http://localhost:3000" {
+		t.Errorf("白名单 origin 应通过，实际: %s", rec.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	// 不在白名单的 origin
+	req2 := httptest.NewRequest("GET", "/api/test", nil)
+	req2.Header.Set("Origin", "http://evil-site.com")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec2.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("非白名单 origin 不应设置 CORS 头，实际: %s", rec2.Header().Get("Access-Control-Allow-Origin"))
 	}
 }

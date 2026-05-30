@@ -43,20 +43,16 @@ func main() {
 	log.Printf("配置加载完成 | 端口: %d | 数据库: %s", cfg.Server.Port, cfg.Database.Path)
 
 	// 初始化日志文件（双写 stdout + 文件）
+	var logFile *os.File
 	if cfg.Server.LogPath != "" {
-		logFile, err := os.OpenFile(cfg.Server.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		var err error
+		logFile, err = os.OpenFile(cfg.Server.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err == nil {
 			log.SetOutput(io.MultiWriter(os.Stdout, logFile))
 		} else {
 			log.Printf("⚠️ 日志文件 %s 创建失败: %v", cfg.Server.LogPath, err)
 		}
 	}
-
-	// 初始化 JWT 动态密钥（crypto/rand 生成，绝不硬编码）
-	if err := auth.InitSecret(); err != nil {
-		log.Fatalf("❌ JWT Secret 初始化失败: %v", err)
-	}
-	log.Println("✅ JWT 动态密钥已生成 (crypto/rand 32B)")
 
 	// 初始化数据库
 	if err := database.Init(cfg.Database.Path); err != nil {
@@ -67,6 +63,23 @@ func main() {
 	if err := database.InitDefaultUser(auth.HashPassword); err != nil {
 		log.Fatalf("❌ 默认用户创建失败: %v", err)
 	}
+
+	// 初始化 JWT 密钥（从数据库加载或生成新密钥并持久化，重启不丢失）
+	if err := auth.InitSecretFromDB(
+		func(key string) (string, bool) {
+			var s database.Setting
+			if err := database.DB.Where("key = ?", key).First(&s).Error; err != nil {
+				return "", false
+			}
+			return s.Value, true
+		},
+		func(key, value string) {
+			database.DB.Save(&database.Setting{Key: key, Value: value})
+		},
+	); err != nil {
+		log.Fatalf("❌ JWT Secret 初始化失败: %v", err)
+	}
+	log.Println("✅ JWT 密钥已从数据库加载或自动生成 (持久化存储)")
 
 	// 从数据库设置表合并 Web UI 中保存的配置（env var 优先，数据库作回退）
 	cfg.MergeFromSettings(func(key string) (string, bool) {
@@ -274,7 +287,7 @@ func main() {
 	}
 
 	// 启动 HTTP API 服务（含 JWT 鉴权中间件 + 嵌入式前端静态文件）
-	api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, version, dl, sched.TriggerSupplement, pluginMgr, taskParser, mikanSource, yucSource, multiSource, staticHandler(), cfg.Server.LogPath)
+	api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, version, cfg.Server.AllowedOrigins, dl, sched.TriggerSupplement, pluginMgr, taskParser, mikanSource, yucSource, multiSource, staticHandler(), cfg.Server.LogPath)
 
 	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("✅ Ani-Go 启动成功 — Phase 3 全栈引擎运行中")
@@ -293,6 +306,9 @@ func main() {
 
 	fmt.Println("\n👋 Ani-Go 正在关闭...")
 	cancel()
+	if logFile != nil {
+		logFile.Close()
+	}
 }
 
 // resolveAIConfig 根据配置推断实际的 endpoint、apiKey、model

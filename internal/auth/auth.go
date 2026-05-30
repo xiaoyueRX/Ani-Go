@@ -4,6 +4,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -21,6 +22,33 @@ func InitSecret() error {
 		return fmt.Errorf("生成 JWT Secret 失败: %w", err)
 	}
 	jwtSecret = secret
+	return nil
+}
+
+// InitSecretFromDB 从数据库加载或生成 JWT Secret
+// 优先从 getter 读取已持久化的密钥，若不存在则生成新密钥并通过 setter 持久化
+// secret 以 hex 编码存储在 settings 表中
+func InitSecretFromDB(getter func(key string) (string, bool), setter func(key, value string)) error {
+	const settingKey = "jwt_secret"
+
+	if val, ok := getter(settingKey); ok && val != "" {
+		decoded, err := hex.DecodeString(val)
+		if err == nil && len(decoded) >= 32 {
+			jwtSecret = decoded
+			return nil
+		}
+	}
+
+	// 不存在或无效，生成新密钥并持久化
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return fmt.Errorf("生成 JWT Secret 失败: %w", err)
+	}
+	jwtSecret = secret
+
+	if setter != nil {
+		setter(settingKey, hex.EncodeToString(secret))
+	}
 	return nil
 }
 

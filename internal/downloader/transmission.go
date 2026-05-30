@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
@@ -75,7 +76,7 @@ func trStatusString(status int) string {
 	}
 }
 
-var trTagCounter int
+var trTagCounter atomic.Uint64
 
 // NewTransmission 创建 Transmission 下载器实例
 func NewTransmission(host, username, password string) *Transmission {
@@ -95,8 +96,8 @@ func (t *Transmission) call(ctx context.Context, method string, args map[string]
 	sid := t.sessionID
 	t.mu.Unlock()
 
-	trTagCounter++
-	tag := trTagCounter
+	trTagCounter.Add(1)
+	tag := int(trTagCounter.Load())
 	reqBody := trRequest{Method: method, Arguments: args, Tag: tag}
 	bodyBytes, _ := json.Marshal(reqBody)
 
