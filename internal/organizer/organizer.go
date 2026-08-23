@@ -5,6 +5,8 @@ package organizer
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -66,7 +68,23 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 	// 移动或硬链接文件
 	if o.useHardLink {
 		if err := os.Link(filePath, fullPath); err != nil {
-			return "", fmt.Errorf("创建硬链接失败: %w", err)
+			// 任何硬链接失败都回退到复制（跨设备、权限、目录不存在等）
+			src, err := os.Open(filePath)
+			if err != nil {
+				return "", fmt.Errorf("打开源文件失败: %w", err)
+			}
+			defer src.Close()
+			dst, err := os.Create(fullPath)
+			if err != nil {
+				return "", fmt.Errorf("创建目标文件失败: %w", err)
+			}
+			defer dst.Close()
+			if _, err := io.Copy(dst, src); err != nil {
+				return "", fmt.Errorf("复制文件失败: %w", err)
+			}
+			if err := os.Remove(filePath); err != nil {
+				log.Printf("⚠️ 删除源文件失败（文件已复制）: %v", err)
+			}
 		}
 	} else {
 		if err := os.Rename(filePath, fullPath); err != nil {

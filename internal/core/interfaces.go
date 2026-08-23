@@ -67,14 +67,15 @@ type Filter struct {
 }
 
 type DownloadTask struct {
-	Hash      string
-	Name      string
-	SavePath  string
-	Status    string
-	Progress  float32
-	SpeedDown int64
-	Size      int64
-	Done      int64
+	Hash         string
+	Name         string
+	SavePath     string
+	ContentPath  string
+	Status       string
+	Progress     float32
+	SpeedDown    int64
+	Size         int64
+	Done         int64
 }
 
 type Event struct {

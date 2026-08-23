@@ -5,7 +5,7 @@ import request from '../utils/request'
 import { 
   ChevronLeft, Search, LogIn, 
   LayoutGrid, Timer, Calendar, 
-  AlertTriangle, X, Antenna, 
+  AlertTriangle, X, Antenna, Sparkles, Info, 
   Check, Plus, User 
 } from 'lucide-vue-next'
 
@@ -40,6 +40,10 @@ const error = ref('')
 const subscribed = ref<Set<string>>(new Set())
 const lastSearchTime = ref('')
 const searchDuration = ref(0)
+const smartSearch = ref(true)
+const expandedQueries = ref<string[]>([])
+const usedAI = ref(false)
+const aiError = ref('')
 
 // 从查询参数自动搜索
 onMounted(() => {
@@ -73,11 +77,19 @@ async function handleSearch() {
   error.value = ''
   const start = Date.now()
   try {
-    const { data } = await request.get('/search', {
-      params: { q },
-      timeout: 30000,
-    })
-    results.value = data || []
+    if (smartSearch.value) {
+      const { data } = await request.post('/search/smart', { query: q, limit: 60 }, { timeout: 45000 })
+      results.value = data.items || []
+      expandedQueries.value = data.expanded_queries || [q]
+      usedAI.value = !!data.used_ai
+      aiError.value = data.ai_error || ''
+    } else {
+      const { data } = await request.get('/search', { params: { q }, timeout: 30000 })
+      results.value = data || []
+      expandedQueries.value = [q]
+      usedAI.value = false
+      aiError.value = ''
+    }
     lastSearchTime.value = new Date().toLocaleTimeString()
     searchDuration.value = Date.now() - start
   } catch (e: any) {
@@ -192,6 +204,28 @@ function sourceBadge(source: string): string {
            </template>
          </button>
       </div>
+      <label class="absolute right-4 -bottom-10 flex cursor-pointer items-center gap-2 text-[11px] font-black uppercase tracking-widest opacity-50">
+        <Sparkles :size="14" />
+        {{ $t('search.smart') }}
+        <input v-model="smartSearch" type="checkbox" class="toggle toggle-primary toggle-sm" />
+      </label>
+    </div>
+
+    <!-- AI Degradation Notice -->
+    <Transition name="fade">
+      <div v-if="smartSearch && aiError" class="max-w-4xl mx-auto alert bg-warning/10 border-warning/20 text-warning rounded-2xl py-4">
+        <Info :size="20" />
+        <span class="text-xs font-bold">{{ $t('search.degraded') }}</span>
+      </div>
+    </Transition>
+
+    <!-- Expanded Query Chips -->
+    <div v-if="results.length > 0 && expandedQueries.length" class="max-w-5xl mx-auto flex flex-wrap items-center gap-2">
+      <span class="text-[10px] font-black uppercase tracking-widest opacity-30 mr-1">{{ $t('search.expanded') }}</span>
+      <span v-for="(item, idx) in expandedQueries" :key="`${item}-${idx}`"
+        class="badge badge-lg border-base-300 bg-base-200/40 font-bold"
+        :class="idx === 0 ? 'text-primary border-primary/20' : 'opacity-70'">{{ item }}</span>
+      <span v-if="usedAI" class="badge badge-primary badge-outline badge-lg gap-1"><Sparkles :size="12" />AI</span>
     </div>
 
     <!-- Search Metadata -->

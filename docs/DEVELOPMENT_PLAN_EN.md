@@ -135,3 +135,18 @@
 - [x] **Remember Password**: localStorage save, auto-fill on next visit.
 - [x] **Episode Status Management**: `PUT /api/episodes/{id}/status` manual status toggle.
 - [x] **Mikan Mirror Speed Test**: Auto speed test on startup to select fastest mirror + manual speed test in settings page (show latency but don't auto-select).
+
+### Phase 8: Internationalization + Batch Operations + Code Review (v1.3.0) ✅
+- [x] **Internationalization (i18n)**: Full Chinese/English bilingual support with `web/src/locales/zh.ts` + `en.ts`, instant language switching, covering all pages.
+- [x] **Lucide Icon Migration**: Migrated from IconSax to `lucide-vue-next` for unified icon style, removed legacy component.
+- [x] **Onboarding Modal**: First-login guidance modal to help new users get started quickly.
+- [x] **Changelog Modal**: Built-in version change viewer + `useVersion` composable for version detection and update reminders.
+- [x] **Batch Subscription Operations**: Batch create (`POST /api/subscriptions/batch`), batch delete (`DELETE /api/subscriptions/batch`), batch restore (`POST /api/subscriptions/batch/restore`).
+- [x] **Episode Subgroup Name**: Episode API adds `group_name` field, frontend displays subgroup attribution.
+- [x] **Frontend Full Rewrite**: 8 major pages restructured (Schedule / Subscriptions / Settings / Search / SubscriptionDetail / Layout / Login / Downloads), new SubscriptionCard / SubscriptionEditForm / ScheduleCard components.
+- [x] **CORS Security Hardening**: Origin whitelist from config file, wildcard disabled in non-Debug mode.
+- [x] **Settings Password Masking**: API hides sensitive password fields in responses.
+- [x] **EventBus Reliability**: Subscribe returns ID for precise Unsubscribe, Publish handler 5s timeout protection.
+- [x] **Concurrency Safety Fixes**: Transmission sync/atomic race condition, MikanSource RWMutex protection.
+- [x] **JWT Secret Persistence**: Secret stored in SQLite settings table, survives restarts.
+- [x] **13 Code Review Fixes**: CORS / EventBus / Transmission / Schedule N+1 / MikanSource RWMutex / JWT persistence / MultiNotifier error aggregation / Shell audit logging / LRU search cache / Logger file handle / QBittorrent Hash / empty Hash unique constraint / scheduler infinite loop.

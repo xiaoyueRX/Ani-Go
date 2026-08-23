@@ -301,14 +301,15 @@ func (q *QBittorrent) ensureLogin(ctx context.Context) error {
 
 // qbTorrentInfo qBittorrent API 返回的单个种子信息
 type qbTorrentInfo struct {
-	Hash      string  `json:"hash"`
-	Name      string  `json:"name"`
-	SavePath  string  `json:"save_path"`
-	State     string  `json:"state"`
-	Progress  float32 `json:"progress"`
-	DlSpeed   int64   `json:"dlspeed"`
-	Size      int64   `json:"size"`
-	Completed int64   `json:"completed"`
+	Hash        string  `json:"hash"`
+	Name        string  `json:"name"`
+	SavePath    string  `json:"save_path"`
+	ContentPath string  `json:"content_path"`
+	State       string  `json:"state"`
+	Progress    float32 `json:"progress"`
+	DlSpeed     int64   `json:"dlspeed"`
+	Size        int64   `json:"size"`
+	Completed   int64   `json:"completed"`
 }
 
 func parseQBittorrentList(r io.Reader) ([]core.DownloadTask, error) {
@@ -320,14 +321,15 @@ func parseQBittorrentList(r io.Reader) ([]core.DownloadTask, error) {
 	tasks := make([]core.DownloadTask, 0, len(infos))
 	for _, info := range infos {
 		tasks = append(tasks, core.DownloadTask{
-			Hash:      info.Hash,
-			Name:      info.Name,
-			SavePath:  info.SavePath,
-			Status:    info.State,
-			Progress:  info.Progress,
-			SpeedDown: info.DlSpeed,
-			Size:      info.Size,
-			Done:      info.Completed,
+			Hash:         info.Hash,
+			Name:         info.Name,
+			SavePath:     info.SavePath,
+			ContentPath:  info.ContentPath,
+			Status:       info.State,
+			Progress:     info.Progress,
+			SpeedDown:    info.DlSpeed,
+			Size:         info.Size,
+			Done:         info.Completed,
 		})
 	}
 	return tasks, nil

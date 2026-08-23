@@ -3,19 +3,25 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
-	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/ai"
 	"github.com/xiaoyueRX/Ani-Go/internal/auth"
+	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/migrate"
+	"github.com/xiaoyueRX/Ani-Go/internal/search"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
 
@@ -25,28 +31,28 @@ import (
 
 // subscriptionResponse API 返回的订阅数据结构
 type subscriptionResponse struct {
-	ID              uint   `json:"id"`
-	TitleCN         string `json:"title_cn"`
-	TitleEN         string `json:"title_en"`
-	TitleJP         string `json:"title_jp"`
-	Year            int    `json:"year"`
-	Season          int    `json:"season"`
-	BangumiID       string `json:"bangumi_id"`
-	SubgroupName    string `json:"subgroup_name"`
-	MetadataID      string `json:"metadata_id"`
+	ID               uint   `json:"id"`
+	TitleCN          string `json:"title_cn"`
+	TitleEN          string `json:"title_en"`
+	TitleJP          string `json:"title_jp"`
+	Year             int    `json:"year"`
+	Season           int    `json:"season"`
+	BangumiID        string `json:"bangumi_id"`
+	SubgroupName     string `json:"subgroup_name"`
+	MetadataID       string `json:"metadata_id"`
 	MetadataProvider string `json:"metadata_provider"`
-	CoverURL        string `json:"cover_url"`
-	Description     string `json:"description"`
-	AnimeType       string `json:"anime_type"`
-	TotalEpisodes   int    `json:"total_episodes"`
-	CurrentEpisodes int    `json:"current_episodes"`
-	Enabled         bool   `json:"enabled"`
-	Completed       bool   `json:"completed"`
-	FilterJSON      string `json:"filter_json"`
-	CustomPath      string `json:"custom_path"`
-	StalledEpisodes int    `json:"stalled_episodes"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	CoverURL         string `json:"cover_url"`
+	Description      string `json:"description"`
+	AnimeType        string `json:"anime_type"`
+	TotalEpisodes    int    `json:"total_episodes"`
+	CurrentEpisodes  int    `json:"current_episodes"`
+	Enabled          bool   `json:"enabled"`
+	Completed        bool   `json:"completed"`
+	FilterJSON       string `json:"filter_json"`
+	CustomPath       string `json:"custom_path"`
+	StalledEpisodes  int    `json:"stalled_episodes"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 type createSubscriptionRequest struct {
@@ -82,23 +88,23 @@ type batchSubResult struct {
 }
 
 type updateSubscriptionRequest struct {
-	TitleCN         *string `json:"title_cn"`
-	TitleEN         *string `json:"title_en"`
-	TitleJP         *string `json:"title_jp"`
-	Year            *int    `json:"year"`
-	Season          *int    `json:"season"`
-	BangumiID       *string `json:"bangumi_id"`
-	SubgroupName    *string `json:"subgroup_name"`
-	MetadataID      *string `json:"metadata_id"`
+	TitleCN          *string `json:"title_cn"`
+	TitleEN          *string `json:"title_en"`
+	TitleJP          *string `json:"title_jp"`
+	Year             *int    `json:"year"`
+	Season           *int    `json:"season"`
+	BangumiID        *string `json:"bangumi_id"`
+	SubgroupName     *string `json:"subgroup_name"`
+	MetadataID       *string `json:"metadata_id"`
 	MetadataProvider *string `json:"metadata_provider"`
-	CoverURL        *string `json:"cover_url"`
-	Description     *string `json:"description"`
-	AnimeType       *string `json:"anime_type"`
-	TotalEpisodes   *int    `json:"total_episodes"`
-	Enabled         *bool   `json:"enabled"`
-	Completed       *bool   `json:"completed"`
-	FilterJSON      *string `json:"filter_json"`
-	CustomPath      *string `json:"custom_path"`
+	CoverURL         *string `json:"cover_url"`
+	Description      *string `json:"description"`
+	AnimeType        *string `json:"anime_type"`
+	TotalEpisodes    *int    `json:"total_episodes"`
+	Enabled          *bool   `json:"enabled"`
+	Completed        *bool   `json:"completed"`
+	FilterJSON       *string `json:"filter_json"`
+	CustomPath       *string `json:"custom_path"`
 }
 
 type batchDeleteRequest struct {
@@ -120,21 +126,21 @@ type batchRestoreResponse struct {
 
 // episodeResponse API 返回的剧集数据结构
 type episodeResponse struct {
-	ID               uint    `json:"id"`
-	SubscriptionID   uint    `json:"subscription_id"`
-	Season           int     `json:"season"`
-	Number           float32 `json:"number"`
-	Title            string  `json:"title"`
-	Status           string  `json:"status"`
-	TorrentHash      string  `json:"torrent_hash"`
-	TorrentURL       string  `json:"torrent_url"`
-	OriginalName     string  `json:"original_name"`
-	FinalPath        string  `json:"final_path"`
-	FileSize         int64   `json:"file_size"`
-	IsStalled        bool    `json:"is_stalled"`
-	GroupName        string  `json:"group_name"`
+	ID                uint    `json:"id"`
+	SubscriptionID    uint    `json:"subscription_id"`
+	Season            int     `json:"season"`
+	Number            float32 `json:"number"`
+	Title             string  `json:"title"`
+	Status            string  `json:"status"`
+	TorrentHash       string  `json:"torrent_hash"`
+	TorrentURL        string  `json:"torrent_url"`
+	OriginalName      string  `json:"original_name"`
+	FinalPath         string  `json:"final_path"`
+	FileSize          int64   `json:"file_size"`
+	IsStalled         bool    `json:"is_stalled"`
+	GroupName         string  `json:"group_name"`
 	DownloadStartedAt string  `json:"download_started_at,omitempty"`
-	CreatedAt        string  `json:"created_at"`
+	CreatedAt         string  `json:"created_at"`
 }
 
 func toSubscriptionResponse(sub database.Subscription) subscriptionResponse {
@@ -486,7 +492,10 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	database.DB.First(&sub, id)
+	if err := database.DB.First(&sub, id).Error; err != nil {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "更新后查询订阅失败"})
+		return
+	}
 	log.Printf("✅ 已更新订阅: ID=%d", sub.ID)
 	writeJSON(w, http.StatusOK, toSubscriptionResponse(sub))
 }
@@ -586,7 +595,7 @@ func (s *Server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 	tasks, err := s.downloader.List(r.Context())
 	if err != nil {
 		log.Printf("❌ 获取下载列表失败: %v", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "获取下载列表失败: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "获取下载列表失败"})
 		return
 	}
 
@@ -769,6 +778,12 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for key, value := range req.Settings {
+		// 阻止通过 API 修改认证密钥等敏感配置
+		keyUpper := strings.ToUpper(key)
+		if strings.Contains(keyUpper, "SECRET") || strings.Contains(keyUpper, "JWT") {
+			log.Printf("⚠️  拒绝通过 API 修改敏感配置: %s", key)
+			continue
+		}
 		setting := database.Setting{Key: key, Value: value}
 		database.DB.Where("key = ?", key).Assign(setting).FirstOrCreate(&setting)
 	}
@@ -815,8 +830,12 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 			buf = make([]byte, readSize)
 		}
 		pos -= readSize
-		f.Seek(pos, 0)
-		f.Read(buf)
+		if _, err := f.Seek(pos, 0); err != nil {
+			break
+		}
+		if _, err := f.Read(buf); err != nil {
+			break
+		}
 		tail = append(buf, tail...)
 		linesFound = 0
 		for _, b := range tail {
@@ -866,9 +885,9 @@ func (s *Server) handleGetCustomRegex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"patterns":            rawPatterns,
-		"compiled":            source.GetCustomRegexPatterns(),
-		"builtin_count":       8,
+		"patterns":      rawPatterns,
+		"compiled":      source.GetCustomRegexPatterns(),
+		"builtin_count": 8,
 	})
 }
 
@@ -887,8 +906,8 @@ func (s *Server) handleReloadCustomRegex(w http.ResponseWriter, r *http.Request)
 		return setting.Value, true
 	})
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message":   "自定义正则已重新加载",
-		"compiled":  source.GetCustomRegexPatterns(),
+		"message":  "自定义正则已重新加载",
+		"compiled": source.GetCustomRegexPatterns(),
 	})
 }
 
@@ -924,7 +943,6 @@ func (s *Server) handleReloadPlugins(w http.ResponseWriter, r *http.Request) {
 		"count":   len(s.pluginManager.GetPlugins()),
 	})
 }
-
 
 // ============================================================
 // 搜索番剧
@@ -1131,11 +1149,17 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 域名白名单校验
+	// 域名白名单校验（使用 URL 解析 + 后缀匹配，防止 SSRF 绕过）
 	allowedDomains := []string{"i0.hdslb.com", "lain.bgm.tv", "img.mikanani.me", "image.tmdb.org", "bilibili.com", "bgm.tv", "mikanime.tv"}
+	parsedURL, err := url.Parse(imageURL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		http.Error(w, "invalid url", http.StatusBadRequest)
+		return
+	}
+	host := parsedURL.Hostname()
 	allowed := false
 	for _, domain := range allowedDomains {
-		if strings.Contains(imageURL, domain) {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
 			allowed = true
 			break
 		}
@@ -1172,7 +1196,8 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
 	w.Header().Set("Cache-Control", "public, max-age=604800")
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	// 限制代理响应体最大 20MB，防止恶意 URL 消耗服务器内存
+	io.CopyN(w, resp.Body, 20*1024*1024)
 }
 
 // normalizeTitle 用于增强番剧标题匹配的鲁棒性（去除空格、统一简繁/变体等）
@@ -1261,6 +1286,24 @@ func (s *Server) handleMigrateData(w http.ResponseWriter, r *http.Request) {
 	if req.SourcePath == "" {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请提供 source_path（源数据库文件路径）"})
 		return
+	}
+
+	// 安全校验：限制迁移文件只能在 data/ 目录下，防止读取任意 SQLite 文件
+	cleanPath := filepath.Clean(req.SourcePath)
+	dataDir := "data"
+	if !filepath.IsAbs(cleanPath) {
+		// 相对路径检查
+		if !strings.HasPrefix(cleanPath, dataDir+"/") && cleanPath != dataDir {
+			writeJSON(w, http.StatusForbidden, errorResponse{Error: "迁移文件路径必须在 data/ 目录下"})
+			return
+		}
+	} else {
+		// 绝对路径检查：解析后必须在 data/ 下
+		absDataDir, _ := filepath.Abs(dataDir)
+		if !strings.HasPrefix(cleanPath, absDataDir+"/") && cleanPath != absDataDir {
+			writeJSON(w, http.StatusForbidden, errorResponse{Error: "迁移文件路径必须在 data/ 目录下"})
+			return
+		}
 	}
 
 	stats, err := migrate.MigrateFromPath(req.SourcePath)
@@ -1406,4 +1449,157 @@ func (s *Server) handleBatchRestoreSubscriptions(w http.ResponseWriter, r *http.
 
 	log.Printf("↩️  批量恢复订阅: %v", req.IDs)
 	writeJSON(w, http.StatusOK, batchRestoreResponse{Restored: len(req.IDs)})
+}
+
+// ============================================================
+// AI 智能搜索
+// ============================================================
+
+type smartSearchRequest struct {
+	Query   string   `json:"query"`
+	Limit   int      `json:"limit"`
+	Offset  int      `json:"offset"`
+	Sources []string `json:"sources"`
+}
+
+type smartSearchResponse struct {
+	Items           []core.TorrentItem `json:"items"`
+	Total           int                `json:"total"`
+	HasMore         bool               `json:"has_more"`
+	ExpandedQueries []string           `json:"expanded_queries"`
+	UsedAI          bool               `json:"used_ai"`
+	AIError         string             `json:"ai_error,omitempty"`
+}
+
+// handleSmartSearch expands the query with optional AI suggestions, but every
+// returned item is fetched by MultiSource from real configured sources.
+// POST /api/search/smart
+func (s *Server) handleSmartSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 POST"})
+		return
+	}
+	if s.multiSrc == nil || s.smartAggregator == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "搜索服务未配置"})
+		return
+	}
+
+	var req smartSearchRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+		return
+	}
+	req.Query = strings.TrimSpace(req.Query)
+	if req.Query == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "query 不能为空"})
+		return
+	}
+	if utf8.RuneCountInString(req.Query) > 200 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "query 长度不能超过 200 字符"})
+		return
+	}
+	if req.Limit <= 0 {
+		req.Limit = 20
+	}
+	if req.Limit > search.MaxResults {
+		req.Limit = search.MaxResults
+	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
+
+	var usedAI bool
+	aiError := ""
+	queries, err := s.smartExpander.Expand(r.Context(), req.Query)
+	if err != nil {
+		switch {
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, search.ErrAITimeout):
+			aiError = "timeout"
+		case errors.Is(err, ai.ErrQuotaExceeded):
+			aiError = "quota_exceeded"
+		case errors.Is(err, search.ErrAIParse):
+			aiError = "parse_failed"
+		default:
+			aiError = "model_unavailable"
+		}
+	} else if len(queries) > 1 && s.smartExpander != nil {
+		usedAI = !queriesCircuitOpen(s.smartExpander)
+	}
+
+	items, err := s.smartAggregator.AggregateSearch(r.Context(), queries, req.Sources)
+	if err != nil && len(items) == 0 {
+		log.Printf("⚠️ 智能搜索失败 [%s]: %v", req.Query, err)
+		writeJSON(w, http.StatusBadGateway, errorResponse{Error: "资源站搜索失败"})
+		return
+	}
+	if items == nil {
+		items = make([]core.TorrentItem, 0)
+	}
+	total := len(items)
+	end := min(total, req.Offset+req.Limit)
+	page := items[min(req.Offset, total):end]
+
+	writeJSON(w, http.StatusOK, smartSearchResponse{
+		Items: page, Total: total, HasMore: end < total,
+		ExpandedQueries: queries, UsedAI: usedAI, AIError: aiError,
+	})
+}
+// queriesCircuitOpen 检查熔断器状态
+func queriesCircuitOpen(expander *search.Expander) bool {
+	return expander == nil || expander.CircuitOpen()
+}
+
+// ============================================================
+// 通知测试
+// ============================================================
+
+type testNotifyRequest struct {
+	Channel string `json:"channel"` // 空=所有已配置渠道
+	Title   string `json:"title"`
+	Message string `json:"message"`
+}
+
+// handleTestNotify 发送测试通知
+// POST /api/notify/test
+func (s *Server) handleTestNotify(w http.ResponseWriter, r *http.Request) {
+	var req testNotifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+		return
+	}
+
+	if req.Title == "" {
+		req.Title = "Ani-Go 测试通知"
+	}
+	if req.Message == "" {
+		req.Message = "这是一条来自 Ani-Go 的测试消息，如果您收到说明通知配置正常。"
+	}
+
+	ctx := r.Context()
+	if req.Channel != "" {
+		// 单渠道测试
+		err := s.notifyMgr.SendTest(ctx, req.Channel, req.Title, req.Message)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+	} else {
+		// 全渠道测试
+		err := s.notifyMgr.SendTest(ctx, "", req.Title, req.Message)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "测试通知已发送",
+	})
 }

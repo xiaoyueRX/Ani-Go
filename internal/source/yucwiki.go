@@ -318,13 +318,13 @@ func parseYucWiki(html string) ([]WeekDayItem, error) {
 
 		section := cleanText[wdStart:wdEnd]
 
-		// 提取番剧条目: 时间~日期~标题 OR 完结 (全xx话) 标题
-		entryRe := regexp.MustCompile(`(?:(\d+:\d+)~\s*([\d/]+)~|完结\s*(?:\(全\d+话\))?)\s*(.+?)(?:\s+(?:环大陆|港台|大陆|网络|完结)\s*|\s+\d+:\d+~|$)`)
+		// 提取番剧条目: 时间~日期~标题 或 时间~ (全xx话) 标题
+		entryRe := regexp.MustCompile(`(\d{1,2}:\d{2})~\s*(?:([\d/]+)~|\(([^)]*)\)|(?:P\d+=\d+话|全\d+话\??))?\s*([^\s(（][^~]{1,100}?)(?:\s+(?:环大陆|港台|大陆|网络|完结)|\s*\d{1,2}:\d{2}~|$)`)
 		matches := entryRe.FindAllStringSubmatch(section, -1)
 
 		var items []core.TorrentItem
 		for _, m := range matches {
-			title := strings.TrimSpace(m[3])
+			title := strings.TrimSpace(m[4])
 			if title == "" {
 				continue
 			}

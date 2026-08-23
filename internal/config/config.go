@@ -109,15 +109,17 @@ type SourceConfig struct {
 }
 
 type AIConfig struct {
-	Enabled     bool
-	Protocol    string // openai / google / anthropic / ollama / auto
-	Endpoint    string
-	APIKey      string
-	Model       string
-	GeminiKey   string
-	ClaudeKey   string
-	OllamaHost  string
-	OllamaModel string
+	Enabled            bool
+	SmartSearchEnabled bool
+	Protocol           string // openai / google / anthropic / ollama / auto
+	Endpoint           string
+	APIKey             string
+	Model              string
+	BackupModel        string
+	GeminiKey          string
+	ClaudeKey          string
+	OllamaHost         string
+	OllamaModel        string
 }
 
 type NotifierConfig struct {
@@ -237,6 +239,11 @@ func Load() *Config {
 	if v := os.Getenv("OVA_BASE_PATH"); v != "" {
 		cfg.Organizer.OVABasePath = v
 	}
+	if v := os.Getenv("ORGANIZER_USE_HARD_LINK"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.Organizer.UseHardLink = enabled
+		}
+	}
 	if v := os.Getenv("AI_PROTOCOL"); v != "" {
 		cfg.AI.Protocol = v
 	}
@@ -250,6 +257,14 @@ func Load() *Config {
 	}
 	if v := os.Getenv("AI_MODEL"); v != "" {
 		cfg.AI.Model = v
+	}
+	if v := os.Getenv("AI_BACKUP_MODEL"); v != "" {
+		cfg.AI.BackupModel = v
+	}
+	if v := os.Getenv("AI_SMART_SEARCH_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.AI.SmartSearchEnabled = enabled
+		}
 	}
 	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
 		cfg.AI.GeminiKey = v
@@ -422,7 +437,7 @@ func defaults() *Config {
 		Organizer: OrganizerConfig{
 			TVBasePath:    "./TV/番剧",
 			MovieBasePath: "./TV/剧场版",
-				OVABasePath:   "./TV/OVA",
+			OVABasePath:   "./TV/OVA",
 			TVTemplate:    "{title_cn} ({year})/Season {season}/{title_en} S{season:02}E{ep:02}{ext}",
 			MovieTemplate: "{title_cn} ({year})/{title_en}{ext}",
 			UseHardLink:   false,
@@ -432,7 +447,7 @@ func defaults() *Config {
 			ACGRIP:     SourceConfig{Domain: "acg.rip"},
 			AnimeTosho: SourceConfig{Domain: "feed.animetosho.org"},
 		},
-		AI: AIConfig{Enabled: false, Model: "gpt-4o-mini"},
+		AI:       AIConfig{Enabled: false, Model: "gpt-4o-mini", SmartSearchEnabled: true},
 		Notifier: NotifierConfig{},
 		Scheduler: SchedulerConfig{
 			RSSInterval: 30 * time.Minute, SupplementInterval: 24 * time.Hour, OrganizerInterval: 2 * time.Minute,
@@ -525,6 +540,14 @@ func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
 	}
 	if v, ok := getter("AI_MODEL"); ok && c.AI.Model == "gpt-4o-mini" {
 		c.AI.Model = v
+	}
+	if v, ok := getter("AI_BACKUP_MODEL"); ok && c.AI.BackupModel == "" {
+		c.AI.BackupModel = v
+	}
+	if v, ok := getter("AI_SMART_SEARCH_ENABLED"); ok && v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			c.AI.SmartSearchEnabled = enabled
+		}
 	}
 	if v, ok := getter("GEMINI_API_KEY"); ok && c.AI.GeminiKey == "" {
 		c.AI.GeminiKey = v

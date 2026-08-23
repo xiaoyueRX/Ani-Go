@@ -133,7 +133,7 @@ func TestCORSMiddleware_Options(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	// 空白名单 → 允许所有来源（向后兼容）
+	// 空白名单 → 仅允许本地默认 Origin（安全优先）
 	handler := CORSMiddleware(nil)(inner)
 
 	req := httptest.NewRequest("OPTIONS", "/api/login", nil)
@@ -143,8 +143,9 @@ func TestCORSMiddleware_Options(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("OPTIONS 预检应返回 204，实际: %d", rec.Code)
 	}
-	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("CORS Allow-Origin 应设为 *")
+	// 无 Origin 头时不设置 Allow-Origin（防止通配符泄露）
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("无 Origin 头时不应设置 Allow-Origin，实际: %s", got)
 	}
 }
 

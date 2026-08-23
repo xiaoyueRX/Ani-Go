@@ -316,14 +316,75 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 		// 2. 从下载器获取真实保存路径
 		task, err := s.downloader.GetStatus(ctx, ep.TorrentHash)
 		if err != nil {
-			log.Printf("⚠️  获取种子状态失败: %v", err)
-			continue
+			// 回退：三级匹配策略
+			tasks, listErr := s.downloader.List(ctx)
+			if listErr != nil {
+				log.Printf("⚠️  获取种子列表失败: %v", listErr)
+				continue
+			}
+			var found bool
+
+			// Level 1: hash 前缀匹配（ep.TorrentHash 存前缀，task.Hash 是完整 hash）
+			if ep.TorrentHash != "" {
+				for _, t := range tasks {
+					if strings.HasPrefix(t.Hash, ep.TorrentHash) {
+						task = t
+						found = true
+						log.Printf("✅ 整理匹配 Level1(hash前缀): ep.TorrentHash=%s -> task.Hash=%s task.Name=%s", ep.TorrentHash, t.Hash, t.Name)
+						break
+					}
+				}
+			}
+
+			// Level 2: original_name 精确匹配 task.Name 或 ContentPath 文件名
+			if !found && ep.OriginalName != "" {
+				for _, t := range tasks {
+					taskFileName := filepath.Base(t.ContentPath)
+					if taskFileName == "" {
+						taskFileName = t.Name
+					}
+					if t.Name == ep.OriginalName || taskFileName == ep.OriginalName {
+						task = t
+						found = true
+						log.Printf("✅ 整理匹配 Level2(original_name): ep.OriginalName=%s -> task.Name=%s", ep.OriginalName, t.Name)
+						break
+					}
+				}
+			}
+
+			// Level 3: title 模糊匹配（最后手段）
+			if !found && ep.Title != "" {
+				epTitleLower := strings.ToLower(ep.Title)
+				for _, t := range tasks {
+					taskNameLower := strings.ToLower(t.Name)
+					if strings.Contains(taskNameLower, epTitleLower) || strings.Contains(epTitleLower, taskNameLower) {
+						task = t
+						found = true
+						log.Printf("⚠️ 整理匹配 Level3(title模糊): ep.Title=%s -> task.Name=%s", ep.Title, t.Name)
+						break
+					}
+				}
+			}
+
+			if !found {
+				log.Printf("❌ 整理匹配失败: ep.OriginalName=%s ep.Title=%s ep.TorrentHash=%s (总任务数=%d)", ep.OriginalName, ep.Title, ep.TorrentHash, len(tasks))
+				continue
+			}
 		}
 
 		// 这里处理任务的真实路径
-		// 因为 task.SavePath 是基础保存目录，task.Name 是文件/文件夹名
-		realPath := filepath.Join(task.SavePath, task.Name)
-		
+		// 优先用 ContentPath（qB 直接下载到最终目录的情况），回退 SavePath+Name
+		realPath := task.ContentPath
+		if realPath == "" {
+			realPath = filepath.Join(task.SavePath, task.Name)
+		}
+
+		// 检查文件是否真实存在（跳过 missingFiles / 还在下载的）
+		if _, err := os.Stat(realPath); os.IsNotExist(err) {
+			log.Printf("⏭️ 跳过整理：文件不存在 realPath=%s (task.Progress=%.2f state=%s)", realPath, task.Progress, task.Status)
+			continue
+		}
+
 		// 如果是目录，我们要找到里面最大的视频文件作为真正要整理的文件
 		info, err := os.Stat(realPath)
 		if err == nil && info.IsDir() {
@@ -344,11 +405,14 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 
 		// 4. 更新 Episode 记录
 		now := time.Now()
-		database.DB.Model(&ep).Updates(map[string]interface{}{
+		if err := database.DB.Model(&ep).Updates(map[string]interface{}{
 			"status":       "organized",
 			"final_path":   newPath,
 			"organized_at": &now,
-		})
+		}).Error; err != nil {
+			log.Printf("❌ 更新整理状态失败 [ID=%d]: %v", ep.ID, err)
+			continue
+		}
 
 		if s.bus != nil {
 			s.bus.Publish(core.Event{
@@ -473,6 +537,13 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 			continue
 		}
 
+		// 集数级防重: 同一订阅下该集已有记录(合集/单集重复)则跳过,避免重复下载
+		season, epNum := parser.ExtractEpisode(item.Title)
+		if epNum > 0 && episodeNumberExists(sub.ID, season, epNum) {
+			log.Printf("⏭️  补全跳过 [%s] S%02dE%02d: 该集已存在", sub.TitleCN, season, int(epNum))
+			continue
+		}
+
 		savePath := sub.CustomPath
 		if savePath == "" {
 			savePath = s.cfg.Organizer.TVBasePath
@@ -484,9 +555,8 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 		}
 
 		recordDownload(item)
-		
+
 		// 使用新增的正则工具解析季数和集数
-		season, epNum := parser.ExtractEpisode(item.Title)
 		createEpisodeRecordWithParsed(sub.ID, item, season, epNum)
 		newCount++
 	}
@@ -624,6 +694,15 @@ func isDuplicate(torrentURL string) bool {
 	var count int64
 	database.DB.Model(&database.DownloadRecord{}).
 		Where("torrent_url = ?", torrentURL).
+		Count(&count)
+	return count > 0
+}
+
+// episodeNumberExists 检查同一订阅下该季该集是否已有 Episode 记录（集数级防重）
+func episodeNumberExists(subscriptionID uint, season int, number float32) bool {
+	var count int64
+	database.DB.Model(&database.Episode{}).
+		Where("subscription_id = ? AND season = ? AND number = ? AND deleted_at IS NULL", subscriptionID, season, number).
 		Count(&count)
 	return count > 0
 }

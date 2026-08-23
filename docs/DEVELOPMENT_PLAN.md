@@ -135,3 +135,18 @@
 - [x] **登录页记住密码**：localStorage 保存，下次自动填充。
 - [x] **剧集状态管理**：`PUT /api/episodes/{id}/status` 手动切换状态。
 - [x] **Mikan 镜像测速**：启动自动测速选最快镜像 + 设置页手动测速（显示延迟但不自动选择）。
+
+### Phase 8: 国际化 + 批量操作 + 代码审查 (v1.3.0) ✅
+- [x] **国际化 (i18n)**：中英文双语完整支持，`web/src/locales/zh.ts` + `en.ts`，语言切换即时生效，覆盖所有页面。
+- [x] **Lucide 图标迁移**：从 IconSax 迁移到 `lucide-vue-next`，统一图标风格，删除旧组件。
+- [x] **新手引导弹窗**：`OnboardingModal` 首次登录引导，帮助新用户快速上手。
+- [x] **更新日志弹窗**：`ChangelogModal` 内置版本变更查看 + `useVersion` 版本检测与更新提醒。
+- [x] **批量订阅操作**：批量创建（`POST /api/subscriptions/batch`）、批量删除（`DELETE /api/subscriptions/batch`）、批量恢复（`POST /api/subscriptions/batch/restore`）。
+- [x] **剧集字幕组名称**：剧集 API 新增 `group_name` 字段，前端显示字幕组归属。
+- [x] **前端全面重构**：Schedule / Subscriptions / Settings / Search / SubscriptionDetail / Layout / Login / Downloads 八大页面重构，新增 SubscriptionCard / SubscriptionEditForm / ScheduleCard 组件。
+- [x] **CORS 安全加固**：Origin 白名单从配置读取，非 Debug 模式禁用通配符。
+- [x] **设置页密码脱敏**：API 返回时隐藏敏感密码字段。
+- [x] **EventBus 可靠性**：Subscribe 返回 ID 精确 Unsubscribe、Publish handler 5s 超时保护。
+- [x] **并发安全修复**：Transmission sync/atomic 竞态、MikanSource RWMutex 保护。
+- [x] **JWT Secret 持久化**：密钥存入 SQLite settings 表，重启不丢失。
+- [x] **13 项代码审查修复**：CORS / EventBus / Transmission / Schedule N+1 / MikanSource RWMutex / JWT 持久化 / MultiNotifier 错误聚合 / Shell 审计日志 / LRU 搜索缓存 / Logger 句柄关闭 / QBittorrent Hash / 空 Hash 唯一约束 / 调度器死循环。

@@ -10,11 +10,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/xiaoyueRX/Ani-Go/internal/ai"
 	"github.com/xiaoyueRX/Ani-Go/internal/auth"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
+	"github.com/xiaoyueRX/Ani-Go/internal/search"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
+	"github.com/xiaoyueRX/Ani-Go/internal/notifier/v2"
 )
 
 // Server 持有 API 所需的依赖
@@ -23,16 +26,28 @@ type Server struct {
 	triggerSupplement func(ctx context.Context, subID uint) error
 	pluginManager     *plugin.Manager
 	taskParser        core.TaskParser
-	mikanSrc          *source.MikanSource  // Mikan 资源源，用于字幕组查询
-	multiSrc          core.Source          // 聚合资源源，用于搜索
+	mikanSrc          *source.MikanSource // Mikan 资源源，用于字幕组查询
+	multiSrc          core.Source         // 聚合资源源，用于搜索
+	smartExpander     *search.Expander
+	smartAggregator   *search.Aggregator
 	yucSrc            *source.YucWikiSource // yuc.wiki 资源源，用于时间表
 	version           string
 	logPath           string
+	notifyMgr         *v2.NotifyManager
 }
 
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
 // staticHandler 为嵌入式前端静态文件服务，若为 nil 则仅提供 API 服务
-func StartServer(ctx context.Context, host string, port int, version string, allowedOrigins []string, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error, pluginMgr *plugin.Manager, parser core.TaskParser, mikan *source.MikanSource, yuc *source.YucWikiSource, multi core.Source, staticHandler http.Handler, logPath string) *http.Server {
+type ServerOptions struct {
+	SmartSearchEnabled bool
+	AIChat             ai.Classifier
+}
+
+func StartServer(ctx context.Context, host string, port int, version string, allowedOrigins []string, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error, pluginMgr *plugin.Manager, parser core.TaskParser, mikan *source.MikanSource, yuc *source.YucWikiSource, multi core.Source, staticHandler http.Handler, logPath string, notifyMgr *v2.NotifyManager, options ...ServerOptions) *http.Server {
+	opts := ServerOptions{}
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	s := &Server{
 		downloader:        dl,
 		triggerSupplement: triggerSupp,
@@ -42,7 +57,10 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 		yucSrc:            yuc,
 		multiSrc:          multi,
 		version:           version,
+		smartExpander:     search.NewExpander(opts.AIChat, opts.SmartSearchEnabled),
+		smartAggregator:   search.NewAggregator(multi),
 		logPath:           logPath,
+		notifyMgr:         notifyMgr,
 	}
 
 	mux := http.NewServeMux()
@@ -169,6 +187,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/settings/custom-regex/reload", s.handleReloadCustomRegex)
 	mux.HandleFunc("GET /api/logs", s.handleGetLogs)
 
+	// 通知测试
+	mux.HandleFunc("POST /api/notify/test", s.handleTestNotify)
+
 	// 插件管理
 	mux.HandleFunc("GET /api/plugins", s.handleGetPlugins)
 	mux.HandleFunc("POST /api/plugins/reload", s.handleReloadPlugins)
@@ -181,6 +202,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 搜索番剧
 	mux.HandleFunc("GET /api/search", s.handleSearchAnime)
+	mux.HandleFunc("POST /api/search/smart", s.handleSmartSearch)
 
 	// Mikan 字幕组查询（根据 BangumiID 获取字幕组 RSS URL）
 	mux.HandleFunc("GET /api/mikan/groups", s.handleMikanGroups)

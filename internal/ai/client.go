@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,8 @@ import (
 // ============================================================
 // 公开类型
 // ============================================================
+
+var ErrQuotaExceeded = errors.New("quota exceeded")
 
 type AnimeType string
 
@@ -32,11 +35,11 @@ const (
 type Protocol string
 
 const (
-	ProtocolAuto     Protocol = ""          // 自动检测
-	ProtocolOpenAI   Protocol = "openai"    // OpenAI 及兼容协议（DeepSeek/Groq/通义千问/智谱等）
-	ProtocolGoogle   Protocol = "google"    // Google Gemini
+	ProtocolAuto      Protocol = ""          // 自动检测
+	ProtocolOpenAI    Protocol = "openai"    // OpenAI 及兼容协议（DeepSeek/Groq/通义千问/智谱等）
+	ProtocolGoogle    Protocol = "google"    // Google Gemini
 	ProtocolAnthropic Protocol = "anthropic" // Anthropic Claude
-	ProtocolOllama   Protocol = "ollama"    // Ollama 本地部署
+	ProtocolOllama    Protocol = "ollama"    // Ollama 本地部署
 )
 
 type ClassifyResult struct {
@@ -65,6 +68,7 @@ type Classifier interface {
 
 type aiBackend interface {
 	chat(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+	chatWithModel(ctx context.Context, model, systemPrompt, userPrompt string) (string, error)
 	isAvailable() bool
 }
 
@@ -82,8 +86,9 @@ type chatMessage struct {
 // ============================================================
 
 type Client struct {
-	backend aiBackend
-	model   string
+	backend     aiBackend
+	model       string
+	backupModel string
 }
 
 // NewClient 创建 AI 客户端，自动检测协议
@@ -94,6 +99,15 @@ func NewClient(endpoint, apiKey, model string) *Client {
 
 // NewClientWithProtocol 创建指定协议的 AI 客户端
 func NewClientWithProtocol(endpoint, apiKey, model string, proto Protocol) *Client {
+	return newClient(endpoint, apiKey, model, "", proto)
+}
+
+// NewClientWithBackup 创建支持备用模型的 AI 客户端
+func NewClientWithBackup(endpoint, apiKey, model, backupModel string, proto Protocol) *Client {
+	return newClient(endpoint, apiKey, model, backupModel, proto)
+}
+
+func newClient(endpoint, apiKey, model, backupModel string, proto Protocol) *Client {
 	if model == "" {
 		model = "gpt-4o-mini"
 	}
@@ -116,7 +130,10 @@ func NewClientWithProtocol(endpoint, apiKey, model string, proto Protocol) *Clie
 		backend = newOpenAIBackend(endpoint, apiKey, model)
 	}
 
-	return &Client{backend: backend, model: model}
+	if backupModel != "" && backupModel != model {
+		log.Printf("🛟 AI 备用模型: %s", backupModel)
+	}
+	return &Client{backend: backend, model: model, backupModel: backupModel}
 }
 
 // detectProtocol 根据端点自动检测协议类型
@@ -140,11 +157,42 @@ func (c *Client) IsAvailable(ctx context.Context) bool {
 }
 
 // Chat 通用对话接口，发送自定义系统提示和用户提示，返回模型原始响应
+// 内置容灾：最多2次重试(指数退避) + 主模型失败自动切换备用模型
 func (c *Client) Chat(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	if c.backend == nil {
 		return "", fmt.Errorf("AI 后端未初始化")
 	}
-	return c.backend.chat(ctx, systemPrompt, userPrompt)
+
+	const maxRetries = 2
+	backoff := []time.Duration{100 * time.Millisecond, 300 * time.Millisecond}
+
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			log.Printf("🔁 AI 请求重试 (%d/%d): %v", attempt, maxRetries, lastErr)
+			select {
+			case <-time.After(backoff[attempt-1]):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		resp, err := c.backend.chatWithModel(ctx, c.model, systemPrompt, userPrompt)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+	}
+
+	// 主模型全部失败 → 尝试备用模型
+	if c.backupModel != "" && c.backupModel != c.model {
+		log.Printf("⚠️ 主模型 %s 失败(%v)，切换备用模型 %s", c.model, lastErr, c.backupModel)
+		resp, err := c.backend.chatWithModel(ctx, c.backupModel, systemPrompt, userPrompt)
+		if err == nil {
+			return resp, nil
+		}
+		return "", fmt.Errorf("主模型与备用模型均失败: 主=%v, 备=%w", lastErr, err)
+	}
+	return "", lastErr
 }
 
 // Classify 使用 AI 对番剧进行分类
@@ -274,8 +322,12 @@ func (b *openAIBackend) isAvailable() bool {
 }
 
 func (b *openAIBackend) chat(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	return b.chatWithModel(ctx, b.model, systemPrompt, userPrompt)
+}
+
+func (b *openAIBackend) chatWithModel(ctx context.Context, model, systemPrompt, userPrompt string) (string, error) {
 	reqBody := openAIRequest{
-		Model: b.model,
+		Model: model,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
@@ -364,8 +416,12 @@ func (b *googleBackend) isAvailable() bool {
 }
 
 func (b *googleBackend) chat(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	return b.chatWithModel(ctx, b.model, systemPrompt, userPrompt)
+}
+
+func (b *googleBackend) chatWithModel(ctx context.Context, model, systemPrompt, userPrompt string) (string, error) {
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		b.model, b.apiKey)
+		model, b.apiKey)
 
 	contents := []geminiContent{
 		{Parts: []geminiPart{{Text: systemPrompt + "\n\n" + userPrompt}}},
@@ -448,10 +504,14 @@ func (b *ollamaBackend) isAvailable() bool {
 }
 
 func (b *ollamaBackend) chat(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	return b.chatWithModel(ctx, b.model, systemPrompt, userPrompt)
+}
+
+func (b *ollamaBackend) chatWithModel(ctx context.Context, model, systemPrompt, userPrompt string) (string, error) {
 	url := b.host + "/api/chat"
 
 	reqBody := ollamaRequest{
-		Model: b.model,
+		Model: model,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
@@ -503,11 +563,11 @@ type claudeMessage struct {
 }
 
 type claudeRequest struct {
-	Model       string         `json:"model"`
-	MaxTokens   int            `json:"max_tokens"`
-	System      string         `json:"system"`
+	Model       string          `json:"model"`
+	MaxTokens   int             `json:"max_tokens"`
+	System      string          `json:"system"`
 	Messages    []claudeMessage `json:"messages"`
-	Temperature float64        `json:"temperature,omitempty"`
+	Temperature float64         `json:"temperature,omitempty"`
 }
 
 type claudeResponse struct {
@@ -533,8 +593,12 @@ func (b *anthropicBackend) isAvailable() bool {
 }
 
 func (b *anthropicBackend) chat(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	return b.chatWithModel(ctx, b.model, systemPrompt, userPrompt)
+}
+
+func (b *anthropicBackend) chatWithModel(ctx context.Context, model, systemPrompt, userPrompt string) (string, error) {
 	reqBody := claudeRequest{
-		Model:     b.model,
+		Model:     model,
 		MaxTokens: 1024,
 		System:    systemPrompt,
 		Messages: []claudeMessage{

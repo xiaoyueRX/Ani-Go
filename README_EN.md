@@ -15,9 +15,10 @@
 - 🌐 **GFW Mirror Fallback**: Multi-domain mirror auto-switching for Mikan / BGM.tv / TMDB
 - 🤖 **AI Assisted** (optional): Supports OpenAI / Google / Anthropic / Ollama 4 protocols for category recognition
 - 🧩 **Plugin System**: Open hooks supporting third-party extensions
-- 🌐 **Web UI**: Vue3 + DaisyUI, manage subscriptions, download queues, and settings from a browser
-- 🔐 **JWT Auth**: Dynamic secret + Bcrypt, secure and reliable
-- 📡 **RESTful API**: Complete subscription CRUD, download management, and settings endpoints
+- 🌐 **Web UI**: Vue3 + DaisyUI + Lucide icons, manage subscriptions, download queues, and settings from a browser
+- 🔐 **JWT Auth**: Dynamic secret + Bcrypt + persistent Secret, secure and reliable
+- 📡 **RESTful API**: Complete subscription CRUD, batch operations, download management, and settings endpoints
+- 🌍 **Internationalization**: Chinese/English bilingual support with instant language switching
 
 ## Quick Start
 
@@ -149,6 +150,12 @@ Ani-Go/
 | `GET` | `/api/downloads` | Download queue |
 | `GET` | `/api/settings` | Get settings |
 | `PUT` | `/api/settings` | Update settings |
+| `POST` | `/api/subscriptions/batch` | Batch create subscriptions |
+| `DELETE` | `/api/subscriptions/batch` | Batch delete subscriptions |
+| `POST` | `/api/subscriptions/batch/restore` | Batch restore subscriptions |
+| `PUT` | `/api/episodes/{id}/status` | Toggle episode status |
+| `POST` | `/api/mikan/test-mirrors` | Mikan mirror speed test |
+| `POST` | `/api/mikan/select-mirror` | Manually select mirror |
 
 ## Development Progress
 
@@ -162,6 +169,7 @@ Ani-Go/
 | Phase 5: Multi-Platform Messaging | ✅ Complete (16 platforms) |
 | Phase 6: Data Migration Tool | ✅ Complete |
 | Phase 7: Frontend Polish + Search Fix | ✅ Complete |
+| Phase 8: i18n + Batch Operations + Code Review | ✅ Complete (v1.3.0) |
 
 ## License
 

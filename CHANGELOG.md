@@ -4,6 +4,124 @@ Ani-Go 的更新日志。所有版本遵循 [语义化版本](https://semver.org
 
 ---
 
+## v1.4.0 — 2026-08-24
+
+### 新增
+
+#### 通知系统全面重构
+- **v2 通知器适配器**：`internal/notifier/v2/adapters.go` 实现 Telegram/钉钉/企业微信/飞书/OneBot(QQ) 真实发送逻辑
+  - Telegram：支持 MarkdownV2、特殊字符自动转义、MarkdownV2 解析模式
+  - 钉钉：Webhook Markdown 消息、加签预留
+  - 企业微信：Text 类型消息、@all 提及支持
+  - 飞书：Post 富文本卡片消息
+  - OneBot (QQ)：私聊/群聊双通道、Bearer Token 认证
+- **通知管理器**：`internal/notifier/v2/manager.go` 企业级异步分发中心
+  - Worker 池并发处理（默认 4 workers）
+  - 指数退避重试策略（10s/20s/40s...，最多 3 次）
+  - 死信队列 (DLQ) 持久化失败消息
+  - 事件路由规则：按事件类型路由到指定渠道
+  - 热重载：配置变更即时生效，无需重启
+- **EventBus 深度集成**：订阅 5 大核心业务事件
+  - `download.started` / `download.completed` / `file.organized` / `episode.missing` / `error`
+- **测试通知 API**：`POST /api/notify/test` 支持单渠道/全渠道测试
+- **WebUI 设置页**：notify 标签页各渠道字段新增 🔔 测试按钮，一键验证配置
+
+#### 整理器增强
+- 硬链接优先（同文件系统），跨设备自动回退复制+删除源文件
+- 优先使用 qBittorrent `content_path`（已在最终目录），避免跨卷移动
+- 文件存在性检查：跳过 `missingFiles` / 进度 < 1.0 的种子
+- TMDB 刮削重命名：按 BangumiID 获取中文标题、年份、季数、集标题
+- 命名模板：`{title_cn} ({year})/Season {season}/{title_en} S{season:02}E{ep:02}{ext}`
+
+#### Mikan 个人 RSS 确认
+- `RSS_MODE=personal`：仅下载已订阅番剧
+- `RSS_MODE=classic`：自动建订阅（经典模式）
+- 镜像域名自动测速回退：`mikanani.me` / `mikanime.tv` / `mikanani.kas.pub`
+
+### 修复
+
+- **整理器匹配逻辑**：三级匹配策略（hash前缀 → original_name精确 → title模糊），修复原 `|| ContentPath != ""` 导致的错误匹配
+- **调度器 pollOrganizer**：增加文件存在性检查，正确跳过未完成/失败下载
+- **跨设备移动失败**：`os.Rename` EXDEV 错误改为复制+删除，硬链接失败统一回退
+
+### CI/CD
+
+- Docker 多架构构建：`linux/amd64,linux/arm64` (GitHub Actions + QEMU + Buildx)
+- 前端构建：Vite 8 + Vue 3 + TypeScript 6 + TailwindCSS v4 + DaisyUI v5
+- 后端构建：Go 1.25 + CGO_ENABLED=0 纯 Go 部署
+
+---
+
+## v1.3.0 — 2026-05-30
+
+### 新增
+
+#### 国际化 (i18n)
+- 中英文双语完整支持（`web/src/locales/zh.ts` + `en.ts`）
+- `web/src/i18n.ts` 国际化引擎，语言切换即时生效
+- 覆盖所有页面：设置、订阅、搜索、时间表、下载、登录
+
+#### 新手引导与版本管理
+- **OnboardingModal**：首次登录引导弹窗，帮助新用户快速上手
+- **ChangelogModal**：更新日志弹窗，内置版本变更查看
+- **useVersion composable**：版本检测 + 更新提醒
+
+#### 批量操作 API
+- `POST /api/subscriptions/batch`：批量创建订阅（支持多字幕组选择）
+- `DELETE /api/subscriptions/batch`：批量删除订阅（可选删除文件）
+- `POST /api/subscriptions/batch/restore`：批量恢复已删除订阅
+
+#### 前端 Lucide 图标迁移
+- 从 IconSax 迁移到 `lucide-vue-next`，统一图标风格
+- 删除旧 `IconSax.vue` 组件，所有视图改用 Lucide 组件
+
+#### 前端大幅重构
+- **Schedule.vue** 重写：时间表页面全面重构（+864 行），支持按星期分组 + 海报图
+- **Subscriptions.vue** 重构：订阅管理页面优化（+525 行），支持批量操作
+- **SettingsPage.vue** 重构：设置页大幅改进（+557 行），i18n 集成
+- **Search.vue** 重构：搜索页优化（+378 行），交互体验提升
+- **SubscriptionDetail.vue** 重构：订阅详情页改进（+506 行）
+- **Layout.vue** 重构：布局组件优化（+261 行）
+- **Login.vue** 重构：登录页改进（+169 行）
+- **Downloads.vue** 重构：下载页优化（+187 行）
+- 新增 `SubscriptionCard.vue` 订阅卡片组件
+- 新增 `SubscriptionEditForm.vue` 订阅编辑表单
+- 新增 `ScheduleCard.vue` 时间表卡片组件
+- 剧集 API 新增 `group_name` 字段（显示字幕组名称）
+
+### 安全
+
+- **CORS Origin 白名单**: 从配置文件读取允许的 Origin 列表，非 Debug 模式禁用通配符，防止跨域攻击
+- **设置页密码脱敏**: 设置 API 返回时隐藏敏感密码字段，防止信息泄露
+
+### 性能
+
+- **Schedule API N+1 修复**: 批量 GROUP BY 查询替代逐条查询，时间表加载提速
+- **搜索缓存 LRU 改造**: 引入 LRU 缓存（128 条上限）替代无限制 `sync.Map`，防止内存无限增长
+
+### 可靠性
+
+- **EventBus 订阅管理**: `Subscribe` 返回 `SubscriptionID`，`Unsubscribe` 通过 ID 精确移除，避免 goroutine 泄漏
+- **EventBus 超时保护**: `Publish` 中 handler 执行加入 5s 超时，防止慢 handler 阻塞事件总线
+- **Transmission 竞态修复**: tag 计数器改用 `sync/atomic`，消除并发竞态条件
+- **MikanSource 读写锁**: domain 读写加入 `sync.RWMutex` 保护，解决并发数据竞争
+- **JWT Secret 持久化**: 密钥持久化到 SQLite settings 表，重启不丢失（之前每次重启重新生成，导致已有 Token 失效）
+- **MultiNotifier 错误聚合**: 用 `errors.Join` 聚合多平台发送错误，不再丢失错误信息
+- **插件 Shell 审计日志**: Shell 插件执行增加 AUDIT 审计日志，便于安全审计
+- **Logger 文件句柄**: 退出前关闭日志文件句柄，防止资源泄漏
+- **QBittorrent Hash 修复**: 修复 `GetTorrentHashByURL` 逻辑错误
+- **Mikan 空 Hash 唯一约束修复**: 修复空 torrent hash 导致的 unique constraint 失败
+- **调度器死循环修复**: 修复调度器中潜在的无限循环问题
+- **yucwiki 正则修复**: 修复 `~` 后有空格导致的匹配失败
+
+### CI/CD
+
+- **前端构建步骤修复**: CI 流水线前端构建步骤更新
+- **新增 mikanani.kas.pub 镜像**: Mikan 镜像列表新增 `mikanani.kas.pub` 域名
+- **测试修复**: nil pointer 修复 + 域名期望值更新 + 镜像数 2→3
+
+---
+
 ## v1.2.0 — 2026-05-07
 
 ### 新增

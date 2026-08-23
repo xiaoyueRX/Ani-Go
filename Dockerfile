@@ -14,6 +14,9 @@ RUN npm run build
 # ---- Stage 2: Go 后端构建 ----
 FROM golang:1.25-alpine AS backend-builder
 
+# 国内 Go 模块代理（解决 GFW 下载超时）
+ENV GOPROXY=https://goproxy.cn,direct
+
 # 安装 git（Go 模块可能需要）及基础编译工具
 RUN apk add --no-cache git ca-certificates
 

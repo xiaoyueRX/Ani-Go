@@ -21,6 +21,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/event"
 	"github.com/xiaoyueRX/Ani-Go/internal/metadata"
 	"github.com/xiaoyueRX/Ani-Go/internal/notifier"
+	"github.com/xiaoyueRX/Ani-Go/internal/notifier/v2"
 	"github.com/xiaoyueRX/Ani-Go/internal/organizer"
 	parsepkg "github.com/xiaoyueRX/Ani-Go/internal/parser"
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
@@ -215,11 +216,7 @@ func main() {
 	if cfg.AI.Enabled {
 		endpoint, apiKey, model := resolveAIConfig(cfg)
 		protocol := ai.Protocol(cfg.AI.Protocol)
-		if protocol == "" || protocol == "auto" {
-			aiClient = ai.NewClient(endpoint, apiKey, model)
-		} else {
-			aiClient = ai.NewClientWithProtocol(endpoint, apiKey, model, protocol)
-		}
+		aiClient = ai.NewClientWithBackup(endpoint, apiKey, model, cfg.AI.BackupModel, protocol)
 		if aiClient.IsAvailable(context.Background()) {
 			protoStr := cfg.AI.Protocol
 			if protoStr == "" {
@@ -243,30 +240,21 @@ func main() {
 	pluginMgr.LoadFromSettings()
 	pluginMgr.SubscribeAll()
 
-	// 初始化通知系统（可选，支持 Telegram/Discord/企业微信/飞书/钉钉）
-	mn := setupNotifier(cfg)
-	if mn.Count() > 0 {
-		log.Printf("🔔 已启用 %d 个通知渠道", mn.Count())
-		// 订阅关键事件以自动推送通知
-		bus.Subscribe(core.EventDownloadStarted, func(event core.Event) {
-			title, _ := event.Payload["title"].(string)
-			mn.Send(context.Background(), "⬇️ 下载开始", title)
-		})
-		bus.Subscribe(core.EventDownloadCompleted, func(event core.Event) {
-			title, _ := event.Payload["title"].(string)
-			mn.Send(context.Background(), "✅ 下载完成", title)
-		})
-		bus.Subscribe(core.EventDownloadFailed, func(event core.Event) {
-			title, _ := event.Payload["title"].(string)
-			mn.Send(context.Background(), "❌ 下载失败", title)
-		})
-		bus.Subscribe(core.EventSupplementCompleted, func(event core.Event) {
-			title, _ := event.Payload["title"].(string)
-			mn.Send(context.Background(), "📦 补全完成", title)
-		})
-	} else {
-		log.Println("ℹ️  未启用通知渠道")
+	// 初始化通知系统 v2（支持 Telegram/钉钉/企业微信/飞书/QQ OneBot）
+	notifyMgr := v2.NewNotifyManager(nil, bus)
+	// 从配置创建通知器并热加载
+	reloadNotifiersV2(cfg, notifyMgr)
+	if len(notifyMgr.GetStats()) > 0 || true { // 统计暂时为空，用 provider 名称判断
+		names := []string{}
+		for _, n := range notifyMgr.Notifiers() {
+			names = append(names, n.Name())
+		}
+		if len(names) > 0 {
+			log.Printf("🔔 已启用 %d 个通知渠道: %v", len(names), names)
+		}
 	}
+	notifyMgr.Start()
+	defer notifyMgr.Stop()
 
 	// 启动调度器
 	sched := scheduler.New(cfg, multiSource, dl, org, bus, primaryMetadata, aiClient)
@@ -287,7 +275,7 @@ func main() {
 	}
 
 	// 启动 HTTP API 服务（含 JWT 鉴权中间件 + 嵌入式前端静态文件）
-	api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, version, cfg.Server.AllowedOrigins, dl, sched.TriggerSupplement, pluginMgr, taskParser, mikanSource, yucSource, multiSource, staticHandler(), cfg.Server.LogPath)
+	api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, version, cfg.Server.AllowedOrigins, dl, sched.TriggerSupplement, pluginMgr, taskParser, mikanSource, yucSource, multiSource, staticHandler(), cfg.Server.LogPath, notifyMgr, api.ServerOptions{SmartSearchEnabled: cfg.AI.SmartSearchEnabled, AIChat: aiClient})
 
 	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("✅ Ani-Go 启动成功 — Phase 3 全栈引擎运行中")
@@ -419,12 +407,12 @@ func setupNotifier(cfg *config.Config) *notifier.MultiNotifier {
 	if cfg.Notifier.WhatsAppPhoneID != "" && cfg.Notifier.WhatsAppToken != "" && cfg.Notifier.WhatsAppTo != "" {
 		mn.Add(notifier.NewWhatsAppNotifier(cfg.Notifier.WhatsAppPhoneID, cfg.Notifier.WhatsAppToken, cfg.Notifier.WhatsAppTo))
 	}
-	
+
 	// Add Signal
 	if os.Getenv("SIGNAL_API_URL") != "" {
 		mn.Add(notifier.NewSignalNotifier())
 	}
-	
+
 	// Add WeChat Official Account
 	if os.Getenv("WECHAT_APP_ID") != "" {
 		mn.Add(notifier.NewWeChatNotifier())
@@ -464,4 +452,22 @@ func printConfig(cfg *config.Config) {
 	fmt.Printf("   番剧目录: %s\n", cfg.Organizer.TVBasePath)
 	fmt.Printf("   RSS 间隔: %v | 整理间隔: %v\n", cfg.Scheduler.RSSInterval, cfg.Scheduler.OrganizerInterval)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+}
+
+// reloadNotifiersV2 从配置创建通知器并热加载到 NotifyManager
+func reloadNotifiersV2(cfg *config.Config, mgr *v2.NotifyManager) {
+	notifierCfg := v2.NotifierConfig{
+		TelegramBotToken: cfg.Notifier.TelegramBotToken,
+		TelegramChatID:   cfg.Notifier.TelegramChatID,
+		DingTalkWebhook:  cfg.Notifier.DingTalkWebhook,
+		DingTalkSecret:   "", // 暂不支持
+		WeComWebhook:     cfg.Notifier.WecomWebhook,
+		FeishuWebhook:    cfg.Notifier.FeishuWebhook,
+		OneBotHost:       cfg.Notifier.OneBotHost,
+		OneBotToken:      cfg.Notifier.OneBotToken,
+		OneBotUserID:     cfg.Notifier.OneBotUserID,
+		OneBotGroupID:    cfg.Notifier.OneBotGroupID,
+	}
+	notifiers := v2.CreateNotifiersFromConfig(notifierCfg)
+	mgr.ReloadNotifiers(notifiers)
 }

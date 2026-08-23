@@ -115,22 +115,23 @@ const tabs = computed<TabDef[]>(() => [
   ]}]},
   { key: 'notify', label: t('settings.tabs.notify'), icon: Bell, sections: [
     { title: t('settings.sections.im'), desc: t('settings.sections.imDesc'), fields: [
-      { label: t('settings.fields.tgToken'), key: 'TELEGRAM_BOT_TOKEN', placeholder: '123456:ABC...' },
+      { label: t('settings.fields.tgToken'), key: 'TELEGRAM_BOT_TOKEN', placeholder: '123456:ABC...', testChannel: 'Telegram' },
       { label: t('settings.fields.tgId'), key: 'TELEGRAM_CHAT_ID', placeholder: '123456789' },
-      { label: t('settings.fields.discord'), key: 'DISCORD_WEBHOOK', placeholder: 'Endpoint URL' },
+      { label: t('settings.fields.discord'), key: 'DISCORD_WEBHOOK', placeholder: 'Endpoint URL', testChannel: 'Discord' },
       { label: t('settings.fields.slack'), key: 'SLACK_WEBHOOK', placeholder: 'Endpoint URL' },
       { label: t('settings.fields.onebotHost'), key: 'ONEBOT_HOST', placeholder: 'http://localhost:3000' },
       { label: t('settings.fields.onebotToken'), key: 'ONEBOT_TOKEN', placeholder: 'Access token' },
     ]},
     { title: t('settings.sections.enterprise'), desc: t('settings.sections.enterpriseDesc'), fields: [
-      { label: t('settings.fields.wecom'), key: 'WECOM_WEBHOOK', placeholder: 'Endpoint URL' },
-      { label: t('settings.fields.feishu'), key: 'FEISHU_WEBHOOK', placeholder: 'Endpoint URL' },
-      { label: t('settings.fields.dingtalk'), key: 'DINGTALK_WEBHOOK', placeholder: 'Endpoint URL' },
+      { label: t('settings.fields.wecom'), key: 'WECOM_WEBHOOK', placeholder: 'Endpoint URL', testChannel: '企业微信' },
+      { label: t('settings.fields.feishu'), key: 'FEISHU_WEBHOOK', placeholder: 'Endpoint URL', testChannel: '飞书' },
+      { label: t('settings.fields.dingtalk'), key: 'DINGTALK_WEBHOOK', placeholder: 'Endpoint URL', testChannel: '钉钉' },
     ]},
   ]},
   { key: 'ai', label: t('settings.tabs.ai'), icon: Cpu, sections: [
     { title: t('settings.sections.ai'), desc: t('settings.sections.aiDesc'), fields: [
       { label: t('settings.fields.protocol'), key: 'AI_PROTOCOL', placeholder: 'auto' },
+      { label: t('settings.fields.smartSearch'), key: 'AI_SMART_SEARCH_ENABLED', placeholder: '', type: 'switch', hint: t('settings.fields.smartSearchHint') },
       { label: t('settings.fields.endpoint'), key: 'AI_ENDPOINT', placeholder: 'https://api.openai.com/v1/chat/completions' },
       { label: t('settings.fields.key'), key: 'AI_API_KEY', placeholder: 'API key', type: 'password' },
       { label: t('settings.fields.model'), key: 'AI_MODEL', placeholder: 'gpt-4o-mini' },
@@ -217,6 +218,20 @@ async function saveAll() {
     saved.value = true; setTimeout(() => { saved.value = false }, 3000)
   } catch (e: any) {
     error.value = e.response?.data?.error || t('settings.error.saveFailed')
+  }
+}
+
+async function sendTestNotify(channel: string) {
+  try {
+    const { data } = await request.post('/notify/test', { channel, title: 'Ani-Go 测试通知', message: `这是一条来自 ${channel} 的测试消息，如果您收到说明通知配置正常。` })
+    if (data.success) {
+      saved.value = true
+      setTimeout(() => { saved.value = false }, 3000)
+    } else {
+      error.value = data.error || '发送失败'
+    }
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '发送请求失败'
   }
 }
 
@@ -449,6 +464,11 @@ onMounted(() => {
                       class="absolute right-3 top-1/2 -translate-y-1/2 btn btn-ghost btn-circle btn-xs hover:bg-primary/20 hover:text-primary transition-all"
                       @click="togglePassword(field.key)">
                       <component :is="showPasswords.has(field.key) ? Eye : EyeOff" :size="16" />
+                    </button>
+                    <button v-if="field.testChannel"
+                      class="absolute right-36 top-1/2 -translate-y-1/2 btn btn-ghost btn-circle btn-xs hover:bg-primary/20 hover:text-primary transition-all"
+                      @click="sendTestNotify(field.testChannel)">
+                      <Bell :size="16" />
                     </button>
                   </template>
               </div>

@@ -15,10 +15,12 @@
 - 🌐 **GFW 镜像回退**：Mikan / BGM.tv / TMDB 多镜像域名自动切换
 - 🤖 **AI 辅助**（可选）：支持 OpenAI / Google / Anthropic / Ollama 四大协议，辅助分类识别
 - 🧩 **插件系统**：开放钩子，支持第三方扩展
-- 🌐 **Web UI**：Vue3 + DaisyUI，浏览器管理订阅、下载队列、设置
+- 🌐 **Web UI**：Vue3 + DaisyUI + Lucide 图标，浏览器管理订阅、下载队列、设置
 - 📱 **PWA 可安装**：Chrome/Edge 将网页安装为独立应用
-- 🔐 **JWT 鉴权**：动态密钥 + Bcrypt，安全可靠
-- 📡 **RESTful API**：完整的订阅 CRUD、下载管理、设置接口
+- 🔐 **JWT 鉴权**：动态密钥 + Bcrypt + 持久化 Secret，安全可靠
+- 📡 **RESTful API**：完整的订阅 CRUD、批量操作、下载管理、设置接口
+- 🌍 **国际化**：中英文双语支持，语言切换即时生效
+- 🔔 **企业级通知系统**：Telegram/钉钉/企业微信/飞书/QQ(OneBot) 五大渠道，异步分发、指数退避重试、死信队列、事件路由、热重载、WebUI 一键测试
 
 ## 快速开始
 
@@ -150,6 +152,13 @@ Ani-Go/
 | `GET` | `/api/downloads` | 下载队列 |
 | `GET` | `/api/settings` | 获取设置 |
 | `PUT` | `/api/settings` | 更新设置 |
+| `POST` | `/api/subscriptions/batch` | 批量创建订阅 |
+| `DELETE` | `/api/subscriptions/batch` | 批量删除订阅 |
+| `POST` | `/api/subscriptions/batch/restore` | 批量恢复订阅 |
+| `PUT` | `/api/episodes/{id}/status` | 切换剧集状态 |
+| `POST` | `/api/mikan/test-mirrors` | Mikan 镜像测速 |
+| `POST` | `/api/mikan/select-mirror` | 手动选择镜像 |
+| `POST` | `/api/notify/test` | 发送测试通知 |
 
 ## 开发进度
 
@@ -163,6 +172,8 @@ Ani-Go/
 | Phase 5: 多平台消息通知 | ✅ 完成 (16 平台) |
 | Phase 6: 数据迁移工具 | ✅ 完成 |
 | Phase 7: 前端美化 + 搜索修复 | ✅ 完成 |
+| Phase 8: 国际化 + 批量操作 + 代码审查 | ✅ 完成 (v1.3.0) |
+
 ## License
 
 MIT License © xiaoyueRX

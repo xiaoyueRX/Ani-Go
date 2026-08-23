@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/glebarez/sqlite"
@@ -12,7 +13,7 @@ var DB *gorm.DB
 
 func Init(dbPath string) error {
 	var err error
-	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+	DB, err = gorm.Open(sqlite.Open(dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
@@ -38,7 +39,9 @@ func Init(dbPath string) error {
 // 密码使用 Bcrypt 加盐哈希存储，绝不保存明文
 func InitDefaultUser(hashFunc func(string) (string, error)) error {
 	var count int64
-	DB.Model(&User{}).Count(&count)
+	if err := DB.Model(&User{}).Count(&count).Error; err != nil {
+		return fmt.Errorf("查询用户数量失败: %w", err)
+	}
 	if count > 0 {
 		return nil // 已有用户，跳过
 	}
