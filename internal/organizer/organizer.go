@@ -22,16 +22,18 @@ import (
 type TVOrganizer struct {
 	tvTemplate    string
 	movieTemplate string
+	otherTemplate string
 	tvBasePath    string
 	movieBasePath string
 	useHardLink   bool
 }
 
 // New 创建文件整理器实例
-func New(tvTemplate, movieTemplate, tvBasePath, movieBasePath string, useHardLink bool) *TVOrganizer {
+func New(tvTemplate, movieTemplate, otherTemplate, tvBasePath, movieBasePath string, useHardLink bool) *TVOrganizer {
 	return &TVOrganizer{
 		tvTemplate:    tvTemplate,
 		movieTemplate: movieTemplate,
+		otherTemplate: otherTemplate,
 		tvBasePath:    tvBasePath,
 		movieBasePath: movieBasePath,
 		useHardLink:   useHardLink,
@@ -104,10 +106,13 @@ func (o *TVOrganizer) selectTemplate(anime core.Anime) string {
 		}
 		return "{title_cn} ({year})/{title_en}{ext}"
 	default:
+		if o.otherTemplate != "" {
+			return o.otherTemplate
+		}
 		if o.tvTemplate != "" {
 			return o.tvTemplate
 		}
-		return "{title_cn} ({year})/Season {season}/{title_en} S{season:02}E{ep:02}{ext}"
+		return "{title_cn}{year}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}"
 	}
 }
 
@@ -143,6 +148,14 @@ func (o *TVOrganizer) buildVarValues(anime core.Anime, episode core.Episode) Var
 
 // 模板变量正则：匹配 {var_name} 和 {var_name:format}
 var reTemplateVar = regexp.MustCompile(`\{(\w+)(?::(\w+))?\}`)
+var yearSegmentPattern = regexp.MustCompile(`(?m)(?:^|/)\s*\((?:0|)\)(?:/|$)|\s+\((?:0|)\)`)
+
+// removeYearSegment removes the optional parentheses around {year} when
+// the value is absent, while preserving unrelated literal parentheses.
+func removeYearSegment(path string) string {
+	trimmed := yearSegmentPattern.ReplaceAllString(path, "")
+	return strings.TrimSpace(trimmed)
+}
 
 // renderTemplate 将模板字符串渲染为实际路径
 func renderTemplate(template string, v VarValues) string {
@@ -164,6 +177,10 @@ func renderTemplate(template string, v VarValues) string {
 		// 应用格式
 		return applyFormat(val, format)
 	})
+
+	if v.Year <= 0 {
+		result = removeYearSegment(result)
+	}
 
 	// 清理非法文件名字符
 	result = sanitizePath(result)

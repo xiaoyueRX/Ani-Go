@@ -66,7 +66,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 
 	suppTicker := time.NewTicker(s.cfg.Scheduler.SupplementInterval)
 	defer suppTicker.Stop()
-	
+
 	downloadTicker := time.NewTicker(10 * time.Second)
 	defer downloadTicker.Stop()
 
@@ -134,7 +134,7 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 		for i := range subs {
 			sub := &subs[i]
 			currentMatchLen := 0
-			
+
 			if sub.TitleCN != "" && strings.Contains(strings.ToLower(item.Title), strings.ToLower(sub.TitleCN)) {
 				currentMatchLen = len(sub.TitleCN)
 			}
@@ -287,11 +287,15 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 
 	log.Printf("📂 发现 %d 个待整理的文件", len(episodes))
 
+	successCount := 0
+	failureCount := 0
+	lastOrganizedPath := ""
 	for _, ep := range episodes {
 		// 1. 根据 Subscription 获取番剧元数据
 		var sub database.Subscription
 		if err := database.DB.First(&sub, ep.SubscriptionID).Error; err != nil {
 			log.Printf("⚠️  整理跳过，找不到对应的订阅记录: %d", ep.SubscriptionID)
+			failureCount++
 			continue
 		}
 
@@ -320,6 +324,7 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 			tasks, listErr := s.downloader.List(ctx)
 			if listErr != nil {
 				log.Printf("⚠️  获取种子列表失败: %v", listErr)
+				failureCount++
 				continue
 			}
 			var found bool
@@ -368,6 +373,7 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 
 			if !found {
 				log.Printf("❌ 整理匹配失败: ep.OriginalName=%s ep.Title=%s ep.TorrentHash=%s (总任务数=%d)", ep.OriginalName, ep.Title, ep.TorrentHash, len(tasks))
+				failureCount++
 				continue
 			}
 		}
@@ -400,6 +406,7 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 		newPath, err := s.organizer.Organize(ctx, realPath, anime, coreEp)
 		if err != nil {
 			log.Printf("❌ 文件整理失败 [%s]: %v", ep.Title, err)
+			failureCount++
 			continue
 		}
 
@@ -411,22 +418,29 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 			"organized_at": &now,
 		}).Error; err != nil {
 			log.Printf("❌ 更新整理状态失败 [ID=%d]: %v", ep.ID, err)
+			failureCount++
 			continue
 		}
 
-		if s.bus != nil {
-			s.bus.Publish(core.Event{
-				Type: core.EventFileOrganized,
-				Payload: map[string]any{
-					"episode_id": ep.ID,
-					"final_path": newPath,
-				},
-				Time: time.Now(),
-			})
-		}
+		lastOrganizedPath = newPath
+		successCount++
 	}
 
-	log.Printf("✅ 已整理 %d 个文件", len(episodes))
+	if s.bus != nil && (successCount > 0 || failureCount > 0) {
+		s.bus.Publish(core.Event{
+			Type: core.EventFileOrganized,
+			Payload: map[string]any{
+				"success":    successCount,
+				"failed":     failureCount,
+				"final_path": lastOrganizedPath,
+			},
+			Time: time.Now(),
+		})
+	}
+
+	if successCount > 0 || failureCount > 0 {
+		log.Printf("✅ 整理完成：成功 %d 个，失败 %d 个", successCount, failureCount)
+	}
 }
 
 // pollSupplement 执行补全扫描：查找集数不完整的订阅，爬取历史种子补全
@@ -783,10 +797,10 @@ func autoCreateSubscription(ctx context.Context, s *Scheduler, item core.Torrent
 		}
 
 		sub := database.Subscription{
-			TitleCN:   cleanTitle,
-			BangumiID: mikanBangumiID,
-			RSSURL:    rssURL,
-			Enabled:   true,
+			TitleCN:    cleanTitle,
+			BangumiID:  mikanBangumiID,
+			RSSURL:     rssURL,
+			Enabled:    true,
 			SourceName: "Mikan",
 		}
 

@@ -181,6 +181,7 @@ func main() {
 	org := organizer.New(
 		cfg.Organizer.TVTemplate,
 		cfg.Organizer.MovieTemplate,
+		cfg.Organizer.OtherTemplate,
 		cfg.Organizer.TVBasePath,
 		cfg.Organizer.MovieBasePath,
 		cfg.Organizer.UseHardLink,

@@ -1,0 +1,1395 @@
+openapi: 3.0.3
+info:
+  title: Ani-Go API
+  description: |
+    Ani-Go 自动化番剧下载器 REST API。
+
+    **认证方式**: JWT Bearer Token（通过 `/api/login` 获取）。
+    **免认证接口**: `/api/login`、`/api/health`、`/api/proxy/image`。
+  version: 1.3.0
+  contact:
+    name: Ani-Go
+    url: https://github.com/xiaoyueRX/Ani-Go
+
+servers:
+  - url: /api
+    description: API 基础路径
+
+tags:
+  - name: Auth
+    description: 认证与鉴权
+  - name: Health
+    description: 健康检查
+  - name: User
+    description: 用户信息
+  - name: Subscriptions
+    description: 订阅管理
+  - name: Episodes
+    description: 剧集管理
+  - name: Downloads
+    description: 下载队列
+  - name: Settings
+    description: 设置管理
+  - name: Search
+    description: 搜索与发现
+  - name: Mikan
+    description: Mikan 镜像管理
+  - name: Plugins
+    description: 插件管理
+  - name: Parse
+    description: 任务解析
+  - name: Migrate
+    description: 数据迁移
+  - name: Version
+    description: 版本信息
+  - name: Proxy
+    description: 图片代理
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required: [username, password]
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        username:
+          type: string
+        message:
+          type: string
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        time:
+          type: string
+          format: date-time
+
+    UserResponse:
+      type: object
+      properties:
+        username:
+          type: string
+
+    ChangePasswordRequest:
+      type: object
+      properties:
+        old_password:
+          type: string
+        new_password:
+          type: string
+          minLength: 6
+      required: [old_password, new_password]
+
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: integer
+        title_cn:
+          type: string
+        title_en:
+          type: string
+        title_jp:
+          type: string
+        year:
+          type: integer
+        season:
+          type: integer
+        bangumi_id:
+          type: string
+        subgroup_name:
+          type: string
+        metadata_id:
+          type: string
+        metadata_provider:
+          type: string
+        cover_url:
+          type: string
+        description:
+          type: string
+        anime_type:
+          type: string
+        total_episodes:
+          type: integer
+        current_episodes:
+          type: integer
+        enabled:
+          type: boolean
+        completed:
+          type: boolean
+        filter_json:
+          type: string
+        custom_path:
+          type: string
+        stalled_episodes:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateSubscriptionRequest:
+      type: object
+      properties:
+        title_cn:
+          type: string
+        bangumi_id:
+          type: string
+        subgroup_name:
+          type: string
+        rss_url:
+          type: string
+        filter_json:
+          type: string
+        custom_path:
+          type: string
+        cover_url:
+          type: string
+      required: [title_cn]
+
+    UpdateSubscriptionRequest:
+      type: object
+      properties:
+        title_cn:
+          type: string
+        title_en:
+          type: string
+        title_jp:
+          type: string
+        year:
+          type: integer
+        season:
+          type: integer
+        bangumi_id:
+          type: string
+        subgroup_name:
+          type: string
+        metadata_id:
+          type: string
+        metadata_provider:
+          type: string
+        cover_url:
+          type: string
+        description:
+          type: string
+        anime_type:
+          type: string
+        total_episodes:
+          type: integer
+        enabled:
+          type: boolean
+        completed:
+          type: boolean
+        filter_json:
+          type: string
+        custom_path:
+          type: string
+
+    BatchSubscriptionItem:
+      type: object
+      properties:
+        title_cn:
+          type: string
+        bangumi_id:
+          type: string
+        cover_url:
+          type: string
+        subgroups:
+          type: array
+          items:
+            type: string
+      required: [title_cn]
+
+    BatchSubscriptionRequest:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchSubscriptionItem'
+          maxItems: 20
+      required: [items]
+
+    BatchSubResult:
+      type: object
+      properties:
+        title:
+          type: string
+        id:
+          type: integer
+        error:
+          type: string
+
+    BatchSubscriptionResponse:
+      type: object
+      properties:
+        success:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchSubResult'
+        failed:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchSubResult'
+
+    BatchDeleteRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: integer
+          maxItems: 100
+        delete_files:
+          type: boolean
+          default: false
+      required: [ids]
+
+    BatchDeleteResponse:
+      type: object
+      properties:
+        deleted:
+          type: integer
+
+    BatchRestoreRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: integer
+          maxItems: 100
+      required: [ids]
+
+    BatchRestoreResponse:
+      type: object
+      properties:
+        restored:
+          type: integer
+
+    Episode:
+      type: object
+      properties:
+        id:
+          type: integer
+        subscription_id:
+          type: integer
+        season:
+          type: integer
+        number:
+          type: number
+          format: float
+        title:
+          type: string
+        status:
+          type: string
+          enum: [pending, downloading, downloaded, completed, failed]
+        torrent_hash:
+          type: string
+        torrent_url:
+          type: string
+        original_name:
+          type: string
+        final_path:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        is_stalled:
+          type: boolean
+        group_name:
+          type: string
+        download_started_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    SubscriptionDetail:
+      type: object
+      properties:
+        subscription:
+          $ref: '#/components/schemas/Subscription'
+        episodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Episode'
+
+    UpdateEpisodeStatusRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, downloading, completed, failed]
+      required: [status]
+
+    DownloadTask:
+      type: object
+      properties:
+        hash:
+          type: string
+        name:
+          type: string
+        save_path:
+          type: string
+        status:
+          type: string
+        progress:
+          type: number
+          format: float
+        speed_down:
+          type: integer
+          format: int64
+        size:
+          type: integer
+          format: int64
+        done:
+          type: integer
+          format: int64
+
+    SettingsResponse:
+      type: object
+      additionalProperties:
+        type: string
+
+    UpdateSettingsRequest:
+      type: object
+      properties:
+        settings:
+          type: object
+          additionalProperties:
+            type: string
+      required: [settings]
+
+    CustomRegexResponse:
+      type: object
+      properties:
+        patterns:
+          type: array
+          items:
+            type: string
+        compiled:
+          type: array
+          items:
+            type: string
+        builtin_count:
+          type: integer
+
+    LogsResponse:
+      type: object
+      properties:
+        lines:
+          type: array
+          items:
+            type: string
+        total:
+          type: integer
+
+    TorrentItem:
+      type: object
+      properties:
+        title:
+          type: string
+        url:
+          type: string
+        magnet:
+          type: string
+        info_hash:
+          type: string
+        size:
+          type: integer
+          format: int64
+        pub_date:
+          type: string
+          format: date-time
+        source:
+          type: string
+        bangumi_id:
+          type: string
+        episode_url:
+          type: string
+        cover_url:
+          type: string
+        aired_time:
+          type: string
+        aired_date:
+          type: string
+        group_name:
+          type: string
+
+    SubgroupInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        rss_url:
+          type: string
+        subgroup_id:
+          type: string
+
+    MirrorResult:
+      type: object
+      properties:
+        domain:
+          type: string
+        latency:
+          type: integer
+        ok:
+          type: boolean
+
+    SelectMirrorRequest:
+      type: object
+      properties:
+        domain:
+          type: string
+      required: [domain]
+
+    ScheduleResponse:
+      type: object
+      properties:
+        days:
+          type: array
+          items:
+            type: object
+            properties:
+              day_of_week:
+                type: integer
+              label:
+                type: string
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TorrentItem'
+        subscribed:
+          type: object
+          additionalProperties:
+            type: integer
+        subscriptionCount:
+          type: integer
+        sub_stats:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              downloaded:
+                type: integer
+              total:
+                type: integer
+
+    ParseRequest:
+      type: object
+      properties:
+        input:
+          type: string
+      required: [input]
+
+    ParseResult:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [subscribe, unsubscribe, list, search, unknown]
+        title:
+          type: string
+        season:
+          type: integer
+        resolution:
+          type: string
+        subgroups:
+          type: array
+          items:
+            type: string
+        confidence:
+          type: number
+          format: float
+
+    MigrateRequest:
+      type: object
+      properties:
+        source_path:
+          type: string
+      required: [source_path]
+
+    MigrateResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        stats:
+          type: object
+
+    VersionResponse:
+      type: object
+      properties:
+        version:
+          type: string
+        changelog:
+          type: array
+          items:
+            type: string
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+    PluginReloadResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        count:
+          type: integer
+
+paths:
+  /login:
+    post:
+      tags: [Auth]
+      summary: 用户登录
+      description: 验证用户名密码，返回 JWT Token。
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: 请求格式错误或参数为空
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 用户名或密码错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Token 生成失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /health:
+    get:
+      tags: [Health]
+      summary: 健康检查
+      description: 服务健康状态检查，无需认证。
+      operationId: health
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /me:
+    get:
+      tags: [User]
+      summary: 获取当前用户信息
+      operationId: getMe
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 用户信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Token 无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /user/change-password:
+    post:
+      tags: [User]
+      summary: 修改密码
+      description: 修改当前用户密码，修改后所有旧 Token 失效。
+      operationId: changePassword
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: 密码修改成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: 参数校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录
+        '403':
+          description: 旧密码错误
+        '404':
+          description: 用户不存在
+
+  /subscriptions:
+    get:
+      tags: [Subscriptions]
+      summary: 获取订阅列表
+      operationId: listSubscriptions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+          description: 按启用状态过滤
+        - name: completed
+          in: query
+          schema:
+            type: boolean
+          description: 按完成状态过滤
+      responses:
+        '200':
+          description: 订阅列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Subscription'
+        '500':
+          description: 查询失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Subscriptions]
+      summary: 创建订阅
+      description: |
+        创建新订阅。如果有 bangumi_id 但无 rss_url，后台自动解析 Mikan 字幕组 RSS。
+        创建后自动触发补全扫描。
+      operationId: createSubscription
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubscriptionRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '400':
+          description: 参数校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: 创建失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /subscriptions/batch:
+    post:
+      tags: [Subscriptions]
+      summary: 批量创建订阅
+      description: 批量创建订阅，最多 20 部。
+      operationId: batchCreateSubscriptions
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchSubscriptionRequest'
+      responses:
+        '201':
+          description: 批量创建结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchSubscriptionResponse'
+        '400':
+          description: 参数校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /subscriptions/batch-delete:
+    post:
+      tags: [Subscriptions]
+      summary: 批量删除订阅
+      description: 批量删除订阅及关联剧集，最多 100 个，使用事务。
+      operationId: batchDeleteSubscriptions
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchDeleteRequest'
+      responses:
+        '200':
+          description: 删除结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchDeleteResponse'
+        '400':
+          description: 参数校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: 删除失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /subscriptions/batch-restore:
+    post:
+      tags: [Subscriptions]
+      summary: 批量恢复订阅
+      description: 恢复已软删除的订阅及关联剧集，最多 100 个。
+      operationId: batchRestoreSubscriptions
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRestoreRequest'
+      responses:
+        '200':
+          description: 恢复结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchRestoreResponse'
+        '400':
+          description: 参数校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /subgroups:
+    get:
+      tags: [Subscriptions]
+      summary: 获取字幕组列表
+      description: 获取系统中已有的字幕组列表。
+      operationId: getSubgroups
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 字幕组列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /subscriptions/{id}:
+    get:
+      tags: [Subscriptions]
+      summary: 获取订阅详情
+      description: 获取单个订阅详情，包含所有关联剧集。
+      operationId: getSubscription
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 订阅详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionDetail'
+        '400':
+          description: 无效的订阅 ID
+        '404':
+          description: 订阅不存在
+    put:
+      tags: [Subscriptions]
+      summary: 更新订阅
+      description: 部分更新订阅信息，仅更新提供的字段。
+      operationId: updateSubscription
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSubscriptionRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '400':
+          description: 无效的请求
+        '404':
+          description: 订阅不存在
+        '500':
+          description: 更新失败
+    delete:
+      tags: [Subscriptions]
+      summary: 删除订阅
+      description: 删除订阅及其关联剧集，可选同时删除文件和种子。
+      operationId: deleteSubscription
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: delete_files
+          in: query
+          schema:
+            type: boolean
+          description: 是否删除下载文件和种子
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: 无效的订阅 ID
+        '404':
+          description: 订阅不存在
+
+  /subscriptions/{id}/trigger-supplement:
+    post:
+      tags: [Subscriptions]
+      summary: 触发补全扫描
+      description: 手动触发单个订阅的后台补全扫描。
+      operationId: triggerSupplement
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '202':
+          description: 补全任务已触发
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: 无效的 ID 或订阅未启用
+        '404':
+          description: 订阅不存在
+        '500':
+          description: 补全调度器未配置
+
+  /episodes/{id}/status:
+    put:
+      tags: [Episodes]
+      summary: 更新剧集状态
+      operationId: updateEpisodeStatus
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEpisodeStatusRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        '400':
+          description: 无效的 ID 或状态值
+        '500':
+          description: 更新失败
+
+  /downloads:
+    get:
+      tags: [Downloads]
+      summary: 获取下载队列
+      operationId: listDownloads
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 下载任务列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DownloadTask'
+        '503':
+          description: 下载器未配置
+        '500':
+          description: 获取下载列表失败
+
+  /settings:
+    get:
+      tags: [Settings]
+      summary: 获取所有设置
+      description: 敏感字段（含 PASS/SECRET/KEY）返回空值。
+      operationId: getSettings
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 设置键值对
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsResponse'
+    put:
+      tags: [Settings]
+      summary: 批量更新设置
+      description: Upsert 模式更新设置。
+      operationId: updateSettings
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSettingsRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: 参数校验失败
+
+  /settings/custom-regex:
+    get:
+      tags: [Settings]
+      summary: 获取自定义正则规则
+      operationId: getCustomRegex
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 正则规则
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomRegexResponse'
+
+  /settings/custom-regex/reload:
+    post:
+      tags: [Settings]
+      summary: 重新加载自定义正则
+      operationId: reloadCustomRegex
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 重新加载成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  compiled:
+                    type: array
+                    items:
+                      type: string
+
+  /logs:
+    get:
+      tags: [Settings]
+      summary: 获取系统日志
+      description: 逆向读取日志文件尾部 N 行（类似 tail -n）。
+      operationId: getLogs
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: lines
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+          description: 返回行数
+      responses:
+        '200':
+          description: 日志内容
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogsResponse'
+
+  /search:
+    get:
+      tags: [Search]
+      summary: 搜索番剧资源
+      description: 聚合 Nyaa/ACG.RIP/AnimeTosho 搜索。
+      operationId: searchAnime
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 搜索关键词
+      responses:
+        '200':
+          description: 搜索结果
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TorrentItem'
+        '400':
+          description: 搜索关键词不能为空
+        '503':
+          description: 搜索服务未配置
+        '500':
+          description: 搜索失败
+
+  /mikan/groups:
+    get:
+      tags: [Search]
+      summary: 获取 Mikan 字幕组
+      description: 根据 BangumiID 获取 Mikan 字幕组列表及 RSS URL。
+      operationId: getMikanGroups
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: bangumi_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Bangumi 番剧 ID
+      responses:
+        '200':
+          description: 字幕组列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubgroupInfo'
+        '400':
+          description: bangumi_id 不能为空
+        '503':
+          description: Mikan 服务未初始化
+        '500':
+          description: 获取字幕组失败
+
+  /schedule:
+    get:
+      tags: [Search]
+      summary: 获取新番时间表
+      description: 获取指定季度新番时间表，优先 yuc.wiki，回退 Mikan。自动标注已订阅番剧。
+      operationId: getSchedule
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          schema:
+            type: integer
+          description: 年份
+        - name: season
+          in: query
+          schema:
+            type: integer
+            enum: [1, 2, 3, 4]
+          description: 季度
+      responses:
+        '200':
+          description: 时间表数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleResponse'
+        '500':
+          description: 获取时间表失败
+
+  /mikan/test-mirrors:
+    post:
+      tags: [Mikan]
+      summary: 测试 Mikan 镜像延迟
+      operationId: testMirrors
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 镜像测试结果
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MirrorResult'
+        '503':
+          description: Mikan 服务未初始化
+
+  /mikan/select-mirror:
+    post:
+      tags: [Mikan]
+      summary: 选择 Mikan 镜像
+      description: 选择并保存 Mikan 镜像域名到数据库。
+      operationId: selectMirror
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelectMirrorRequest'
+      responses:
+        '200':
+          description: 镜像已选择
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domain:
+                    type: string
+        '400':
+          description: domain 不能为空
+
+  /plugins:
+    get:
+      tags: [Plugins]
+      summary: 获取插件列表
+      operationId: getPlugins
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 插件列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /plugins/reload:
+    post:
+      tags: [Plugins]
+      summary: 重新加载插件
+      operationId: reloadPlugins
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 重新加载成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginReloadResponse'
+        '503':
+          description: 插件管理器未初始化
+
+  /parse:
+    post:
+      tags: [Parse]
+      summary: 自然语言解析任务
+      description: 解析自然语言指令为订阅操作（正则 + AI 回退）。
+      operationId: parseTask
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParseRequest'
+      responses:
+        '200':
+          description: 解析结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseResult'
+        '400':
+          description: 参数校验失败
+        '503':
+          description: 任务解析器未初始化
+        '500':
+          description: 解析失败
+
+  /migrate:
+    post:
+      tags: [Migrate]
+      summary: 数据迁移
+      description: 从 AutoBangumi / ani-rss SQLite 数据库迁移数据。
+      operationId: migrateData
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MigrateRequest'
+      responses:
+        '200':
+          description: 迁移成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrateResponse'
+        '400':
+          description: 参数校验失败
+        '500':
+          description: 迁移失败
+
+  /version:
+    get:
+      tags: [Version]
+      summary: 获取版本信息
+      operationId: getVersion
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 版本信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
+
+  /proxy/image:
+    get:
+      tags: [Proxy]
+      summary: 图片代理
+      description: |
+        代理图片请求，绕过 CDN 热链保护。无需认证。
+        允许的域名: i0.hdslb.com, lain.bgm.tv, img.mikanani.me, image.tmdb.org, bilibili.com, bgm.tv, mikanime.tv
+      operationId: proxyImage
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 图片原始 URL
+      responses:
+        '200':
+          description: 图片二进制流
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: 缺少 url 或 url 无效
+        '403':
+          description: 域名不在白名单
+        '502':
+          description: 获取图片失败

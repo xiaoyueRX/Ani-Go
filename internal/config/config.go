@@ -94,6 +94,7 @@ type OrganizerConfig struct {
 	OVABasePath   string
 	TVTemplate    string
 	MovieTemplate string
+	OtherTemplate string
 	UseHardLink   bool
 }
 
@@ -438,8 +439,8 @@ func defaults() *Config {
 			TVBasePath:    "./TV/番剧",
 			MovieBasePath: "./TV/剧场版",
 			OVABasePath:   "./TV/OVA",
-			TVTemplate:    "{title_cn} ({year})/Season {season}/{title_en} S{season:02}E{ep:02}{ext}",
-			MovieTemplate: "{title_cn} ({year})/{title_en}{ext}",
+			TVTemplate:    "{title_cn}{year}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}",
+			MovieTemplate: "{title_cn}{year}/{title_en}{ext}",
 			UseHardLink:   false,
 		},
 		Sources: SourcesConfig{
@@ -516,6 +517,15 @@ func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
 	}
 	if v, ok := getter("OVA_BASE_PATH"); ok && c.Organizer.OVABasePath == "./TV/OVA" {
 		c.Organizer.OVABasePath = v
+	}
+	if v, ok := getter("TV_TEMPLATE"); ok && strings.TrimSpace(v) != "" {
+		c.Organizer.TVTemplate = v
+	}
+	if v, ok := getter("MOVIE_TEMPLATE"); ok && strings.TrimSpace(v) != "" {
+		c.Organizer.MovieTemplate = v
+	}
+	if v, ok := getter("OTHER_TEMPLATE"); ok && strings.TrimSpace(v) != "" {
+		c.Organizer.OtherTemplate = v
 	}
 	// 元数据
 	if v, ok := getter("TMDB_API_KEY"); ok && c.Metadata.TMDB.APIKey == "" {

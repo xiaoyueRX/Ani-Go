@@ -16,12 +16,12 @@ import (
 // 通知消息结构
 // ============================================================
 type NotifyMessage struct {
-	ID         string
-	Title      string
-	Content    string
-	EventType  string // 事件类型：download.started, download.completed, file.organized, episode.missing, error
-	Target     string // 指定渠道，为空则全渠道推送
-	Priority   int    // 优先级：0=普通，1=高，2=紧急
+	ID        string
+	Title     string
+	Content   string
+	EventType string // 事件类型：download.started, download.completed, file.organized, episode.missing, error
+	Target    string // 指定渠道，为空则全渠道推送
+	Priority  int    // 优先级：0=普通，1=高，2=紧急
 
 	RetryCount int
 	MaxRetries int
@@ -34,11 +34,11 @@ type NotifyMessage struct {
 // 通知管理器：异步分发 + 重试 + 事件订阅
 // ============================================================
 type NotifyManager struct {
-	notifiers   []Notifier
-	bus         *event.Bus
-	queue       chan *NotifyMessage
-	retryChan   chan *NotifyMessage
-	dlq         chan *NotifyMessage // 死信队列
+	notifiers []Notifier
+	bus       *event.Bus
+	queue     chan *NotifyMessage
+	retryChan chan *NotifyMessage
+	dlq       chan *NotifyMessage // 死信队列
 
 	workerCount int
 	wg          sync.WaitGroup
@@ -65,11 +65,11 @@ func NewNotifyManager(notifiers []Notifier, bus *event.Bus) *NotifyManager {
 		cancel:      cancel,
 		stats:       make(map[string]int64),
 		routeRules: map[string][]string{
-			"download.started":    {},     // 全渠道
-			"download.completed":  {},     // 全渠道
-			"file.organized":      {},     // 全渠道
-			"episode.missing":     {},     // 全渠道
-			"error":               {},     // 全渠道
+			"download.started":   {}, // 全渠道
+			"download.completed": {}, // 全渠道
+			"file.organized":     {}, // 全渠道
+			"episode.missing":    {}, // 全渠道
+			"error":              {}, // 全渠道
 		},
 	}
 }
@@ -136,18 +136,9 @@ func (m *NotifyManager) subscribeEvents() {
 		})
 	})
 
-	// 文件整理完成
+	// 文件整理结果（每个整理批次发送一次）
 	m.bus.Subscribe(core.EventFileOrganized, func(e core.Event) {
-		title := "📁 文件已整理"
-		data := e.Payload
-		msg := fmt.Sprintf("最终路径: %s", data["final_path"])
-		m.Publish(&NotifyMessage{
-			Title:      title,
-			Content:    msg,
-			EventType:  "file.organized",
-			Priority:   1,
-			MaxRetries: 3,
-		})
+		m.Publish(organizedNotification(e.Payload))
 	})
 
 	// 补全缺失集数
@@ -179,6 +170,35 @@ func (m *NotifyManager) subscribeEvents() {
 	})
 
 	log.Println("📡 已订阅事件: download.started, download.completed, file.organized, episode.missing, error")
+}
+
+func organizedNotification(data map[string]interface{}) *NotifyMessage {
+	success := intValue(data["success"])
+	failed := intValue(data["failed"])
+	msg := &NotifyMessage{
+		EventType:  "file.organized",
+		MaxRetries: 3,
+	}
+
+	if success == 0 && failed > 0 {
+		msg.Title = "🚨 文件整理失败"
+		msg.Content = fmt.Sprintf("成功: %d 个, 失败: %d 个", success, failed)
+		msg.Priority = 2
+		return msg
+	}
+
+	msg.Title = "📁 文件整理结果"
+	msg.Content = fmt.Sprintf("成功: %d 个, 失败: %d 个\n最终路径: %s", success, failed, data["final_path"])
+	msg.Priority = 1
+	return msg
+}
+
+func intValue(value interface{}) int {
+	number, ok := value.(int)
+	if !ok {
+		return 0
+	}
+	return number
 }
 
 // Publish 发布通知消息（非阻塞）

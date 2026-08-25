@@ -414,3 +414,24 @@ func TestSplitEnv_TrailingComma(t *testing.T) {
 		t.Errorf(" = %s", result[0])
 	}
 }
+
+func TestMergeFromSettings_TemplateKeysAlwaysApply(t *testing.T) {
+	cfg := Load()
+	cfg.Organizer.TVTemplate = "old-tv"
+	cfg.Organizer.MovieTemplate = ""
+	cfg.Organizer.OtherTemplate = ""
+
+	cfg.MergeFromSettings(func(key string) (string, bool) {
+		values := map[string]string{
+			"TV_TEMPLATE":    "{title_en}/TV",
+			"MOVIE_TEMPLATE": "{title_en}/Movie",
+			"OTHER_TEMPLATE": "{title_en}/Other",
+		}
+		value, ok := values[key]
+		return value, ok
+	})
+
+	if cfg.Organizer.TVTemplate != "{title_en}/TV" || cfg.Organizer.MovieTemplate != "{title_en}/Movie" || cfg.Organizer.OtherTemplate != "{title_en}/Other" {
+		t.Fatalf("模板未按设置覆盖: %+v", cfg.Organizer)
+	}
+}
