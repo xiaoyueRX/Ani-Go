@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
@@ -54,20 +56,37 @@ func New(cfg *config.Config, source core.Source, dl core.Downloader, org core.Or
 	}
 }
 
+// jitteredTicker 创建带随机抖动（±20%）的定时器
+// 优化点：固定间隔会让多个 ticker 在同一时刻集中触发，造成周期性 CPU 尖峰；
+// 抖动把触发点打散，削平峰值且不改变轮询频率的期望值
+func jitteredTicker(interval time.Duration) *time.Ticker {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	// rand 数值仅用于调度抖动，无安全要求，直接用全局源即可
+	jitter := time.Duration(rand.Float64()*0.4*float64(interval)) - interval/5 // ±20%
+	return time.NewTicker(interval + jitter)
+}
+
 // Start 启动调度器，运行所有定时任务
 func (s *Scheduler) Start(ctx context.Context) {
 	log.Println("⏰ 调度器已启动")
 
-	rssTicker := time.NewTicker(s.cfg.Scheduler.RSSInterval)
+	rssTicker := jitteredTicker(s.cfg.Scheduler.RSSInterval)
 	defer rssTicker.Stop()
 
-	orgTicker := time.NewTicker(s.cfg.Scheduler.OrganizerInterval)
+	orgTicker := jitteredTicker(s.cfg.Scheduler.OrganizerInterval)
 	defer orgTicker.Stop()
 
-	suppTicker := time.NewTicker(s.cfg.Scheduler.SupplementInterval)
+	suppTicker := jitteredTicker(s.cfg.Scheduler.SupplementInterval)
 	defer suppTicker.Stop()
 
-	downloadTicker := time.NewTicker(10 * time.Second)
+	// 下载状态扫描原为 10s 高频轮询（OPTIMIZE_TASK.md 优化点 1）：
+	// 每次都会请求 qBittorrent API 并查询数据库，CPU 尖峰主要来源之一。
+	// 改为 60s 基础间隔 + 每次触发后重新抖动，下载完成事件的感知延迟从 ~10s 变为 ~60s，
+	// 对"整理文件"这一下游动作（本身 2 分钟一轮）无实际影响
+	downloadInterval := 60 * time.Second
+	downloadTicker := jitteredTicker(downloadInterval)
 	defer downloadTicker.Stop()
 
 	// 启动后立即执行一次 RSS 轮询
@@ -85,15 +104,32 @@ func (s *Scheduler) Start(ctx context.Context) {
 			log.Println("⏰ 调度器已停止")
 			return
 		case <-rssTicker.C:
+			// 每次触发后按基础间隔重新抖动，避免抖动量被反复累加或固化
+			resetWithJitter(rssTicker, s.cfg.Scheduler.RSSInterval)
 			go s.pollRSS(ctx)
 		case <-orgTicker.C:
+			resetWithJitter(orgTicker, s.cfg.Scheduler.OrganizerInterval)
 			go s.pollOrganizer(ctx)
 		case <-suppTicker.C:
+			resetWithJitter(suppTicker, s.cfg.Scheduler.SupplementInterval)
 			go s.pollSupplement(ctx)
 		case <-downloadTicker.C:
+			resetWithJitter(downloadTicker, downloadInterval)
 			go s.pollDownloads(ctx)
 		}
 	}
+}
+
+// resetWithJitter 停止旧 ticker 并以新的抖动间隔重启
+// 注意：Stop 后 channel 中可能残留一个未消费的 tick，这里主动排空防止紧跟着立即重复触发
+func resetWithJitter(ticker *time.Ticker, base time.Duration) {
+	ticker.Stop()
+	select {
+	case <-ticker.C:
+	default:
+	}
+	jitter := time.Duration(rand.Float64()*0.4*float64(base)) - base/5
+	ticker.Reset(base + jitter)
 }
 
 // pollRSS 执行单次 RSS 轮询
@@ -217,6 +253,10 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 }
 
 // pollDownloads 查询下载状态并更新数据库
+// 优化点（OPTIMIZE_TASK.md 第 2 条）：原先对每个完成的 qB 任务逐条 First 查询，
+// 日志中大量 "record not found" 即来自这里；改为一次性批量拉取所有
+// downloading 状态的 episodes 建内存索引，再与 qB 任务列表匹配，
+// 将每轮 N+1 次查询降为 1 次，消除无谓的 DB 往返与日志噪音
 func (s *Scheduler) pollDownloads(ctx context.Context) {
 	if s.downloader == nil {
 		return
@@ -228,41 +268,81 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 		return
 	}
 
+	// 预先过滤出"已完成"的任务；没有完成任务时直接返回，连 DB 都不查
+	var doneTasks []core.DownloadTask
 	for _, task := range tasks {
 		// 判断是否下载完成：completed(完全做种), stalledUP(做种中但没流量), uploading(正在做种上传)
 		if task.Status == "completed" || task.Status == "stalledUP" || task.Status == "uploading" || task.Progress >= 1.0 {
-			// 更新数据库状态
-			var ep database.Episode
-			err := database.DB.Where("torrent_hash = ? AND status = ?", task.Hash, "downloading").First(&ep).Error
-			if err != nil {
-				// 尝试通过原始名称匹配，用于处理 RSS 等未提前获取到 Hash 的场景
-				if err2 := database.DB.Where("(torrent_hash = '' OR torrent_hash IS NULL) AND original_name = ? AND status = ?", task.Name, "downloading").First(&ep).Error; err2 == nil {
-					database.DB.Model(&ep).Update("torrent_hash", task.Hash)
-					err = nil
-				}
+			doneTasks = append(doneTasks, task)
+		}
+	}
+	if len(doneTasks) == 0 {
+		return
+	}
+
+	// 一次拉取全部 downloading 状态的 episodes，构建 hash / original_name 两级内存索引
+	var downloadingEps []database.Episode
+	if err := database.DB.Where("status = ?", "downloading").Find(&downloadingEps).Error; err != nil {
+		log.Printf("❌ 批量查询下载中剧集失败: %v", err)
+		return
+	}
+	hashIndex := make(map[string]int, len(downloadingEps))     // torrent_hash -> 下标
+	nameIndex := make(map[string][]int, len(downloadingEps)) // original_name -> 下标列表（可能多条）
+	for i, ep := range downloadingEps {
+		if ep.TorrentHash != "" {
+			hashIndex[ep.TorrentHash] = i
+		}
+		if ep.OriginalName != "" {
+			nameIndex[ep.OriginalName] = append(nameIndex[ep.OriginalName], i)
+		}
+	}
+
+	for _, task := range doneTasks {
+		idx, ok := hashIndex[task.Hash]
+		if !ok {
+			// 回退：通过原始名称匹配，用于处理 RSS 等未提前获取到 Hash 的场景；
+			// 命中后回写 hash，使后续轮询能走更快的 hash 索引
+			candidates, byName := nameIndex[task.Name]
+			if !byName {
+				continue
 			}
-
-			if err == nil && ep.ID != 0 {
-				now := time.Now()
-				database.DB.Model(&ep).Updates(map[string]interface{}{
-					"status":               "downloaded",
-					"download_finished_at": &now,
-				})
-
-				log.Printf("📥 下载完成: %s", task.Name)
-
-				if s.bus != nil {
-					s.bus.Publish(core.Event{
-						Type: core.EventDownloadCompleted,
-						Payload: map[string]any{
-							"episode_id": ep.ID,
-							"title":      ep.Title,
-							"hash":       task.Hash, // 使用 task.Hash，确保即使刚更新也能传正确值
-						},
-						Time: now,
-					})
+			matched := false
+			for _, ci := range candidates {
+				ep := &downloadingEps[ci]
+				if ep.TorrentHash != "" {
+					continue // 已绑定其他 hash 的记录不抢占
 				}
+				database.DB.Model(ep).Update("torrent_hash", task.Hash)
+				ep.TorrentHash = task.Hash
+				hashIndex[task.Hash] = ci
+				idx = ci
+				matched = true
+				break
 			}
+			if !matched {
+				continue
+			}
+		}
+
+		ep := downloadingEps[idx]
+		now := time.Now()
+		database.DB.Model(&ep).Updates(map[string]interface{}{
+			"status":               "downloaded",
+			"download_finished_at": &now,
+		})
+
+		log.Printf("📥 下载完成: %s", task.Name)
+
+		if s.bus != nil {
+			s.bus.Publish(core.Event{
+				Type: core.EventDownloadCompleted,
+				Payload: map[string]any{
+					"episode_id": ep.ID,
+					"title":      ep.Title,
+					"hash":       task.Hash, // 使用 task.Hash，确保即使刚更新也能传正确值
+				},
+				Time: now,
+			})
 		}
 	}
 }
@@ -854,8 +934,8 @@ func extractMikanBangumiID(ctx context.Context, s *Scheduler, item core.TorrentI
 	domain := mikanSrc.GetDomain()
 	detailURL := fmt.Sprintf("https://%s%s", domain, u.Path)
 
-	// 自己发起 HTTP 请求抓取详情页
-	httpClient := &http.Client{Timeout: 30 * time.Second}
+	// 自己发起 HTTP 请求抓取详情页（复用全局 HTTP 连接池，避免每请求新建 Client）
+	httpClient := httpx.New(30 * time.Second)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, detailURL, nil)
 	if err != nil {
 		return ""
@@ -869,7 +949,8 @@ func extractMikanBangumiID(ctx context.Context, s *Scheduler, item core.TorrentI
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// 限制详情页读取上限 10MB（正常页面远小于此值），防止异常响应撑爆内存
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return ""
 	}
