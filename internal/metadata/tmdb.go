@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // TMDBProvider 实现 core.MetadataProvider 接口
@@ -33,7 +34,7 @@ func NewTMDBProvider(apiKey, language string, mirrorDomains []string) *TMDBProvi
 		baseURL = mirrorDomains[0]
 	}
 	return &TMDBProvider{
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		httpClient:    httpx.New(30 * time.Second),
 		apiKey:        apiKey,
 		language:      language,
 		mirrorDomains: mirrorDomains,

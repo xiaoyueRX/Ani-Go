@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 type LINENotifier struct {
@@ -18,7 +20,7 @@ type LINENotifier struct {
 
 func NewLINENotifier(channelToken, userID string) *LINENotifier {
 	return &LINENotifier{
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		httpClient:   httpx.New(10 * time.Second),
 		channelToken: channelToken,
 		userID:       userID,
 	}

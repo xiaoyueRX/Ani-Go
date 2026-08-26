@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // NyaaSource 实现 core.Source 接口，从 nyaa.si 获取资源
@@ -47,7 +48,7 @@ func NewNyaaSource(domain string) *NyaaSource {
 		domain = "nyaa.si"
 	}
 	return &NyaaSource{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpx.New(30 * time.Second),
 		domain:     domain,
 	}
 }

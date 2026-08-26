@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // WebhookType 定义不同平台的 Webhook 消息格式
@@ -30,7 +32,7 @@ type WebhookNotifier struct {
 
 func NewWebhookNotifier(url string, wtype WebhookType) *WebhookNotifier {
 	return &WebhookNotifier{
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: httpx.New(10 * time.Second),
 		url:        url,
 		wtype:      wtype,
 		name:       string(wtype),

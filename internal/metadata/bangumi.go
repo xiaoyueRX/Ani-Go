@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // BGMTVProvider 实现 core.MetadataProvider 接口
@@ -31,7 +32,7 @@ func NewBGMTVProvider(userToken string, mirrorDomains []string) *BGMTVProvider {
 		active = mirrorDomains[0]
 	}
 	return &BGMTVProvider{
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		httpClient:    httpx.New(30 * time.Second),
 		userToken:     userToken,
 		mirrorDomains: mirrorDomains,
 		activeDomain:  active,

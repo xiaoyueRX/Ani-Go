@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // ACGRIPSource 实现 core.Source 接口，从 acg.rip 获取资源
@@ -46,7 +47,7 @@ func NewACGRIPSource(domain string) *ACGRIPSource {
 		domain = "acg.rip"
 	}
 	return &ACGRIPSource{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpx.New(30 * time.Second),
 		domain:     domain,
 	}
 }

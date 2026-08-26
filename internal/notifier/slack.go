@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 type SlackNotifier struct {
@@ -17,7 +19,7 @@ type SlackNotifier struct {
 
 func NewSlackNotifier(webhookURL string) *SlackNotifier {
 	return &SlackNotifier{
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: httpx.New(10 * time.Second),
 		webhookURL: webhookURL,
 	}
 }

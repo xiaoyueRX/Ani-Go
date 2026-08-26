@@ -20,6 +20,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/auth"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 	"github.com/xiaoyueRX/Ani-Go/internal/migrate"
 	"github.com/xiaoyueRX/Ani-Go/internal/search"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
@@ -1170,7 +1171,7 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := httpx.New(10 * time.Second)
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, imageURL, nil)
 	if err != nil {
 		http.Error(w, "invalid url", http.StatusBadRequest)

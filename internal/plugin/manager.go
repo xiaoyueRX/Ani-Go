@@ -16,6 +16,7 @@ import (
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // ============================================================
@@ -53,7 +54,7 @@ func NewManager(bus core.EventBus) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		bus:    bus,
-		client: &http.Client{Timeout: 15 * time.Second},
+		client: httpx.New(15 * time.Second),
 		ctx:    ctx,
 		cancel: cancel,
 	}

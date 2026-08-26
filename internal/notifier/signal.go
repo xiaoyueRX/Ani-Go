@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 type SignalNotifier struct {
@@ -60,7 +62,7 @@ func (n *SignalNotifier) Send(ctx context.Context, title, message string) error 
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpx.Default.Do(req)
 	if err != nil {
 		return err
 	}

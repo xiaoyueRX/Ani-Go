@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 type MatrixNotifier struct {
@@ -19,7 +21,7 @@ type MatrixNotifier struct {
 
 func NewMatrixNotifier(homeserver, accessToken, roomID string) *MatrixNotifier {
 	return &MatrixNotifier{
-		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		httpClient:  httpx.New(10 * time.Second),
 		homeserver:  homeserver,
 		accessToken: accessToken,
 		roomID:      roomID,

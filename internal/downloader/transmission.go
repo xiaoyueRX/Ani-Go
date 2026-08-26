@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // ============================================================
@@ -81,7 +82,7 @@ var trTagCounter atomic.Uint64
 // NewTransmission 创建 Transmission 下载器实例
 func NewTransmission(host, username, password string) *Transmission {
 	return &Transmission{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpx.New(30 * time.Second),
 		host:       strings.TrimRight(host, "/"),
 		username:   username,
 		password:   password,

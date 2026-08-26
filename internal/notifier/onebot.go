@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // OneBotNotifier OneBot 协议通知器，支持 NapCat / go-cqhttp / Lagrange / LLOneBot
@@ -28,7 +30,7 @@ func NewOneBotNotifier(host, token string, userID, groupID int64) *OneBotNotifie
 	}
 	host = strings.TrimSuffix(host, "/")
 	return &OneBotNotifier{
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: httpx.New(10 * time.Second),
 		host:       host,
 		token:      token,
 		userID:     userID,

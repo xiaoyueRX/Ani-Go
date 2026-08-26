@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // ============================================================
@@ -310,7 +312,7 @@ func newOpenAIBackend(endpoint, apiKey, model string) *openAIBackend {
 		endpoint = "https://api.openai.com/v1/chat/completions"
 	}
 	return &openAIBackend{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpx.New(30 * time.Second),
 		endpoint:   endpoint,
 		apiKey:     apiKey,
 		model:      model,
@@ -405,7 +407,7 @@ func newGoogleBackend(apiKey, model string) *googleBackend {
 		model = "gemini-2.0-flash"
 	}
 	return &googleBackend{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpx.New(30 * time.Second),
 		apiKey:     apiKey,
 		model:      model,
 	}
@@ -493,7 +495,7 @@ func newOllamaBackend(host, model string) *ollamaBackend {
 		model = "llama3"
 	}
 	return &ollamaBackend{
-		httpClient: &http.Client{Timeout: 120 * time.Second},
+		httpClient: httpx.New(120 * time.Second),
 		host:       host,
 		model:      model,
 	}
@@ -582,7 +584,7 @@ func newAnthropicBackend(apiKey, model string) *anthropicBackend {
 		model = "claude-haiku-4-5-20251001"
 	}
 	return &anthropicBackend{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpx.New(30 * time.Second),
 		apiKey:     apiKey,
 		model:      model,
 	}

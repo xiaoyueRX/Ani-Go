@@ -9,6 +9,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 type WeChatNotifier struct {
@@ -46,7 +48,7 @@ func (n *WeChatNotifier) getAccessToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpx.Default.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -105,7 +107,7 @@ func (n *WeChatNotifier) Send(ctx context.Context, title, message string) error 
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpx.Default.Do(req)
 	if err != nil {
 		return err
 	}

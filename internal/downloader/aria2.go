@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // ============================================================
@@ -58,7 +59,7 @@ type aria2Status struct {
 // NewAria2 创建 Aria2 下载器实例
 func NewAria2(host, token string) *Aria2 {
 	return &Aria2{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpx.New(30 * time.Second),
 		host:       strings.TrimRight(host, "/"),
 		token:      token,
 	}

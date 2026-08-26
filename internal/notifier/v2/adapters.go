@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // ============================================================
@@ -31,7 +33,7 @@ type TelegramNotifier struct {
 
 func NewTelegramNotifier(botToken, chatID string) *TelegramNotifier {
 	return &TelegramNotifier{
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: httpx.New(10 * time.Second),
 		botToken:   botToken,
 		chatID:     chatID,
 	}
@@ -96,7 +98,7 @@ type DingTalkNotifier struct {
 
 func NewDingTalkNotifier(webhookURL, secret string) *DingTalkNotifier {
 	return &DingTalkNotifier{
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: httpx.New(10 * time.Second),
 		webhookURL: webhookURL,
 		secret:     secret,
 	}
@@ -159,7 +161,7 @@ type WeComNotifier struct {
 
 func NewWeComNotifier(webhookURL string) *WeComNotifier {
 	return &WeComNotifier{
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: httpx.New(10 * time.Second),
 		webhookURL: webhookURL,
 	}
 }
@@ -215,7 +217,7 @@ type FeishuNotifier struct {
 
 func NewFeishuNotifier(webhookURL string) *FeishuNotifier {
 	return &FeishuNotifier{
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: httpx.New(10 * time.Second),
 		webhookURL: webhookURL,
 	}
 }
@@ -285,7 +287,7 @@ func NewOneBotNotifier(host, token string, userID, groupID int64) *OneBotNotifie
 	}
 	host = strings.TrimSuffix(host, "/")
 	return &OneBotNotifier{
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: httpx.New(10 * time.Second),
 		host:       host,
 		token:      token,
 		userID:     userID,

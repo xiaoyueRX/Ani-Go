@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // ============================================================
@@ -32,11 +33,10 @@ type QBittorrent struct {
 // NewQBittorrent 创建 qBittorrent 下载器实例
 func NewQBittorrent(host, username, password, category string) *QBittorrent {
 	jar, _ := cookiejar.New(nil)
+	client := httpx.New(30 * time.Second)
+	client.Jar = jar
 	return &QBittorrent{
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Jar:     jar,
-		},
+		httpClient: client,
 		host:     strings.TrimRight(host, "/"),
 		username: username,
 		password: password,

@@ -13,6 +13,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // YucWikiSource 从 yuc.wiki 获取新番时间表
@@ -30,7 +31,7 @@ type yucCacheItem struct {
 
 func NewYucWikiSource() *YucWikiSource {
 	return &YucWikiSource{
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		httpClient: httpx.New(15 * time.Second),
 		baseURL:    "https://yuc.wiki",
 	}
 }

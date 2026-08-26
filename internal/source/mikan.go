@@ -18,6 +18,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // ============================================================
@@ -148,7 +149,7 @@ type MikanSource struct {
 // NewMikanSource 创建新的 Mikan 资源源
 func NewMikanSource(domain, proxyDomain string, mirrorDomains []string) *MikanSource {
 	return &MikanSource{
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		httpClient:    httpx.New(30 * time.Second),
 		domain:        domain,
 		proxyDomain:   proxyDomain,
 		mirrorDomains: mirrorDomains,
@@ -217,7 +218,7 @@ func (m *MikanSource) TestLatency(ctx context.Context) []MirrorLatency {
 				return
 			}
 			req.Header.Set("User-Agent", "Mozilla/5.0")
-			resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+			resp, err := (httpx.New(8 * time.Second)).Do(req)
 			elapsed := time.Since(start).Milliseconds()
 			if err != nil {
 				results[idx] = MirrorLatency{Domain: d, Latency: elapsed, OK: false}

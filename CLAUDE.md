@@ -174,6 +174,12 @@ Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5。前端已通过 `//go:e
 - [x] **剧集状态管理**：`PUT /api/episodes/{id}/status` 手动切换状态
 - [x] **Mikan 镜像测速**：启动自动测速选最快镜像 + 设置页手动测速
 
+### Phase 8: HTTP 客户端代理统一（2026-08-26）✅
+- [x] **代理生效修复**：容器注入 `HTTP_PROXY/HTTPS_PROXY` 后裸建 `&http.Client{}` 不走共享 Transport，导致 Mikan 镜像探测全部失败
+- [x] **全仓 Client 统一**：23 处裸建 Client（mikan/nyaa/acgrip/animetosho/yucwiki/tmdb/bangumi/ai/qbittorrent/transmission/aria2/plugin/api图片代理 + 16 通知器）全部改用 `httpx.New(timeout)`，保留各自超时语义；qBittorrent 通过 `client.Jar = jar` 保留 Cookie 语义
+- [x] **DefaultClient 清理**：signal.go / wechat.go 的 `http.DefaultClient`（无代理无超时）改为 `httpx.Default`
+- [x] **效果**：全部出站 HTTP 统一走 `httpx.sharedTransport`（含 `ProxyFromEnvironment`），代理环境变量全模块生效，连接池跨模块复用
+
 详见 `CHANGELOG.md` 和 `docs/DEVELOPMENT_PLAN.md`。
 
 <!-- gitnexus:start -->

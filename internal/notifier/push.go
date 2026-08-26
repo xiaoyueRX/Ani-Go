@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 // PushType 推送服务类型
@@ -35,7 +37,7 @@ type PushNotifier struct {
 
 func NewPushNotifier(pushType PushType, url, token, userKey string) *PushNotifier {
 	pn := &PushNotifier{
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: httpx.New(10 * time.Second),
 		url:        url,
 		token:      token,
 		userKey:    userKey,

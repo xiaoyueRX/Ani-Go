@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 type TelegramNotifier struct {
@@ -18,7 +20,7 @@ type TelegramNotifier struct {
 
 func NewTelegramNotifier(botToken, chatID string) *TelegramNotifier {
 	return &TelegramNotifier{
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: httpx.New(10 * time.Second),
 		botToken:   botToken,
 		chatID:     chatID,
 	}

@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 type WhatsAppNotifier struct {
@@ -19,7 +21,7 @@ type WhatsAppNotifier struct {
 
 func NewWhatsAppNotifier(phoneNumberID, accessToken, to string) *WhatsAppNotifier {
 	return &WhatsAppNotifier{
-		httpClient:    &http.Client{Timeout: 10 * time.Second},
+		httpClient:    httpx.New(10 * time.Second),
 		phoneNumberID: phoneNumberID,
 		accessToken:   accessToken,
 		to:            to,
