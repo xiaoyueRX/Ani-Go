@@ -7,7 +7,10 @@ import {
   Check, Antenna, Download, 
   Folder, Bell, Cpu, 
   Settings, Timer, Lock, 
-  FileText, Eye, EyeOff 
+  FileText, Eye, EyeOff,
+  Loader2,
+  ChevronDown,
+  RefreshCw,
 } from 'lucide-vue-next'
 
 const { t } = useI18n()
@@ -130,11 +133,17 @@ const tabs = computed<TabDef[]>(() => [
   ]},
   { key: 'ai', label: t('settings.tabs.ai'), icon: Cpu, sections: [
     { title: t('settings.sections.ai'), desc: t('settings.sections.aiDesc'), fields: [
-      { label: t('settings.fields.protocol'), key: 'AI_PROTOCOL', placeholder: 'auto' },
-      { label: t('settings.fields.smartSearch'), key: 'AI_SMART_SEARCH_ENABLED', placeholder: '', type: 'switch', hint: t('settings.fields.smartSearchHint') },
+      { label: t('settings.fields.protocol'), key: 'AI_PROTOCOL', placeholder: '', type: 'select', selectOptions: [
+        {label: t('settings.ai.protocol.auto'), value: ''},
+        {label: t('settings.ai.protocol.openai'), value: 'openai'},
+        {label: t('settings.ai.protocol.google'), value: 'google'},
+        {label: t('settings.ai.protocol.anthropic'), value: 'anthropic'},
+        {label: t('settings.ai.protocol.ollama'), value: 'ollama'},
+      ]},
       { label: t('settings.fields.endpoint'), key: 'AI_ENDPOINT', placeholder: 'https://api.openai.com/v1/chat/completions' },
       { label: t('settings.fields.key'), key: 'AI_API_KEY', placeholder: 'API key', type: 'password' },
-      { label: t('settings.fields.model'), key: 'AI_MODEL', placeholder: 'gpt-4o-mini' },
+      { label: t('settings.fields.model'), key: 'AI_MODEL', placeholder: '', type: 'select', selectOptions: [] },
+      { label: t('settings.fields.smartSearch'), key: 'AI_SMART_SEARCH_ENABLED', placeholder: '', type: 'switch', hint: t('settings.fields.smartSearchHint') },
     ]},
     { title: t('settings.sections.vendor'), desc: t('settings.sections.vendorDesc'), fields: [
       { label: t('settings.fields.gemini'), key: 'GEMINI_API_KEY', placeholder: 'Google key', type: 'password' },
@@ -220,6 +229,56 @@ async function saveAll() {
     error.value = e.response?.data?.error || t('settings.error.saveFailed')
   }
 }
+
+// AI 模型列表相关
+const modelLoading = ref(false)
+const modelOptions = ref<{label: string, value: string}[]>([])
+
+async function fetchAIModels() {
+  const protocol = getVal('AI_PROTOCOL')
+  const endpoint = getVal('AI_ENDPOINT')
+  const apiKey = getVal('AI_API_KEY')
+  
+  if (!endpoint) {
+    error.value = t('settings.ai.error.endpointRequired')
+    return
+  }
+  
+  modelLoading.value = true
+  modelOptions.value = []
+  
+  try {
+    const { data } = await request.post('/ai/models', { 
+      protocol, 
+      endpoint, 
+      apiKey 
+    }, { timeout: 15000 })
+    
+    if (data.success && data.models && data.models.length > 0) {
+      modelOptions.value = data.models.map((m: string) => ({ label: m, value: m }))
+      // 自动选择第一个模型（如果当前没有选中）
+      if (!getVal('AI_MODEL')) {
+        setVal('AI_MODEL', data.models[0])
+      }
+      saved.value = true
+      setTimeout(() => { saved.value = false }, 2000)
+    } else {
+      error.value = data.error || t('settings.ai.error.fetchFailed')
+    }
+  } catch (e: any) {
+    error.value = e.response?.data?.error || t('settings.ai.error.fetchFailed')
+  } finally {
+    modelLoading.value = false
+  }
+}
+
+// 检查 AI 是否已完整配置（用于控制智能搜索开关）
+const isAIConfigured = computed(() => {
+  const endpoint = getVal('AI_ENDPOINT')
+  const apiKey = getVal('AI_API_KEY')
+  const model = getVal('AI_MODEL')
+  return endpoint && apiKey && model
+})
 
 async function sendTestNotify(channel: string) {
   try {
@@ -441,15 +500,32 @@ onMounted(() => {
                   <template v-if="field.type === 'switch'">
                     <input type="checkbox" class="toggle toggle-primary toggle-lg" 
                       :checked="getVal(field.key) === 'true'"
-                      @change="(e: any) => setVal(field.key, e.target.checked ? 'true' : 'false')" />
+                      @change="(e: any) => setVal(field.key, e.target.checked ? 'true' : 'false')"
+                      :disabled="field.key === 'AI_SMART_SEARCH_ENABLED' && !isAIConfigured" />
+                    <span v-if="field.key === 'AI_SMART_SEARCH_ENABLED' && !isAIConfigured" class="text-[9px] font-bold opacity-30 uppercase ml-2">
+                      {{ $t('settings.ai.error.aiNotConfigured') }}
+                    </span>
                   </template>
                   <template v-else-if="field.type === 'select' && field.selectOptions">
-                    <select 
-                      :value="getVal(field.key) || field.selectOptions[0].value"
-                      @change="(e: any) => setVal(field.key, e.target.value)"
-                      class="w-full bg-base-200/50 border border-transparent focus:border-primary/20 focus:bg-base-100 focus:ring-4 focus:ring-primary/5 rounded-xl lg:rounded-2xl pl-12 lg:pl-14 pr-10 lg:pr-12 py-3.5 lg:py-4 transition-all outline-none font-bold text-sm lg:text-base appearance-none cursor-pointer">
-                      <option v-for="opt in field.selectOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                    </select>
+                    <div class="flex w-full items-center gap-2">
+                      <select 
+                        :value="getVal(field.key) || (field.key === 'AI_MODEL' ? (modelOptions[0]?.value || '') : field.selectOptions[0]?.value)"
+                        @change="(e: any) => setVal(field.key, e.target.value)"
+                        :disabled="field.key === 'AI_MODEL' && modelOptions.length === 0 && !modelLoading"
+                        class="flex-1 bg-base-200/50 border border-transparent focus:border-primary/20 focus:bg-base-100 focus:ring-4 focus:ring-primary/5 rounded-xl lg:rounded-2xl pl-12 lg:pl-14 pr-10 lg:pr-12 py-3.5 lg:py-4 transition-all outline-none font-bold text-sm lg:text-base appearance-none cursor-pointer">
+                        <option v-for="opt in (field.key === 'AI_MODEL' ? modelOptions : field.selectOptions)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                      </select>
+                      <!-- AI 模型获取按钮 -->
+                      <button v-if="field.key === 'AI_MODEL'"
+                        class="btn btn-ghost btn-sm rounded-xl gap-2 px-4 py-3.5 lg:py-4 hover:bg-primary/20 hover:text-primary transition-all shrink-0"
+                        @click="fetchAIModels"
+                        :disabled="modelLoading || !getVal('AI_ENDPOINT')"
+                        title="从端点获取可用模型列表">
+                        <RefreshCw v-if="modelLoading" :size="16" class="animate-spin" />
+                        <RefreshCw v-else :size="16" />
+                        <span class="hidden sm:inline text-xs font-black uppercase tracking-widest">{{ modelLoading ? $t('settings.ai.loadingModels') : $t('settings.ai.fetchModels') }}</span>
+                      </button>
+                    </div>
                   </template>
                   <template v-else>
                     <div class="absolute inset-y-0 left-5 flex items-center text-base-content/10 group-focus-within:text-primary transition-colors">

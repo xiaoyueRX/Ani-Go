@@ -40,13 +40,23 @@ const error = ref('')
 const subscribed = ref<Set<string>>(new Set())
 const lastSearchTime = ref('')
 const searchDuration = ref(0)
-const smartSearch = ref(true)
+const smartSearch = ref(false)
 const expandedQueries = ref<string[]>([])
 const usedAI = ref(false)
 const aiError = ref('')
+const aiConfigured = ref(false)
 
 // 从查询参数自动搜索
-onMounted(() => {
+onMounted(async () => {
+  // 检查 AI 是否已配置
+  try {
+    const { data } = await request.get('/settings')
+    const settings = data as Record<string, string>
+    aiConfigured.value = !!(settings.AI_ENDPOINT && settings.AI_API_KEY && settings.AI_MODEL)
+  } catch (e) {
+    aiConfigured.value = false
+  }
+  
   const q = route.query.q as string
   if (q) {
     query.value = q
@@ -207,7 +217,10 @@ function sourceBadge(source: string): string {
       <label class="absolute right-4 -bottom-10 flex cursor-pointer items-center gap-2 text-[11px] font-black uppercase tracking-widest opacity-50">
         <Sparkles :size="14" />
         {{ $t('search.smart') }}
-        <input v-model="smartSearch" type="checkbox" class="toggle toggle-primary toggle-sm" />
+        <input v-model="smartSearch" type="checkbox" class="toggle toggle-primary toggle-sm" :disabled="!aiConfigured" />
+        <span v-if="!aiConfigured" class="text-[9px] font-bold opacity-30 uppercase ml-1">
+          {{ $t('settings.ai.error.aiNotConfigured') }}
+        </span>
       </label>
     </div>
 

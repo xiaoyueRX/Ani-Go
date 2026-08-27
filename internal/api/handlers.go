@@ -1604,3 +1604,209 @@ func (s *Server) handleTestNotify(w http.ResponseWriter, r *http.Request) {
 		"message": "测试通知已发送",
 	})
 }
+
+// ============================================================
+// AI 模型列表获取
+// ============================================================
+
+type aiModelsRequest struct {
+	Protocol string `json:"protocol"`
+	Endpoint string `json:"endpoint"`
+	ApiKey   string `json:"apiKey"`
+}
+
+// handleGetAIModels 获取 AI 模型列表
+// POST /api/ai/models
+func (s *Server) handleGetAIModels(w http.ResponseWriter, r *http.Request) {
+	var req aiModelsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+		return
+	}
+
+	if req.Endpoint == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请先填写端点地址"})
+		return
+	}
+
+	models, err := s.fetchModelsFromProvider(req.Protocol, req.Endpoint, req.ApiKey)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"models":  models,
+	})
+}
+
+// fetchModelsFromProvider 根据协议从提供商获取模型列表
+func (s *Server) fetchModelsFromProvider(protocol, endpoint, apiKey string) ([]string, error) {
+	ctx := context.Background()
+	
+	switch protocol {
+	case "openai", "":
+		return s.fetchOpenAIModels(ctx, endpoint, apiKey)
+	case "google":
+		return s.fetchGoogleModels(ctx, endpoint, apiKey)
+	case "anthropic":
+		return s.fetchAnthropicModels(ctx, endpoint, apiKey)
+	case "ollama":
+		return s.fetchOllamaModels(ctx, endpoint)
+	default:
+		// 默认尝试 OpenAI 兼容格式
+		return s.fetchOpenAIModels(ctx, endpoint, apiKey)
+	}
+}
+
+// fetchOpenAIModels 获取 OpenAI 兼容格式的模型列表
+func (s *Server) fetchOpenAIModels(ctx context.Context, endpoint, apiKey string) ([]string, error) {
+	// 规范化端点：确保以 /v1/models 结尾
+	modelsEndpoint := strings.TrimSuffix(endpoint, "/")
+	if !strings.Contains(modelsEndpoint, "/v1") {
+		modelsEndpoint = modelsEndpoint + "/v1"
+	}
+	modelsEndpoint = modelsEndpoint + "/models"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsEndpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	client := httpx.New(15 * time.Second)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API 返回状态码 %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	models := make([]string, 0, len(result.Data))
+	for _, m := range result.Data {
+		if m.ID != "" {
+			models = append(models, m.ID)
+		}
+	}
+	return models, nil
+}
+
+// fetchGoogleModels 获取 Google Gemini 模型列表
+func (s *Server) fetchGoogleModels(ctx context.Context, endpoint, apiKey string) ([]string, error) {
+	// Google 使用不同的端点格式
+	modelsEndpoint := strings.TrimSuffix(endpoint, "/")
+	if !strings.Contains(modelsEndpoint, "generativelanguage.googleapis.com") {
+		modelsEndpoint = "https://generativelanguage.googleapis.com"
+	}
+	modelsEndpoint = modelsEndpoint + "/v1beta/models?key=" + apiKey
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsEndpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := httpx.New(15 * time.Second)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API 返回状态码 %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Models []struct {
+			Name string `json:"name"` // 格式: models/gemini-1.5-pro
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	models := make([]string, 0, len(result.Models))
+	for _, m := range result.Models {
+		// 提取模型名: models/gemini-1.5-pro -> gemini-1.5-pro
+		if strings.HasPrefix(m.Name, "models/") {
+			models = append(models, m.Name[7:])
+		} else {
+			models = append(models, m.Name)
+		}
+	}
+	return models, nil
+}
+
+// fetchAnthropicModels 获取 Anthropic 模型列表
+// Anthropic 没有公开的模型列表 API，返回常用模型
+func (s *Server) fetchAnthropicModels(ctx context.Context, endpoint, apiKey string) ([]string, error) {
+	// Anthropic 官方模型列表（硬编码备选）
+	return []string{
+		"claude-3-5-sonnet-20241022",
+		"claude-3-5-haiku-20241022",
+		"claude-3-opus-20240229",
+		"claude-3-sonnet-20240229",
+		"claude-3-haiku-20240307",
+	}, nil
+}
+
+// fetchOllamaModels 获取 Ollama 本地模型列表
+func (s *Server) fetchOllamaModels(ctx context.Context, endpoint string) ([]string, error) {
+	modelsEndpoint := strings.TrimSuffix(endpoint, "/") + "/api/tags"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsEndpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	client := httpx.New(15 * time.Second)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API 返回状态码 %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Models []struct {
+			Name string `json:"name"` // 格式: llama3.1:8b
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	models := make([]string, 0, len(result.Models))
+	for _, m := range result.Models {
+		if m.Name != "" {
+			models = append(models, m.Name)
+		}
+	}
+	return models, nil
+}

@@ -111,6 +111,22 @@ export default {
       autoUpdate: '自动检查更新',
       autoUpdateHint: '开启后将定期检查 GitHub 最新版本',
     },
+    ai: {
+      protocol: {
+        auto: '自动检测',
+        openai: 'OpenAI 兼容',
+        google: 'Google Gemini',
+        anthropic: 'Anthropic Claude',
+        ollama: 'Ollama 本地',
+      },
+      loadingModels: '获取中...',
+      fetchModels: '获取模型',
+      error: {
+        endpointRequired: '请先填写端点地址',
+        fetchFailed: '获取模型列表失败',
+        aiNotConfigured: '请先完整配置 AI（端点、密钥、模型）',
+      },
+    },
     tabs: {
       mikan: 'Mikan',
       downloader: '传输',
@@ -153,6 +169,7 @@ export default {
       sync: '同步错误',
       timeout: '获取时间表超时',
       failed: '获取时间表失败',
+      offlineMode: '离线模式 - 仅显示公开数据',
     },
     empty: {
       title: '暂无时间表数据',
@@ -193,6 +210,7 @@ export default {
       error: '订阅失败',
       submitting: '提交中...',
     },
+    offlineMode: '离线模式 - 仅显示公开数据'
   },
   search: {
     title: '探索',

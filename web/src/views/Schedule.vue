@@ -6,15 +6,20 @@ import {
   Antenna, LayoutGrid, RefreshCw, 
   AlertTriangle, X, Calendar, 
   Image, Check, Clock, ChevronDown,
-  Search, ChevronLeft
+  Search, ChevronLeft,
+  Lock, WifiOff, AlertCircle
 } from 'lucide-vue-next'
 import { ListChecks, CheckCircle, XCircle } from 'lucide-vue-next'
 import OnboardingModal from '../components/OnboardingModal.vue'
 import ChangelogModal from '../components/ChangelogModal.vue'
 import { useVersion } from '../composables/useVersion'
+import { useAuth } from '../composables/useAuth'
 
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
+
+// 认证状态
+const { isAuthenticated, isLoading: authLoading, isOfflineMode, initAuth, checkAuth } = useAuth()
 
 interface TorrentItem {
   title: string; 
@@ -189,7 +194,33 @@ async function fetchSchedule() {
     subscribedIds.value = data.subscribed || {}
     subStats.value = data.sub_stats || {}
   } catch (e: any) {
-    error.value = e.code === 'ECONNABORTED' ? t('schedule.error.timeout') : t('schedule.error.failed')
+    if (e.response?.status === 401) {
+      // Token 过期，触发重新验证
+      await checkAuth()
+      // 如果验证通过，重试一次
+      if (isAuthenticated.value) {
+        try {
+          const { data } = await request.get('/schedule', { 
+            params: { 
+              year: selectedYear.value, 
+              season: selectedSeason.value 
+            },
+            timeout: 30000 
+          })
+          weekDays.value = data.days || []
+          subscribedIds.value = data.subscribed || {}
+          subStats.value = data.sub_stats || {}
+          return
+        } catch (retryError: any) {
+          error.value = retryError.code === 'ECONNABORTED' ? t('schedule.error.timeout') : t('schedule.error.failed')
+        }
+      } else {
+        // 离线模式：显示公开数据（不包含订阅信息）
+        error.value = t('schedule.error.offlineMode')
+      }
+    } else {
+      error.value = e.code === 'ECONNABORTED' ? t('schedule.error.timeout') : t('schedule.error.failed')
+    }
   } finally {
     loading.value = false
   }
@@ -371,8 +402,9 @@ async function confirmBatchSubscribe() {
 // 已选数量
 const selectedCount = computed(() => selectedItems.value.size)
 
-onMounted(() => {
-  fetchSchedule()
+onMounted(async () => {
+  await initAuth()
+  await fetchSchedule()
   checkVersion()
 })
 </script>
@@ -387,6 +419,12 @@ onMounted(() => {
       </div>
       
       <div class="flex items-center gap-3">
+        <!-- Offline Mode Indicator -->
+        <div v-if="isOfflineMode" class="flex items-center gap-2 px-3 py-1.5 bg-warning/10 border border-warning/20 text-warning rounded-2xl text-[9px] font-black uppercase tracking-widest animate-pulse">
+          <WifiOff :size="12" />
+          <span>{{ $t('schedule.offlineMode') }}</span>
+        </div>
+        
         <!-- Season Selector -->
         <div v-if="activeTab === 'schedule'" class="flex items-center gap-1.5 p-1 bg-base-200/50 rounded-2xl border border-base-300/30">
           <select v-model="selectedYear" @change="fetchSchedule" class="select select-ghost select-xs focus:bg-transparent font-black text-[10px] w-20 h-8 min-h-0">
@@ -474,9 +512,9 @@ onMounted(() => {
                 <span class="text-[10px] font-black uppercase tracking-widest text-base-content/30 ml-2">{{ day.items.length }} 部</span>
               </div>
               <div class="collapse-content">
-                <div class="grid gap-4 sm:gap-6 items-start pt-2" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
+                <div class="grid gap-4 sm:gap-6 items-start pt-2 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
                   <div v-for="item in day.items" :key="item.title"
-                    class="group relative bg-base-100/50 rounded-[1.8rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:border-primary/30 transition-all duration-500 cursor-pointer active:scale-95"
+                    class="group relative bg-base-100/50 rounded-[1.8rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:border-primary/30 transition-all duration-500 cursor-pointer active:scale-95 flex flex-col"
                     @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)">
                     <div class="z-0 bg-base-200/50 relative">
                       <div v-if="batchMode"
@@ -516,9 +554,9 @@ onMounted(() => {
               <span class="text-[10px] font-black uppercase tracking-widest text-base-content/20 mt-1">{{ day.items.length }} {{ $t('schedule.entries') }}</span>
             </div>
 
-            <div class="grid gap-4 sm:gap-6 items-start" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
+            <div class="grid gap-4 sm:gap-6 items-start grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
               <div v-for="item in day.items" :key="item.title"
-                class="group relative bg-base-100/50 rounded-[1.8rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:border-primary/30 transition-all duration-500 cursor-pointer active:scale-95"
+                class="group relative bg-base-100/50 rounded-[1.8rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:border-primary/30 transition-all duration-500 cursor-pointer active:scale-95 flex flex-col"
                 @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)">
                 <div class="z-0 bg-base-200/50 relative">
                   <div v-if="batchMode"
@@ -566,9 +604,9 @@ onMounted(() => {
             <h2 class="text-2xl font-black tracking-tight italic">{{ label }}</h2>
           </div>
 
-          <div class="grid gap-4 sm:gap-6 items-start" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
+          <div class="grid gap-4 sm:gap-6 items-start grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
             <div v-for="item in items" :key="item.title"
-              class="group relative bg-base-100/50 rounded-[1.8rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:border-success/30 transition-all duration-500 cursor-pointer active:scale-95"
+              class="group relative bg-base-100/50 rounded-[1.8rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:border-success/30 transition-all duration-500 cursor-pointer active:scale-95 flex flex-col"
               @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)">
               
               <!-- Poster -->

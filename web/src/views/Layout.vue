@@ -64,7 +64,7 @@ function closeDrawer() {
     <div class="drawer-content flex flex-col">
       <!-- Top navbar (Mobile & Tablet) -->
       <div class="sticky top-0 z-30 flex h-16 w-full justify-center bg-base-100/60 backdrop-blur transition-all duration-100 lg:hidden border-b border-base-200/50">
-        <div class="navbar w-full max-w-7xl">
+        <div class="navbar w-full max-w-[1400px] lg:max-w-[1600px] xl:max-w-[2000px] 2xl:max-w-[2400px] mx-auto">
           <div class="flex-none">
             <label for="drawer-toggle" class="btn btn-square btn-ghost">
               <Menu :size="24" />
@@ -91,7 +91,7 @@ function closeDrawer() {
       </div>
 
       <!-- Main content area -->
-      <main class="flex-1 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto w-full">
+      <main class="flex-1 p-4 sm:p-6 md:p-8 max-w-[1400px] lg:max-w-[1600px] xl:max-w-[2000px] 2xl:max-w-[2400px] mx-auto w-full">
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in">
             <component :is="Component" />

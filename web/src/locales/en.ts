@@ -110,6 +110,22 @@ export default {
       autoUpdate: 'Auto Check Update',
       autoUpdateHint: 'If enabled, it will periodically check for the latest GitHub version',
     },
+    ai: {
+      protocol: {
+        auto: 'Auto Detect',
+        openai: 'OpenAI Compatible',
+        google: 'Google Gemini',
+        anthropic: 'Anthropic Claude',
+        ollama: 'Ollama Local',
+      },
+      loadingModels: 'Loading...',
+      fetchModels: 'Fetch Models',
+      error: {
+        endpointRequired: 'Please enter endpoint first',
+        fetchFailed: 'Failed to fetch models',
+        aiNotConfigured: 'Please configure AI completely (endpoint, key, model)',
+      },
+    },
     tabs: {
       mikan: 'Mikan',
       downloader: 'Transfers',
@@ -148,6 +164,7 @@ export default {
       sync: 'Synchronization Error',
       timeout: 'Timeout fetching schedule',
       failed: 'Failed to fetch schedule',
+      offlineMode: 'Offline Mode - Showing public data only',
     },
     empty: {
       title: 'No Schedule Data',
@@ -173,7 +190,8 @@ export default {
       sp: 'Movie/OVA/Special',
       others: 'Others',
       tbd: 'TBD',
-    }
+    },
+    offlineMode: 'Offline Mode - Public data only'
   },
   search: {
     title: 'Discovery',
