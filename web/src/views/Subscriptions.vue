@@ -270,77 +270,71 @@ onUnmounted(() => {
         <p class="text-xs font-bold tracking-[0.3em] uppercase opacity-30">{{ $t('subs.subtitle') }}</p>
       </div>
       
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 overflow-x-auto no-scrollbar max-w-full pb-1">
         <template v-if="batchDeleteMode">
-          <div class="flex items-center gap-3">
-            <span class="text-xs font-bold opacity-60">已选 {{ batchDeleteSelected.size }} 项</span>
-            <button class="btn btn-ghost btn-sm rounded-xl" @click="exitBatchDeleteMode">
+          <div class="flex items-center gap-3 flex-none">
+            <span class="text-xs font-bold opacity-60 whitespace-nowrap">已选 {{ batchDeleteSelected.size }}</span>
+            <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-4" @click="exitBatchDeleteMode">
               取消
             </button>
-            <button class="btn btn-error btn-sm rounded-xl gap-2" @click="openBatchDeleteModal">
-              <Trash2 :size="16" />
-              删除选中
+            <button class="btn btn-error btn-xs rounded-xl h-10 min-h-0 px-4 gap-2 whitespace-nowrap" @click="openBatchDeleteModal">
+              <Trash2 :size="14" />
+              删除
             </button>
           </div>
         </template>
         <button v-if="!batchDeleteMode"
-          class="btn btn-ghost border-base-300 rounded-2xl gap-3 px-6 hover:bg-base-200 transition-all active:scale-95"
+          class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap"
           @click="enterBatchDeleteMode">
-          <Trash2 :size="20" />
-          <span class="text-xs font-black uppercase tracking-widest">{{ $t('subs.batchDelete') || '批量删除' }}</span>
+          <Trash2 :size="16" class="opacity-50" />
+          <span class="text-[10px] font-black uppercase tracking-widest">批量删除</span>
         </button>
         <button 
-          class="btn btn-ghost border-base-300 rounded-2xl gap-3 px-6 hover:bg-base-200 transition-all active:scale-95" 
+          class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap" 
           @click="router.push('/search')"
         >
-          <Search :size="20" />
-          <span class="text-xs font-black uppercase tracking-widest">{{ $t('subs.find') }}</span>
+          <Search :size="16" class="opacity-50" />
+          <span class="text-[10px] font-black uppercase tracking-widest">{{ $t('subs.find') }}</span>
         </button>
         <button 
-          class="btn btn-primary rounded-2xl gap-3 px-6 shadow-xl shadow-lg hover:scale-105 active:scale-95 transition-all" 
-          @click="router.push('/subscriptions/new')"
+          class="flex-none btn btn-primary rounded-2xl gap-2 px-5 h-11 min-h-0 shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all whitespace-nowrap" 
+          @click="router.push('/search')"
         >
-          <Plus :size="20" />
-          <span class="text-xs font-black uppercase tracking-widest">{{ $t('subs.new') }}</span>
+          <Plus :size="16" />
+          <span class="text-[10px] font-black uppercase tracking-widest">{{ $t('subs.new') }}</span>
         </button>
       </div>
     </div>
 
-    <!-- Toolbar Section -->
-    <div class="flex flex-col lg:flex-row items-center gap-4 bg-base-100 p-3 rounded-[2rem] border border-base-200/50 shadow-sm">
-      <div class="relative w-full lg:w-96 group">
-        <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-base-content/20 group-focus-within:text-primary transition-colors">
-          <Search :size="20" />
+      <div class="flex flex-wrap items-center gap-4 bg-base-100 p-3 rounded-[2rem] border border-base-200/50 shadow-sm">
+        <div class="relative w-full sm:w-80 group">
+          <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-base-content/20 group-focus-within:text-primary transition-colors">
+            <Search :size="20" />
+          </div>
+          <input 
+            v-model="filterText" 
+            type="text" 
+            :placeholder="$t('subs.searchPlaceholder')" 
+            class="input w-full bg-base-200/50 border-transparent focus:border-primary/30 focus:bg-base-100 focus:ring-0 rounded-2xl pl-12 transition-all font-bold text-sm h-12"
+          />
         </div>
-        <input 
-          v-model="filterText" 
-          type="text" 
-          :placeholder="$t('subs.searchPlaceholder')" 
-          class="input w-full bg-base-200/50 border-transparent focus:border-primary/30 focus:bg-base-100 focus:ring-0 rounded-2xl pl-12 transition-all font-bold text-sm h-12"
-        />
-      </div>
 
-      <div class="flex p-1.5 bg-base-200/50 rounded-2xl gap-1 w-full lg:w-auto overflow-x-auto no-scrollbar">
-        <button 
-          v-for="t in ['all', 'active', 'completed']" 
-          :key="t"
-          class="flex-1 lg:flex-none px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap"
-          :class="filterType === t ? 'bg-base-100 text-primary shadow-sm ring-1 ring-base-300' : 'text-base-content/40 hover:text-base-content'"
-          @click="filterType = t as any"
-        >
-          {{ t === 'all' ? $t('subs.filter.all') : t === 'active' ? $t('subs.filter.active') : $t('subs.filter.completed') }}
-        </button>
-      </div>
+        <div class="flex p-1.5 bg-base-200/50 rounded-2xl gap-1 w-fit overflow-x-auto no-scrollbar">
+          <button 
+            v-for="t in ['all', 'active', 'completed']" 
+            :key="t"
+            class="px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap"
+            :class="filterType === t ? 'bg-base-100 text-primary shadow-sm ring-1 ring-base-300' : 'text-base-content/40 hover:text-base-content'"
+            @click="filterType = t as any"
+          >
+            {{ t === 'all' ? $t('subs.filter.all') : t === 'active' ? $t('subs.filter.active') : t === 'completed' ? $t('subs.filter.completed') : t }}
+          </button>
+        </div>
 
-      <div class="hidden lg:flex ml-auto px-4 items-center gap-2">
-         <div class="flex -space-x-3">
-            <div v-for="i in 3" :key="i" class="w-8 h-8 rounded-full border-2 border-base-100 bg-base-200 flex items-center justify-center overflow-hidden">
-               <img :src="`https://api.dicebear.com/7.x/bottts/svg?seed=${i+10}`" class="w-full h-full object-cover" />
-            </div>
-         </div>
-         <span class="text-[10px] font-black text-base-content/20 uppercase tracking-widest ml-2">{{ $t('subs.itemsTracked', { count: subs.length }) }}</span>
+        <div class="hidden sm:flex ml-auto px-4 items-center gap-2">
+           <span class="text-[10px] font-black text-base-content/20 uppercase tracking-widest ml-2">{{ $t('subs.itemsTracked', { count: subs.length }) }}</span>
+        </div>
       </div>
-    </div>
 
     <!-- Status Alerts -->
     <div v-if="error" class="alert bg-error/10 border-error/20 text-error rounded-3xl p-6 flex items-start gap-4">
@@ -357,8 +351,8 @@ onUnmounted(() => {
     </div>
 
     <!-- Main Content Section -->
-    <div v-if="loading" class="grid gap-6 grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 animate-pulse">
-      <div v-for="i in 8" :key="i" class="aspect-[3/5] bg-base-200 rounded-[2.5rem]"></div>
+    <div v-if="loading" class="grid gap-6 sm:gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 animate-pulse">
+      <div v-for="i in 16" :key="i" class="aspect-[3/5] bg-base-200 rounded-[2.5rem]"></div>
     </div>
 
     <div v-else-if="filteredSubs.length === 0" class="flex flex-col items-center justify-center py-32 text-center bg-base-100/30 rounded-[3rem] border-2 border-dashed border-base-200">
@@ -394,7 +388,7 @@ onUnmounted(() => {
       <TransitionGroup
         name="list"
         tag="div"
-        class="grid gap-6 sm:gap-8 grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"
+        class="grid gap-6 sm:gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8"
       >
         <SubscriptionCard
           v-for="sub in filteredSubs"
@@ -491,5 +485,13 @@ onUnmounted(() => {
 .slide-up-leave-to {
   transform: translateY(100%);
   opacity: 0;
+}
+<style scoped>
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 </style>

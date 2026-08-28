@@ -7,6 +7,7 @@
 package httpx
 
 import (
+	"crypto/tls"
 	"net"
 	"net/http"
 	"time"
@@ -22,21 +23,44 @@ var sharedTransport = &http.Transport{
 	}).DialContext,
 	ForceAttemptHTTP2:     true,
 	MaxIdleConns:          100,
-	MaxIdleConnsPerHost:   10,             // 每个 host 保底 10 条空闲连接，覆盖 RSS/元数据/通知并发场景
+	MaxIdleConnsPerHost:   10,               // 每个 host 保底 10 条空闲连接，覆盖 RSS/元数据/通知并发场景
 	IdleConnTimeout:       90 * time.Second, // 空闲连接 90s 后回收，兼顾复用率与 fd 占用
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
+}
+
+var insecureTransport = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	ForceAttemptHTTP2:     true,
+	MaxIdleConns:          100,
+	MaxIdleConnsPerHost:   10,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+	TLSClientConfig: &tls.Config{
+		InsecureSkipVerify: true,
+	},
 }
 
 // Default 全局默认客户端（30s 超时），供无特殊超时需求的调用方直接使用
 var Default = New(30 * time.Second)
 
 // New 创建复用全局连接池的 HTTP 客户端
-// 保留 per-client Timeout 语义（各模块超时需求不同：通知 10s / RSS 30s / Ollama 120s），
-// 由 context 取代的方案会侵入所有调用链，此处不做
 func New(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout:   timeout,
 		Transport: sharedTransport,
+	}
+}
+
+// NewInsecure 创建忽略证书错误的客户端（解决 yuc.wiki 证书过期问题）
+func NewInsecure(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: insecureTransport,
 	}
 }

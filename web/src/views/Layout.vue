@@ -91,7 +91,7 @@ function closeDrawer() {
       </div>
 
       <!-- Main content area -->
-      <main class="flex-1 p-4 sm:p-6 md:p-8 max-w-[1400px] lg:max-w-[1600px] xl:max-w-[2000px] 2xl:max-w-[2400px] mx-auto w-full">
+      <main class="flex-1 p-4 sm:p-6 md:p-8 max-w-[1400px] lg:max-w-[1600px] xl:max-w-[2000px] 2xl:max-w-[2400px] mx-auto w-full overflow-hidden">
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in">
             <component :is="Component" />
@@ -112,8 +112,9 @@ function closeDrawer() {
         <!-- Logo Section -->
         <div class="px-8 py-10">
           <div class="flex items-center gap-4 group">
-            <div class="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-lg -rotate-3 group-hover:rotate-0 transition-all duration-500">
-               <Antenna :size="28" class="text-primary-content" />
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-primary-focus flex items-center justify-center shadow-xl shadow-primary/20 -rotate-3 group-hover:rotate-0 transition-all duration-500 overflow-hidden">
+               <div class="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(255,255,255,0.3),transparent)]"></div>
+               <Antenna :size="28" class="text-primary-content relative z-10" />
             </div>
             <div>
               <h1 class="text-2xl font-black tracking-tighter leading-none italic">Ani-Go</h1>

@@ -1151,7 +1151,7 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 域名白名单校验（使用 URL 解析 + 后缀匹配，防止 SSRF 绕过）
-	allowedDomains := []string{"i0.hdslb.com", "lain.bgm.tv", "img.mikanani.me", "image.tmdb.org", "bilibili.com", "bgm.tv", "mikanime.tv"}
+	allowedDomains := []string{"i0.hdslb.com", "lain.bgm.tv", "img.mikanani.me", "image.tmdb.org", "bilibili.com", "bgm.tv", "mikanime.tv", "yuc.wiki", "yucc.wiki", "yucwiki.net"}
 	parsedURL, err := url.Parse(imageURL)
 	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		http.Error(w, "invalid url", http.StatusBadRequest)
@@ -1171,7 +1171,7 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := httpx.New(10 * time.Second)
+	client := httpx.NewInsecure(15 * time.Second)
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, imageURL, nil)
 	if err != nil {
 		http.Error(w, "invalid url", http.StatusBadRequest)
@@ -1185,6 +1185,8 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 		req.Header.Set("Referer", "https://bgm.tv/")
 	} else if strings.Contains(imageURL, "mikan") {
 		req.Header.Set("Referer", "https://mikanime.tv/")
+	} else if strings.Contains(imageURL, "yuc.wiki") || strings.Contains(imageURL, "yucc.wiki") {
+		req.Header.Set("Referer", "https://yuc.wiki/")
 	}
 
 	resp, err := client.Do(req)

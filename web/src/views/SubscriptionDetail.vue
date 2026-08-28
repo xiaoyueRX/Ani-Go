@@ -425,6 +425,13 @@ onMounted(fetchDetail)
 </template>
 
 <style scoped>
+.modal-box {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.modal-box::-webkit-scrollbar {
+  display: none;
+}
 .fade-enter-active, .fade-leave-active {
   transition: opacity 0.5s ease, transform 0.5s ease;
 }

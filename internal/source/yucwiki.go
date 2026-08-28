@@ -31,7 +31,7 @@ type yucCacheItem struct {
 
 func NewYucWikiSource() *YucWikiSource {
 	return &YucWikiSource{
-		httpClient: httpx.New(15 * time.Second),
+		httpClient: httpx.NewInsecure(15 * time.Second),
 		baseURL:    "https://yuc.wiki",
 	}
 }

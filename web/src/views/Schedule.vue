@@ -418,15 +418,15 @@ onMounted(async () => {
         <p class="text-xs font-bold tracking-[0.3em] uppercase opacity-30">{{ $t('schedule.subtitle') }}</p>
       </div>
       
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-3 overflow-x-auto pb-2 no-scrollbar max-w-full">
         <!-- Offline Mode Indicator -->
-        <div v-if="isOfflineMode" class="flex items-center gap-2 px-3 py-1.5 bg-warning/10 border border-warning/20 text-warning rounded-2xl text-[9px] font-black uppercase tracking-widest animate-pulse">
+        <div v-if="isOfflineMode" class="flex-none flex items-center gap-2 px-3 py-1.5 bg-warning/10 border border-warning/20 text-warning rounded-2xl text-[9px] font-black uppercase tracking-widest animate-pulse">
           <WifiOff :size="12" />
           <span>{{ $t('schedule.offlineMode') }}</span>
         </div>
         
         <!-- Season Selector -->
-        <div v-if="activeTab === 'schedule'" class="flex items-center gap-1.5 p-1 bg-base-200/50 rounded-2xl border border-base-300/30">
+        <div v-if="activeTab === 'schedule'" class="flex-none flex items-center gap-1.5 p-1 bg-base-200/50 rounded-2xl border border-base-300/30">
           <select v-model="selectedYear" @change="fetchSchedule" class="select select-ghost select-xs focus:bg-transparent font-black text-[10px] w-20 h-8 min-h-0">
             <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
           </select>
@@ -436,25 +436,25 @@ onMounted(async () => {
           </select>
         </div>
 
-        <div class="p-1 bg-base-200/50 rounded-2xl flex gap-1 border border-base-300/30">
-          <button 
-            v-for="t in [ {id: 'schedule', label: $t('schedule.tabs.all'), icon: Antenna}, {id: 'mysub', label: $t('schedule.tabs.mine'), icon: LayoutGrid} ]" 
-            :key="t.id"
-            class="px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2"
-            :class="activeTab === t.id ? 'bg-primary text-primary-content shadow-lg shadow-lg' : 'text-base-content/40 hover:text-base-content hover:bg-base-200'"
-            @click="activeTab = t.id as any"
-          >
+          <div class="flex-none p-1 bg-base-200/50 rounded-2xl flex gap-1 border border-base-300/30 overflow-x-auto no-scrollbar scroll-smooth">
+            <button 
+              v-for="t in [ {id: 'schedule', label: $t('schedule.tabs.all'), icon: Antenna}, {id: 'mysub', label: $t('schedule.tabs.mine'), icon: LayoutGrid} ]" 
+              :key="t.id"
+              class="px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap"
+              :class="activeTab === t.id ? 'bg-primary text-primary-content shadow-lg' : 'text-base-content/40 hover:text-base-content hover:bg-base-200'"
+              @click="activeTab = t.id as any"
+            >
             <component :is="t.icon" :size="14" />
             {{ t.label }}
             <span v-if="t.id === 'mysub' && subscribedCount > 0" class="badge badge-xs bg-white/20 text-white border-none ml-1">{{ subscribedCount }}</span>
           </button>
         </div>
-        <button v-if="!batchMode" class="btn btn-ghost border border-base-300/50 rounded-2xl hover:bg-base-200 text-[10px] font-black uppercase tracking-widest gap-2" @click="enterBatchMode">
+        <button v-if="!batchMode" class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl hover:bg-base-200 text-[10px] font-black uppercase tracking-widest gap-2 whitespace-nowrap" @click="enterBatchMode">
           <ListChecks :size="16" />
           批量订阅
         </button>
         <button 
-          class="btn btn-ghost btn-circle hover:bg-base-200" 
+          class="flex-none btn btn-ghost btn-circle hover:bg-base-200" 
           @click="fetchSchedule" 
           :disabled="loading"
         >
@@ -849,6 +849,13 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
