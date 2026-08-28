@@ -109,6 +109,11 @@ const tabs = computed<TabDef[]>(() => [
       { label: t('settings.fields.rpc'), key: 'ARIA2_HOST', placeholder: 'http://localhost:6800' },
       { label: t('settings.fields.secret'), key: 'ARIA2_SECRET', placeholder: 'Secret key', type: 'password' },
     ]},
+    { title: t('settings.sections.seedCleanup'), desc: t('settings.sections.seedCleanupDesc'), fields: [
+      { label: t('settings.fields.seedCleanupEnabled'), key: 'SEED_CLEANUP_ENABLED', placeholder: '', type: 'switch' },
+      { label: t('settings.fields.seedCleanupInterval'), key: 'SEED_CLEANUP_INTERVAL', placeholder: '1h' },
+      { label: t('settings.fields.seedCleanupMinRatio'), key: 'SEED_CLEANUP_MIN_RATIO', placeholder: '1.0' },
+    ]},
   ]},
   { key: 'paths', label: t('settings.tabs.paths'), icon: Folder, sections: [{ title: t('settings.sections.storage'), desc: t('settings.sections.storageDesc'), fields: [
     { label: t('settings.fields.db'), key: 'DB_PATH', placeholder: '/data/ani-go.db' },

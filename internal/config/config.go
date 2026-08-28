@@ -163,6 +163,11 @@ type SchedulerConfig struct {
 	RSSInterval        time.Duration
 	SupplementInterval time.Duration
 	OrganizerInterval  time.Duration
+	// 种子自动清理配置
+	SeedCleanupEnabled   bool          // 是否启用自动清理已完成种子
+	SeedCleanupInterval  time.Duration // 清理检查间隔
+	SeedCleanupMinSeedTime time.Duration // 最小做种时间（默认 48h）
+	SeedCleanupMinRatio    float64     // 最小做种比率（默认 1.0）
 }
 
 func Load() *Config {
@@ -243,6 +248,27 @@ func Load() *Config {
 	if v := os.Getenv("ORGANIZER_USE_HARD_LINK"); v != "" {
 		if enabled, err := strconv.ParseBool(v); err == nil {
 			cfg.Organizer.UseHardLink = enabled
+		}
+	}
+	// 种子自动清理环境变量
+	if v := os.Getenv("SEED_CLEANUP_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.Scheduler.SeedCleanupEnabled = enabled
+		}
+	}
+	if v := os.Getenv("SEED_CLEANUP_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Scheduler.SeedCleanupInterval = d
+		}
+	}
+	if v := os.Getenv("SEED_CLEANUP_MIN_SEED_TIME"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Scheduler.SeedCleanupMinSeedTime = d
+		}
+	}
+	if v := os.Getenv("SEED_CLEANUP_MIN_RATIO"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Scheduler.SeedCleanupMinRatio = f
 		}
 	}
 	if v := os.Getenv("AI_PROTOCOL"); v != "" {
@@ -451,8 +477,10 @@ func defaults() *Config {
 		AI:       AIConfig{Enabled: false, Model: "gpt-4o-mini", SmartSearchEnabled: true},
 		Notifier: NotifierConfig{},
 		Scheduler: SchedulerConfig{
-			RSSInterval: 30 * time.Minute, SupplementInterval: 24 * time.Hour, OrganizerInterval: 2 * time.Minute,
-		},
+				RSSInterval: 30 * time.Minute, SupplementInterval: 24 * time.Hour, OrganizerInterval: 2 * time.Minute,
+				SeedCleanupEnabled: true, SeedCleanupInterval: 1 * time.Hour,
+				SeedCleanupMinSeedTime: 48 * time.Hour, SeedCleanupMinRatio: 1.0,
+			},
 	}
 }
 

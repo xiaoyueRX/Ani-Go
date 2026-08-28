@@ -66,6 +66,8 @@ export default {
       scheduleDesc: 'Background task cycles',
       update: 'System Update',
       updateDesc: 'Control software update checking behavior',
+      seedCleanup: 'Seed Auto Cleanup',
+      seedCleanupDesc: 'Auto remove completed torrents from qBittorrent (delete task only, keep files)',
     },
     fields: {
       rss: 'Personal RSS',
@@ -109,6 +111,9 @@ export default {
       smartSearchHint: 'Expand queries with AI; results still come from real sources',
       autoUpdate: 'Auto Check Update',
       autoUpdateHint: 'If enabled, it will periodically check for the latest GitHub version',
+      seedCleanupEnabled: 'Enable Seed Cleanup',
+      seedCleanupInterval: 'Cleanup Interval',
+      seedCleanupMinRatio: 'Min Seed Ratio',
     },
     ai: {
       protocol: {

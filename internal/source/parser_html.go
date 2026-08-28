@@ -287,6 +287,7 @@ func extractTorrentTable(table *goquery.Selection, groupName, domain string, fil
 			PublishedAt: pubAt,
 			SourceName:  "Mikan",
 			GroupName:   info.Subgroup,
+			Resolution:  info.Resolution,
 		})
 	})
 }

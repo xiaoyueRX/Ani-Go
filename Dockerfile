@@ -18,7 +18,8 @@ FROM golang:1.25-alpine AS backend-builder
 ENV GOPROXY=https://goproxy.cn,direct
 
 # 安装 git（Go 模块可能需要）及基础编译工具
-RUN apk add --no-cache git ca-certificates
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+    apk update && apk add --no-cache git ca-certificates
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -35,10 +36,11 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -trimpath -o /anigo .
 
 # ---- Stage 3: 极简运行环境 ----
-FROM alpine:3.22
+FROM alpine:3.20
 
 # 时区 + CA 证书（HTTPS 请求需要）
-RUN apk add --no-cache tzdata ca-certificates
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+    apk update && apk add --no-cache tzdata ca-certificates
 
 ENV TZ=Asia/Shanghai
 ENV PORT=20001

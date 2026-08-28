@@ -81,6 +81,15 @@ func (s *Scheduler) Start(ctx context.Context) {
 	suppTicker := jitteredTicker(s.cfg.Scheduler.SupplementInterval)
 	defer suppTicker.Stop()
 
+	// 种子自动清理定时器
+	var seedCleanupTicker *time.Ticker
+	if s.cfg.Scheduler.SeedCleanupEnabled {
+		seedCleanupTicker = jitteredTicker(s.cfg.Scheduler.SeedCleanupInterval)
+		defer seedCleanupTicker.Stop()
+		log.Printf("🧹 种子自动清理已启用：间隔=%v, 最小做种时间=%v, 最小比率=%.1f",
+			s.cfg.Scheduler.SeedCleanupInterval, s.cfg.Scheduler.SeedCleanupMinSeedTime, s.cfg.Scheduler.SeedCleanupMinRatio)
+	}
+
 	// 下载状态扫描原为 10s 高频轮询（OPTIMIZE_TASK.md 优化点 1）：
 	// 每次都会请求 qBittorrent API 并查询数据库，CPU 尖峰主要来源之一。
 	// 改为 60s 基础间隔 + 每次触发后重新抖动，下载完成事件的感知延迟从 ~10s 变为 ~60s，
@@ -116,6 +125,11 @@ func (s *Scheduler) Start(ctx context.Context) {
 		case <-downloadTicker.C:
 			resetWithJitter(downloadTicker, downloadInterval)
 			go s.pollDownloads(ctx)
+		case <-seedCleanupTicker.C:
+			if seedCleanupTicker != nil {
+				resetWithJitter(seedCleanupTicker, s.cfg.Scheduler.SeedCleanupInterval)
+				go s.pollSeedCleanup(ctx)
+			}
 		}
 	}
 }
@@ -194,6 +208,11 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 		savePath := s.cfg.Organizer.TVBasePath
 		if matchedSub != nil && matchedSub.CustomPath != "" {
 			savePath = matchedSub.CustomPath
+		}
+
+		// 使用订阅的字幕组作为标签（比标题解析更准确）
+		if matchedSub != nil && matchedSub.SubgroupName != "" {
+			item.GroupName = matchedSub.SubgroupName
 		}
 
 		// 下发下载任务
@@ -643,6 +662,11 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 			savePath = s.cfg.Organizer.TVBasePath
 		}
 
+		// 使用订阅的字幕组作为标签（比标题解析更准确）
+		if sub.SubgroupName != "" {
+			item.GroupName = sub.SubgroupName
+		}
+
 		if err := s.downloader.Add(ctx, item, savePath); err != nil {
 			log.Printf("❌ 添加补全下载失败 [%s]: %v", item.Title, err)
 			continue
@@ -720,6 +744,7 @@ func createEpisodeRecordWithParsed(subID uint, item core.TorrentItem, season int
 		OriginalName:      item.Title,
 		FileSize:          item.Size,
 		GroupName:         item.GroupName,
+		Resolution:        item.Resolution,
 		DownloadStartedAt: &now,
 	}
 
@@ -746,6 +771,7 @@ func createEpisodeRecord(subID uint, item core.TorrentItem) {
 		OriginalName:      item.Title,
 		FileSize:          item.Size,
 		GroupName:         item.GroupName,
+		Resolution:        item.Resolution,
 		DownloadStartedAt: &now,
 	}
 
@@ -1088,4 +1114,58 @@ func bestMatch(results []core.Anime, cleanTitle string) *core.Anime {
 
 	// 3. 直接返回第一个结果（兜底）
 	return &results[0]
+}
+
+// pollSeedCleanup 清理已做种满足条件的种子（仅删任务记录，不删文件）
+func (s *Scheduler) pollSeedCleanup(ctx context.Context) {
+	if s.downloader == nil {
+		return
+	}
+
+	log.Println("🧹 开始种子自动清理扫描...")
+
+	// 获取 qBittorrent 所有任务
+	tasks, err := s.downloader.List(ctx)
+	if err != nil {
+		log.Printf("❌ 获取种子列表失败: %v", err)
+		return
+	}
+
+	cleaned := 0
+	minSeedTime := s.cfg.Scheduler.SeedCleanupMinSeedTime
+	minRatio := s.cfg.Scheduler.SeedCleanupMinRatio
+
+	for _, task := range tasks {
+		// 只处理已完成的任务
+		if task.Progress < 1.0 {
+			continue
+		}
+
+		// 检查做种时间（需要 qB 支持 seeding_time 字段，否则跳过时间检查）
+		if minSeedTime > 0 {
+			// TODO: 需要 qB API 返回 seeding_time 字段才能精确判断
+			// 目前跳过时间检查，仅检查比率
+		}
+
+		// 检查做种比率
+		if minRatio > 0 && task.Size > 0 {
+			ratio := float64(task.Done) / float64(task.Size)
+			if ratio < minRatio {
+				continue
+			}
+		}
+
+		// 删除种子（不删文件，因为已硬链接到媒体库）
+		if err := s.downloader.Delete(ctx, task.Hash, false); err != nil {
+			log.Printf("⚠️ 清理种子失败 [%s]: %v", task.Name, err)
+			continue
+		}
+
+		log.Printf("🗑️ 已清理完成种子: %s (进度=%.0f%%, 比率=%.2f)", task.Name, task.Progress*100, float64(task.Done)/float64(task.Size))
+		cleaned++
+	}
+
+	if cleaned > 0 {
+		log.Printf("✅ 种子自动清理完成：清理 %d 个", cleaned)
+	}
 }

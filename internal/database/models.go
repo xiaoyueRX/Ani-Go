@@ -45,6 +45,7 @@ type Episode struct {
 	FinalPath          string
 	FileSize           int64
 	GroupName          string
+	Resolution         string
 	DownloadStartedAt  *time.Time
 	DownloadFinishedAt *time.Time
 	OrganizedAt        *time.Time

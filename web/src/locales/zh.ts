@@ -66,6 +66,8 @@ export default {
       scheduleDesc: '后台任务循环周期',
       update: '系统更新',
       updateDesc: '控制软件更新检查行为',
+      seedCleanup: '种子自动清理',
+      seedCleanupDesc: '下载完成后自动清理 qBittorrent 种子任务（仅删任务，不删文件）',
     },
     fields: {
       rss: '个人 RSS',
@@ -110,6 +112,9 @@ export default {
       smartSearchHint: '搜索时使用 AI 扩写关键词，结果仍来自真实资源站',
       autoUpdate: '自动检查更新',
       autoUpdateHint: '开启后将定期检查 GitHub 最新版本',
+      seedCleanupEnabled: '启用种子清理',
+      seedCleanupInterval: '清理间隔',
+      seedCleanupMinRatio: '最小做种比率',
     },
     ai: {
       protocol: {

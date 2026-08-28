@@ -21,6 +21,7 @@ type TorrentItem struct {
 	AiredTime   string    `json:"aired_time,omitempty"`
 	AiredDate   string    `json:"aired_date,omitempty"`
 	GroupName   string    `json:"group_name"`
+	Resolution  string    `json:"resolution,omitempty"`
 }
 
 type Anime struct {

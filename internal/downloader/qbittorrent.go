@@ -12,6 +12,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
@@ -28,6 +29,8 @@ type QBittorrent struct {
 	username   string
 	password   string
 	category   string
+	loginMu    sync.Mutex
+	retryCount int
 }
 
 // NewQBittorrent 创建 qBittorrent 下载器实例
@@ -59,6 +62,7 @@ func (q *QBittorrent) login(ctx context.Context) error {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Referer", q.host)
+	req.Header.Set("Origin", q.host)
 
 	resp, err := q.httpClient.Do(req)
 	if err != nil {
@@ -66,7 +70,8 @@ func (q *QBittorrent) login(ctx context.Context) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	// qBittorrent 登录成功返回 204 No Content，也可能是 200 OK
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("登录失败 (状态码 %d): %s", resp.StatusCode, string(body))
 	}
@@ -77,6 +82,14 @@ func (q *QBittorrent) login(ctx context.Context) error {
 
 // Add 添加种子到 qBittorrent
 func (q *QBittorrent) Add(ctx context.Context, item core.TorrentItem, savePath string) error {
+	return q.addWithRetry(ctx, item, savePath, 0)
+}
+
+func (q *QBittorrent) addWithRetry(ctx context.Context, item core.TorrentItem, savePath string, attempt int) error {
+	if attempt > 1 {
+		return fmt.Errorf("添加种子重试次数超限: %s", item.Title)
+	}
+
 	if err := q.ensureLogin(ctx); err != nil {
 		return err
 	}
@@ -90,7 +103,16 @@ func (q *QBittorrent) Add(ctx context.Context, item core.TorrentItem, savePath s
 	}
 	data.Set("savepath", savePath)
 	data.Set("category", q.category)
-	data.Set("tags", "ani-go")
+	// 构建标签: ani-go + 字幕组 + 分辨率
+	tags := []string{"ani-go"}
+	if item.GroupName != "" {
+		tags = append(tags, item.GroupName)
+	}
+	if item.Resolution != "" {
+		tags = append(tags, item.Resolution)
+	}
+	// qBittorrent API 使用分号分隔标签
+	data.Set("tags", strings.Join(tags, ";"))
 	data.Set("autoTMM", "false")
 	data.Set("paused", "false")
 
@@ -101,6 +123,7 @@ func (q *QBittorrent) Add(ctx context.Context, item core.TorrentItem, savePath s
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Referer", q.host)
+	req.Header.Set("Origin", q.host)
 
 	resp, err := q.httpClient.Do(req)
 	if err != nil {
@@ -108,13 +131,41 @@ func (q *QBittorrent) Add(ctx context.Context, item core.TorrentItem, savePath s
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("添加种子失败 (状态码 %d): %s", resp.StatusCode, string(body))
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("📥 添加种子响应: 状态码=%d, body=%s", resp.StatusCode, string(body))
+
+	// qBittorrent API: 200 OK = 成功；201 Created = 成功；202 Accepted = 已接受（待处理）；204 No Content = 成功（无返回体）；403/401 = 未认证；409 = 已存在（幂等）；其他均视为需重试
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusNoContent {
+		log.Printf("📥 已添加下载: %s", item.Title)
+		return nil
 	}
 
-	log.Printf("📥 已添加下载: %s", item.Title)
-	return nil
+	// 409 = 已存在，也算成功（幂等）
+	if resp.StatusCode == http.StatusConflict {
+		log.Printf("📥 种子已存在，跳过: %s", item.Title)
+		return nil
+	}
+
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+		log.Printf("⚠️ 认证失败 (状态码 %d)，重新登录重试", resp.StatusCode)
+	} else {
+		log.Printf("⚠️ 添加种子返回异常状态码 %d，尝试重新登录重试", resp.StatusCode)
+	}
+
+	// 清除 Cookie 重新登录
+	q.loginMu.Lock()
+	q.httpClient.Jar = nil
+	jar, _ := cookiejar.New(nil)
+	q.httpClient.Jar = jar
+	if loginErr := q.login(ctx); loginErr != nil {
+		q.loginMu.Unlock()
+		return fmt.Errorf("重新登录失败: %w", loginErr)
+	}
+	q.loginMu.Unlock()
+
+	// 重试添加
+	log.Printf("🔄 重试添加种子 (%d/1): %s", attempt+1, item.Title)
+	return q.addWithRetry(ctx, item, savePath, attempt+1)
 }
 
 // List 获取所有下载任务列表
@@ -136,8 +187,13 @@ func (q *QBittorrent) List(ctx context.Context) ([]core.DownloadTask, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return nil, fmt.Errorf("查询下载列表返回状态码: %d", resp.StatusCode)
+	}
+
+	// 204 = 空列表，返回空数组
+	if resp.StatusCode == http.StatusNoContent {
+		return []core.DownloadTask{}, nil
 	}
 
 	// qBittorrent API 返回 JSON，这里用简单 JSON 解析
@@ -168,8 +224,13 @@ func (q *QBittorrent) GetStatus(ctx context.Context, hash string) (core.Download
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return core.DownloadTask{}, fmt.Errorf("查询种子状态返回状态码: %d", resp.StatusCode)
+	}
+
+	// 204 = 空结果，种子不存在
+	if resp.StatusCode == http.StatusNoContent {
+		return core.DownloadTask{}, fmt.Errorf("种子未找到: %s", hash)
 	}
 
 	tasks, err := parseQBittorrentList(resp.Body)
@@ -209,7 +270,7 @@ func (q *QBittorrent) Delete(ctx context.Context, hash string, deleteFiles bool)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("删除种子失败 (状态码 %d): %s", resp.StatusCode, string(body))
 	}
@@ -241,7 +302,7 @@ func (q *QBittorrent) AddTags(ctx context.Context, hash string, tags string) err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("添加标签失败 (状态码 %d): %s", resp.StatusCode, string(body))
 	}
@@ -276,22 +337,32 @@ func (q *QBittorrent) IsAvailable(ctx context.Context) bool {
 		return false
 	}
 	resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	// qBittorrent 可达返回 200，也可能返回 204
+	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent
 }
 
 // ensureLogin 确保已登录，如果 Cookie 过期则重新登录
 func (q *QBittorrent) ensureLogin(ctx context.Context) error {
-	if q.IsAvailable(ctx) {
-		// 尝试访问需要认证的接口，如果失败则重新登录
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
-			q.host+"/api/v2/torrents/info", nil)
-		req.Header.Set("Referer", q.host)
-		resp, err := q.httpClient.Do(req)
-		if err == nil && resp.StatusCode == http.StatusOK {
+	// 先尝试访问需要认证的接口
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+		q.host+"/api/v2/torrents/info", nil)
+	req.Header.Set("Referer", q.host)
+	resp, err := q.httpClient.Do(req)
+	if err == nil {
+		// 403/401 = 未登录/过期，需要重新登录
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+			resp.Body.Close()
+			return q.login(ctx)
+		}
+		// 200 = 明确已登录（有数据或空列表但已认证）
+		// 204 = 空列表但已认证（qBittorrent 空列表也返回 204）
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
 			resp.Body.Close()
 			return nil
 		}
+		resp.Body.Close()
 	}
+	// 其他情况（网络错误等）尝试登录
 	return q.login(ctx)
 }
 

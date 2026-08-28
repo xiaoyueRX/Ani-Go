@@ -401,7 +401,7 @@ onMounted(fetchDetail)
 
       <!-- Edit Dialog -->
       <dialog ref="editDialog" class="modal bg-black/80 backdrop-blur-xl" @click.self="closeEditDialog">
-        <div class="modal-box max-w-2xl bg-base-100 rounded-[3rem] p-10 border border-white/5 overflow-hidden">
+        <div class="modal-box max-w-2xl bg-base-100 rounded-[3rem] p-10 border border-white/5 overflow-y-auto max-h-[85vh]">
          <div class="flex items-center justify-between mb-10">
             <div class="space-y-1">
                 <h3 class="text-3xl font-black tracking-tighter italic">{{ t('detail.edit.title') }}</h3>
