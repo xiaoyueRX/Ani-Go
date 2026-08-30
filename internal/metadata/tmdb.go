@@ -72,6 +72,9 @@ type tmdbTVDetail struct {
 	NumberOfSeasons  int    `json:"number_of_seasons"`
 	NumberOfEpisodes int    `json:"number_of_episodes"`
 	Type             string `json:"type"`
+	ExternalIDs      struct {
+		IMDBID string `json:"imdb_id"`
+	} `json:"external_ids"`
 }
 
 type tmdbSeasonResponse struct {
@@ -129,7 +132,7 @@ func (p *TMDBProvider) SearchAnime(ctx context.Context, title string) ([]core.An
 
 // GetAnime 获取番剧详情
 func (p *TMDBProvider) GetAnime(ctx context.Context, id string) (core.Anime, error) {
-	path := fmt.Sprintf("/tv/%s?api_key=%s&language=%s", id, p.apiKey, p.language)
+	path := fmt.Sprintf("/tv/%s?api_key=%s&language=%s&append_to_response=external_ids", id, p.apiKey, p.language)
 
 	resp, err := p.tryMirrors(ctx, path)
 	if err != nil {
@@ -170,6 +173,8 @@ func (p *TMDBProvider) GetAnime(ctx context.Context, id string) (core.Anime, err
 		Type:        animeType,
 		Description: detail.Overview,
 		CoverURL:    coverURL,
+		TMDBID:      strconv.Itoa(detail.ID),
+		IMDBID:      detail.ExternalIDs.IMDBID,
 	}, nil
 }
 

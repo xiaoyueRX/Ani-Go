@@ -189,8 +189,8 @@ onMounted(fetchDetail)
           <div class="flex flex-col lg:flex-row gap-12">
              <!-- Left: Poster -->
              <div class="w-full lg:w-1/3 xl:w-1/4 shrink-0 flex justify-center lg:justify-start">
-                <div class="w-full max-w-[280px] sm:max-w-sm lg:max-w-none aspect-[3/4.2] rounded-[2.5rem] bg-base-200 overflow-hidden shadow-2xl border border-white/5 relative group/poster">
-                   <img v-if="sub.cover_url" :src="proxyImage(sub.cover_url)" class="w-full h-full object-cover transition-transform duration-1000 group-hover/poster:scale-110" />
+                <div class="w-full max-w-[280px] sm:max-w-sm lg:max-w-none aspect-[3/3.8] rounded-[2.5rem] bg-base-200 overflow-hidden shadow-2xl border border-white/5 relative group/poster">
+                   <img v-if="sub.cover_url" :src="proxyImage(sub.cover_url)" class="w-full h-full object-contain bg-black transition-transform duration-1000 group-hover/poster:scale-110" />
                    <div v-else class="w-full h-full flex items-center justify-center text-base-content/10">
                       <Image :size="80" />
                    </div>

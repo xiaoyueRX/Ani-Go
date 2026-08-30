@@ -26,22 +26,15 @@ func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 			}
 
 			if len(originSet) > 0 {
-					// 白名单模式：仅允许配置的 Origin
-					if originSet[origin] {
-						w.Header().Set("Access-Control-Allow-Origin", origin)
-						w.Header().Set("Vary", "Origin")
-					}
-				} else {
-					// 无白名单时默认仅允许本地访问（安全优先）
-					defaultOrigins := map[string]bool{
-						"http://localhost:20001":  true,
-						"http://127.0.0.1:20001": true,
-					}
-					if defaultOrigins[origin] {
-						w.Header().Set("Access-Control-Allow-Origin", origin)
-						w.Header().Set("Vary", "Origin")
-					}
+				// 白名单模式：仅允许配置的 Origin
+				if originSet[origin] {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Vary", "Origin")
 				}
+			} else {
+				// 兜底模式：允许所有来源（仅限开发或私有网络部署）
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 			w.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Type")

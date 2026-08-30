@@ -136,20 +136,26 @@ async function openSubscribe(item: TorrentItem) {
   }
 }
 
-async function subscribe(item: TorrentItem, rssUrl: string) {
+declare global {
+  interface Window {
+    showToast: (message: string, type?: 'success' | 'error' | 'info') => void
+  }
+}
+
+async function subscribe(item: TorrentItem, rssUrl: string, subgroupName?: string) {
   try {
     await request.post('/subscriptions', {
       title_cn: item.title,
       bangumi_id: item.bangumi_id,
       rss_url: rssUrl || undefined,
+      subgroup_name: subgroupName || undefined,
       filter_json: JSON.stringify({ source_url: item.url }),
       cover_url: item.cover_url || '',
     })
-    subscribed.value.add(item.title)
+    window.showToast(t('search.subscribed', { title: item.title }))
     showGroupModal.value = false
-    alert(t('search.subscribed', { title: item.title }))
   } catch (e: any) {
-    alert(t('search.subscribeFailed', { error: e.response?.data?.error || e.message }))
+    window.showToast(t('search.subscribeFailed', { error: e.response?.data?.error || e.message }), 'error')
   }
 }
 
@@ -394,7 +400,7 @@ function sourceBadge(source: string): string {
                    <button 
                      v-for="g in subgroups" :key="g.rss_url"
                      class="group/item w-full bg-base-200/30 hover:bg-primary/10 border border-base-300/30 hover:border-primary/30 rounded-2xl p-4 flex items-center justify-between transition-all duration-300"
-                     @click="selectedItem && subscribe(selectedItem, g.rss_url)"
+                     @click="selectedItem && subscribe(selectedItem, g.rss_url, g.name)"
                    >
                      <div class="flex items-center gap-4">
                         <div class="w-10 h-10 rounded-xl bg-base-300 flex items-center justify-center text-base-content/30 group-hover/item:bg-primary group-hover/item:text-primary-content transition-colors">

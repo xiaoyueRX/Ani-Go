@@ -112,9 +112,9 @@ func (o *TVOrganizer) selectTemplate(anime core.Anime) string {
 		if o.tvTemplate != "" {
 			return o.tvTemplate
 		}
-		return "{title_cn}{year}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}"
+		return "{title_cn}{year}/Season {season}/{title_en} [tmdbid={tmdb_id}] S{season:02}E{ep:02}{ext}"
 	}
-}
+	}
 
 // VarValues 保存模板变量名到值的映射
 type VarValues struct {
@@ -126,6 +126,8 @@ type VarValues struct {
 	Ext      string
 	AnimeID  string
 	Provider string
+	TMDBID   string
+	IMDBID   string
 }
 
 // buildVarValues 从 anime 和 episode 构建模板变量值
@@ -139,6 +141,8 @@ func (o *TVOrganizer) buildVarValues(anime core.Anime, episode core.Episode) Var
 		Ext:      "",
 		AnimeID:  anime.ID,
 		Provider: anime.Provider,
+		TMDBID:   anime.TMDBID,
+		IMDBID:   anime.IMDBID,
 	}
 }
 
@@ -206,6 +210,10 @@ func resolveVar(name string, v VarValues) string {
 		return fmt.Sprintf("%02g", v.Ep)
 	case "ext":
 		return v.Ext
+	case "tmdb_id":
+		return v.TMDBID
+	case "imdb_id":
+		return v.IMDBID
 	default:
 		return "{" + name + "}"
 	}

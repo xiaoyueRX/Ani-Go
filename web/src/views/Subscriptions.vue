@@ -233,12 +233,19 @@ function confirmSingleDelete() {
   scheduleDelete([sub.id], deleteFilesChecked.value)
 }
 
-async function triggerSupplement(sub: Subscription) {
+declare global {
+  interface Window {
+    showToast: (message: string, type?: 'success' | 'error' | 'info') => void
+  }
+}
+
+async function triggerSupplement(sub: any) {
   try {
     await request.post(`/subscriptions/${sub.id}/trigger-supplement`)
-    alert(t('subscriptions.supplementTriggered'))
+    window.showToast(t('subs.supplementTriggered'))
   } catch (e: any) {
-    error.value = e.response?.data?.error || t('subscriptions.error.supplement')
+    error.value = e.response?.data?.error || t('subs.error.supplement')
+    window.showToast(error.value, 'error')
   }
 }
 

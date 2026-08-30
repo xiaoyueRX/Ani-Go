@@ -523,6 +523,13 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 
 		lastOrganizedPath = newPath
 		successCount++
+
+		// 每整理完一集，重新计算订阅的当前集数（仅计算 organized 状态，即已落盘整理好的）
+		var count int64
+		database.DB.Model(&database.Episode{}).
+			Where("subscription_id = ? AND status = ? AND deleted_at IS NULL", sub.ID, "organized").
+			Count(&count)
+		database.DB.Model(&sub).Update("current_episodes", int(count))
 	}
 
 	if s.bus != nil && (successCount > 0 || failureCount > 0) {
@@ -611,6 +618,14 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 				updates["metadata_provider"] = s.metadataProvider.Name()
 				sub.MetadataProvider = s.metadataProvider.Name()
 			}
+			if sub.TMDBID == "" && anime.TMDBID != "" {
+				updates["tmdb_id"] = anime.TMDBID
+				sub.TMDBID = anime.TMDBID
+			}
+			if sub.IMDBID == "" && anime.IMDBID != "" {
+				updates["imdb_id"] = anime.IMDBID
+				sub.IMDBID = anime.IMDBID
+			}
 
 			if len(updates) > 0 {
 				database.DB.Model(&sub).Updates(updates)
@@ -685,9 +700,9 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 
 	var count int64
 	database.DB.Model(&database.Episode{}).
-		Where("subscription_id = ? AND status IN ?", sub.ID, []string{"downloaded", "downloading"}).
+		Where("subscription_id = ? AND status = ? AND deleted_at IS NULL", sub.ID, "organized").
 		Count(&count)
-	database.DB.Model(&sub).Update("current_episodes", count)
+	database.DB.Model(&sub).Update("current_episodes", int(count))
 
 	if sub.TotalEpisodes > 0 && int(count) >= sub.TotalEpisodes {
 		database.DB.Model(&sub).Update("completed", true)

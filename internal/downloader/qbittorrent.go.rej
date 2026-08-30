@@ -1,0 +1,5 @@
+--- /dev/null
++++ /dev/null
+@@ -194 +194 @@
+-	data.Set("deleteFiles", "true")
++	data.Set("deleteFiles", strconv.FormatBool(deleteFiles))

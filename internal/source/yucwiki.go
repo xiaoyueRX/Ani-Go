@@ -1,46 +1,49 @@
-// Package source 提供番剧资源站接口实现
 package source
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
-	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
-// YucWikiSource 从 yuc.wiki 获取新番时间表
 type YucWikiSource struct {
 	httpClient *http.Client
 	baseURL    string
 	cache      sync.Map
 }
 
-// yucCacheItem 内存缓存项
 type yucCacheItem struct {
 	timestamp time.Time
-	data      any
+	data      interface{}
 }
 
 func NewYucWikiSource() *YucWikiSource {
+	// YucWiki 证书常年过期，必须用 Insecure
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
 	return &YucWikiSource{
-		httpClient: httpx.NewInsecure(15 * time.Second),
-		baseURL:    "https://yuc.wiki",
+		httpClient: &http.Client{
+			Transport: tr,
+			Timeout:   20 * time.Second,
+		},
+		baseURL: "https://yuc.wiki",
 	}
 }
 
 func (y *YucWikiSource) Name() string { return "YucWiki" }
 
-// seasonPath 根据指定年份和季度返回 yuc.wiki 的季度页面路径
-// season: 1=1月, 2=4月, 3=7月, 4=10月
-func seasonPath(year, season int) string {
+func (y *YucWikiSource) seasonPath(year, season int) string {
 	if year <= 0 || season <= 0 {
 		now := time.Now()
 		year = now.Year()
@@ -68,147 +71,16 @@ func seasonPath(year, season int) string {
 	case 4:
 		month = "10"
 	default:
-		month = "01" // 默认一月
+		month = "01"
 	}
 
+	// 历史年份适配：实测 2024 年及以后都是目录格式
+	if year < 2024 {
+		return fmt.Sprintf("/%d%s.htm", year, month)
+	}
 	return fmt.Sprintf("/%d%s/", year, month)
 }
 
-// SPTypedGroup SP/OVA/剧场版按月和类型分组
-type SPTypedGroup struct {
-	Month string             `json:"month"` // "2026年3月"
-	Type  string             `json:"type"`  // "剧场版"/"OVA"/"SP"
-	Items []core.TorrentItem `json:"items"`
-}
-
-// FetchSPItems 获取 SP/OVA/剧场版列表
-func (y *YucWikiSource) FetchSPItems(ctx context.Context) ([]SPTypedGroup, error) {
-	cacheKey := "sp_items"
-	if val, ok := y.cache.Load(cacheKey); ok {
-		if item, ok := val.(yucCacheItem); ok {
-			if time.Since(item.timestamp) < 6*time.Hour {
-				return item.data.([]SPTypedGroup), nil
-			}
-		}
-	}
-
-	url := y.baseURL + "/sp/"
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-	resp, err := y.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var groups []SPTypedGroup
-	monthRe := regexp.MustCompile(`(\d{4}年\d{1,2}月)`)
-
-	type itemWithType struct {
-		item core.TorrentItem
-		tp   string
-	}
-
-	doc.Find("details").Each(func(i int, det *goquery.Selection) {
-		summary := det.Find("summary").Text()
-		match := monthRe.FindStringSubmatch(summary)
-		if len(match) < 2 {
-			return
-		}
-		month := match[1]
-
-		// 按类型归类本月条目
-		typeMap := make(map[string][]core.TorrentItem)
-		
-		det.Find("div[style='float:left']").Each(func(j int, s *goquery.Selection) {
-			titleTd := s.Find("td.sp_title")
-			if titleTd.Length() == 0 {
-				return
-			}
-
-			// 提取类型
-			tp := "其他"
-			if class, ok := s.Find("td[class^='type-']").Attr("class"); ok {
-				switch {
-				case strings.Contains(class, "type-m"):
-					tp = "剧场版"
-				case strings.Contains(class, "type-ova") || strings.Contains(class, "type-o"):
-					tp = "OVA"
-				case strings.Contains(class, "type-sp") || strings.Contains(class, "type-websp") || 
-					strings.Contains(class, "type-tvsp") || strings.Contains(class, "type-s"):
-					tp = "SP"
-				}
-			}
-
-			// 处理标题中的 <br>
-			titleTd.Find("br").ReplaceWithHtml(" ")
-			title := strings.TrimSpace(titleTd.Text())
-			title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
-
-
-			// 获取日期
-			releaseTd := s.Find("td.sp_release")
-			airedDate := strings.TrimSpace(releaseTd.Text())
-
-			// 获取海报
-			img := s.Find("img").First()
-			cover, _ := img.Attr("data-src")
-			if cover == "" {
-				cover, _ = img.Attr("src")
-			}
-
-			// 转换为 https
-			if cover != "" {
-				if strings.HasPrefix(cover, "http://") {
-					cover = "https://" + cover[7:]
-				} else if strings.HasPrefix(cover, "//") {
-					cover = "https:" + cover
-				}
-			}
-
-			if title != "" {
-				item := core.TorrentItem{
-					Title:      title,
-					SourceName: "YucWiki",
-					AiredDate:  airedDate,
-					CoverURL:   cover,
-				}
-				typeMap[tp] = append(typeMap[tp], item)
-			}
-		})
-
-		// 按照 剧场版 -> OVA -> SP -> 其他 的顺序加入组
-		typeOrder := []string{"剧场版", "OVA", "SP", "其他"}
-		for _, tp := range typeOrder {
-			if items, ok := typeMap[tp]; ok && len(items) > 0 {
-				groups = append(groups, SPTypedGroup{
-					Month: month,
-					Type:  tp,
-					Items: items,
-				})
-			}
-		}
-	})
-
-	y.cache.Store(cacheKey, yucCacheItem{
-		timestamp: time.Now(),
-		data:      groups,
-	})
-
-	return groups, nil
-}
-
-// FetchWeekSchedule 获取按星期分组的新番时间表
 func (y *YucWikiSource) FetchWeekSchedule(ctx context.Context, year, season int) ([]WeekDayItem, error) {
 	cacheKey := fmt.Sprintf("schedule:%d:%d", year, season)
 	if val, ok := y.cache.Load(cacheKey); ok {
@@ -219,7 +91,7 @@ func (y *YucWikiSource) FetchWeekSchedule(ctx context.Context, year, season int)
 		}
 	}
 
-	url := y.baseURL + seasonPath(year, season)
+	url := y.baseURL + y.seasonPath(year, season)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -238,7 +110,7 @@ func (y *YucWikiSource) FetchWeekSchedule(ctx context.Context, year, season int)
 		return nil, err
 	}
 
-	result, err := parseYucWiki(string(body))
+	result, err := y.parseYucWiki(string(body))
 	if err != nil {
 		return nil, err
 	}
@@ -251,106 +123,202 @@ func (y *YucWikiSource) FetchWeekSchedule(ctx context.Context, year, season int)
 	return result, nil
 }
 
-func parseYucWiki(html string) ([]WeekDayItem, error) {
+func (y *YucWikiSource) parseYucWiki(html string) ([]WeekDayItem, error) {
 	weekLabel := map[int]string{
 		1: "星期一", 2: "星期二", 3: "星期三", 4: "星期四",
 		5: "星期五", 6: "星期六", 7: "星期日",
 	}
 
-	// 解析 html 获取封面图映射
-	coverMap := make(map[string]string)
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err == nil {
-		doc.Find(".date_title, .date_title_, .date_title__").Each(func(i int, s *goquery.Selection) {
-			// 将 <br> 替换为空格，并去除多余空白
-			s.Find("br").ReplaceWithHtml(" ")
-			title := strings.TrimSpace(s.Text())
-			// yucwiki 的标题可能有换行，清洗一下
+	if err != nil {
+		return nil, err
+	}
+
+	// 1. 建立封面图映射
+	type meta struct {
+		src        string
+		totalEps   int
+		isFinished bool
+	}
+	coverMap := make(map[string]meta)
+	doc.Find("img").Each(func(i int, s *goquery.Selection) {
+		src, _ := s.Attr("data-src")
+		if src == "" {
+			src, _ = s.Attr("src")
+		}
+		if src == "" {
+			return
+		}
+
+		// yuc.wiki 结构：<div class="div_date"><img src="..."></div><div><table>...<td class="date_title">标题</td>
+		var title string
+		if divDate := s.Closest(".div_date"); divDate.Length() > 0 {
+			// 排除那些“版权方/播放平台”的 logo 图（这类图通常被包在 td 里，且没有 div_date 父节点）
+			// 但 yuc.wiki 的番剧封面是在 div.div_date 里的直接子节点
+			titleNode := divDate.Next().Find("td.date_title, td.date_title_, td.date_title__").First()
+			tClone := titleNode.Clone()
+			tClone.Find("br").ReplaceWithHtml(" ")
+			title = strings.TrimSpace(tClone.Text())
 			title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
-			
-			parentDiv := s.ParentsFiltered("div").Parent()
-			img := parentDiv.Find("img").First()
-			src, _ := img.Attr("data-src")
-			if src == "" {
-				src, _ = img.Attr("src")
+		}
+
+		// 3. 提取总集数信息 (yuc.wiki 结构：td.date_title 后的 td.date_title_)
+		var totalEps int
+		var isFinished bool
+		if divDate := s.Closest(".div_date"); divDate.Length() > 0 {
+			if titleNode := divDate.Next().Find("td.date_title, td.date_title_, td.date_title__"); titleNode.Length() > 0 {
+				titleNode.Each(func(idx int, sel *goquery.Selection) {
+					txt := sel.Text()
+					if strings.Contains(txt, "全") && strings.Contains(txt, "话") {
+						re := regexp.MustCompile(`全(\d+)话`)
+						if matches := re.FindStringSubmatch(txt); len(matches) > 1 {
+							totalEps, _ = strconv.Atoi(matches[1])
+							isFinished = true
+						}
+					}
+				})
 			}
-			if src != "" {
-				// 转换为 https 并处理 bilibili 链接
-				if strings.HasPrefix(src, "http://") {
-					src = "https://" + src[7:]
-				} else if strings.HasPrefix(src, "//") {
+		}
+
+		// 增加硬核过滤：yuc.wiki 的巴哈姆特/B站版权占位图 md5 或 特征 URL
+		if strings.Contains(src, "d06ad4b201012067db7d59c9dedfadeb6da75cf3.jpg") || 
+		   strings.Contains(src, "dec51811ba1216627f761e1a730be1f3512995925.jpg") {
+			return
+		}
+
+			if title != "" {
+				if strings.HasPrefix(src, "//") {
 					src = "https:" + src
+				} else if strings.HasPrefix(src, "http://") {
+					src = "https" + src[4:]
+				}
+				// 移除 URL 中的尺寸限制后缀，获取原图
+				if idx := strings.Index(src, "?"); idx != -1 {
+					src = src[:idx]
+				}
+				coverMap[title] = meta{
+					src:        src,
+					totalEps:   totalEps,
+					isFinished: isFinished,
 				}
 			}
-			if title != "" && src != "" {
-				coverMap[title] = src
-			}
-		})
-	}
+	})
 
-	// 去除 HTML 标签得到纯文本
-	cleanText := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(html, " ")
-	cleanText = regexp.MustCompile(`\s+`).ReplaceAllString(cleanText, " ")
+	// 2. 按星期分组抓取番剧标题
+	weekdaysData := make(map[int][]string)
+	doc.Find("td.date2").Each(func(i int, s *goquery.Selection) {
+		text := strings.TrimSpace(s.Text())
+		var day int
+		switch {
+		case strings.Contains(text, "一"): day = 1
+		case strings.Contains(text, "二"): day = 2
+		case strings.Contains(text, "三"): day = 3
+		case strings.Contains(text, "四"): day = 4
+		case strings.Contains(text, "五"): day = 5
+		case strings.Contains(text, "六"): day = 6
+		case strings.Contains(text, "日"): day = 7
+		default: return
+		}
 
-	weekdays := []string{"周一", "周二", "周三", "周四", "周五", "周六", "周日"}
+		var titles []string
+		container := s.Closest("div")
+		if container.Length() == 0 { container = s.Closest("table") }
+		
+		curr := container.Next()
+		for curr.Length() > 0 {
+			if curr.Find("td.date2").Length() > 0 { break }
+			
+			curr.Find("td.date_title, td.date_title_, td.date_title__").Each(func(j int, ts *goquery.Selection) {
+				tn := ts.Clone()
+				tn.Find("br").ReplaceWithHtml(" ")
+				t := strings.TrimSpace(tn.Text())
+				t = regexp.MustCompile(`\s+`).ReplaceAllString(t, " ")
+				if t != "" { titles = append(titles, t) }
+			})
+			curr = curr.Next()
+		}
+		if len(titles) > 0 {
+			weekdaysData[day] = titles
+		}
+	})
 
+	// 3. 组装结果
 	var result []WeekDayItem
-
-	for i, wd := range weekdays {
-		// 找到该星期的区间
-		wdPattern := wd + " ("
-		wdStart := strings.Index(cleanText, wdPattern)
-		if wdStart < 0 {
-			continue
+	for i := 1; i <= 7; i++ {
+		item := WeekDayItem{
+			DayOfWeek: i,
+			Label:     weekLabel[i],
+			Items:     []core.TorrentItem{},
 		}
-
-		// 找到下一个星期或结尾
-		wdEnd := len(cleanText)
-		for j := i + 1; j < len(weekdays); j++ {
-			nextPattern := weekdays[j] + " ("
-			nextIdx := strings.Index(cleanText[wdStart+len(wdPattern):], nextPattern)
-			if nextIdx >= 0 {
-				candidate := wdStart + len(wdPattern) + nextIdx
-				if candidate < wdEnd {
-					wdEnd = candidate
-				}
+		if titles, ok := weekdaysData[i]; ok {
+			for _, t := range titles {
+				metaData := coverMap[t]
+				cover := metaData.src
+				if cover == "" { cover = "/placeholder.jpg" }
+				item.Items = append(item.Items, core.TorrentItem{
+					Title:         t,
+					CoverURL:      cover,
+					TotalEpisodes: metaData.totalEps,
+					IsFinished:    metaData.isFinished,
+				})
 			}
 		}
+		result = append(result, item)
+	}
+	return result, nil
+}
 
-		section := cleanText[wdStart:wdEnd]
+func (y *YucWikiSource) FetchSPItems(ctx context.Context, year, season int) ([]core.TorrentItem, error) {
+	url := y.baseURL + y.seasonPath(year, season)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
-		// 提取番剧条目: 时间~日期~标题 或 时间~ (全xx话) 标题
-		entryRe := regexp.MustCompile(`(\d{1,2}:\d{2})~\s*(?:([\d/]+)~|\(([^)]*)\)|(?:P\d+=\d+话|全\d+话\??))?\s*([^\s(（][^~]{1,100}?)(?:\s+(?:环大陆|港台|大陆|网络|完结)|\s*\d{1,2}:\d{2}~|$)`)
-		matches := entryRe.FindAllStringSubmatch(section, -1)
+	resp, err := y.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-		var items []core.TorrentItem
-		for _, m := range matches {
-			title := strings.TrimSpace(m[4])
-			if title == "" {
-				continue
-			}
-
-			// 匹配封面图，清理标题空白
-			cleanTitle := regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
-			cover := coverMap[cleanTitle]
-
-			items = append(items, core.TorrentItem{
-				Title:      title,
-				SourceName: "YucWiki",
-				AiredTime:  strings.TrimSpace(m[1]),
-				AiredDate:  strings.TrimSpace(m[2]),
-				CoverURL:   cover,
-			})
-		}
-
-		if len(items) > 0 {
-			result = append(result, WeekDayItem{
-				DayOfWeek: i + 1,
-				Label:     weekLabel[i+1],
-				Items:     items,
-			})
-		}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
 
-	return result, nil
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+
+	var spItems []core.TorrentItem
+	// YucWiki 的 SP/剧场版通常在 "网络放送 & 其他" 栏目下，或者没有明确日期标记的区域
+	// 这里通过查找 "网络放送" 标题后的内容来提取
+	doc.Find("td.date2").Each(func(i int, s *goquery.Selection) {
+		text := s.Text()
+		if strings.Contains(text, "网络") || strings.Contains(text, "其他") || strings.Contains(text, "剧场") {
+			container := s.Closest("div")
+			if container.Length() == 0 { container = s.Closest("table") }
+			
+			curr := container.Next()
+			for curr.Length() > 0 {
+				if curr.Find("td.date2").Length() > 0 { break }
+				curr.Find("td.date_title, td.date_title_, td.date_title__").Each(func(j int, ts *goquery.Selection) {
+					tNode := ts.Clone()
+					tNode.Find("br").ReplaceWithHtml(" ")
+					title := strings.TrimSpace(tNode.Text())
+					title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
+					if title != "" {
+						spItems = append(spItems, core.TorrentItem{
+							Title: title,
+						})
+					}
+				})
+				curr = curr.Next()
+			}
+		}
+	})
+
+	return spItems, nil
 }

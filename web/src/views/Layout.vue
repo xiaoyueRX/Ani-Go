@@ -17,6 +17,26 @@ const isDrawerOpen = ref(false)
 
 const { latestVersion, hasNewVersion, checkGitHubUpdate } = useVersion()
 
+interface Toast {
+  id: number
+  message: string
+  type: 'success' | 'error' | 'info'
+}
+
+const toasts = ref<Toast[]>([])
+let toastId = 0
+
+function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
+  const id = ++toastId
+  toasts.value.push({ id, message, type })
+  setTimeout(() => {
+    toasts.value = toasts.value.filter(t => t.id !== id)
+  }, 3000)
+}
+
+// 暴露出全局 Toast 给子组件使用
+window.showToast = showToast
+
 function toggleLanguage() {
   locale.value = locale.value === 'zh' ? 'en' : 'zh'
   localStorage.setItem('lang', locale.value)
@@ -103,6 +123,28 @@ function closeDrawer() {
       <footer class="p-6 text-center text-[10px] font-bold tracking-[0.2em] uppercase opacity-20 mt-auto">
         {{ $t('footer.copy') }}
       </footer>
+
+      <!-- Global Toasts -->
+      <div class="toast toast-end toast-bottom p-4 z-[100]">
+        <transition-group name="page">
+          <div 
+            v-for="t in toasts" :key="t.id"
+            class="alert shadow-2xl border-0 mb-2 rounded-2xl min-w-[280px] animate-in slide-in-from-right duration-300"
+            :class="{
+              'bg-primary text-primary-content': t.type === 'success',
+              'bg-error text-error-content': t.type === 'error',
+              'bg-info text-info-content': t.type === 'info'
+            }"
+          >
+            <div class="flex items-center gap-3">
+              <Sparkles v-if="t.type === 'success'" :size="18" />
+              <TriangleAlert v-else-if="t.type === 'error'" :size="18" />
+              <Antenna v-else :size="18" />
+              <span class="text-xs font-black uppercase tracking-widest">{{ t.message }}</span>
+            </div>
+          </div>
+        </transition-group>
+      </div>
     </div>
 
     <!-- Sidebar -->

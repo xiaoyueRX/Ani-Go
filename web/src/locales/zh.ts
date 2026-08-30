@@ -250,8 +250,8 @@ export default {
       cancel: '取消操作',
       end: '探索列表结束',
     },
-    subscribed: '已订阅: {title}',
-    subscribeFailed: '订阅失败: {error}',
+    subscribed: '订阅成功喵: {title}',
+    subscribeFailed: '订阅失败喵: {error}',
   },
   downloads: {
     title: '下载队列',
@@ -299,7 +299,8 @@ export default {
       supplement: '触发补全失败',
     },
     confirmDelete: '确定要删除「{title}」吗？关联的剧集记录也会一并删除。',
-    supplementSuccess: '补全任务已触发，将在后台执行',
+    supplementSuccess: '补全任务已触发，将在后台执行喵',
+    supplementTriggered: '补全任务已触发，正在全力拉取历史剧集喵',
     empty: {
       noResults: '未找到结果',
       noResultsDesc: '无法找到匹配的项目。尝试放宽搜索条件。',

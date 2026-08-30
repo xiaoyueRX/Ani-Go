@@ -22,6 +22,9 @@ type TorrentItem struct {
 	AiredDate   string    `json:"aired_date,omitempty"`
 	GroupName   string    `json:"group_name"`
 	Resolution  string    `json:"resolution,omitempty"`
+	// YucWiki 元数据增强
+	TotalEpisodes int  `json:"total_episodes,omitempty"`
+	IsFinished    bool `json:"is_finished,omitempty"`
 }
 
 type Anime struct {
@@ -37,6 +40,8 @@ type Anime struct {
 	Description string `json:"description"`
 	CoverURL    string `json:"cover_url"`
 	SeriesID    string `json:"series_id"`
+	TMDBID      string `json:"tmdb_id,omitempty"`
+	IMDBID      string `json:"imdb_id,omitempty"`
 }
 
 type Episode struct {

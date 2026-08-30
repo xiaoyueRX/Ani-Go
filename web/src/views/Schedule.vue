@@ -377,6 +377,8 @@ async function confirmBatchSubscribe() {
         bangumi_id: i.bangumi_id,
         cover_url: i.cover_url,
         subgroups: i.subgroups,
+        total_episodes: i.item.total_episodes || 0,
+        is_finished: i.item.is_finished || false,
       }))
     }
     
@@ -803,8 +805,8 @@ onMounted(async () => {
     <dialog :class="['modal', { 'modal-open': selectedItem }]">
       <div v-if="selectedItem" class="modal-box bg-base-200/95 backdrop-blur-3xl border border-white/5 rounded-[2.5rem] p-0 overflow-hidden max-w-sm w-full shadow-[0_0_40px_rgba(0,0,0,0.5)]">
         <!-- Header Image -->
-        <div class="relative w-full aspect-video bg-base-300">
-          <img v-if="selectedItem.cover_url" :src="proxyImage(selectedItem.cover_url)" class="w-full h-full object-contain" referrerpolicy="no-referrer" />
+        <div class="relative w-full aspect-[3/3.8] bg-base-300">
+          <img v-if="selectedItem.cover_url" :src="proxyImage(selectedItem.cover_url)" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
           <div class="absolute inset-0 bg-gradient-to-t from-base-200 to-transparent"></div>
           <button class="btn btn-circle btn-sm btn-ghost absolute top-4 right-4 text-white bg-black/20 hover:bg-black/40 border-none backdrop-blur-md" @click="selectedItem = null">
             <X :size="16" />
@@ -816,16 +818,11 @@ onMounted(async () => {
           <div>
             <h3 class="text-xl font-black leading-tight mb-3 text-base-content">{{ selectedItem.title }}</h3>
             <div class="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest text-base-content/60">
-              <span class="flex items-center gap-1.5 bg-base-100/50 px-3 py-1.5 rounded-xl border border-base-content/5"><Clock :size="14" /> {{ selectedItem.aired_time || selectedItem.info_hash || 'TBA' }}</span>
-              <span class="flex items-center gap-1.5 bg-base-100/50 px-3 py-1.5 rounded-xl border border-base-content/5"><Calendar :size="14" /> {{ selectedItem.aired_date || selectedItem.bangumi_id || 'TBA' }}</span>
+              <span class="flex items-center gap-1.5 bg-base-100/50 px-3 py-1.5 rounded-xl border border-base-content/5"><Clock :size="14" /> {{ selectedItem.aired_time || 'TBA' }}</span>
+              <span class="flex items-center gap-1.5 bg-base-100/50 px-3 py-1.5 rounded-xl border border-base-content/5"><Calendar :size="14" /> {{ selectedItem.aired_date || 'TBA' }}</span>
             </div>
           </div>
           
-          <!-- Synopsis Placeholder -->
-          <p class="text-xs font-medium text-base-content/50 leading-relaxed pb-2">
-            {{ $t('schedule.modal.noSynopsis') }}
-          </p>
-
           <!-- Action -->
           <div class="pt-2">
             <button class="btn btn-primary w-full rounded-2xl flex gap-3 items-center justify-center font-black tracking-widest text-xs h-14 shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-shadow" @click="router.push(`/search?q=${encodeURIComponent(selectedItem?.title || '')}`)">

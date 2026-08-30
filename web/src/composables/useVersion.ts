@@ -1,7 +1,7 @@
 import { ref, onMounted } from 'vue'
 import request from '../utils/request'
 
-export const CURRENT_VERSION = 'v0.2.0'
+export const CURRENT_VERSION = 'v0.3.5'
 const VERSION_KEY = 'ani-go-last-version'
 const AUTO_UPDATE_KEY = 'ani-go-auto-update'
 

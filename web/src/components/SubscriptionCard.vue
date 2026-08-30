@@ -38,10 +38,18 @@ const props = defineProps<{
 
 function proxyImage(url: string | undefined): string {
   if (!url) return ''
+  // 如果已经是代理链接，直接返回
   if (url.includes('api/proxy/image')) return url
+  
   let target = url
-  if (url.startsWith('//')) target = 'https:' + url
-  return `/api/proxy/image?url=${encodeURIComponent(target)}`
+  // 处理相对路径
+  if (url.startsWith('//')) {
+    target = 'https:' + url
+  }
+  
+  // 生产环境下使用绝对路径 API 绕过前端路由拦截
+  const apiPath = window.location.origin + '/api/proxy/image'
+  return `${apiPath}?url=${encodeURIComponent(target)}`
 }
 
 const emit = defineEmits<{
@@ -80,7 +88,7 @@ const progressColor = computed(() => {
         v-if="sub.cover_url"
         :src="proxyImage(sub.cover_url)"
         :alt="sub.title_cn"
-        class="w-full h-full object-cover transition-all duration-1000 group-hover:scale-105"
+        class="w-full h-full object-contain bg-black transition-all duration-1000 group-hover:scale-105"
         :class="{ 'opacity-0': !isImageLoaded, 'opacity-100': isImageLoaded }"
         @load="isImageLoaded = true"
         @error="(e) => { 

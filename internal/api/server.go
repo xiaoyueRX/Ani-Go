@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/ai"
@@ -82,7 +83,7 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 				return
 			}
 			// /api/health 和 /api/login 也走 API
-			if r.URL.Path == "/api/health" || r.URL.Path == "/api/login" || r.URL.Path == "/api/me" {
+			if r.URL.Path == "/api/health" || r.URL.Path == "/api/login" || r.URL.Path == "/api/me" || strings.HasPrefix(r.URL.Path, "/api/proxy/image") {
 				apiHandler.ServeHTTP(w, r)
 				return
 			}

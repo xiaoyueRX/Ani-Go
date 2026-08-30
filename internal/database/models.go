@@ -30,6 +30,8 @@ type Subscription struct {
 	FilterJSON       string `gorm:"type:text"`
 	CustomPath       string
 	SeriesID         string
+	TMDBID           string `gorm:"index"`
+	IMDBID           string `gorm:"index"`
 }
 
 type Episode struct {

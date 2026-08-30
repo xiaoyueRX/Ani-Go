@@ -67,10 +67,12 @@ type createSubscriptionRequest struct {
 }
 
 type batchSubscriptionItem struct {
-	TitleCN   string   `json:"title_cn"`
-	BangumiID string   `json:"bangumi_id"`
-	CoverURL  string   `json:"cover_url"`
-	Subgroups []string `json:"subgroups"`
+	TitleCN       string   `json:"title_cn"`
+	BangumiID     string   `json:"bangumi_id"`
+	CoverURL      string   `json:"cover_url"`
+	Subgroups     []string `json:"subgroups"`
+	TotalEpisodes int      `json:"total_episodes"`
+	IsFinished    bool     `json:"is_finished"`
 }
 
 type batchSubscriptionRequest struct {
@@ -289,11 +291,13 @@ func (s *Server) handleBatchCreateSubscriptions(w http.ResponseWriter, r *http.R
 		subgroup := strings.Join(item.Subgroups, ",")
 
 		sub := database.Subscription{
-			TitleCN:      item.TitleCN,
-			BangumiID:    item.BangumiID,
-			SubgroupName: subgroup,
-			CoverURL:     item.CoverURL,
-			Enabled:      true,
+			TitleCN:       item.TitleCN,
+			BangumiID:     item.BangumiID,
+			SubgroupName:  subgroup,
+			CoverURL:      item.CoverURL,
+			TotalEpisodes: item.TotalEpisodes,
+			Completed:     item.IsFinished,
+			Enabled:       true,
 		}
 
 		if err := database.DB.Create(&sub).Error; err != nil {
@@ -318,6 +322,17 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 
 	if req.TitleCN == "" {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "番剧标题 (title_cn) 不能为空"})
+		return
+	}
+
+	// 查重：防止重复订阅
+	var existing database.Subscription
+	query := database.DB.Where("title_cn = ?", req.TitleCN)
+	if req.BangumiID != "" {
+		query = database.DB.Where("title_cn = ? OR bangumi_id = ?", req.TitleCN, req.BangumiID)
+	}
+	if err := query.First(&existing).Error; err == nil {
+		writeJSON(w, http.StatusConflict, errorResponse{Error: "该番剧已在订阅列表中喵！"})
 		return
 	}
 
@@ -649,13 +664,12 @@ func getStallTimeout() time.Duration {
 
 func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"version": s.version,
+		"version": "v0.3.5",
 		"changelog": []string{
-			"新增引导弹窗单次会话逻辑，不再频繁打扰",
-			"新增版本更新日志提示，及时了解新功能",
-			"新增自动检查更新功能，支持检测 GitHub 最新版本",
-			"优化设置页布局，增加自动更新开关",
-			"修复部分 UI 显示问题",
+			"🗂️ 整理引擎增强：修复 qBittorrent 删种 API 参数错误导致的归档卡死喵",
+			"📸 视觉比例锁定：统一海报比例 3:3.8，解决海报拉伸与显示不全喵",
+			"🆔 元数据注入：在文件路径中自动注入 [tmdbid=xxxx] 提升刮削率喵",
+			"🌙 品牌视觉重塑：更新极简侧颜 Logo，更有次元同步范喵",
 		},
 	})
 }
@@ -1021,17 +1035,13 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 			log.Printf("⚠️  Yucwiki 获取时间表失败: %v，尝试使用 mikan", err)
 		} else {
 			// yucwiki 获取成功后，额外获取 SP 条目
-			spGroups, spErr := s.yucSrc.FetchSPItems(r.Context())
-			if spErr == nil {
-				for _, g := range spGroups {
-					schedule = append(schedule, source.WeekDayItem{
-						DayOfWeek: 0,
-						Label:     fmt.Sprintf("%s · %s", g.Month, g.Type),
-						Items:     g.Items,
-					})
-				}
-			} else if spErr != nil {
-				log.Printf("⚠️  Yucwiki 获取 SP 失败: %v", spErr)
+			spItems, spErr := s.yucSrc.FetchSPItems(r.Context(), year, season)
+			if spErr == nil && len(spItems) > 0 {
+				schedule = append(schedule, source.WeekDayItem{
+					DayOfWeek: 0,
+					Label:     "网络放送 & 其他",
+					Items:     spItems,
+				})
 			}
 		}
 	}
@@ -1151,7 +1161,7 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 域名白名单校验（使用 URL 解析 + 后缀匹配，防止 SSRF 绕过）
-	allowedDomains := []string{"i0.hdslb.com", "lain.bgm.tv", "img.mikanani.me", "image.tmdb.org", "bilibili.com", "bgm.tv", "mikanime.tv", "yuc.wiki", "yucc.wiki", "yucwiki.net"}
+	allowedDomains := []string{"i0.hdslb.com", "lain.bgm.tv", "img.mikanani.me", "mikanani.me", "image.tmdb.org", "bilibili.com", "bgm.tv", "mikanime.tv", "yuc.wiki", "yucc.wiki", "yucwiki.net"}
 	parsedURL, err := url.Parse(imageURL)
 	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		http.Error(w, "invalid url", http.StatusBadRequest)
