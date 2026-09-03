@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
@@ -8,29 +8,23 @@ import {
   Folder, Bell, Cpu, 
   Settings, Timer, Lock, 
   FileText, Eye, EyeOff,
-  Loader2,
-  ChevronDown,
-  RefreshCw,
-  User,
-  Database,
-  RotateCcw,
-  Upload,
-  HardDrive,
-  Trash2,
-  ArrowDown,
-  Shield,
-  Sparkles,
-  Plus
+  RefreshCw, User, Database, 
+  RotateCcw, Upload, Trash2, 
+  Shield, Sparkles, Plus, 
+  Copy, Search, ExternalLink
 } from 'lucide-vue-next'
+import { CURRENT_VERSION } from '../composables/useVersion'
 
 const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
+
+// 全局配置数据
 const settings = ref<Record<string, string>>({})
 const loading = ref(true)
 const error = ref('')
 const saved = ref(false)
-const activeTab = ref(route.query.tab ? String(route.query.tab) : 'mikan')
+const activeTab = ref(route.query.tab ? String(route.query.tab) : 'paths')
 const showPasswords = ref<Set<string>>(new Set())
 
 // 镜像测速
@@ -38,6 +32,7 @@ const mirrorTesting = ref(false)
 const mirrorResults = ref<{ domain: string; latency_ms: number; ok: boolean }[]>([])
 const selectedMirror = ref('')
 
+// 账户密码修改
 const oldPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
@@ -45,7 +40,7 @@ const changingPassword = ref(false)
 const passwordMsg = ref('')
 const passwordError = ref('')
 
-// 备份管理状态
+// 备份管理
 const backupLoading = ref(false)
 const backupList = ref<{ name: string; size: number; mod_time: string }[]>([])
 const creatingBackup = ref(false)
@@ -53,7 +48,7 @@ const restoringBackup = ref(false)
 const deletingBackup = ref<string | null>(null)
 const showBackupEpisodes = ref(false)
 
-// 插件管理状态
+// 插件管理
 const pluginLoading = ref(false)
 const pluginList = ref<any[]>([])
 const showPluginModal = ref(false)
@@ -83,6 +78,346 @@ const availablePluginEvents = [
   { id: 'error', label: '系统异常报警 (error)' }
 ]
 
+// 日志管理
+const logs = ref<string[]>([])
+const logLoading = ref(false)
+const logFilter = ref('')
+const autoRefreshLogs = ref(false)
+let logTimer: any = null
+
+const filteredLogs = computed(() => {
+  if (!logFilter.value.trim()) return logs.value
+  const q = logFilter.value.toLowerCase()
+  return logs.value.filter(line => line.toLowerCase().includes(q))
+})
+
+// AI 模型列表
+const modelLoading = ref(false)
+const modelOptions = ref<{ label: string; value: string }[]>([])
+
+// 导航分组结构
+const tabGroups = computed(() => [
+  {
+    name: '核心与存储',
+    tabs: [
+      { key: 'paths', label: '存储与目录', icon: Folder },
+      { key: 'downloader', label: '下载客户端', icon: Download },
+    ]
+  },
+  {
+    name: '数据源与联动',
+    tabs: [
+      { key: 'mikan', label: 'Mikan 计划', icon: Antenna },
+      { key: 'bangumi', label: 'Bangumi 番组', icon: Antenna },
+    ]
+  },
+  {
+    name: '扩展与智能',
+    tabs: [
+      { key: 'ai', label: 'AI 辅助核心', icon: Cpu },
+      { key: 'notify', label: '消息通知推送', icon: Bell },
+      { key: 'plugins', label: '插件与自动化', icon: Sparkles },
+    ]
+  },
+  {
+    name: '系统与运维',
+    tabs: [
+      { key: 'backup', label: '数据备份恢复', icon: Database },
+      { key: 'logs', label: '系统运行日志', icon: FileText },
+      { key: 'account', label: '账户与安全', icon: Lock },
+    ]
+  }
+])
+
+// 扁平化标签页定义与字段映射
+interface FieldDef {
+  label: string
+  key: string
+  placeholder: string
+  type?: string
+  hint?: string
+  testChannel?: string
+  selectOptions?: { label: string; value: string }[]
+}
+
+const tabs = computed(() => [
+  { key: 'paths', label: '存储与目录', icon: Folder, sections: [
+    { title: '文件系统与媒体库路径', desc: '配置番剧文件下载整理与数据库持久化位置', fields: [
+      { label: '数据库存储路径', key: 'DB_PATH', placeholder: './data/ani-go.db' },
+      { label: '番剧 TV 剧集根目录', key: 'TV_BASE_PATH', placeholder: '/data/media/anime' },
+      { label: '剧场版 / 电影根目录', key: 'MOVIE_BASE_PATH', placeholder: '/data/media/movies' },
+    ]}
+  ]},
+  { key: 'downloader', label: '下载客户端', icon: Download, sections: [
+    { title: '默认下载引擎', desc: '全局下载器客户端调度偏好', fields: [
+      { label: '活动下载引擎', key: 'DEFAULT_DOWNLOADER', placeholder: 'qbittorrent', type: 'select', selectOptions: [
+        { label: 'qBittorrent (推荐)', value: 'qbittorrent' },
+        { label: 'Transmission', value: 'transmission' },
+        { label: 'Aria2', value: 'aria2' },
+      ]},
+    ]},
+    { title: 'qBittorrent 配置', desc: '主流的高性能 BitTorrent 客户端', fields: [
+      { label: 'WebUI 地址 (Host)', key: 'QB_HOST', placeholder: 'http://localhost:8081' },
+      { label: '下载目标分类 (Category)', key: 'QB_CATEGORY', placeholder: 'ani-go' },
+      { label: 'WebUI 用户名', key: 'QB_USER', placeholder: 'admin' },
+      { label: 'WebUI 访问密码', key: 'QB_PASS', placeholder: '已配置，输入新密码覆盖', type: 'password' },
+    ]},
+    { title: 'Transmission 配置', desc: '轻量级 Unix 风格客户端', fields: [
+      { label: 'RPC 服务端点', key: 'TR_HOST', placeholder: 'http://localhost:9091' },
+      { label: 'RPC 用户名', key: 'TR_USER', placeholder: 'Username' },
+      { label: 'RPC 访问密码', key: 'TR_PASS', placeholder: 'Access key', type: 'password' },
+    ]},
+    { title: 'Aria2 配置', desc: '多协议轻量极速下载工具', fields: [
+      { label: 'RPC 端点', key: 'ARIA2_HOST', placeholder: 'http://localhost:6800/jsonrpc' },
+      { label: 'RPC 密钥 (Secret)', key: 'ARIA2_SECRET', placeholder: 'Secret Token', type: 'password' },
+    ]},
+    { title: '种子自动维护', desc: '下载完成后自动管理做种生命周期', fields: [
+      { label: '自动删除已完成种子任务', key: 'SEED_CLEANUP_ENABLED', placeholder: '', type: 'select', selectOptions: [
+        { label: '开启（仅删种子，保留下载文件）', value: 'true' },
+        { label: '关闭', value: 'false' },
+      ]},
+      { label: '清理扫描周期', key: 'SEED_CLEANUP_INTERVAL', placeholder: '1h' },
+      { label: '达标最小做种分享率 (Ratio)', key: 'SEED_CLEANUP_MIN_RATIO', placeholder: '1.0' },
+    ]}
+  ]},
+  { key: 'mikan', label: 'Mikan 计划', icon: Antenna, sections: [
+    { title: 'Mikan 同步参数', desc: '配置番剧 RSS 订阅与网页抓取节点', fields: [
+      { label: '个人 RSS 订阅地址', key: 'MIKAN_RSS_URL', placeholder: 'https://mikanani.me/RSS/MyBangumi?token=***' },
+      { label: 'RSS 订阅模式', key: 'MIKAN_RSS_MODE', placeholder: '', type: 'select', selectOptions: [
+        { label: '个人订阅模式 (推荐)', value: 'personal' },
+        { label: '经典模式 (全局更新)', value: 'classic' },
+      ]},
+      { label: '当前主域名', key: 'MIKAN_DOMAIN', placeholder: 'mikanani.me' },
+      { label: '反代加速域名 (可选)', key: 'MIKAN_PROXY_DOMAIN', placeholder: '可选的代理加速地址' },
+      { label: '备选镜像节点列表', key: 'MIKAN_MIRROR_DOMAINS', placeholder: 'mikanani.me,mikanime.tv' },
+    ]}
+  ]},
+  { key: 'bangumi', label: 'Bangumi 番组', icon: Antenna, sections: [
+    { title: 'Bangumi OAuth2 授权凭据', desc: '在 bgm.tv/dev/app 创建客户端应用获取', fields: [
+      { label: 'Client ID', key: 'BANGUMI_CLIENT_ID', placeholder: 'bgm... (Client ID)' },
+      { label: 'Client Secret', key: 'BANGUMI_CLIENT_SECRET', placeholder: 'Client Secret', type: 'password' },
+    ]},
+    { title: 'Bangumi 数据同步设置', desc: '用于追番列表双向同步与日历信息查询', fields: [
+      { label: 'Bangumi 用户名 / ID', key: 'BGMTV_USERNAME', placeholder: '输入您的 Bangumi 用户名或 ID' },
+      { label: '个人访问令牌 (User Token)', key: 'BGMTV_USER_TOKEN', placeholder: 'Bearer Token (OAuth 授权后自动填入)', type: 'password' },
+      { label: '自动同步间隔', key: 'BGMTV_SYNC_INTERVAL', placeholder: '6h (默认 6 小时)' },
+      { label: 'API 主域名', key: 'BGMTV_DOMAIN', placeholder: 'api.bgm.tv' },
+      { label: '镜像节点列表', key: 'BGMTV_MIRROR_DOMAINS', placeholder: 'api.bgm.tv,api.bangumi.tv,api.chii.in' },
+    ]}
+  ]},
+  { key: 'ai', label: 'AI 辅助核心', icon: Cpu, sections: [
+    { title: '大语言模型参数', desc: '用于搜索意图解析、番剧别名扩写与智能分类', fields: [
+      { label: '接口协议', key: 'AI_PROTOCOL', placeholder: 'openai', type: 'select', selectOptions: [
+        { label: 'OpenAI 兼容 (OpenAI, DeepSeek, 硅基流动等)', value: 'openai' },
+        { label: 'Google Gemini', value: 'google' },
+        { label: 'Anthropic Claude', value: 'anthropic' },
+        { label: 'Ollama 本地部署', value: 'ollama' },
+      ]},
+      { label: 'API 端点 (Endpoint)', key: 'AI_ENDPOINT', placeholder: 'https://api.openai.com/v1' },
+      { label: 'API 密钥 (API Key)', key: 'AI_API_KEY', placeholder: 'sk-...', type: 'password' },
+      { label: '模型名称 (Model)', key: 'AI_MODEL', placeholder: 'gpt-4o-mini / deepseek-chat' },
+      { label: '启用 AI 智能搜索扩写', key: 'AI_SMART_SEARCH', placeholder: '', type: 'select', selectOptions: [
+        { label: '开启 (推荐)', value: 'true' },
+        { label: '关闭', value: 'false' },
+      ]},
+    ]}
+  ]},
+  { key: 'notify', label: '消息通知推送', icon: Bell, sections: [
+    { title: 'Telegram 推送', desc: '通过 Telegram Bot 发送追番与下载通知', fields: [
+      { label: 'Bot Token', key: 'TELEGRAM_BOT_TOKEN', placeholder: '123456:ABC...', type: 'password', testChannel: 'Telegram' },
+      { label: 'Chat ID', key: 'TELEGRAM_CHAT_ID', placeholder: '123456789' },
+    ]},
+    { title: '协作平台 Webhook', desc: '向主流群组机器人实时转发事件', fields: [
+      { label: '钉钉 Webhook', key: 'DINGTALK_WEBHOOK', placeholder: 'https://oapi.dingtalk.com/robot/send?access_token=...', testChannel: 'DingTalk' },
+      { label: '钉钉签名 Secret (可选)', key: 'DINGTALK_SECRET', placeholder: 'SEC...', type: 'password' },
+      { label: '企业微信 Webhook', key: 'WECOM_WEBHOOK', placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...', testChannel: 'WeCom' },
+      { label: '飞书 Webhook', key: 'FEISHU_WEBHOOK', placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/...', testChannel: 'Feishu' },
+    ]},
+    { title: 'QQ (OneBot 协议)', desc: '通过 OneBot/Go-CQHttp 协议推送到 QQ 号或群', fields: [
+      { label: 'OneBot 端点', key: 'ONEBOT_HOST', placeholder: 'http://localhost:5700', testChannel: 'OneBot' },
+      { label: 'OneBot Token (可选)', key: 'ONEBOT_TOKEN', placeholder: 'Access Token', type: 'password' },
+      { label: '目标 QQ 号', key: 'ONEBOT_USER_ID', placeholder: '10001' },
+      { label: '目标 QQ 群号', key: 'ONEBOT_GROUP_ID', placeholder: '20002' },
+    ]}
+  ]},
+  { key: 'plugins', label: '插件与自动化', icon: Sparkles, sections: [] },
+  { key: 'backup', label: '数据备份恢复', icon: Database, sections: [
+    { title: '定时自动归档', desc: '设置定时快照与历史文件保留策略', fields: [
+      { label: '备份存储目录', key: 'BACKUP_PATH', placeholder: './data/backups' },
+      { label: '定时备份 Cron 表达式', key: 'BACKUP_CRON', placeholder: '0 0 * * *' },
+      { label: '保留备份份数', key: 'BACKUP_KEEP_COUNT', placeholder: '7' },
+    ]}
+  ]},
+  { key: 'logs', label: '系统运行日志', icon: FileText, sections: [] },
+  { key: 'account', label: '账户与安全', icon: Lock, sections: [
+    { title: '账户资料', desc: '自定义管理员资料', fields: [
+      { label: '管理员头像 URL', key: 'USER_AVATAR_URL', placeholder: 'https://example.com/avatar.png' },
+    ]}
+  ]},
+])
+
+const allFields = computed(() => {
+  const m: Record<string, FieldDef> = {}
+  for (const tab of tabs.value) {
+    for (const section of tab.sections) {
+      for (const f of section.fields) m[f.key] = f
+    }
+  }
+  return m
+})
+
+function getVal(key: string): string { return settings.value[key] || '' }
+function setVal(key: string, val: string) { settings.value[key] = val }
+function isConfigured(key: string): boolean {
+  const val = settings.value[key]
+  const field = allFields.value[key]
+  if (field?.type === 'password') return val !== undefined
+  return val !== undefined && val.length > 0
+}
+
+function togglePassword(key: string) {
+  if (showPasswords.value.has(key)) showPasswords.value.delete(key)
+  else showPasswords.value.add(key)
+}
+
+function inputType(field: FieldDef): string {
+  if (field.type !== 'password') return 'text'
+  return showPasswords.value.has(field.key) ? 'text' : 'password'
+}
+
+// 基础网络请求
+async function fetchSettings() {
+  loading.value = true
+  error.value = ''
+  try {
+    const { data } = await request.get('/settings')
+    settings.value = (data as Record<string, string>) || {}
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '加载系统设置失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function saveAll() {
+  error.value = ''
+  saved.value = false
+  const changed: Record<string, string> = {}
+  for (const key of Object.keys(allFields.value)) {
+    const val = settings.value[key]
+    const field = allFields.value[key]
+    if (field.type === 'password' && (val === '' || val === undefined)) {
+      continue
+    }
+    if (val !== undefined && val !== '') {
+      changed[key] = val
+    }
+  }
+  try {
+    await request.put('/settings', { settings: changed })
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 3000)
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '保存设置失败'
+  }
+}
+
+// Bangumi 授权
+async function connectBangumi() {
+  const newTab = window.open('', '_blank')
+  try {
+    const { data } = await request.get("/bangumi/auth/link")
+    if (data.url) {
+      if (newTab) newTab.location.href = data.url
+      else window.open(data.url, '_blank')
+    } else {
+      if (newTab) newTab.close()
+      error.value = "授权链接为空"
+    }
+  } catch (e: any) {
+    if (newTab) newTab.close()
+    error.value = e.response?.data?.error || "无法获取 Bangumi 授权链接"
+  }
+}
+
+// 测速
+async function testMirrors() {
+  mirrorTesting.value = true
+  mirrorResults.value = []
+  try {
+    const endpoint = activeTab.value === 'bangumi' ? '/bgm/test-mirrors' : '/mikan/test-mirrors'
+    const { data } = await request.post(endpoint, {}, { timeout: 15000 })
+    mirrorResults.value = data || []
+  } catch (e: any) {
+    error.value = '测速请求失败'
+  } finally {
+    mirrorTesting.value = false
+  }
+}
+
+async function selectMirror(domain: string) {
+  try {
+    const isBgm = activeTab.value === 'bangumi'
+    const endpoint = isBgm ? '/bgm/select-mirror' : '/mikan/select-mirror'
+    const key = isBgm ? 'BGMTV_DOMAIN' : 'MIKAN_DOMAIN'
+    await request.post(endpoint, { domain })
+    setVal(key, domain)
+    selectedMirror.value = domain
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 2000)
+  } catch (e: any) {
+    error.value = '切换节点失败'
+  }
+}
+
+// AI 模型拉取
+async function fetchAIModels() {
+  const protocol = getVal('AI_PROTOCOL')
+  const endpoint = getVal('AI_ENDPOINT')
+  const apiKey = getVal('AI_API_KEY')
+  if (!endpoint) {
+    error.value = '请先填写 API 端点地址'
+    return
+  }
+  modelLoading.value = true
+  modelOptions.value = []
+  try {
+    const { data } = await request.post('/ai/models', { protocol, endpoint, apiKey }, { timeout: 15000 })
+    if (data.success && data.models && data.models.length > 0) {
+      modelOptions.value = data.models.map((m: string) => ({ label: m, value: m }))
+      if (!getVal('AI_MODEL')) setVal('AI_MODEL', data.models[0])
+      saved.value = true
+      setTimeout(() => { saved.value = false }, 2000)
+    } else {
+      error.value = data.error || '未获取到可用模型'
+    }
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '拉取模型列表失败'
+  } finally {
+    modelLoading.value = false
+  }
+}
+
+// 发送通知自检
+async function sendTestNotify(channel: string) {
+  try {
+    const { data } = await request.post('/notify/test', {
+      channel,
+      title: 'Ani-Go 联通测试',
+      message: `来自 ${channel} 的自检通知，收到说明配置成功。`
+    })
+    if (data.success) {
+      saved.value = true
+      setTimeout(() => { saved.value = false }, 3000)
+    } else {
+      error.value = data.error || '测试发送失败'
+    }
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '发送测试请求失败'
+  }
+}
+
+// 插件管理逻辑
 async function fetchPlugins() {
   pluginLoading.value = true
   try {
@@ -101,7 +436,7 @@ async function reloadPlugins() {
     await request.post('/plugins/reload')
     await fetchPlugins()
     saved.value = true
-    setTimeout(() => { saved.value = false }, 3000)
+    setTimeout(() => { saved.value = false }, 2500)
   } catch (e: any) {
     error.value = '重新加载插件失败'
   } finally {
@@ -115,7 +450,7 @@ async function togglePlugin(p: any) {
     await request.post('/plugins/toggle', { id: p.id, enabled: targetState })
     p.enabled = targetState
     saved.value = true
-    setTimeout(() => { saved.value = false }, 2500)
+    setTimeout(() => { saved.value = false }, 2000)
   } catch (e: any) {
     error.value = e.response?.data?.error || '切换插件状态失败'
   }
@@ -127,7 +462,7 @@ async function deletePlugin(id: string) {
     await request.delete(`/plugins/${id}`)
     await fetchPlugins()
     saved.value = true
-    setTimeout(() => { saved.value = false }, 2500)
+    setTimeout(() => { saved.value = false }, 2000)
   } catch (e: any) {
     error.value = e.response?.data?.error || '删除插件失败'
   }
@@ -175,9 +510,7 @@ async function submitPluginForm() {
         throw new Error('JSON 格式错误: ' + err.message)
       }
       if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          await request.post('/plugins/save', item)
-        }
+        for (const item of parsed) await request.post('/plugins/save', item)
       } else {
         await request.post('/plugins/save', parsed)
       }
@@ -185,7 +518,7 @@ async function submitPluginForm() {
     showPluginModal.value = false
     await fetchPlugins()
     saved.value = true
-    setTimeout(() => { saved.value = false }, 3000)
+    setTimeout(() => { saved.value = false }, 2500)
   } catch (e: any) {
     pluginJsonError.value = e.message || e.response?.data?.error || '保存插件失败'
   } finally {
@@ -208,8 +541,7 @@ function handlePluginFileImport(e: any) {
   const reader = new FileReader()
   reader.onload = (evt) => {
     try {
-      const content = evt.target?.result as string
-      pluginJsonText.value = content
+      pluginJsonText.value = evt.target?.result as string
       pluginModalTab.value = 'json'
     } catch (err) {
       pluginJsonError.value = '读取文件失败'
@@ -218,307 +550,7 @@ function handlePluginFileImport(e: any) {
   reader.readAsText(file)
 }
 
-async function changePassword() {
-  passwordMsg.value = ''; passwordError.value = ''
-  if (newPassword.value.length < 6) { passwordError.value = '新密码不能少于6位'; return }
-  if (newPassword.value !== confirmPassword.value) { passwordError.value = '两次密码不一致'; return }
-  changingPassword.value = true
-  try {
-    await request.post('/user/change-password', { old_password: oldPassword.value, new_password: newPassword.value })
-    passwordMsg.value = '密码修改成功，即将重新登录...'
-    oldPassword.value = ''; newPassword.value = ''; confirmPassword.value = ''
-    localStorage.removeItem('token')
-    setTimeout(() => { router.push('/login') }, 1500)
-  } catch (e: any) {
-    passwordError.value = e?.response?.data?.error || '修改失败'
-  } finally { changingPassword.value = false }
-}
-
-async function testMirrors() {
-  mirrorTesting.value = true
-  mirrorResults.value = []
-  try {
-    const endpoint = activeTab.value === 'bangumi' ? '/bgm/test-mirrors' : '/mikan/test-mirrors'
-    const { data } = await request.post(endpoint, {}, { timeout: 15000 })
-    mirrorResults.value = data || []
-  } catch (e: any) {
-    error.value = t('settings.error.testFailed')
-  } finally {
-    mirrorTesting.value = false
-  }
-}
-
-async function selectMirror(domain: string) {
-  try {
-    const isBgm = activeTab.value === 'bangumi'
-    const endpoint = isBgm ? '/bgm/select-mirror' : '/mikan/select-mirror'
-    const key = isBgm ? 'BGMTV_DOMAIN' : 'MIKAN_DOMAIN'
-    
-    await request.post(endpoint, { domain })
-    setVal(key, domain)
-    selectedMirror.value = domain
-  } catch (e: any) {
-    error.value = t('settings.error.switchFailed')
-  }
-}
-
-interface FieldDef {
-  label: string; key: string; placeholder: string; type?: string; hint?: string; selectOptions?: {label: string, value: string}[]
-}
-
-const tabs = computed(() => [
-  { key: "bangumi", label: "Bangumi", icon: Antenna, sections: [
-    { title: "Bangumi OAuth2", desc: "连接您的 Bangumi 账号以同步收藏数据", fields: [
-      { label: "Client ID", key: "BANGUMI_CLIENT_ID", placeholder: "bgm33669389335a4f78e (Default)", type: "text" },
-      { label: "Client Secret", key: "BANGUMI_CLIENT_SECRET", placeholder: "从 Bangumi 开发者平台获取", type: "password" },
-    ]},
-    { title: "Bangumi 同步", desc: "自动从 Bangumi.tv 同步收藏番剧到 Ani-Go", fields: [
-
-
-      { label: "Bangumi 用户名", key: "BGMTV_USERNAME", placeholder: "Your Bangumi ID or Username" },
-      { label: "Bangumi Token", key: "BGMTV_USER_TOKEN", placeholder: "Bearer Token (OAuth 后自动填入)", type: "password" },
-      { label: "同步间隔", key: "BGMTV_SYNC_INTERVAL", placeholder: "6h (Default)" },
-    ]}
-  ]},
-  { key: 'mikan', label: t('settings.tabs.mikan'), icon: Antenna, sections: [{ title: t('settings.sections.mikan'), desc: t('settings.sections.mikanDesc'), fields: [
-    { label: t('settings.fields.rss'), key: 'MIKAN_RSS_URL', placeholder: 'https://mikanani.me/RSS/MyBangumi?token=***' },
-    { label: t('settings.fields.rssMode'), key: 'MIKAN_RSS_MODE', placeholder: '', type: 'select', selectOptions: [{label: t('settings.rssMode.personal'), value: 'personal'}, {label: t('settings.rssMode.classic'), value: 'classic'}] },
-    { label: t('settings.fields.domain'), key: 'MIKAN_DOMAIN', placeholder: 'mikanani.me' },
-    { label: t('settings.fields.proxy'), key: 'MIKAN_PROXY_DOMAIN', placeholder: 'Optional proxy address' },
-    { label: t('settings.fields.mirrors'), key: 'MIKAN_MIRROR_DOMAINS', placeholder: 'mikanani.me,mikanime.tv' },
-  ]}]},
-  { key: 'downloader', label: t('settings.tabs.downloader'), icon: Download, sections: [
-    { title: t('settings.sections.engine'), desc: t('settings.sections.engineDesc'), fields: [
-      { label: t('settings.fields.downloader'), key: 'DEFAULT_DOWNLOADER', placeholder: 'qbittorrent' },
-    ]},
-    { title: t('settings.sections.qb'), desc: t('settings.sections.qbDesc'), fields: [
-      { label: t('settings.fields.host'), key: 'QB_HOST', placeholder: 'http://localhost:8081' },
-      { label: t('settings.fields.user'), key: 'QB_USER', placeholder: 'admin' },
-      { label: t('settings.fields.pass'), key: 'QB_PASS', placeholder: 'Access key', type: 'password' },
-      { label: t('settings.fields.category'), key: 'QB_CATEGORY', placeholder: 'ani-go' },
-    ]},
-    { title: t('settings.sections.tr'), desc: t('settings.sections.trDesc'), fields: [
-      { label: t('settings.fields.host'), key: 'TR_HOST', placeholder: 'http://localhost:9091' },
-      { label: t('settings.fields.user'), key: 'TR_USER', placeholder: 'Username' },
-      { label: t('settings.fields.pass'), key: 'TR_PASS', placeholder: 'Access key', type: 'password' },
-    ]},
-    { title: t('settings.sections.aria2'), desc: t('settings.sections.aria2Desc'), fields: [
-      { label: t('settings.fields.rpc'), key: 'ARIA2_HOST', placeholder: 'http://localhost:6800' },
-      { label: t('settings.fields.secret'), key: 'ARIA2_SECRET', placeholder: 'Secret key', type: 'password' },
-    ]},
-  ]},
-  { key: 'paths', label: t('settings.tabs.paths'), icon: Folder, sections: [{ title: t('settings.sections.storage'), desc: t('settings.sections.storageDesc'), fields: [
-    { label: t('settings.fields.db'), key: 'DB_PATH', placeholder: '/data/ani-go.db' },
-    { label: t('settings.fields.tv'), key: 'TV_BASE_PATH', placeholder: '/TV/Media/Anime' },
-    { label: t('settings.fields.movie'), key: 'MOVIE_BASE_PATH', placeholder: '/TV/Media/Movies' },
-  ]}]},
-  { key: 'notify', label: t('settings.tabs.notify'), icon: Bell, sections: [
-    { title: t('settings.sections.im'), desc: t('settings.sections.imDesc'), fields: [
-      { label: t('settings.fields.tgToken'), key: 'TELEGRAM_BOT_TOKEN', placeholder: '123456:ABC...', testChannel: 'Telegram' },
-      { label: t('settings.fields.tgId'), key: 'TELEGRAM_CHAT_ID', placeholder: '123456789' },
-    ]},
-  ]},
-  { key: 'plugins', label: t('settings.tabs.plugins'), icon: Sparkles, sections: [
-    { title: t('settings.sections.plugins'), desc: t('settings.sections.pluginsDesc'), fields: [] }
-  ]},
-  { key: 'account', label: t('settings.tabs.account'), icon: Lock, sections: [
-    { title: t('settings.sections.profile'), desc: t('settings.sections.profileDesc'), fields: [
-      { label: t('settings.fields.avatar'), key: 'USER_AVATAR_URL', placeholder: 'https://example.com/avatar.png', type: 'text' },
-    ]},
-  ]},
-  { key: 'backup', label: t('settings.tabs.backup'), icon: Database, sections: [
-    { title: t('settings.sections.backup'), desc: t('settings.sections.backupDesc'), fields: [
-      { label: t('settings.fields.backupPath'), key: 'BACKUP_PATH', placeholder: './data/backups', type: 'text' },
-      { label: t('settings.fields.backupCron'), key: 'BACKUP_CRON', placeholder: '0 0 * * *', type: 'text' },
-    ]},
-  ]},
-])
-
-const allFields = computed(() => {
-  const m: Record<string, FieldDef> = {}
-  for (const tab of tabs.value)
-    for (const section of tab.sections)
-      for (const f of section.fields) m[f.key] = f
-  return m
-})
-
-function getVal(key: string): string { return settings.value[key] || '' }
-function setVal(key: string, val: string) { settings.value[key] = val }
-function isConfigured(key: string): boolean {
-  const val = settings.value[key]
-  const field = allFields.value[key]
-  if (field?.type === 'password') {
-    return val !== undefined
-  }
-  return val !== undefined && val.length > 0
-}
-
-function togglePassword(key: string) {
-  if (showPasswords.value.has(key)) showPasswords.value.delete(key)
-  else showPasswords.value.add(key)
-}
-
-function inputType(field: FieldDef): string {
-  if (field.type !== 'password') return 'text'
-  return showPasswords.value.has(field.key) ? 'text' : 'password'
-}
-
-async function connectBangumi() {
-  // 先打开空白新窗口防止被浏览器弹窗拦截 (Popup Blocker)
-  const newTab = window.open('', '_blank')
-  try {
-    const { data } = await request.get("/bangumi/auth/link")
-    if (data.url) {
-      if (newTab) {
-        newTab.location.href = data.url
-      } else {
-        window.open(data.url, '_blank')
-      }
-    } else {
-      if (newTab) newTab.close()
-      error.value = "授权链接为空"
-    }
-  } catch (e: any) {
-    if (newTab) newTab.close()
-    error.value = e.response?.data?.error || "无法获取 Bangumi 授权链接"
-  }
-}
-
-async function fetchSettings() {
-
-  loading.value = true; error.value = ''
-  try {
-    const { data } = await request.get('/settings')
-    settings.value = (data as Record<string, string>) || {}
-  } catch (e: any) {
-    error.value = e.response?.data?.error || t('settings.error.loadFailed')
-  } finally { loading.value = false }
-}
-
-async function saveAll() {
-  error.value = ''; saved.value = false
-  const changed: Record<string, string> = {}
-  for (const key of Object.keys(allFields.value)) {
-    const val = settings.value[key]
-    const field = allFields.value[key]
-    // 密码字段如果为空（说明未修改），则不包含在请求中，防止覆盖旧密码
-    if (field.type === 'password' && (val === '' || val === undefined)) {
-      continue
-    }
-    if (val !== undefined && val !== '') {
-      changed[key] = val
-    }
-  }
-  try {
-    await request.put('/settings', { settings: changed })
-    saved.value = true; setTimeout(() => { saved.value = false }, 3000)
-  } catch (e: any) {
-    error.value = e.response?.data?.error || t('settings.error.saveFailed')
-  }
-}
-
-// AI 模型列表相关
-const modelLoading = ref(false)
-const modelOptions = ref<{label: string, value: string}[]>([])
-
-async function fetchAIModels() {
-  const protocol = getVal('AI_PROTOCOL')
-  const endpoint = getVal('AI_ENDPOINT')
-  const apiKey = getVal('AI_API_KEY')
-  
-  if (!endpoint) {
-    error.value = t('settings.ai.error.endpointRequired')
-    return
-  }
-  
-  modelLoading.value = true
-  modelOptions.value = []
-  
-  try {
-    const { data } = await request.post('/ai/models', { 
-      protocol, 
-      endpoint, 
-      apiKey 
-    }, { timeout: 15000 })
-    
-    if (data.success && data.models && data.models.length > 0) {
-      modelOptions.value = data.models.map((m: string) => ({ label: m, value: m }))
-      // 自动选择第一个模型（如果当前没有选中）
-      if (!getVal('AI_MODEL')) {
-        setVal('AI_MODEL', data.models[0])
-      }
-      saved.value = true
-      setTimeout(() => { saved.value = false }, 2000)
-    } else {
-      error.value = data.error || t('settings.ai.error.fetchFailed')
-    }
-  } catch (e: any) {
-    error.value = e.response?.data?.error || t('settings.ai.error.fetchFailed')
-  } finally {
-    modelLoading.value = false
-  }
-}
-
-// 检查 AI 是否已完整配置（用于控制智能搜索开关）
-const isAIConfigured = computed(() => {
-  const endpoint = getVal('AI_ENDPOINT')
-  const apiKey = getVal('AI_API_KEY')
-  const model = getVal('AI_MODEL')
-  return endpoint && apiKey && model
-})
-
-async function sendTestNotify(channel: string) {
-  try {
-    const { data } = await request.post('/notify/test', { channel, title: 'Ani-Go 测试通知', message: `这是一条来自 ${channel} 的测试消息，如果您收到说明通知配置正常。` })
-    if (data.success) {
-      saved.value = true
-      setTimeout(() => { saved.value = false }, 3000)
-    } else {
-      error.value = data.error || '发送失败'
-    }
-  } catch (e: any) {
-    error.value = e.response?.data?.error || '发送请求失败'
-  }
-}
-
-onMounted(fetchSettings)
-
-// 日志
-const logs = ref<string[]>([])
-const logLoading = ref(false)
-const logLines = ref(100)
-
-async function fetchLogs() {
-  logLoading.value = true
-  try {
-    const { data } = await request.get('/logs', { params: { lines: logLines.value } })
-    logs.value = data.lines || []
-  } catch (e) {
-    // 静默失败
-  } finally {
-    logLoading.value = false
-  }
-}
-
-onMounted(() => {
-  if (route.query.status === 'success') {
-    saved.value = true
-    setTimeout(() => { saved.value = false }, 4000)
-  }
-  fetchSettings()
-  fetchLogs()
-  fetchBackupList()
-  fetchPlugins()
-
-  // 监听窗口重新获得焦点，如果在 bangumi 标签页则刷新一次配置
-  window.addEventListener('focus', () => {
-    if (activeTab.value === 'bangumi') {
-      fetchSettings()
-    }
-  })
-})
-
-// 备份管理函数
+// 备份逻辑
 async function fetchBackupList() {
   backupLoading.value = true
   try {
@@ -536,7 +568,7 @@ async function createBackup() {
   try {
     await request.post('/backup/create', { include_episodes: showBackupEpisodes.value })
     saved.value = true
-    setTimeout(() => { saved.value = false }, 3000)
+    setTimeout(() => { saved.value = false }, 2500)
     await fetchBackupList()
   } catch (e: any) {
     error.value = e.response?.data?.error || '创建备份失败'
@@ -546,8 +578,7 @@ async function createBackup() {
 }
 
 async function restoreBackup(name: string) {
-  if (!confirm(`确定要从备份 "${name}" 恢复吗？这将覆盖当前的设置和订阅数据。建议恢复后重启服务。`)) return
-  
+  if (!confirm(`确定要从备份 "${name}" 恢复吗？这将覆盖当前设置和订阅数据。建议恢复后重启服务。`)) return
   restoringBackup.value = true
   try {
     await request.post('/backup/restore', { name })
@@ -561,7 +592,6 @@ async function restoreBackup(name: string) {
 
 async function deleteBackup(name: string) {
   if (!confirm(`确定要删除备份 "${name}" 吗？此操作不可撤销。`)) return
-  
   deletingBackup.value = name
   try {
     await request.delete(`/backup/${name}`)
@@ -603,454 +633,496 @@ function formatBackupTime(timeStr: string): string {
     hour: '2-digit', minute: '2-digit' 
   })
 }
+
+// 系统日志
+async function fetchLogs() {
+  logLoading.value = true
+  try {
+    const { data } = await request.get('/logs')
+    logs.value = data || []
+  } catch (e: any) {
+    // 静默失败
+  } finally {
+    logLoading.value = false
+  }
+}
+
+function copyAllLogs() {
+  navigator.clipboard.writeText(logs.value.join('\n'))
+  saved.value = true
+  setTimeout(() => { saved.value = false }, 2000)
+}
+
+watch(autoRefreshLogs, (val) => {
+  if (val) {
+    logTimer = setInterval(() => fetchLogs(), 3000)
+  } else if (logTimer) {
+    clearInterval(logTimer)
+    logTimer = null
+  }
+})
+
+// 修改密码
+async function changePassword() {
+  passwordMsg.value = ''
+  passwordError.value = ''
+  if (newPassword.value.length < 6) { passwordError.value = '新密码不能少于6位'; return }
+  if (newPassword.value !== confirmPassword.value) { passwordError.value = '两次输入密码不一致'; return }
+  changingPassword.value = true
+  try {
+    await request.post('/user/change-password', { old_password: oldPassword.value, new_password: newPassword.value })
+    passwordMsg.value = '密码修改成功，即将重新登录...'
+    oldPassword.value = ''; newPassword.value = ''; confirmPassword.value = ''
+    localStorage.removeItem('token')
+    setTimeout(() => { router.push('/login') }, 1500)
+  } catch (e: any) {
+    passwordError.value = e?.response?.data?.error || '修改失败'
+  } finally {
+    changingPassword.value = false
+  }
+}
+
+// 快捷键 Ctrl+S / Cmd+S
+function handleGlobalKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    saveAll()
+  }
+}
+
+onMounted(() => {
+  fetchSettings()
+  fetchPlugins()
+  fetchBackupList()
+  fetchLogs()
+  window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('focus', () => {
+    if (activeTab.value === 'bangumi') fetchSettings()
+  })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  if (logTimer) clearInterval(logTimer)
+})
 </script>
 
 <template>
-  <div class="space-y-10 pb-20">
-    <!-- Header Section -->
-    <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
+  <div class="space-y-6 pb-24 max-w-7xl mx-auto animate-in fade-in duration-300">
+    
+    <!-- 顶部标题与保存操作栏 -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-base-100 p-6 sm:p-7 rounded-3xl border border-base-200/80 shadow-sm">
       <div class="space-y-1">
-        <h1 class="text-4xl font-black tracking-tighter italic">{{ $t('settings.title') }}</h1>
-        <p class="text-xs font-bold tracking-[0.3em] uppercase opacity-30">{{ $t('settings.subtitle') }}</p>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-inner">
+            <Settings :size="20" />
+          </div>
+          <h1 class="text-2xl sm:text-3xl font-black tracking-tight italic">系统设置</h1>
+          <span class="badge badge-neutral text-xs font-mono font-bold">v{{ CURRENT_VERSION }}</span>
+        </div>
+        <p class="text-xs text-base-content/60 font-medium">配置全局运行参数、数据源联动、下载客户端及自动化扩展</p>
       </div>
-      
-      <button 
-        class="btn btn-primary rounded-2xl gap-3 px-8 shadow-xl shadow-lg hover:scale-105 active:scale-95 transition-all group" 
-        @click="saveAll"
-      >
-        <Check :size="20" class="group-hover:scale-125 transition-transform" />
-        <span class="text-xs font-black uppercase tracking-widest">{{ $t('settings.commit') }}</span>
-      </button>
+
+      <div class="flex items-center gap-3">
+        <button 
+          @click="saveAll" 
+          class="btn btn-primary rounded-xl px-7 gap-2 shadow-lg shadow-primary/25 hover:scale-[1.02] active:scale-95 transition-all"
+          :disabled="loading"
+        >
+          <Check :size="18" />
+          <span class="text-xs font-black uppercase tracking-wider">保存全部配置</span>
+          <kbd class="hidden md:inline-block kbd kbd-xs bg-primary-content/20 text-primary-content font-mono border-0 ml-1">Ctrl+S</kbd>
+        </button>
+      </div>
     </div>
 
-    <!-- Status Alerts -->
+    <!-- 顶部状态提示条 -->
     <Transition name="fade">
-       <div v-if="saved" class="alert bg-success/10 border-success/20 text-success rounded-[2rem] p-6 shadow-xl shadow-lg">
-          <Check :size="24" class="shrink-0" />
-          <div class="flex-1">
-             <h3 class="font-black text-sm uppercase tracking-widest">{{ $t('settings.updateSuccess') }}</h3>
-             <p class="text-sm font-bold opacity-80 mt-1">{{ $t('settings.updateSuccessDesc') }}</p>
+      <div v-if="saved" class="alert bg-success/15 border border-success/30 text-success rounded-2xl p-4 shadow-sm flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <Check :size="18" class="shrink-0" />
+          <div>
+            <h4 class="font-black text-xs">配置更新成功</h4>
+            <p class="text-[11px] opacity-80">修改已生效并写入数据库。</p>
           </div>
-       </div>
+        </div>
+        <button @click="saved = false" class="btn btn-ghost btn-xs btn-circle">✕</button>
+      </div>
+    </Transition>
+    <Transition name="fade">
+      <div v-if="error" class="alert bg-error/15 border border-error/30 text-error rounded-2xl p-4 shadow-sm flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <Shield :size="18" class="shrink-0" />
+          <div>
+            <h4 class="font-black text-xs">操作遇到问题</h4>
+            <p class="text-[11px] opacity-80">{{ error }}</p>
+          </div>
+        </div>
+        <button @click="error = ''" class="btn btn-ghost btn-xs btn-circle">✕</button>
+      </div>
     </Transition>
 
+    <!-- 主布局：左侧导航 + 右侧内容面板 -->
     <div v-if="loading" class="flex justify-center py-32">
       <span class="loading loading-spinner loading-lg text-primary"></span>
     </div>
 
-    <div v-else class="flex flex-col lg:flex-row gap-6 lg:gap-10">
-      <!-- Navigation Sidebar -->
-      <div class="flex flex-row lg:flex-col gap-2 overflow-x-auto lg:w-56 shrink-0 no-scrollbar pb-2 lg:pb-0">
-        <button v-for="tab in tabs" :key="tab.key"
-          class="flex items-center gap-4 px-5 py-3.5 lg:px-6 lg:py-4 rounded-xl lg:rounded-2xl transition-all duration-300 relative group overflow-hidden whitespace-nowrap lg:w-full shrink-0"
-          :class="activeTab === tab.key ? 'bg-primary text-primary-content shadow-xl shadow-lg font-black' : 'bg-base-100 hover:bg-base-200 text-base-content/50 hover:text-base-content border border-base-200/50'"
-          @click="activeTab = tab.key">
-          <component :is="tab.icon" :size="20" />
-          <span class="text-xs uppercase tracking-widest">{{ tab.label }}</span>
-          <div v-if="activeTab === tab.key" class="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white/40 rounded-l-full hidden lg:block"></div>
-        </button>
-      </div>
-
-      <!-- Main Config Area -->
-      <div class="flex-1 min-w-0 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
-        
-        <!-- Special: Latency Test Card (Shared between Mikan/Bangumi) -->
-        <div v-if="activeTab === 'mikan' || activeTab === 'bangumi'" class="bg-base-100 rounded-3xl lg:rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden group">
-          <div class="p-6 sm:p-8 lg:p-10 space-y-8">
-            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
-               <div class="flex items-center gap-4">
-               <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-                  <Timer :size="24" />
-               </div>
-               <div>
-                     <h3 class="text-xl font-black tracking-tight italic">{{ $t('settings.mikan.mirrorAudit') }}</h3>
-                     <p class="text-[10px] font-black uppercase tracking-widest opacity-30 mt-1">{{ $t('settings.mikan.autoRoute') }}</p>
-                  </div>
-               </div>
-               <button class="btn btn-primary btn-sm rounded-xl px-6 uppercase font-black tracking-widest text-[9px] h-10 min-h-0" @click="testMirrors" :disabled="mirrorTesting">
-                 <span v-if="mirrorTesting" class="loading loading-spinner loading-xs"></span>
-                 <template v-else>{{ $t('settings.mikan.runDiagnostics') }}</template>
-               </button>
-            </div>
-
-            <div v-if="mirrorResults.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div v-for="r in mirrorResults" :key="r.domain"
-                class="group/item flex items-center justify-between p-5 rounded-2xl border transition-all duration-300"
-                :class="r.ok ? 'bg-base-200/30 border-base-300 hover:border-primary/50 cursor-pointer active:scale-95' : 'bg-error/5 border-error/20 opacity-60 cursor-not-allowed'"
-                @click="r.ok && selectMirror(r.domain)">
-                <div class="flex flex-col gap-1">
-                  <div class="flex items-center gap-2">
-                     <div class="w-2 h-2 rounded-full shadow-[0_0_8px]" :class="r.ok ? 'bg-success shadow-lg' : 'bg-error shadow-lg'"></div>
-                     <span class="text-sm font-black font-mono tracking-tight group-hover/item:text-primary transition-colors">{{ r.domain }}</span>
-                  </div>
-                  <span v-if="(activeTab === 'bangumi' ? getVal('BGMTV_DOMAIN') : getVal('MIKAN_DOMAIN')) === r.domain" class="text-[9px] font-black uppercase tracking-widest text-primary ml-4">{{ $t('settings.mikan.currentRoute') }}</span>
-                </div>
-                <div class="text-right">
-                  <p v-if="r.ok" class="text-lg font-black tracking-tighter" :class="r.latency_ms < 500 ? 'text-success' : r.latency_ms < 1000 ? 'text-warning' : 'text-error'">
-                    {{ r.latency_ms }}<span class="text-[10px] ml-0.5 opacity-50 uppercase tracking-widest">ms</span>
-                  </p>
-                  <p v-else class="text-xs font-black uppercase tracking-widest text-error">{{ $t('settings.mikan.unreachable') }}</p>
-                </div>
-              </div>
-            </div>
-            
-            <div v-else-if="!mirrorTesting" class="flex flex-col items-center justify-center py-12 text-center bg-base-200/30 rounded-3xl border border-dashed border-base-300">
-               <p class="text-[10px] font-black uppercase tracking-widest opacity-20 italic">{{ $t('settings.mikan.noData') }}</p>
-            </div>
+    <div v-else class="flex flex-col lg:flex-row gap-6 items-start">
+      
+      <!-- 左侧分类侧边栏 Navigation Sidebar -->
+      <aside class="w-full lg:w-64 shrink-0 lg:sticky lg:top-24 space-y-4 bg-base-100 p-4 rounded-3xl border border-base-200/80 shadow-sm">
+        <div v-for="group in tabGroups" :key="group.name" class="space-y-1">
+          <div class="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-base-content/40">
+            {{ group.name }}
           </div>
+          <button
+            v-for="tab in group.tabs"
+            :key="tab.key"
+            @click="activeTab = tab.key"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all group"
+            :class="activeTab === tab.key 
+              ? 'bg-primary text-primary-content shadow-md shadow-primary/20 font-black' 
+              : 'text-base-content/70 hover:text-base-content hover:bg-base-200/60'"
+          >
+            <div class="flex items-center gap-2.5">
+              <component :is="tab.icon" :size="16" class="group-hover:scale-110 transition-transform" />
+              <span>{{ tab.label }}</span>
+            </div>
+            <span v-if="activeTab === tab.key" class="w-1.5 h-1.5 rounded-full bg-primary-content"></span>
+          </button>
         </div>
+      </aside>
 
-        <!-- Account Security: Change Password -->
-        <div v-if="activeTab === 'account'" class="animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div class="px-4 mb-6">
-            <h2 class="text-2xl font-black tracking-tight italic flex items-center gap-4">
-              {{ $t('settings.tabs.account') }}
-              <div class="h-1 w-12 bg-primary/20 rounded-full"></div>
-            </h2>
-            <p class="text-[10px] font-black uppercase tracking-widest opacity-30">更新账户凭据以确保安全</p>
+      <!-- 右侧配置主面板 Right Content Area -->
+      <main class="flex-1 min-w-0 w-full space-y-6">
+
+        <!-- 1. Mikan 镜像测速卡片 (在 Mikan 或 Bangumi Tab 顶部展示) -->
+        <div v-if="activeTab === 'mikan' || activeTab === 'bangumi'" class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                <Timer :size="20" />
+              </div>
+              <div>
+                <h3 class="text-base font-black tracking-tight">网络镜像延迟诊断</h3>
+                <p class="text-[11px] opacity-50">实时探测多节点响应速度，点击可用节点即可切换</p>
+              </div>
+            </div>
+            <button 
+              @click="testMirrors" 
+              :disabled="mirrorTesting"
+              class="btn btn-primary btn-sm rounded-xl px-5 gap-2"
+            >
+              <RefreshCw v-if="mirrorTesting" :size="14" class="animate-spin" />
+              <Timer v-else :size="14" />
+              <span class="text-xs font-bold">{{ mirrorTesting ? '正在测速...' : '开始网络诊断' }}</span>
+            </button>
           </div>
 
-          <div class="bg-base-100 rounded-3xl lg:rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden p-6 sm:p-8 lg:p-10">
-            <div class="space-y-6 max-w-md">
-              <div class="space-y-2">
-                <label class="text-xs font-black uppercase tracking-widest opacity-50 ml-1">当前密码</label>
-                <div class="relative">
-                  <div class="absolute inset-y-0 left-5 flex items-center text-base-content/10">
-                    <Lock :size="20" />
-                  </div>
-                  <input v-model="oldPassword" type="password" class="w-full bg-base-200/50 border border-transparent focus:border-primary/20 focus:bg-base-100 focus:ring-4 focus:ring-primary/5 rounded-2xl pl-14 py-4 transition-all outline-none font-bold text-sm" placeholder="输入当前密码" />
+          <!-- 测速结果列表 -->
+          <div v-if="mirrorResults.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+            <div 
+              v-for="r in mirrorResults" 
+              :key="r.domain"
+              @click="r.ok && selectMirror(r.domain)"
+              class="flex items-center justify-between p-3.5 rounded-2xl border transition-all"
+              :class="r.ok 
+                ? 'bg-base-200/30 border-base-300 hover:border-primary/50 cursor-pointer active:scale-95' 
+                : 'bg-error/5 border-error/20 opacity-60 cursor-not-allowed'"
+            >
+              <div class="space-y-0.5">
+                <div class="flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full" :class="r.ok ? (r.latency_ms < 500 ? 'bg-success' : 'bg-warning') : 'bg-error'"></span>
+                  <span class="text-xs font-mono font-bold">{{ r.domain }}</span>
                 </div>
+                <span v-if="(activeTab === 'bangumi' ? getVal('BGMTV_DOMAIN') : getVal('MIKAN_DOMAIN')) === r.domain" class="text-[10px] font-bold text-primary block pl-4">
+                  当前连接节点
+                </span>
               </div>
-
-              <div class="space-y-2">
-                <label class="text-xs font-black uppercase tracking-widest opacity-50 ml-1">新密码</label>
-                <div class="relative">
-                  <div class="absolute inset-y-0 left-5 flex items-center text-base-content/10">
-                    <Lock :size="20" />
-                  </div>
-                  <input v-model="newPassword" type="password" class="w-full bg-base-200/50 border border-transparent focus:border-primary/20 focus:bg-base-100 focus:ring-4 focus:ring-primary/5 rounded-2xl pl-14 py-4 transition-all outline-none font-bold text-sm" placeholder="至少 6 位" />
-                </div>
-              </div>
-
-              <div class="space-y-2">
-                <label class="text-xs font-black uppercase tracking-widest opacity-50 ml-1">确认新密码</label>
-                <div class="relative">
-                  <div class="absolute inset-y-0 left-5 flex items-center text-base-content/10">
-                    <Lock :size="20" />
-                  </div>
-                  <input v-model="confirmPassword" type="password" class="w-full bg-base-200/50 border border-transparent focus:border-primary/20 focus:bg-base-100 focus:ring-4 focus:ring-primary/5 rounded-2xl pl-14 py-4 transition-all outline-none font-bold text-sm" placeholder="再次输入新密码" />
-                </div>
-              </div>
-
-              <div class="pt-4 flex flex-col gap-4">
-                <button @click="changePassword" :disabled="changingPassword" class="btn btn-primary rounded-2xl gap-3 h-14 min-h-0 px-8 shadow-xl shadow-lg hover:scale-[1.02] active:scale-95 transition-all group">
-                  <span v-if="changingPassword" class="loading loading-spinner loading-sm"></span>
-                  <span v-else class="text-xs font-black uppercase tracking-widest">确认修改密码</span>
-                </button>
-                <p v-if="passwordMsg" class="text-success text-xs font-bold bg-success/10 p-4 rounded-xl border border-success/20 animate-in fade-in zoom-in-95">{{ passwordMsg }}</p>
-                <p v-if="passwordError" class="text-error text-xs font-bold bg-error/10 p-4 rounded-xl border border-error/20 animate-in fade-in zoom-in-95">{{ passwordError }}</p>
+              <div class="text-right">
+                <span v-if="r.ok" class="text-sm font-mono font-black" :class="r.latency_ms < 500 ? 'text-success' : 'text-warning'">
+                  {{ r.latency_ms }}<span class="text-[10px] opacity-60">ms</span>
+                </span>
+                <span v-else class="text-xs text-error font-bold">无法访问</span>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Section Fields -->
-        <div v-for="section in tabs.find(t => t.key === activeTab)?.sections" :key="section.title" class="space-y-4 lg:space-y-6">
-          <div class="px-4 flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4">
-            <div v-if="section.title === 'Bangumi OAuth2'" class="p-6 bg-primary/5 rounded-[2rem] border border-primary/10 w-full mb-6 flex flex-col items-start gap-5">
-              <div class="w-full flex flex-col sm:flex-row items-center justify-between gap-6">
-                <div class="flex items-center gap-6">
-                  <div class="w-16 h-16 rounded-[1.5rem] bg-primary/10 flex items-center justify-center text-primary shadow-inner">
-                    <Antenna :size="32" />
-                  </div>
-                  <div class="space-y-1">
-                    <h3 class="text-xl font-black tracking-tight italic">连接 Bangumi 账号</h3>
-                    <p class="text-[10px] font-black uppercase tracking-widest opacity-40 leading-relaxed">连接后将自动同步您的收藏列表（想看、在看）</p>
-                  </div>
-                </div>
-                <button @click="connectBangumi" class="btn btn-primary btn-lg rounded-2xl gap-3 px-10 shadow-xl shadow-primary/20 hover:scale-105 active:scale-95 transition-all group">
-                  <Antenna :size="20" class="group-hover:animate-pulse" />
-                  <span class="text-xs font-black uppercase tracking-widest">OAuth 授权连接</span>
-                </button>
+        <!-- 2. Bangumi 专属 OAuth2 快捷授权横幅 -->
+        <div v-if="activeTab === 'bangumi'" class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+            <div class="flex items-center gap-4">
+              <div class="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+                <Antenna :size="24" />
               </div>
-              <div class="w-full text-xs opacity-75 bg-base-200/50 p-4 rounded-2xl border border-base-content/5 space-y-1.5">
-                <p class="font-bold text-primary">💡 支持两种连接方式：</p>
-                <p>• <b>方式一（推荐，超简单）</b>：直接前往 <a href="https://next.bgm.tv/demo/access-token" target="_blank" class="link link-primary font-bold">Bangumi 个人令牌页面 ↗</a> 生成一个 Token，粘贴到下方的 <code>Bangumi Token</code>，并在下方填写您的 <code>Bangumi 用户名</code>，点击页面底部「保存配置」即可！</p>
-                <p>• <b>方式二（OAuth2 自动授权）</b>：前往 <a href="https://bgm.tv/dev/app" target="_blank" class="link link-primary font-bold">Bangumi 开发者平台 ↗</a> 创建客户端应用，将获得的 Client ID 和 Secret 填入下方保存后，点击上方「OAuth 授权连接」按钮即可。</p>
+              <div>
+                <div class="flex items-center gap-2">
+                  <h3 class="text-base font-black tracking-tight">Bangumi 账号关联</h3>
+                  <span v-if="getVal('BGMTV_USERNAME')" class="badge badge-success badge-sm font-bold text-[10px]">
+                    已绑定: {{ getVal('BGMTV_USERNAME') }}
+                  </span>
+                  <span v-else class="badge badge-ghost badge-sm text-[10px]">未连接</span>
+                </div>
+                <p class="text-xs opacity-60 mt-0.5">关联后自动双向同步番剧收藏、追番状态与个人进度</p>
               </div>
             </div>
 
-            <div class="space-y-1">
-              <h2 class="text-xl lg:text-2xl font-black tracking-tight italic flex items-center gap-4">
-                {{ section.title }}
-                <div class="h-1 w-12 bg-primary/20 rounded-full"></div>
-              </h2>
-              <p class="text-[10px] font-black uppercase tracking-widest opacity-30">{{ section.desc }}</p>
-            </div>
-            <div class="px-4 py-1.5 rounded-full bg-base-200 border border-base-300/50 flex items-center gap-2">
-               <span class="text-[10px] font-black uppercase tracking-widest text-base-content/40">{{ $t('settings.status.syncStatus') }}:</span>
-               <span class="text-[10px] font-black text-primary">{{ section.fields.filter(f => isConfigured(f.key)).length }}/{{ section.fields.length }}</span>
-            </div>
+            <button 
+              @click="connectBangumi" 
+              class="btn btn-primary rounded-xl gap-2 px-6 shadow-md hover:scale-[1.02] active:scale-95 transition-all"
+            >
+              <Antenna :size="16" />
+              <span class="text-xs font-black">OAuth 网页授权</span>
+            </button>
           </div>
 
-          <div class="bg-base-100 rounded-3xl lg:rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden divide-y divide-base-200/50">
-            <div v-for="field in section.fields" :key="field.key"
-              class="group/field flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-10 p-5 sm:p-6 lg:p-8 hover:bg-base-200/30 transition-colors">
-              
-              <div class="sm:w-56 shrink-0 space-y-1">
-                <p class="text-xs font-black uppercase tracking-widest flex items-center gap-2">
-                   {{ field.label }}
-                   <Check v-if="isConfigured(field.key)" :size="12" class="text-success" />
-                </p>
-                <p v-if="field.hint" class="text-[9px] font-bold opacity-30 uppercase leading-relaxed">{{ field.hint }}</p>
+          <div class="text-xs bg-base-200/50 p-4 rounded-2xl border border-base-300/40 space-y-1.5 text-base-content/75">
+            <p class="font-bold text-primary">💡 支持两种极简绑定模式：</p>
+            <p>1. <b>个人令牌模式（最推荐）</b>：直接在 <a href="https://next.bgm.tv/demo/access-token" target="_blank" class="link link-primary font-bold">Bangumi 访问令牌申请页 ↗</a> 生成 Token，填入下方「个人访问令牌」保存即可！</p>
+            <p>2. <b>OAuth2 应用模式</b>：在 <a href="https://bgm.tv/dev/app" target="_blank" class="link link-primary font-bold">Bangumi 开发者中心 ↗</a> 创建 App 后，填入下方 Client ID 与 Secret，点击上方按钮一键完成跳转授权。</p>
+          </div>
+        </div>
+
+        <!-- 3. 标准化表单渲染区块 (适用常规 Sections) -->
+        <div 
+          v-for="section in tabs.find(t => t.key === activeTab)?.sections" 
+          :key="section.title" 
+          class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5"
+        >
+          <div>
+            <h3 class="text-base font-black tracking-tight">{{ section.title }}</h3>
+            <p class="text-xs opacity-50 mt-0.5">{{ section.desc }}</p>
+          </div>
+
+          <!-- 表单字段响应式网格 -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div 
+              v-for="field in section.fields" 
+              :key="field.key" 
+              class="space-y-1.5"
+              :class="{ 'md:col-span-2': field.placeholder.includes('http') || field.label.includes('列表') || field.label.includes('说明') }"
+            >
+              <div class="flex items-center justify-between">
+                <label class="text-xs font-bold text-base-content/75 flex items-center gap-1.5">
+                  <span>{{ field.label }}</span>
+                  <span v-if="isConfigured(field.key)" class="w-1.5 h-1.5 rounded-full bg-success"></span>
+                </label>
+                <span v-if="field.testChannel" class="text-[10px] text-primary cursor-pointer hover:underline font-bold" @click="sendTestNotify(field.testChannel)">
+                  发送自检测试
+                </span>
               </div>
 
-              <div class="flex-1 relative group flex items-center">
-                  <template v-if="field.type === 'switch'">
-                    <input type="checkbox" class="toggle toggle-primary toggle-lg" 
-                      :checked="getVal(field.key) === 'true'"
-                      @change="(e: any) => setVal(field.key, e.target.checked ? 'true' : 'false')"
-                      :disabled="field.key === 'AI_SMART_SEARCH_ENABLED' && !isAIConfigured" />
-                    <span v-if="field.key === 'AI_SMART_SEARCH_ENABLED' && !isAIConfigured" class="text-[9px] font-bold opacity-30 uppercase ml-2">
-                      {{ $t('settings.ai.error.aiNotConfigured') }}
-                    </span>
-                  </template>
-                  <template v-else-if="field.type === 'select' && field.selectOptions">
-                    <div class="flex w-full items-center gap-2">
-                      <select 
-                        :value="getVal(field.key) || (field.key === 'AI_MODEL' ? (modelOptions[0]?.value || '') : field.selectOptions[0]?.value)"
-                        @change="(e: any) => setVal(field.key, e.target.value)"
-                        :disabled="field.key === 'AI_MODEL' && modelOptions.length === 0 && !modelLoading"
-                        class="flex-1 bg-base-200/50 border border-transparent focus:border-primary/20 focus:bg-base-100 focus:ring-4 focus:ring-primary/5 rounded-xl lg:rounded-2xl pl-12 lg:pl-14 pr-10 lg:pr-12 py-3.5 lg:py-4 transition-all outline-none font-bold text-sm lg:text-base appearance-none cursor-pointer">
-                        <option v-for="opt in (field.key === 'AI_MODEL' ? modelOptions : field.selectOptions)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                      </select>
-                      <!-- AI 模型获取按钮 -->
-                      <button v-if="field.key === 'AI_MODEL'"
-                        class="btn btn-ghost btn-sm rounded-xl gap-2 px-4 py-3.5 lg:py-4 hover:bg-primary/20 hover:text-primary transition-all shrink-0"
-                        @click="fetchAIModels"
-                        :disabled="modelLoading || !getVal('AI_ENDPOINT')"
-                        title="从端点获取可用模型列表">
-                        <RefreshCw v-if="modelLoading" :size="16" class="animate-spin" />
-                        <RefreshCw v-else :size="16" />
-                        <span class="hidden sm:inline text-xs font-black uppercase tracking-widest">{{ modelLoading ? $t('settings.ai.loadingModels') : $t('settings.ai.fetchModels') }}</span>
-                      </button>
-                    </div>
-                  </template>
-                  <template v-else>
-                    <div class="absolute inset-y-0 left-5 flex items-center text-base-content/10 group-focus-within:text-primary transition-colors">
-                       <component :is="field.type === 'password' ? Lock : FileText" :size="20" />
-                    </div>
-                    <input :type="inputType(field)" :value="getVal(field.key)"
-                      @input="(e: Event) => setVal(field.key, (e.target as HTMLInputElement).value)"
-                      :placeholder="(field.type === 'password' && settings[field.key] !== undefined) ? '已配置，输入新值覆盖' : field.placeholder"
-                      class="w-full bg-base-200/50 border border-transparent focus:border-primary/20 focus:bg-base-100 focus:ring-4 focus:ring-primary/5 rounded-xl lg:rounded-2xl pl-12 lg:pl-14 pr-10 lg:pr-12 py-3.5 lg:py-4 transition-all outline-none font-bold placeholder:text-base-content/20 text-sm lg:text-base" />
-                    
-                    <button v-if="field.type === 'password' && getVal(field.key)"
-                      class="absolute right-3 top-1/2 -translate-y-1/2 btn btn-ghost btn-circle btn-xs hover:bg-primary/20 hover:text-primary transition-all"
-                      @click="togglePassword(field.key)">
-                      <component :is="showPasswords.has(field.key) ? Eye : EyeOff" :size="16" />
-                    </button>
-                    <button v-if="field.testChannel"
-                      class="absolute right-36 top-1/2 -translate-y-1/2 btn btn-ghost btn-circle btn-xs hover:bg-primary/20 hover:text-primary transition-all"
-                      @click="sendTestNotify(field.testChannel)">
-                      <Bell :size="16" />
-                    </button>
-                  </template>
+              <!-- 下拉选择控件 -->
+              <div v-if="field.type === 'select'" class="relative">
+                <select 
+                  :value="getVal(field.key) || (field.key === 'AI_MODEL' ? (modelOptions[0]?.value || '') : field.selectOptions?.[0]?.value)"
+                  @change="(e: any) => setVal(field.key, e.target.value)"
+                  class="select select-bordered w-full rounded-xl text-xs font-semibold focus:border-primary"
+                >
+                  <option v-for="opt in (field.key === 'AI_MODEL' && modelOptions.length ? modelOptions : field.selectOptions)" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
+                </select>
+              </div>
+
+              <!-- AI 模型专用输入+拉取组合控件 -->
+              <div v-else-if="field.key === 'AI_MODEL'" class="flex gap-2">
+                <input 
+                  type="text" 
+                  :value="getVal(field.key)" 
+                  @input="(e: Event) => setVal(field.key, (e.target as HTMLInputElement).value)"
+                  :placeholder="field.placeholder" 
+                  class="input input-bordered flex-1 rounded-xl text-xs font-mono font-medium focus:border-primary" 
+                />
+                <button 
+                  @click="fetchAIModels" 
+                  :disabled="modelLoading || !getVal('AI_ENDPOINT')"
+                  class="btn btn-outline btn-sm rounded-xl gap-1.5 h-10 px-4"
+                  title="从端点获取可用模型"
+                >
+                  <RefreshCw v-if="modelLoading" :size="14" class="animate-spin" />
+                  <span class="text-xs font-bold">{{ modelLoading ? '获取中' : '获取模型' }}</span>
+                </button>
+              </div>
+
+              <!-- 普通文本与密码输入控件 -->
+              <div v-else class="relative">
+                <input 
+                  :type="inputType(field)" 
+                  :value="getVal(field.key)"
+                  @input="(e: Event) => setVal(field.key, (e.target as HTMLInputElement).value)"
+                  :placeholder="field.placeholder"
+                  class="input input-bordered w-full rounded-xl text-xs font-mono font-medium pr-10 focus:border-primary" 
+                />
+                <button 
+                  v-if="field.type === 'password' && getVal(field.key)" 
+                  type="button"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 opacity-40 hover:opacity-100 transition-opacity"
+                  @click="togglePassword(field.key)"
+                >
+                  <component :is="showPasswords.has(field.key) ? EyeOff : Eye" :size="16" />
+                </button>
               </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- 插件管理面板 -->
-    <div v-if="activeTab === 'plugins'" class="animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div class="space-y-6">
-        <div class="bg-base-100 rounded-3xl lg:rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden">
-          <div class="p-6 sm:p-8 lg:p-10 space-y-6">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div class="space-y-1">
-                <h2 class="text-xl lg:text-2xl font-black tracking-tight italic flex items-center gap-4">
-                  插件扩展与自动化中心
-                  <div class="h-1 w-12 bg-primary/20 rounded-full"></div>
-                </h2>
-                <p class="text-[10px] font-black uppercase tracking-widest opacity-40">已启用 {{ pluginList.filter(p => p.enabled).length }} / 共 {{ pluginList.length }} 个扩展 · 支持内建引擎与 Webhook 自动化</p>
-              </div>
-              <div class="flex items-center gap-3 flex-wrap">
-                <button class="btn btn-ghost btn-sm rounded-xl gap-2 border border-base-300/50 hover:bg-base-200" @click="exportPluginsJSON" title="导出插件配置">
-                  <Download :size="16" />
-                  <span class="text-xs font-bold">导出配置</span>
-                </button>
-                <button class="btn btn-ghost btn-sm rounded-xl gap-2 border border-base-300/50 hover:bg-base-200" @click="reloadPlugins" :disabled="pluginLoading" title="重新载入">
-                  <RefreshCw :size="16" :class="{ 'animate-spin': pluginLoading }" />
-                  <span class="text-xs font-bold">重新加载</span>
-                </button>
-                <button class="btn btn-primary btn-sm rounded-xl gap-2 shadow-lg shadow-primary/20" @click="openAddPluginModal">
-                  <Plus :size="16" />
-                  <span class="text-xs font-black uppercase tracking-wider">导入 / 添加插件</span>
-                </button>
-              </div>
+        <!-- 4. 插件生态与自动化面板 (Plugins Tab) -->
+        <div v-if="activeTab === 'plugins'" class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-6">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 class="text-base font-black tracking-tight">插件扩展与事件自动化</h3>
+              <p class="text-xs opacity-50 mt-0.5">支持内建规范整理插件与外部 Webhook 实时触发联动</p>
             </div>
-
-            <!-- 加载状态 -->
-            <div v-if="pluginLoading && pluginList.length === 0" class="flex justify-center py-12">
-              <span class="loading loading-spinner loading-lg text-primary"></span>
-            </div>
-
-            <!-- 空状态 -->
-            <div v-else-if="pluginList.length === 0" class="flex flex-col items-center justify-center py-16 text-center bg-base-200/30 rounded-3xl border border-dashed border-base-300 space-y-3">
-              <Sparkles :size="48" class="opacity-20 text-primary animate-pulse" />
-              <p class="text-sm font-black uppercase tracking-widest opacity-40">暂无任何插件</p>
-              <button class="btn btn-primary btn-sm rounded-xl gap-2" @click="openAddPluginModal">
+            <div class="flex items-center gap-2 flex-wrap">
+              <button class="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-300" @click="exportPluginsJSON">
+                <Download :size="14" />
+                <span class="text-xs font-bold">导出配置</span>
+              </button>
+              <button class="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-300" @click="reloadPlugins" :disabled="pluginLoading">
+                <RefreshCw :size="14" :class="{ 'animate-spin': pluginLoading }" />
+                <span class="text-xs font-bold">重载插件</span>
+              </button>
+              <button class="btn btn-primary btn-sm rounded-xl gap-1.5 shadow-md" @click="openAddPluginModal">
                 <Plus :size="14" />
-                <span>立即添加第一个插件</span>
+                <span class="text-xs font-black">导入 / 添加插件</span>
               </button>
             </div>
+          </div>
 
-            <!-- 插件卡片网格 -->
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div v-for="plugin in pluginList" :key="plugin.id"
-                class="p-6 rounded-3xl border bg-base-200/30 hover:bg-base-200/50 transition-all flex flex-col justify-between gap-5 relative group"
-                :class="plugin.enabled ? 'border-primary/30 shadow-lg shadow-primary/5' : 'border-base-300/40 opacity-75'">
-                
-                <!-- 卡片顶部 -->
-                <div>
-                  <div class="flex items-start justify-between gap-4 mb-3">
-                    <div class="flex items-center gap-3.5">
-                      <div class="w-12 h-12 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-105 shadow-inner"
-                        :class="plugin.is_builtin ? 'bg-primary/10 text-primary' : 'bg-secondary/10 text-secondary'">
-                        <Sparkles v-if="plugin.is_builtin" :size="24" />
-                        <Antenna v-else :size="24" />
-                      </div>
-                      <div>
-                        <div class="flex items-center gap-2">
-                          <h3 class="font-black text-base tracking-tight text-base-content">{{ plugin.name }}</h3>
-                          <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-base-300 text-base-content/60 font-bold">
-                            v{{ plugin.version || '1.0' }}
-                          </span>
-                        </div>
-                        <div class="flex items-center gap-2 mt-1">
-                          <span class="badge badge-xs font-black uppercase tracking-wider text-[9px] px-2 py-1"
-                            :class="plugin.is_builtin ? 'badge-primary' : 'badge-secondary'">
-                            {{ plugin.is_builtin ? '内建插件' : (plugin.type === 'webhook' ? 'Webhook 联动' : '扩展插件') }}
-                          </span>
-                          <span v-if="plugin.author" class="text-[10px] opacity-40 font-semibold">
-                            by {{ plugin.author }}
-                          </span>
-                        </div>
-                      </div>
+          <!-- 插件列表网格 -->
+          <div v-if="pluginLoading && pluginList.length === 0" class="flex justify-center py-12">
+            <span class="loading loading-spinner text-primary"></span>
+          </div>
+          <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div 
+              v-for="plugin in pluginList" 
+              :key="plugin.id"
+              class="p-5 rounded-2xl border bg-base-200/30 flex flex-col justify-between gap-4 transition-all"
+              :class="plugin.enabled ? 'border-primary/30 shadow-sm' : 'border-base-300/40 opacity-70'"
+            >
+              <div>
+                <div class="flex items-start justify-between gap-3 mb-2">
+                  <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow-inner"
+                      :class="plugin.is_builtin ? 'bg-primary/10 text-primary' : 'bg-secondary/10 text-secondary'">
+                      <Sparkles v-if="plugin.is_builtin" :size="18" />
+                      <Antenna v-else :size="18" />
                     </div>
-
-                    <!-- 开关与操作按钮 -->
-                    <div class="flex items-center gap-3">
-                      <input type="checkbox" class="toggle toggle-primary toggle-md"
-                        :checked="plugin.enabled"
-                        @change="togglePlugin(plugin)"
-                        :title="plugin.enabled ? '点击停用' : '点击启用'" />
-                      <button v-if="!plugin.is_builtin" @click="deletePlugin(plugin.id)"
-                        class="btn btn-ghost btn-xs btn-circle text-error/40 hover:text-error hover:bg-error/10 transition-colors"
-                        title="删除插件">
-                        <Trash2 :size="14" />
-                      </button>
+                    <div>
+                      <div class="flex items-center gap-2">
+                        <h4 class="font-black text-sm">{{ plugin.name }}</h4>
+                        <span class="badge badge-neutral badge-xs font-mono">v{{ plugin.version || '1.0' }}</span>
+                      </div>
+                      <div class="flex items-center gap-1.5 mt-0.5">
+                        <span class="badge badge-xs text-[9px]" :class="plugin.is_builtin ? 'badge-primary' : 'badge-secondary'">
+                          {{ plugin.is_builtin ? '内建功能' : 'Webhook 联动' }}
+                        </span>
+                        <span v-if="plugin.author" class="text-[10px] opacity-40">by {{ plugin.author }}</span>
+                      </div>
                     </div>
                   </div>
 
-                  <!-- 插件描述 -->
-                  <p class="text-xs text-base-content/70 leading-relaxed font-medium mt-2">
-                    {{ plugin.description || '暂无描述' }}
-                  </p>
+                  <!-- 启用切换与删除 -->
+                  <div class="flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      class="toggle toggle-primary toggle-sm"
+                      :checked="plugin.enabled"
+                      @change="togglePlugin(plugin)" 
+                      :title="plugin.enabled ? '点击停用' : '点击启用'"
+                    />
+                    <button 
+                      v-if="!plugin.is_builtin" 
+                      @click="deletePlugin(plugin.id)" 
+                      class="btn btn-ghost btn-xs btn-circle text-error/50 hover:text-error"
+                    >
+                      <Trash2 :size="13" />
+                    </button>
+                  </div>
                 </div>
 
-                <!-- Webhook URL & 监听事件 -->
-                <div class="space-y-3 pt-3 border-t border-base-content/5">
-                  <div v-if="plugin.url" class="space-y-1">
-                    <p class="text-[9px] font-black uppercase tracking-widest opacity-40">目标 Webhook URL</p>
-                    <div class="flex items-center gap-2 bg-base-300/60 px-3 py-1.5 rounded-xl">
-                      <span class="text-xs font-mono break-all opacity-80 select-all flex-1">{{ plugin.url }}</span>
-                    </div>
-                  </div>
+                <p class="text-xs text-base-content/70 leading-relaxed font-medium">
+                  {{ plugin.description || '暂无描述' }}
+                </p>
+              </div>
 
-                  <div v-if="plugin.events && plugin.events.length" class="space-y-1.5">
-                    <p class="text-[9px] font-black uppercase tracking-widest opacity-40">监听事件触发点</p>
-                    <div class="flex flex-wrap gap-1.5">
-                      <span v-for="ev in plugin.events" :key="ev"
-                        class="px-2.5 py-0.5 rounded-lg bg-base-300/80 text-[10px] font-bold text-base-content/70 border border-base-content/5">
-                        {{ ev }}
-                      </span>
-                    </div>
+              <!-- 底部事件与目标 URL -->
+              <div class="space-y-2 pt-2 border-t border-base-content/5 text-xs">
+                <div v-if="plugin.url" class="space-y-0.5">
+                  <span class="text-[9px] font-black uppercase tracking-wider opacity-40">目标 Webhook</span>
+                  <div class="bg-base-300/60 px-2.5 py-1 rounded-lg font-mono text-[11px] truncate select-all">
+                    {{ plugin.url }}
+                  </div>
+                </div>
+
+                <div v-if="plugin.events && plugin.events.length" class="space-y-1">
+                  <span class="text-[9px] font-black uppercase tracking-wider opacity-40">监听事件点</span>
+                  <div class="flex flex-wrap gap-1">
+                    <span v-for="ev in plugin.events" :key="ev" class="px-2 py-0.5 rounded-md bg-base-300 text-[10px] font-mono font-bold opacity-75">
+                      {{ ev }}
+                    </span>
                   </div>
                 </div>
               </div>
             </div>
-
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- 备份管理面板 -->
-    <div v-if="activeTab === 'backup'" class="animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div class="space-y-6">
-        <!-- 备份列表 -->
-        <div class="bg-base-100 rounded-3xl lg:rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden">
-          <div class="p-6 sm:p-8 lg:p-10 space-y-6">
+        <!-- 5. 数据归档与恢复 (Backup Tab) -->
+        <div v-if="activeTab === 'backup'" class="space-y-6">
+          <div class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div class="space-y-1">
-                <h2 class="text-xl lg:text-2xl font-black tracking-tight italic flex items-center gap-4">
-                  {{ $t('settings.sections.backup') }}
-                  <div class="h-1 w-12 bg-primary/20 rounded-full"></div>
-                </h2>
-                <p class="text-[10px] font-black uppercase tracking-widest opacity-30">{{ $t('settings.sections.backupDesc') }} ({{ $t('settings.backup.fileCount', { count: backupList.length }) }})</p>
+              <div>
+                <h3 class="text-base font-black tracking-tight">数据库备份归档</h3>
+                <p class="text-xs opacity-50 mt-0.5">导出包含系统所有订阅状态、下载记录与配置参数的 JSON 快照</p>
               </div>
-              <div class="flex gap-3">
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" class="checkbox checkbox-primary" v-model="showBackupEpisodes" />
-                  <span class="text-xs font-black uppercase tracking-widest">{{ $t('settings.backup.includeEpisodes') }}</span>
+              <div class="flex items-center gap-3">
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                  <input type="checkbox" v-model="showBackupEpisodes" class="checkbox checkbox-primary checkbox-sm rounded-md" />
+                  <span class="text-xs font-bold">包含剧集下载记录</span>
                 </label>
-                <button class="btn btn-primary rounded-2xl gap-3 px-6" @click="createBackup" :disabled="creatingBackup">
-                  <HardDrive :size="20" />
-                  <span class="text-xs font-black uppercase tracking-widest">{{ $t('settings.backup.createBackup') }}</span>
-                  <span v-if="creatingBackup" class="loading loading-spinner loading-xs"></span>
+                <button 
+                  @click="createBackup" 
+                  :disabled="creatingBackup"
+                  class="btn btn-primary btn-sm rounded-xl px-5 gap-1.5 shadow-md"
+                >
+                  <Database :size="14" />
+                  <span class="text-xs font-bold">{{ creatingBackup ? '正在创建...' : '立即创建快照' }}</span>
                 </button>
               </div>
             </div>
 
-            <div v-if="backupLoading" class="flex justify-center py-12">
-              <span class="loading loading-spinner loading-lg text-primary"></span>
-            </div>
-
-            <div v-else-if="backupList.length === 0" class="flex flex-col items-center justify-center py-12 text-center bg-base-200/30 rounded-3xl border border-dashed border-base-300">
-              <HardDrive :size="48" class="opacity-20 mb-4" />
-              <p class="text-[10px] font-black uppercase tracking-widest opacity-20 italic">{{ $t('settings.backup.noBackups') }}</p>
-            </div>
-
-            <div v-else class="overflow-x-auto">
-              <table class="table table-lg w-full">
+            <!-- 历史备份文件表格 -->
+            <div class="overflow-x-auto border border-base-200/80 rounded-2xl">
+              <table class="table table-sm w-full">
                 <thead>
-                  <tr class="border-b border-base-200 bg-base-200/30">
-                    <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6 pl-10">{{ $t('settings.backup.filename') }}</th>
-                    <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6">{{ $t('settings.backup.size') }}</th>
-                    <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6">{{ $t('settings.backup.created') }}</th>
-                    <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6 pr-10">{{ $t('settings.backup.actions') }}</th>
+                  <tr class="bg-base-200/50 text-xs text-base-content/60">
+                    <th>备份文件名</th>
+                    <th>大小</th>
+                    <th>创建时间</th>
+                    <th class="text-right">操作</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-base-200/50">
-                  <tr v-for="backup in backupList" :key="backup.name" class="hover:bg-base-200/30 transition-colors">
-                    <td class="pl-10 font-mono text-sm">{{ backup.name }}</td>
-                    <td class="font-mono text-sm">{{ formatBackupSize(backup.size) }}</td>
-                    <td class="text-sm">{{ formatBackupTime(backup.mod_time) }}</td>
-                    <td class="pr-10">
-                      <div class="flex items-center gap-2">
-                        <button class="btn btn-ghost btn-sm btn-circle hover:bg-primary/20 hover:text-primary" @click="downloadBackup(backup.name)" :title="$t('settings.backup.download')">
-                          <ArrowDown :size="16" />
+                <tbody>
+                  <tr v-if="backupList.length === 0">
+                    <td colspan="4" class="text-center py-8 opacity-40 text-xs">暂无历史备份，点击上方按钮创建</td>
+                  </tr>
+                  <tr v-for="b in backupList" :key="b.name" class="hover:bg-base-200/30 text-xs">
+                    <td class="font-mono font-bold">{{ b.name }}</td>
+                    <td class="font-mono">{{ formatBackupSize(b.size) }}</td>
+                    <td class="opacity-70">{{ formatBackupTime(b.mod_time) }}</td>
+                    <td class="text-right">
+                      <div class="flex items-center justify-end gap-1.5">
+                        <button @click="downloadBackup(b.name)" class="btn btn-ghost btn-xs rounded-lg" title="下载到本地">
+                          <Download :size="13" />
                         </button>
-                        <button class="btn btn-ghost btn-sm btn-circle hover:bg-success/20 hover:text-success" @click="restoreBackup(backup.name)" :disabled="restoringBackup" :title="$t('settings.backup.restore')">
-                          <RotateCcw :size="16" />
-                          <span v-if="restoringBackup" class="loading loading-spinner loading-xs"></span>
+                        <button @click="restoreBackup(b.name)" class="btn btn-ghost btn-xs text-warning rounded-lg" title="从该备份恢复">
+                          <RotateCcw :size="13" />
                         </button>
-                        <button class="btn btn-ghost btn-sm btn-circle hover:bg-error/20 hover:text-error" @click="deleteBackup(backup.name)" :disabled="deletingBackup === backup.name" :title="$t('settings.backup.delete')">
-                          <Trash2 :size="16" />
-                          <span v-if="deletingBackup === backup.name" class="loading loading-spinner loading-xs"></span>
+                        <button @click="deleteBackup(b.name)" class="btn btn-ghost btn-xs text-error rounded-lg" title="删除备份">
+                          <Trash2 :size="13" />
                         </button>
                       </div>
                     </td>
@@ -1060,140 +1132,218 @@ function formatBackupTime(timeStr: string): string {
             </div>
           </div>
         </div>
-      </div>
+
+        <!-- 6. 系统运行日志 (Logs Tab - 独占控制台) -->
+        <div v-if="activeTab === 'logs'" class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 class="text-base font-black tracking-tight flex items-center gap-2">
+                <span>实时运行控制台</span>
+                <span class="badge badge-neutral badge-xs font-mono">{{ logs.length }} 行日志</span>
+              </h3>
+              <p class="text-xs opacity-50 mt-0.5">监控后端服务请求、订阅爬取、刮削与下载器状态</p>
+            </div>
+
+            <div class="flex items-center gap-2.5 flex-wrap">
+              <!-- 实时搜索输入框 -->
+              <div class="relative">
+                <input 
+                  v-model="logFilter" 
+                  type="text" 
+                  placeholder="搜索日志过滤..." 
+                  class="input input-bordered input-sm rounded-xl pl-8 text-xs font-mono w-44 focus:w-56 transition-all"
+                />
+                <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
+              </div>
+
+              <!-- 自动轮询开关 -->
+              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-bold border border-base-300/60 px-3 py-1.5 rounded-xl">
+                <input type="checkbox" v-model="autoRefreshLogs" class="checkbox checkbox-primary checkbox-xs rounded" />
+                <span>自动刷新 (3s)</span>
+              </label>
+
+              <!-- 复制按钮 -->
+              <button @click="copyAllLogs" class="btn btn-ghost btn-sm rounded-xl gap-1 border border-base-300/60">
+                <Copy :size="13" />
+                <span class="text-xs font-bold">复制</span>
+              </button>
+
+              <!-- 手动刷新按钮 -->
+              <button @click="fetchLogs" :disabled="logLoading" class="btn btn-primary btn-sm rounded-xl gap-1">
+                <RefreshCw :size="13" :class="{ 'animate-spin': logLoading }" />
+                <span class="text-xs font-bold">刷新</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 终端风格滚动窗口 -->
+          <div class="bg-[#12161f] text-gray-300 rounded-2xl p-4 font-mono text-[11px] leading-relaxed max-h-[560px] overflow-y-auto space-y-1 select-text border border-white/5 shadow-inner">
+            <div 
+              v-for="(line, i) in filteredLogs" 
+              :key="i"
+              class="py-0.5 px-1 rounded hover:bg-white/5 transition-colors break-all"
+              :class="{
+                'text-rose-400 font-bold': line.includes('❌') || line.includes('ERROR') || line.includes('error'),
+                'text-amber-300 font-bold': line.includes('⚠️') || line.includes('WARN'),
+                'text-emerald-400': line.includes('✅') || line.includes('SUCCESS'),
+                'text-cyan-400': line.includes('🔌') || line.includes('🚀')
+              }"
+            >
+              {{ line }}
+            </div>
+            <div v-if="filteredLogs.length === 0" class="text-center py-12 opacity-30 text-xs">
+              {{ logFilter ? '未搜索到匹配日志行' : '暂无系统日志' }}
+            </div>
+          </div>
+        </div>
+
+        <!-- 7. 账户安全 (Account Tab) -->
+        <div v-if="activeTab === 'account'" class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5">
+          <div>
+            <h3 class="text-base font-black tracking-tight">修改管理员密码</h3>
+            <p class="text-xs opacity-50 mt-0.5">建议定期更换密码以保障管理终端安全</p>
+          </div>
+
+          <div class="max-w-md space-y-4">
+            <div class="space-y-1">
+              <label class="text-xs font-bold text-base-content/75">当前旧密码</label>
+              <input v-model="oldPassword" type="password" placeholder="输入当前密码" class="input input-bordered w-full rounded-xl text-xs" />
+            </div>
+            <div class="space-y-1">
+              <label class="text-xs font-bold text-base-content/75">新密码</label>
+              <input v-model="newPassword" type="password" placeholder="至少 6 位密码" class="input input-bordered w-full rounded-xl text-xs" />
+            </div>
+            <div class="space-y-1">
+              <label class="text-xs font-bold text-base-content/75">确认新密码</label>
+              <input v-model="confirmPassword" type="password" placeholder="再次输入新密码" class="input input-bordered w-full rounded-xl text-xs" />
+            </div>
+
+            <div class="pt-2">
+              <button 
+                @click="changePassword" 
+                :disabled="changingPassword"
+                class="btn btn-primary rounded-xl px-7 gap-2 shadow-md"
+              >
+                <Lock :size="14" />
+                <span class="text-xs font-black">{{ changingPassword ? '正在更新...' : '确认修改密码' }}</span>
+              </button>
+            </div>
+
+            <p v-if="passwordMsg" class="text-success text-xs font-bold bg-success/10 p-3 rounded-xl border border-success/20">{{ passwordMsg }}</p>
+            <p v-if="passwordError" class="text-error text-xs font-bold bg-error/10 p-3 rounded-xl border border-error/20">{{ passwordError }}</p>
+          </div>
+        </div>
+
+      </main>
     </div>
 
-    <!-- 系统日志 -->
-    <div class="bg-base-100 rounded-3xl lg:rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden">
-      <div class="p-6 sm:p-8 lg:p-10 space-y-6">
-        <div class="flex items-center justify-between">
-          <div class="space-y-1">
-            <h2 class="text-xl font-black tracking-tight italic">{{ $t('settings.logs.title') }}</h2>
-            <p class="text-[10px] font-black uppercase tracking-widest opacity-30">{{ $t('settings.logs.count', { count: logs.length }) }}</p>
-          </div>
-          <button class="btn btn-ghost btn-sm rounded-xl text-[10px] font-black uppercase tracking-widest" @click="fetchLogs" :disabled="logLoading">
-            <span v-if="logLoading" class="loading loading-spinner loading-xs"></span>
-            <template v-else>{{ $t('settings.logs.refresh') }}</template>
-          </button>
-        </div>
-        <div class="bg-base-300/30 rounded-2xl p-4 max-h-80 overflow-y-auto font-mono text-[11px] leading-relaxed space-y-1">
-          <div v-for="(line, i) in logs" :key="i" class="opacity-70 hover:opacity-100 transition-opacity">
-            {{ line }}
-          </div>
-          <div v-if="logs.length === 0 && !logLoading" class="text-center py-8 text-[10px] font-bold opacity-30">{{ $t('settings.logs.empty') }}</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Version Footer -->
-    <div class="flex flex-col items-center justify-center gap-2 pb-10 text-center opacity-70 hover:opacity-100 transition-opacity">
-      <div class="text-xs font-semibold text-base-content/80 flex items-center justify-center gap-1.5 flex-wrap">
-        <span>Ani-Go &copy; 2026 • 倾心打造</span>
-        <span class="opacity-40">•</span>
-        <span>by <a href="https://github.com/xiaoyueRX" target="_blank" rel="noopener noreferrer" class="text-primary font-bold hover:underline">xiaoyue</a></span>
-      </div>
-      <a href="https://github.com/xiaoyueRX/Ani-Go" target="_blank" rel="noopener noreferrer" 
-         class="px-5 py-2 rounded-full bg-base-200/60 border border-base-300/60 text-[11px] font-mono font-bold text-base-content/70 hover:text-primary hover:border-primary/40 transition-all flex items-center gap-2 shadow-sm">
-        <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-        <span>GitHub: xiaoyueRX/Ani-Go</span>
-        <span class="opacity-40">•</span>
-        <span>v{{ CURRENT_VERSION }}</span>
-      </a>
-    </div>
     <!-- 导入 / 添加插件弹窗 Modal -->
     <div v-if="showPluginModal" class="modal modal-open z-50 animate-in fade-in duration-200">
-      <div class="modal-box max-w-2xl bg-base-100 rounded-3xl p-6 sm:p-8 border border-base-300/60 shadow-2xl space-y-6">
+      <div class="modal-box max-w-2xl bg-base-100 rounded-3xl p-6 sm:p-7 border border-base-200/80 shadow-2xl space-y-5">
         <div class="flex items-center justify-between">
-          <div class="space-y-1">
-            <h3 class="text-xl font-black italic tracking-tight flex items-center gap-3">
-              <Sparkles class="text-primary" :size="24" />
+          <div class="space-y-0.5">
+            <h3 class="text-lg font-black tracking-tight flex items-center gap-2">
+              <Sparkles class="text-primary" :size="20" />
               添加 / 导入插件扩展
             </h3>
-            <p class="text-xs opacity-50">配置 Webhook 外部系统联动，或直接导入 JSON 格式插件配置</p>
+            <p class="text-xs opacity-50">支持快速创建 Webhook 推送或直接导入 JSON 规则包</p>
           </div>
           <button @click="showPluginModal = false" class="btn btn-ghost btn-sm btn-circle">✕</button>
         </div>
 
         <!-- 模式切换标签 -->
         <div class="flex rounded-2xl bg-base-200 p-1">
-          <button class="flex-1 py-2 rounded-xl text-xs font-black transition-all"
-            :class="pluginModalTab === 'webhook' ? 'bg-primary text-primary-content shadow-md' : 'opacity-60 hover:opacity-100'"
+          <button class="flex-1 py-1.5 rounded-xl text-xs font-black transition-all"
+            :class="pluginModalTab === 'webhook' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
             @click="pluginModalTab = 'webhook'">
             快捷创建 Webhook
           </button>
-          <button class="flex-1 py-2 rounded-xl text-xs font-black transition-all"
-            :class="pluginModalTab === 'json' ? 'bg-primary text-primary-content shadow-md' : 'opacity-60 hover:opacity-100'"
+          <button class="flex-1 py-1.5 rounded-xl text-xs font-black transition-all"
+            :class="pluginModalTab === 'json' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
             @click="pluginModalTab = 'json'">
-            JSON 配置导入
+            JSON 规则导入
           </button>
         </div>
 
         <!-- Tab 1: Webhook 表单 -->
-        <div v-if="pluginModalTab === 'webhook'" class="space-y-4">
-          <div>
-            <label class="text-[11px] font-black uppercase tracking-wider opacity-60 block mb-1.5">插件名称 *</label>
-            <input v-model="pluginForm.name" type="text" placeholder="例如：Discord 追番频道推送 / n8n 自动化" class="input input-bordered w-full rounded-2xl text-sm" />
+        <div v-if="pluginModalTab === 'webhook'" class="space-y-3.5">
+          <div class="space-y-1">
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">插件名称 *</label>
+            <input v-model="pluginForm.name" type="text" placeholder="例如：Discord 频道推送 / n8n 自动化" class="input input-bordered w-full rounded-xl text-xs" />
           </div>
 
-          <div>
-            <label class="text-[11px] font-black uppercase tracking-wider opacity-60 block mb-1.5">目标 Webhook URL *</label>
-            <input v-model="pluginForm.url" type="url" placeholder="https://discord.com/api/webhooks/... 或 http://localhost:5678/webhook/..." class="input input-bordered w-full rounded-2xl font-mono text-sm" />
+          <div class="space-y-1">
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">目标 Webhook URL *</label>
+            <input v-model="pluginForm.url" type="url" placeholder="https://discord.com/api/webhooks/... 或 http://localhost:5678/webhook/..." class="input input-bordered w-full rounded-xl font-mono text-xs" />
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="text-[11px] font-black uppercase tracking-wider opacity-60 block mb-1.5">签名密钥 Secret (可选)</label>
-              <input v-model="pluginForm.secret" type="password" placeholder="请求头 X-AniGo-Secret" class="input input-bordered w-full rounded-2xl text-sm" />
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="space-y-1">
+              <label class="text-[11px] font-black uppercase tracking-wider opacity-60">签名密钥 Secret (可选)</label>
+              <input v-model="pluginForm.secret" type="password" placeholder="请求头 X-AniGo-Secret" class="input input-bordered w-full rounded-xl text-xs font-mono" />
             </div>
-            <div>
-              <label class="text-[11px] font-black uppercase tracking-wider opacity-60 block mb-1.5">插件描述 (可选)</label>
-              <input v-model="pluginForm.description" type="text" placeholder="简要说明此插件功能" class="input input-bordered w-full rounded-2xl text-sm" />
+            <div class="space-y-1">
+              <label class="text-[11px] font-black uppercase tracking-wider opacity-60">功能简述 (可选)</label>
+              <input v-model="pluginForm.description" type="text" placeholder="简要说明此插件功能" class="input input-bordered w-full rounded-xl text-xs" />
             </div>
           </div>
 
-          <div>
-            <label class="text-[11px] font-black uppercase tracking-wider opacity-60 block mb-2">监听触发事件 * (可多选)</label>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-base-200/50 p-4 rounded-2xl border border-base-300/40">
-              <label v-for="ev in availablePluginEvents" :key="ev.id" class="flex items-center gap-2.5 cursor-pointer hover:opacity-100 opacity-80 py-1">
-                <input type="checkbox" :value="ev.id" v-model="pluginForm.events" class="checkbox checkbox-primary checkbox-sm rounded-md" />
-                <span class="text-xs font-semibold select-none">{{ ev.label }}</span>
+          <div class="space-y-1.5">
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">监听触发事件 * (多选)</label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-base-200/50 p-3.5 rounded-2xl border border-base-300/40">
+              <label v-for="ev in availablePluginEvents" :key="ev.id" class="flex items-center gap-2 cursor-pointer hover:opacity-100 opacity-80 py-0.5">
+                <input type="checkbox" :value="ev.id" v-model="pluginForm.events" class="checkbox checkbox-primary checkbox-xs rounded" />
+                <span class="text-xs select-none">{{ ev.label }}</span>
               </label>
             </div>
           </div>
         </div>
 
         <!-- Tab 2: JSON 导入 -->
-        <div v-else class="space-y-4">
+        <div v-else class="space-y-3">
           <div class="flex items-center justify-between">
-            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">粘贴 JSON 配置或上传文件</label>
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">粘贴 JSON 规则或上传文件</label>
             <label class="btn btn-xs btn-outline rounded-xl gap-1 cursor-pointer">
               <Upload :size="12" />
               <span>选择 .json 文件</span>
               <input type="file" accept=".json,application/json" class="hidden" @change="handlePluginFileImport" />
             </label>
           </div>
-          <textarea v-model="pluginJsonText" rows="10" class="textarea textarea-bordered w-full rounded-2xl font-mono text-xs leading-relaxed" placeholder="在此粘贴 JSON 格式的插件定义"></textarea>
+          <textarea v-model="pluginJsonText" rows="9" class="textarea textarea-bordered w-full rounded-xl font-mono text-xs leading-relaxed" placeholder="在此粘贴 JSON 格式的插件定义"></textarea>
         </div>
 
         <p v-if="pluginJsonError" class="text-xs text-error font-bold bg-error/10 p-3 rounded-xl border border-error/20">{{ pluginJsonError }}</p>
 
-        <!-- 底部按钮 -->
-        <div class="modal-action flex justify-end gap-3 pt-2">
-          <button @click="showPluginModal = false" class="btn btn-ghost rounded-2xl px-6">取消</button>
-          <button @click="submitPluginForm" :disabled="pluginSaving" class="btn btn-primary rounded-2xl px-8 shadow-lg shadow-primary/20">
-            <span v-if="pluginSaving" class="loading loading-spinner loading-sm"></span>
-            <span v-else>确认添加</span>
+        <div class="modal-action flex justify-end gap-2.5 pt-2">
+          <button @click="showPluginModal = false" class="btn btn-ghost btn-sm rounded-xl px-5">取消</button>
+          <button @click="submitPluginForm" :disabled="pluginSaving" class="btn btn-primary btn-sm rounded-xl px-7 shadow-md">
+            <span v-if="pluginSaving" class="loading loading-spinner loading-xs"></span>
+            <span v-else>确认导入</span>
           </button>
         </div>
       </div>
     </div>
+
+    <!-- 底部专属版本与作者信息卡片 -->
+    <div class="flex flex-col items-center justify-center gap-2 pt-6 text-center opacity-70 hover:opacity-100 transition-opacity">
+      <div class="text-xs font-semibold text-base-content/80 flex items-center justify-center gap-1.5 flex-wrap">
+        <span>Ani-Go &copy; 2026 • 倾心打造</span>
+        <span class="opacity-40">•</span>
+        <span>by <a href="https://github.com/xiaoyueRX" target="_blank" rel="noopener noreferrer" class="text-primary font-bold hover:underline">xiaoyue</a></span>
+      </div>
+      <a href="https://github.com/xiaoyueRX/Ani-Go" target="_blank" rel="noopener noreferrer" 
+         class="px-4 py-1.5 rounded-full bg-base-200/60 border border-base-300/60 text-[11px] font-mono font-bold text-base-content/70 hover:text-primary hover:border-primary/40 transition-all flex items-center gap-2 shadow-sm">
+        <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        <span>GitHub: xiaoyueRX/Ani-Go</span>
+        <span class="opacity-40">•</span>
+        <span>v{{ CURRENT_VERSION }}</span>
+      </a>
+    </div>
+
   </div>
 </template>
 
 <style scoped>
-.fade-enter-active, .fade-leave-active { transition: opacity 0.5s ease; }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
-
-.no-scrollbar::-webkit-scrollbar { display: none; }
-.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 </style>
