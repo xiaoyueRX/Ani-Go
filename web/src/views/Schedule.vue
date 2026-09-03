@@ -790,17 +790,17 @@ onMounted(async () => {
 
     <!-- 批量订阅浮动栏 -->
     <Transition name="slide-up">
-      <div v-if="batchMode" class="fixed bottom-0 left-0 right-0 z-40 p-4 bg-gradient-to-t from-base-200 via-base-200/95 to-transparent pointer-events-none">
+      <div v-if="batchMode" class="fixed bottom-16 lg:bottom-0 left-0 right-0 z-50 p-3 sm:p-4 bg-gradient-to-t from-base-200 via-base-200/95 to-transparent pointer-events-none">
         <div class="max-w-4xl mx-auto pointer-events-auto">
-          <div class="bg-base-100 rounded-[2rem] border border-base-200/60 shadow-2xl p-4 flex items-center justify-between gap-4">
-            <div class="flex items-center gap-4">
-              <span class="text-sm font-black tracking-tight">已选 <span class="text-primary">{{ selectedCount }}</span> 部</span>
-              <span v-if="defaultSubgroups.length > 0" class="text-[9px] font-black uppercase tracking-widest opacity-30 ml-2">默认: {{ defaultSubgroups.join(', ') }}</span>
-              <span v-if="selectedCount > 20" class="text-[8px] font-black text-error uppercase tracking-widest ml-2">(最多20部)</span>
+          <div class="bg-base-100 rounded-2xl sm:rounded-[2rem] border border-base-200/80 shadow-2xl p-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
+            <div class="flex items-center gap-3 sm:gap-4 flex-wrap justify-center sm:justify-start">
+              <span class="text-xs sm:text-sm font-black tracking-tight">已选 <span class="text-primary">{{ selectedCount }}</span> 部</span>
+              <span v-if="defaultSubgroups.length > 0" class="text-[9px] font-black uppercase tracking-widest opacity-30">默认: {{ defaultSubgroups.join(', ') }}</span>
+              <span v-if="selectedCount > 20" class="text-[8px] font-black text-error uppercase tracking-widest">(最多20部)</span>
             </div>
-            <div class="flex items-center gap-3">
-              <button class="btn btn-ghost btn-sm rounded-xl text-[10px] font-black uppercase tracking-widest" @click="exitBatchMode">取消</button>
-              <button class="btn btn-primary btn-sm rounded-xl px-6 text-[10px] font-black uppercase tracking-widest gap-2" :disabled="selectedCount === 0 || selectedCount > 20 || batchSubmitting" @click="confirmBatchSubscribe">
+            <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-end">
+              <button class="btn btn-ghost btn-xs sm:btn-sm rounded-xl text-[10px] font-black uppercase tracking-widest flex-1 sm:flex-initial" @click="exitBatchMode">取消</button>
+              <button class="btn btn-primary btn-xs sm:btn-sm rounded-xl px-5 sm:px-6 text-[10px] font-black uppercase tracking-widest gap-1.5 flex-1 sm:flex-initial" :disabled="selectedCount === 0 || selectedCount > 20 || batchSubmitting" @click="confirmBatchSubscribe">
                 <span v-if="batchSubmitting" class="loading loading-spinner loading-xs"></span>
                 <template v-else>确认订阅 {{ selectedCount > 0 ? `(${selectedCount})` : '' }}</template>
               </button>

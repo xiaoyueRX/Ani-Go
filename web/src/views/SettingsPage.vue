@@ -158,6 +158,8 @@ const tabGroups = computed(() => [
   }
 ])
 
+const allFlatTabs = computed(() => tabGroups.value.flatMap(g => g.tabs))
+
 // 扁平化标签页定义与字段映射
 interface FieldDef {
   label: string
@@ -888,8 +890,24 @@ onUnmounted(() => {
 
     <div v-else class="flex flex-col lg:flex-row gap-6 items-start w-full">
       
-      <!-- 左侧分类侧边栏 Navigation Sidebar -->
-      <aside class="w-full lg:w-64 shrink-0 lg:sticky lg:top-24 space-y-4 bg-base-100 p-4 rounded-3xl border border-base-200/80 shadow-sm">
+      <!-- 移动端与平板端专属：横向滑动切换标签栏 (Mobile & Tablet Horizontal Tab Strip) -->
+      <div class="lg:hidden w-full overflow-x-auto no-scrollbar py-1 flex items-center gap-2 bg-base-100/90 backdrop-blur-md p-2 rounded-2xl border border-base-200/80 sticky top-16 z-20 shadow-sm">
+        <button
+          v-for="tab in allFlatTabs"
+          :key="tab.key"
+          @click="activeTab = tab.key"
+          class="px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0"
+          :class="activeTab === tab.key 
+            ? 'bg-primary text-primary-content shadow-sm font-black' 
+            : 'bg-base-200/60 text-base-content/60 hover:text-base-content hover:bg-base-200'"
+        >
+          <component :is="tab.icon" :size="14" />
+          <span>{{ tab.label }}</span>
+        </button>
+      </div>
+
+      <!-- 左侧分类侧边栏 Navigation Sidebar (桌面端常驻) -->
+      <aside class="hidden lg:block w-64 shrink-0 lg:sticky lg:top-24 space-y-4 bg-base-100 p-4 rounded-3xl border border-base-200/80 shadow-sm">
         <div v-for="group in tabGroups" :key="group.name" class="space-y-1">
           <div class="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-base-content/40">
             {{ group.name }}

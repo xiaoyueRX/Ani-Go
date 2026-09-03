@@ -129,7 +129,7 @@ function closeDrawer() {
       </div>
 
       <!-- Main content area -->
-      <main class="flex-1 p-4 sm:p-6 md:p-8 max-w-[1400px] lg:max-w-[1600px] xl:max-w-[2000px] 2xl:max-w-[2400px] mx-auto w-full overflow-hidden">
+      <main class="flex-1 p-3 sm:p-5 md:p-8 max-w-[1400px] lg:max-w-[1600px] xl:max-w-[2000px] 2xl:max-w-[2400px] mx-auto w-full pb-24 lg:pb-8 overflow-x-hidden">
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in">
             <component :is="Component" />
@@ -138,7 +138,7 @@ function closeDrawer() {
       </main>
 
       <!-- Footer -->
-      <footer class="py-6 px-4 text-center text-xs space-y-1.5 mt-auto border-t border-base-content/5 opacity-60 hover:opacity-100 transition-opacity">
+      <footer class="py-6 px-4 text-center text-xs space-y-1.5 mt-auto border-t border-base-content/5 opacity-60 hover:opacity-100 transition-opacity pb-24 lg:pb-6">
         <div class="font-semibold text-base-content/80 flex items-center justify-center gap-1.5 flex-wrap">
           <span>Ani-Go &copy; 2026 • 倾心打造</span>
           <span class="opacity-40">•</span>
@@ -155,8 +155,34 @@ function closeDrawer() {
         </div>
       </footer>
 
+      <!-- Mobile Bottom Navigation Bar (Phones & Small Tablets) -->
+      <nav class="fixed bottom-0 left-0 right-0 z-40 bg-base-100/90 backdrop-blur-xl border-t border-base-200/80 px-2 py-1.5 flex items-center justify-around lg:hidden shadow-[0_-4px_25px_rgba(0,0,0,0.06)] pb-[env(safe-area-inset-bottom,8px)]">
+        <router-link
+          v-for="item in nav"
+          :key="item.path"
+          :to="item.path"
+          class="flex flex-col items-center justify-center py-1 px-2.5 rounded-2xl transition-all duration-200 min-w-[56px]"
+          :class="route.path.startsWith(item.path) ? 'text-primary' : 'text-base-content/40 hover:text-base-content/80'"
+        >
+          <div class="relative flex items-center justify-center">
+            <component 
+              :is="item.icon" 
+              :size="20" 
+              class="transition-transform duration-200"
+              :class="{ 'scale-110 text-primary': route.path.startsWith(item.path) }" 
+            />
+          </div>
+          <span 
+            class="text-[10px] tracking-tight mt-0.5 transition-all"
+            :class="route.path.startsWith(item.path) ? 'font-black text-primary' : 'font-semibold'"
+          >
+            {{ item.label }}
+          </span>
+        </router-link>
+      </nav>
+
       <!-- Global Toasts -->
-      <div class="toast toast-end toast-bottom p-4 z-[100]">
+      <div class="toast toast-end toast-bottom p-4 z-[100] mb-14 lg:mb-0">
         <transition-group name="page">
           <div 
             v-for="t in toasts" :key="t.id"

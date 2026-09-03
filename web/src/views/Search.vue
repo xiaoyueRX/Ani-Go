@@ -197,25 +197,25 @@ function sourceBadge(source: string): string {
     <!-- Modern Search Interface -->
     <div class="relative group max-w-4xl mx-auto w-full">
       <div class="absolute -inset-1 bg-gradient-to-r from-primary to-secondary rounded-[2.5rem] blur opacity-10 group-focus-within:opacity-30 transition-opacity duration-500"></div>
-      <div class="relative bg-base-100 rounded-[2.2rem] border border-base-200/50 shadow-2xl flex items-center p-2 overflow-hidden">
-         <div class="pl-6 text-base-content/20 group-focus-within:text-primary transition-colors">
-            <Search :size="28" />
+      <div class="relative bg-base-100 rounded-2xl sm:rounded-[2.2rem] border border-base-200/50 shadow-2xl flex items-center p-1.5 sm:p-2 overflow-hidden">
+         <div class="pl-3 sm:pl-6 text-base-content/20 group-focus-within:text-primary transition-colors shrink-0">
+            <Search :size="24" class="sm:w-7 sm:h-7" />
          </div>
          <input 
            v-model="query" 
            type="text"
-           class="flex-1 bg-transparent border-none outline-none px-6 py-4 font-bold text-lg placeholder:text-base-content/20 placeholder:font-bold"
+           class="flex-1 min-w-0 bg-transparent border-none outline-none px-3 sm:px-6 py-2.5 sm:py-4 font-bold text-sm sm:text-lg placeholder:text-base-content/20 placeholder:font-bold"
            :placeholder="$t('search.placeholder')"
            @keyup.enter="handleSearch"
          />
          <button 
-           class="btn btn-primary h-14 min-h-0 px-10 rounded-[1.8rem] shadow-xl shadow-lg gap-3 group/btn transition-all active:scale-95"
+           class="btn btn-primary h-11 sm:h-14 min-h-0 px-4 sm:px-10 rounded-xl sm:rounded-[1.8rem] shadow-xl shadow-lg gap-2 sm:gap-3 shrink-0 group/btn transition-all active:scale-95"
            :disabled="loading || !query.trim()" 
            @click="handleSearch"
          >
-           <span v-if="loading" class="loading loading-spinner loading-md"></span>
+           <span v-if="loading" class="loading loading-spinner loading-sm sm:loading-md"></span>
            <template v-else>
-              <span class="text-xs font-black uppercase tracking-widest">{{ $t('search.execute') }}</span>
+              <span class="hidden sm:inline text-xs font-black uppercase tracking-widest">{{ $t('search.execute') }}</span>
               <Search :size="18" class="group-hover/btn:scale-110 transition-transform" />
            </template>
          </button>
@@ -288,9 +288,9 @@ function sourceBadge(source: string): string {
          :key="idx"
          class="group bg-base-100 rounded-[2rem] border border-base-200/60 shadow-sm hover:shadow-2xl hover:shadow-lg hover:border-primary/20 transition-all duration-500 overflow-hidden active:scale-[0.99]"
        >
-         <div class="p-4 sm:p-5 flex items-center gap-6">
+         <div class="p-3 sm:p-5 flex items-center gap-3 sm:gap-6">
             <!-- Poster -->
-            <div class="w-16 h-24 sm:w-20 sm:h-28 rounded-2xl bg-base-200 shrink-0 overflow-hidden relative shadow-lg shadow-black/10 group-hover:rotate-2 transition-transform duration-500">
+            <div class="w-14 h-20 sm:w-20 sm:h-28 rounded-xl sm:rounded-2xl bg-base-200 shrink-0 overflow-hidden relative shadow-md group-hover:rotate-2 transition-transform duration-500">
                <img 
                  v-if="item.cover_url" 
                  :src="proxyImage(item.cover_url)" 
@@ -300,38 +300,38 @@ function sourceBadge(source: string): string {
                  @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" 
                />
                <div class="absolute inset-0 flex items-center justify-center text-base-content/10" v-else>
-                  <Antenna :size="32" />
+                  <Antenna :size="24" class="sm:w-8 sm:h-8" />
                </div>
             </div>
 
             <!-- Meta -->
-            <div class="flex-1 min-w-0 space-y-3">
-               <h3 class="text-lg font-black tracking-tight line-clamp-2 leading-snug group-hover:text-primary transition-colors">
+            <div class="flex-1 min-w-0 space-y-2 sm:space-y-3">
+               <h3 class="text-sm sm:text-lg font-black tracking-tight line-clamp-2 leading-snug group-hover:text-primary transition-colors">
                  {{ item.title }}
                </h3>
                
-               <div class="flex flex-wrap gap-2">
-                  <span class="text-[9px] font-black uppercase tracking-widest py-1.5 px-3 rounded-lg border transition-all" :class="sourceBadge(item.source)">
+               <div class="flex flex-wrap gap-1.5 sm:gap-2">
+                  <span class="text-[9px] font-black uppercase tracking-widest py-1 px-2.5 sm:py-1.5 sm:px-3 rounded-lg border transition-all" :class="sourceBadge(item.source)">
                     {{ item.source }}
                   </span>
-                  <span v-if="item.bangumi_id" class="text-[9px] font-black uppercase tracking-widest bg-base-200 text-base-content/40 py-1.5 px-3 rounded-lg border border-base-300/50">
+                  <span v-if="item.bangumi_id" class="text-[9px] font-black uppercase tracking-widest bg-base-200 text-base-content/40 py-1 px-2.5 sm:py-1.5 sm:px-3 rounded-lg border border-base-300/50">
                     ID: {{ item.bangumi_id }}
                   </span>
-                  <span v-if="item.size > 0" class="text-[9px] font-black uppercase tracking-widest bg-base-200 text-base-content/40 py-1.5 px-3 rounded-lg border border-base-300/50">
+                  <span v-if="item.size > 0" class="text-[9px] font-black uppercase tracking-widest bg-base-200 text-base-content/40 py-1 px-2.5 sm:py-1.5 sm:px-3 rounded-lg border border-base-300/50">
                     {{ formatSize(item.size) }}
                   </span>
                </div>
             </div>
 
             <!-- Action -->
-            <div class="shrink-0 pl-2">
+            <div class="shrink-0 pl-1 sm:pl-2">
                <button 
-                 class="btn btn-circle w-14 h-14 rounded-2xl transition-all duration-500 shadow-xl"
+                 class="btn btn-circle w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl transition-all duration-500 shadow-lg"
                  :class="subscribed.has(item.title) ? 'btn-success shadow-lg' : 'btn-primary shadow-lg hover:scale-110'"
                  :disabled="subscribed.has(item.title)" 
                  @click="openSubscribe(item)"
                >
-                 <component :is="subscribed.has(item.title) ? Check : Plus" :size="28" />
+                 <component :is="subscribed.has(item.title) ? Check : Plus" :size="20" class="sm:w-7 sm:h-7" />
                </button>
             </div>
          </div>

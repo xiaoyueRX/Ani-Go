@@ -295,11 +295,11 @@ onMounted(fetchDetail)
            <div class="absolute inset-0 bg-gradient-to-b from-transparent to-base-100"></div>
         </div>
 
-        <div class="p-8 sm:p-12 relative z-10">
-          <div class="flex flex-col lg:flex-row gap-12">
+        <div class="p-4 sm:p-8 lg:p-12 relative z-10">
+          <div class="flex flex-col lg:flex-row gap-6 lg:gap-12">
              <!-- Left: Poster -->
              <div class="w-full lg:w-1/3 xl:w-1/4 shrink-0 flex justify-center lg:justify-start">
-                <div class="w-full max-w-[280px] sm:max-w-sm lg:max-w-none aspect-[3/3.8] rounded-[2.5rem] bg-base-200 overflow-hidden shadow-2xl border border-white/5 relative group/poster">
+                <div class="w-full max-w-[240px] sm:max-w-sm lg:max-w-none aspect-[3/3.8] rounded-2xl sm:rounded-[2.5rem] bg-base-200 overflow-hidden shadow-2xl border border-white/5 relative group/poster">
                    <img v-if="sub.cover_url" :src="proxyImage(sub.cover_url)" class="w-full h-full object-contain bg-black transition-transform duration-1000 group-hover/poster:scale-110" />
                    <div v-else class="w-full h-full flex items-center justify-center text-base-content/10">
                       <Image :size="80" />
@@ -314,29 +314,29 @@ onMounted(fetchDetail)
              </div>
 
              <!-- Right: Information -->
-            <div class="flex-1 space-y-8">
-               <div class="space-y-4">
-              <div class="flex flex-wrap items-center gap-3">
-                  <span v-if="sub.anime_type && sub.anime_type !== t('detail.type.unknown')" class="text-[10px] font-black uppercase tracking-[0.3em] text-primary bg-primary/10 px-4 py-1.5 rounded-full border border-primary/20">
+            <div class="flex-1 space-y-6 sm:space-y-8">
+               <div class="space-y-3 sm:space-y-4">
+              <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                  <span v-if="sub.anime_type && sub.anime_type !== t('detail.type.unknown')" class="text-[10px] font-black uppercase tracking-[0.3em] text-primary bg-primary/10 px-3 py-1 sm:px-4 sm:py-1.5 rounded-full border border-primary/20">
                     {{ sub.anime_type }}
                   </span>
-                  <span v-if="sub.completed" class="text-[10px] font-black uppercase tracking-[0.3em] text-success bg-success/10 px-4 py-1.5 rounded-full border border-success/20">
+                  <span v-if="sub.completed" class="text-[10px] font-black uppercase tracking-[0.3em] text-success bg-success/10 px-3 py-1 sm:px-4 sm:py-1.5 rounded-full border border-success/20">
                     {{ t('detail.status.finished') }}
                   </span>
-                  <span v-if="!sub.enabled" class="text-[10px] font-black uppercase tracking-[0.3em] text-warning bg-warning/10 px-4 py-1.5 rounded-full border border-warning/20">
+                  <span v-if="!sub.enabled" class="text-[10px] font-black uppercase tracking-[0.3em] text-warning bg-warning/10 px-3 py-1 sm:px-4 sm:py-1.5 rounded-full border border-warning/20">
                     {{ t('detail.status.paused') }}
                   </span>
                </div>
                    
                    <div class="space-y-2">
-                      <h1 class="text-4xl sm:text-5xl font-black tracking-tighter leading-none">{{ sub.title_cn }}</h1>
-                      <p v-if="sub.title_jp" class="text-lg font-bold opacity-30 tracking-tight">{{ sub.title_jp }}</p>
-                      <p v-if="sub.title_en" class="text-sm font-bold opacity-20 tracking-widest uppercase">{{ sub.title_en }}</p>
+                      <h1 class="text-2xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">{{ sub.title_cn }}</h1>
+                      <p v-if="sub.title_jp" class="text-sm sm:text-lg font-bold opacity-30 tracking-tight">{{ sub.title_jp }}</p>
+                      <p v-if="sub.title_en" class="text-xs sm:text-sm font-bold opacity-20 tracking-widest uppercase">{{ sub.title_en }}</p>
                    </div>
                 </div>
 
                 <!-- Stats Grid -->
-                <div class="grid grid-cols-2 sm:grid-cols-3 gap-6 p-8 bg-base-200/50 rounded-[2rem] border border-base-300/30">
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-6 p-4 sm:p-8 bg-base-200/50 rounded-2xl sm:rounded-[2rem] border border-base-300/30">
                    <div class="space-y-1">
                       <p class="text-[9px] font-black uppercase tracking-widest opacity-30">{{ t('detail.stats.releaseYear') }}</p>
                       <p class="text-lg font-black">{{ sub.year || 'N/A' }}</p>
@@ -436,11 +436,11 @@ onMounted(fetchDetail)
       <div class="space-y-6">
          <!-- Bulk Actions Bar -->
          <Transition name="slide">
-           <div v-if="showBulkActions" class="fixed bottom-6 right-6 z-50 bg-base-100 rounded-[2rem] border border-primary/30 shadow-2xl p-4 flex flex-col sm:flex-row gap-3 animate-in slide-in-from-bottom-4">
-             <span class="text-sm font-black text-primary self-center px-2">
+           <div v-if="showBulkActions" class="fixed bottom-16 lg:bottom-6 left-3 right-3 sm:left-auto sm:right-6 z-50 bg-base-100/95 backdrop-blur-xl rounded-2xl sm:rounded-[2rem] border border-primary/30 shadow-2xl p-3 sm:p-4 flex flex-col sm:flex-row gap-2 sm:gap-3 animate-in slide-in-from-bottom-4 overflow-x-auto no-scrollbar max-w-2xl">
+             <span class="text-xs sm:text-sm font-black text-primary self-center px-2 whitespace-nowrap shrink-0">
                已选 {{ selectedEpisodes.size }} 项
              </span>
-             <div class="flex gap-2">
+             <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
                <button class="btn btn-sm btn-ghost gap-2" @click="bulkUpdateStatus('pending')">
                  <History :size="16" /> 待下载
                </button>

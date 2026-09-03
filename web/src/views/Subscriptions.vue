@@ -426,10 +426,10 @@ onUnmounted(() => {
     </div>
 
     <!-- 订阅统计概览仪表盘 -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
       <div 
         @click="filterType = 'all'" 
-        class="bg-base-100 p-4 rounded-2xl border transition-all cursor-pointer hover:border-primary/50 shadow-sm flex items-center justify-between"
+        class="bg-base-100 p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer hover:border-primary/50 shadow-sm flex items-center justify-between"
         :class="filterType === 'all' ? 'border-primary shadow-md shadow-primary/10' : 'border-base-200/80'"
       >
         <div class="space-y-0.5">
@@ -443,7 +443,7 @@ onUnmounted(() => {
 
       <div 
         @click="filterType = 'active'" 
-        class="bg-base-100 p-4 rounded-2xl border transition-all cursor-pointer hover:border-primary/50 shadow-sm flex items-center justify-between"
+        class="bg-base-100 p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer hover:border-primary/50 shadow-sm flex items-center justify-between"
         :class="filterType === 'active' ? 'border-primary shadow-md shadow-primary/10' : 'border-base-200/80'"
       >
         <div class="space-y-0.5">
@@ -457,7 +457,7 @@ onUnmounted(() => {
 
       <div 
         @click="filterType = 'completed'" 
-        class="bg-base-100 p-4 rounded-2xl border transition-all cursor-pointer hover:border-success/50 shadow-sm flex items-center justify-between"
+        class="bg-base-100 p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer hover:border-success/50 shadow-sm flex items-center justify-between"
         :class="filterType === 'completed' ? 'border-success shadow-md shadow-success/10' : 'border-base-200/80'"
       >
         <div class="space-y-0.5">
@@ -471,7 +471,7 @@ onUnmounted(() => {
 
       <div 
         @click="filterType = 'stalled'" 
-        class="bg-base-100 p-4 rounded-2xl border transition-all cursor-pointer hover:border-warning/50 shadow-sm flex items-center justify-between"
+        class="bg-base-100 p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer hover:border-warning/50 shadow-sm flex items-center justify-between"
         :class="filterType === 'stalled' ? 'border-warning shadow-md shadow-warning/10' : 'border-base-200/80'"
       >
         <div class="space-y-0.5">
@@ -582,7 +582,7 @@ onUnmounted(() => {
       <TransitionGroup
         name="list"
         tag="div"
-        class="grid gap-6 sm:gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8"
+        class="grid gap-3 sm:gap-6 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 3xl:grid-cols-8"
       >
         <SubscriptionCard
           v-for="sub in filteredSubs"
@@ -602,7 +602,7 @@ onUnmounted(() => {
 
     <!-- 撤回浮条 -->
     <Transition name="slide-up">
-      <div v-if="undoBarVisible" class="fixed bottom-0 left-0 right-0 z-50 p-4 pointer-events-none">
+      <div v-if="undoBarVisible" class="fixed bottom-16 lg:bottom-4 left-0 right-0 z-50 p-3 sm:p-4 pointer-events-none">
         <div class="max-w-lg mx-auto bg-base-300 rounded-2xl shadow-2xl px-6 py-4 flex items-center gap-4 pointer-events-auto">
           <span class="text-sm font-bold flex-1">
             将在 {{ remainingSeconds }} 秒后删除 {{ undoCount }} 个订阅{{ undoDeleteFiles ? '（含文件）' : '' }}
