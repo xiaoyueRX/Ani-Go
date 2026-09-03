@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
 import { 
@@ -24,11 +24,12 @@ import {
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const settings = ref<Record<string, string>>({})
 const loading = ref(true)
 const error = ref('')
 const saved = ref(false)
-const activeTab = ref('mikan')
+const activeTab = ref(route.query.tab ? String(route.query.tab) : 'mikan')
 const showPasswords = ref<Set<string>>(new Set())
 
 // 镜像测速
@@ -227,10 +228,22 @@ function inputType(field: FieldDef): string {
 }
 
 async function connectBangumi() {
+  // 先打开空白新窗口防止被浏览器弹窗拦截 (Popup Blocker)
+  const newTab = window.open('', '_blank')
   try {
     const { data } = await request.get("/bangumi/auth/link")
-    if (data.url) window.location.href = data.url
+    if (data.url) {
+      if (newTab) {
+        newTab.location.href = data.url
+      } else {
+        window.open(data.url, '_blank')
+      }
+    } else {
+      if (newTab) newTab.close()
+      error.value = "授权链接为空"
+    }
   } catch (e: any) {
+    if (newTab) newTab.close()
     error.value = "无法获取 Bangumi 授权链接"
   }
 }
@@ -352,10 +365,21 @@ async function fetchLogs() {
 }
 
 onMounted(() => {
+  if (route.query.status === 'success') {
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 4000)
+  }
   fetchSettings()
   fetchLogs()
   fetchBackupList()
   fetchPlugins()
+
+  // 监听窗口重新获得焦点，如果在 bangumi 标签页则刷新一次配置
+  window.addEventListener('focus', () => {
+    if (activeTab.value === 'bangumi') {
+      fetchSettings()
+    }
+  })
 })
 
 // 备份管理函数
