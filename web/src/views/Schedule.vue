@@ -619,7 +619,7 @@ onMounted(async () => {
     </div>
 
     <!-- Empty State -->
-    <div v-else-if="filteredDays.length === 0" class="flex flex-col items-center justify-center py-32 text-center bg-base-100/30 rounded-[3rem] border-2 border-dashed border-base-200 max-w-4xl mx-auto">
+    <div v-if="!loading && (activeTab === 'schedule' ? filteredDays.length === 0 : Object.keys(subscribedSchedule).length === 0)" class="flex flex-col items-center justify-center py-32 text-center bg-base-100/30 rounded-[3rem] border-2 border-dashed border-base-200 max-w-4xl mx-auto">
       <div class="w-32 h-32 bg-base-200/50 rounded-full flex items-center justify-center mb-8 rotate-12">
         <Calendar :size="64" class="opacity-10" />
       </div>
@@ -632,7 +632,7 @@ onMounted(async () => {
     </div>
 
     <!-- ====== Main Timeline ====== -->
-    <div v-else class="space-y-12">
+    <div v-else-if="!loading" class="space-y-12">
       <!-- Section Template -->
       <template v-if="activeTab === 'schedule'">
         <div v-for="(day, index) in filteredDays" :key="day.day_of_week + day.label" class="space-y-6">
