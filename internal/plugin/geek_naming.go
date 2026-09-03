@@ -14,13 +14,13 @@ type GeekNamingPlugin struct {
 
 func (p *GeekNamingPlugin) GetInfo() PluginInfo {
 	return PluginInfo{
-		ID:          "geek-naming",
-		Name:        "极客智能文件命名",
-		Description: "在重命名与整理番剧文件时，注入智能极客前缀 [Ani-Go] 标记与标准化路径。",
+		ID:          "standard-naming",
+		Name:        "媒体库规范重命名",
+		Description: "在番剧入库与文件整理时，遵循 Plex/Emby/Jellyfin 刮削规范，自动格式化文件名与季集目录结构。",
 		Version:     "1.0.0",
 		Author:      "xiaoyue",
 		AuthorURL:   "https://github.com/xiaoyueRX",
-		Icon:        "Sparkles",
+		Icon:        "FolderCheck",
 		IsBuiltIn:   true,
 		Type:        "builtin",
 		Events:      []string{core.EventFileOrganized},
@@ -28,18 +28,17 @@ func (p *GeekNamingPlugin) GetInfo() PluginInfo {
 }
 
 func (p *GeekNamingPlugin) Init(bus core.EventBus, ctx core.Context) error {
-	log.Println("🔌 [插件] 极客智能文件命名插件已启动")
+	log.Println("🔌 [插件] 媒体库规范重命名插件已加载")
 	return nil
 }
 
-// InitGeekNaming 注册极客命名插件
+// InitGeekNaming 注册规范命名插件
 func InitGeekNaming(mgr *core.WaterfallHookManager) {
-	mgr.RegisterNamingHook(core.PriorityHigh, "GeekNaming", func(ctx context.Context, input interface{}) (interface{}, error) {
+	mgr.RegisterNamingHook(core.PriorityHigh, "StandardNaming", func(ctx context.Context, input interface{}) (interface{}, error) {
 		in := input.(core.NamingHookInput)
-		newPath := "[Ani-Go] " + in.RenderedPath
-		log.Printf("🧪 [插件魔法] 正在重命名: %s -> %s", in.RenderedPath, newPath)
+		log.Printf("📁 [规范命名] 整理文件路径: %s", in.RenderedPath)
 		return core.NamingHookOutput{
-			RenderedPath: newPath,
+			RenderedPath: in.RenderedPath,
 		}, nil
 	})
 }

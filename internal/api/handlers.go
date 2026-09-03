@@ -392,7 +392,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		query = database.DB.Where("title_cn = ? OR bangumi_id = ?", req.TitleCN, req.BangumiID)
 	}
 	if err := query.First(&existing).Error; err == nil {
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "该番剧已在订阅列表中喵！"})
+		writeJSON(w, http.StatusConflict, errorResponse{Error: "该番剧已在订阅列表中"})
 		return
 	}
 
@@ -805,11 +805,11 @@ func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"version": "v0.5.1",
 		"changelog": []string{
-			"🛡️ 终极稳固：剔除数据库事务内所有网络请求，根绝锁库卡死隐患喵",
-			"🔐 凭证保护：修复设置界面无法保存下载器密钥及空密码覆盖漏洞喵",
-			"🚀 架构飞跃：补全插件管理闭环，支持 Webhook 与 Shell 脚本增强喵",
-			"⏱️ 细粒度控制：支持番剧级 Stall 超时配置，死种检测更灵活喵",
-			"📂 路径安全：全面防范并修复数据迁移与接口的路径穿越威胁喵",
+			"🛡️ 架构稳固：剔除数据库事务内网络依赖，杜绝 SQLite 并发锁死隐患",
+			"🔐 凭证保护：修复下载器密钥脱敏保存与空密码覆盖缺陷",
+			"🚀 插件生态：重构插件管理系统，支持多事件 Webhook 联动与配置导入导出",
+			"⏱️ 细粒度控制：支持番剧级 Stall 超时配置，死种检测更灵活精确",
+			"📂 路径安全：全面加固数据迁移与文件管理接口的路径穿越防护",
 		},
 	})
 }
