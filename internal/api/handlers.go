@@ -932,12 +932,21 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for key, value := range req.Settings {
-		// 阻止通过 API 修改认证密钥等敏感配置
+		// 阻止通过 API 修改内部 JWT 密钥等系统配置
 		keyUpper := strings.ToUpper(key)
-		if strings.Contains(keyUpper, "SECRET") || strings.Contains(keyUpper, "JWT") {
-			log.Printf("⚠️  拒绝通过 API 修改敏感配置: %s", key)
+		if keyUpper == "JWT_SECRET" || keyUpper == "TOKEN_SECRET" {
+			log.Printf("⚠️  拒绝通过 API 修改内部鉴权密钥: %s", key)
 			continue
 		}
+
+		// 如果值为空，且属于敏感凭证且数据库中已有值，则保留原值（避免前端脱敏展示后提交空值覆盖原有密钥）
+		if value == "" && (strings.Contains(keyUpper, "PASS") || strings.Contains(keyUpper, "SECRET") || strings.Contains(keyUpper, "KEY") || strings.Contains(keyUpper, "TOKEN")) {
+			var existing database.Setting
+			if err := database.DB.Where("key = ?", key).First(&existing).Error; err == nil && existing.Value != "" {
+				continue // 保持原有密码/密钥不变
+			}
+		}
+
 		setting := database.Setting{Key: key, Value: value}
 		database.DB.Where("key = ?", key).Assign(setting).FirstOrCreate(&setting)
 	}

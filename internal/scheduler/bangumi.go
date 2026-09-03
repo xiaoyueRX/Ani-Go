@@ -53,6 +53,26 @@ func (s *Scheduler) pollSyncBangumi(ctx context.Context) {
 
 // autoSubscribe 根据元数据自动创建订阅记录
 func (s *Scheduler) autoSubscribe(ctx context.Context, anime core.Anime) (uint, error) {
+	// 1. 在事务外部获取 Mikan RSS URL，避免网络 I/O 阻塞数据库事务
+	var rssURL string
+	mikanSrc, ok := s.source.(*source.MikanSource)
+	if !ok {
+		// 如果是 MultiSource，尝试获取其中的 MikanSource
+		if multi, ok := s.source.(*source.MultiSource); ok {
+			for _, src := range multi.Sources() {
+				if m, ok := src.(*source.MikanSource); ok {
+					mikanSrc = m
+					break
+				}
+			}
+		}
+	}
+	if mikanSrc != nil {
+		if url, err := mikanSrc.ResolveFirstRSSURL(ctx, anime.ID); err == nil {
+			rssURL = url
+		}
+	}
+
 	var subID uint
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		// 再次检查防止并发冲突
@@ -73,26 +93,7 @@ func (s *Scheduler) autoSubscribe(ctx context.Context, anime core.Anime) (uint, 
 			Enabled:       &[]bool{true}[0],
 			SourceName:    "Mikan",
 			TotalEpisodes: anime.TotalEps,
-		}
-
-		// 尝试获取 Mikan RSS URL
-		mikanSrc, ok := s.source.(*source.MikanSource)
-		if !ok {
-			// 如果是 MultiSource，尝试获取其中的 MikanSource
-			if multi, ok := s.source.(*source.MultiSource); ok {
-				for _, src := range multi.Sources() {
-					if m, ok := src.(*source.MikanSource); ok {
-						mikanSrc = m
-						break
-					}
-				}
-			}
-		}
-
-		if mikanSrc != nil {
-			if rssURL, err := mikanSrc.ResolveFirstRSSURL(ctx, anime.ID); err == nil {
-				sub.RSSURL = rssURL
-			}
+			RSSURL:        rssURL,
 		}
 
 		if err := tx.Create(&sub).Error; err != nil {
