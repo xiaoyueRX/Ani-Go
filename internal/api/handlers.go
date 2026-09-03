@@ -746,9 +746,8 @@ func (s *Server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 
 	tasks, err := s.downloader.List(r.Context())
 	if err != nil {
-		log.Printf("❌ 获取下载列表失败: %v", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "获取下载列表失败"})
-		return
+		log.Printf("⚠️  获取下载列表失败 (下载器可能未启动或连接断开): %v", err)
+		tasks = []core.DownloadTask{}
 	}
 
 	if tasks == nil {
@@ -1177,6 +1176,27 @@ func (s *Server) handleMikanGroups(w http.ResponseWriter, r *http.Request) {
 
 // handleGetBangumiSubject 获取指定番剧的详细元数据（含简介、全集标题等）
 // GET /api/bangumi/subject/:id
+func (s *Server) getBGMProvider() *metadata.BGMTVProvider {
+	if s.md != nil {
+		if p, ok := s.md.(*metadata.BGMTVProvider); ok {
+			return p
+		}
+	}
+	var token string
+	var setting database.Setting
+	if err := database.DB.Where("key = ?", "BGMTV_USER_TOKEN").First(&setting).Error; err == nil {
+		token = setting.Value
+	}
+	var mirrors []string
+	if err := database.DB.Where("key = ?", "BGMTV_MIRROR_DOMAINS").First(&setting).Error; err == nil && setting.Value != "" {
+		mirrors = strings.Split(setting.Value, ",")
+	}
+	if len(mirrors) == 0 {
+		mirrors = []string{"api.bgm.tv", "api.bangumi.tv", "api.chii.in"}
+	}
+	return metadata.NewBGMTVProvider(token, mirrors)
+}
+
 func (s *Server) handleGetBangumiSubject(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Path[len("/api/bangumi/subject/"):]
 	if id == "" {
@@ -1184,12 +1204,12 @@ func (s *Server) handleGetBangumiSubject(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if s.md == nil || s.md.Name() != "BGM.tv" {
+	p := s.getBGMProvider()
+	if p == nil {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "Bangumi 服务未就绪"})
 		return
 	}
 
-	p := s.md.(*metadata.BGMTVProvider)
 	// 1. 获取基础元数据 (Anime 结构)
 	anime, err := p.GetAnime(r.Context(), id)
 	if err != nil {
@@ -1211,12 +1231,12 @@ func (s *Server) handleGetBangumiSubject(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleScheduleBangumi(w http.ResponseWriter, r *http.Request) {
-	if s.md == nil || s.md.Name() != "BGM.tv" {
+	p := s.getBGMProvider()
+	if p == nil {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "Bangumi 服务未就绪"})
 		return
 	}
 	
-	p := s.md.(*metadata.BGMTVProvider)
 	items, err := p.GetCalendar(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
@@ -1387,11 +1407,11 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 // handleBGMTestMirrors 测试所有 BGM 镜像延迟
 // POST /api/bgm/test-mirrors
 func (s *Server) handleBGMTestMirrors(w http.ResponseWriter, r *http.Request) {
-	if s.md == nil || s.md.Name() != "BGM.tv" {
+	p := s.getBGMProvider()
+	if p == nil {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "Bangumi 服务未就绪"})
 		return
 	}
-	p := s.md.(*metadata.BGMTVProvider)
 	results := p.TestLatency(r.Context())
 	writeJSON(w, http.StatusOK, results)
 }
