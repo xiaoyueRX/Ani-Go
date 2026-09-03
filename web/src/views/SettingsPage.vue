@@ -222,7 +222,7 @@ const tabs = computed(() => [
     ]}
   ]},
   { key: 'bangumi', label: 'Bangumi 番组', icon: Antenna, sections: [
-    { title: 'Bangumi OAuth2 授权凭据', desc: '在 bgm.tv/dev/app 创建客户端应用获取', fields: [
+    { title: 'Bangumi OAuth2', desc: '在 bgm.tv/dev/app 创建客户端应用获取 Client ID 与 Client Secret', fields: [
       { label: 'Client ID', key: 'BANGUMI_CLIENT_ID', placeholder: 'bgm... (Client ID)' },
       { label: 'Client Secret', key: 'BANGUMI_CLIENT_SECRET', placeholder: 'Client Secret', type: 'password' },
     ]},
@@ -886,7 +886,7 @@ onUnmounted(() => {
       <span class="loading loading-spinner loading-lg text-primary"></span>
     </div>
 
-    <div v-else class="flex flex-col lg:flex-row gap-6 items-start">
+    <div v-else class="flex flex-col lg:flex-row gap-6 items-start w-full">
       
       <!-- 左侧分类侧边栏 Navigation Sidebar -->
       <aside class="w-full lg:w-64 shrink-0 lg:sticky lg:top-24 space-y-4 bg-base-100 p-4 rounded-3xl border border-base-200/80 shadow-sm">
@@ -916,7 +916,7 @@ onUnmounted(() => {
       <main class="flex-1 min-w-0 w-full space-y-6">
 
         <!-- 1. Mikan 镜像测速卡片 (在 Mikan 或 Bangumi Tab 顶部展示) -->
-        <div v-if="activeTab === 'mikan' || activeTab === 'bangumi'" class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5">
+        <div v-if="activeTab === 'mikan' || activeTab === 'bangumi'" class="w-full bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5 block">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
@@ -968,54 +968,56 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 2. Bangumi 专属 OAuth2 快捷授权横幅 -->
-        <div v-if="activeTab === 'bangumi'" class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-4">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-            <div class="flex items-center gap-4">
-              <div class="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
-                <Antenna :size="24" />
+        <!-- 2. 连接 Bangumi 账号 独立全宽操作卡片 -->
+        <div v-if="activeTab === 'bangumi'" class="w-full bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-4 block">
+          <div class="w-full flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div class="flex items-center gap-4 flex-1 min-w-0">
+              <div class="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <Antenna :size="24" class="shrink-0" />
               </div>
-              <div>
-                <div class="flex items-center gap-2">
-                  <h3 class="text-base font-black tracking-tight">Bangumi 账号关联</h3>
-                  <span v-if="getVal('BGMTV_USERNAME')" class="badge badge-success badge-sm font-bold text-[10px]">
+              <div class="flex-1 min-w-0 space-y-1 text-left">
+                <div class="flex items-center gap-2.5 flex-wrap">
+                  <h3 class="text-base font-black tracking-tight whitespace-nowrap break-keep text-left">连接 Bangumi 账号</h3>
+                  <span v-if="getVal('BGMTV_USERNAME')" class="badge badge-success badge-sm font-bold text-[10px] shrink-0 whitespace-nowrap">
                     已绑定: {{ getVal('BGMTV_USERNAME') }}
                   </span>
-                  <span v-else class="badge badge-ghost badge-sm text-[10px]">未连接</span>
+                  <span v-else class="badge badge-ghost badge-sm text-[10px] shrink-0 whitespace-nowrap">未连接</span>
                 </div>
-                <p class="text-xs opacity-60 mt-0.5">关联后自动双向同步番剧收藏、追番状态与个人进度</p>
+                <p class="text-xs opacity-60 leading-normal text-left break-words">
+                  连接后自动双向同步番剧收藏、追番状态与个人进度
+                </p>
               </div>
             </div>
 
             <button 
               @click="connectBangumi" 
-              class="btn btn-primary rounded-xl gap-2 px-6 shadow-md hover:scale-[1.02] active:scale-95 transition-all"
+              class="btn btn-primary rounded-xl gap-2 px-6 shadow-md hover:scale-[1.02] active:scale-95 transition-all shrink-0 whitespace-nowrap self-start sm:self-auto"
             >
-              <Antenna :size="16" />
-              <span class="text-xs font-black">OAuth 网页授权</span>
+              <Antenna :size="16" class="shrink-0" />
+              <span class="text-xs font-black whitespace-nowrap">立即连接</span>
             </button>
           </div>
 
-          <div class="text-xs bg-base-200/50 p-4 rounded-2xl border border-base-300/40 space-y-1.5 text-base-content/75">
+          <div class="w-full text-xs bg-base-200/50 p-4 rounded-2xl border border-base-300/40 space-y-1.5 text-base-content/75 block text-left">
             <p class="font-bold text-primary">💡 支持两种极简绑定模式：</p>
             <p>1. <b>个人令牌模式（最推荐）</b>：直接在 <a href="https://next.bgm.tv/demo/access-token" target="_blank" class="link link-primary font-bold">Bangumi 访问令牌申请页 ↗</a> 生成 Token，填入下方「个人访问令牌」保存即可！</p>
-            <p>2. <b>OAuth2 应用模式</b>：在 <a href="https://bgm.tv/dev/app" target="_blank" class="link link-primary font-bold">Bangumi 开发者中心 ↗</a> 创建 App 后，填入下方 Client ID 与 Secret，点击上方按钮一键完成跳转授权。</p>
+            <p>2. <b>OAuth2 应用模式</b>：在 <a href="https://bgm.tv/dev/app" target="_blank" class="link link-primary font-bold">Bangumi 开发者中心 ↗</a> 创建 App 后，填入下方「Bangumi OAuth2」区块的 Client ID 与 Secret，点击上方「立即连接」一键完成跳转授权。</p>
           </div>
         </div>
 
-        <!-- 3. 标准化表单渲染区块 (适用常规 Sections) -->
+        <!-- 3. 标准化表单渲染区块 (适用常规 Sections，垂直排列) -->
         <div 
           v-for="section in tabs.find(t => t.key === activeTab)?.sections" 
           :key="section.title" 
-          class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5"
+          class="w-full bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5 block"
         >
-          <div>
-            <h3 class="text-base font-black tracking-tight">{{ section.title }}</h3>
-            <p class="text-xs opacity-50 mt-0.5">{{ section.desc }}</p>
+          <div class="space-y-1 text-left">
+            <h3 class="text-base font-black tracking-tight whitespace-nowrap break-keep">{{ section.title }}</h3>
+            <p class="text-xs opacity-50 leading-normal">{{ section.desc }}</p>
           </div>
 
           <!-- 表单字段响应式网格 -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
             <div 
               v-for="field in section.fields" 
               :key="field.key" 
