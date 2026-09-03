@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 24 24" fill="none" stroke="#00e5ff" stroke-width="1.5">
+  <circle cx="12" cy="12" r="10"/>
+  <path d="M12 6v6l4 2"/>
+  <text x="12" y="20" text-anchor="middle" fill="#00e5ff" font-size="3" font-family="monospace">Ani-Go</text>
+</svg>

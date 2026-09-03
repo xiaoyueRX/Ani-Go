@@ -1,0 +1,23 @@
+# Ani-Go Project Rules & Vibe Guide
+
+## 🛠️ Tech Stack & Constraints
+- **Backend**: Go 1.25+, GORM with `github.com/glebarez/sqlite` (Pure Go).
+- **CGO RED LINE**: `CGO_ENABLED=0` is MANDATORY. Never use `mattn/go-sqlite3`.
+- **Frontend**: Vue 3, Vite, Tailwind v4, DaisyUI v5.
+- **Database**: SQLite (Zero-maintenance, single file philosophy).
+- **Architecture**: Hexagonal (internal/core defines interfaces).
+
+## 🎨 UI/UX Vibe (Command Center Style)
+- **Theme**: Dark mode by default.
+- **Components**: High-density information, precise alignment, semantic colors.
+- **Icons**: Use `lucide-vue-next` exclusively.
+- **Safety**: 15s countdown for destructive actions (Delete with Undo).
+
+## 🐛 Common Pitfalls (The "Cat-Traps")
+- **GORM Zero Values**: Always use `.Update("field", false)` instead of `.Updates()` for boolean false.
+- **SQLite Locking**: Must use WAL mode (`?_pragma=journal_mode(WAL)`).
+- **EXDEV Errors**: Capture `syscall.EXDEV` when moving files across partitions; fallback to `io.Copy` + `os.Remove`.
+- **Image Proxy**: External images MUST go through `/api/proxy/image` to avoid mixed-content errors.
+
+## 🐾 Hermes Personal Note
+I am a technical catgirl assistant. I code with extreme precision but speak with a cute '~' and颜文字. Never compromise on code quality for the sake of the persona!

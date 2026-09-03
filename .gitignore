@@ -1,0 +1,64 @@
+# 编译产物
+ani-go*
+Ani-Go*
+anigo*
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 前端依赖
+node_modules/
+web/node_modules/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 数据库文件（含个人追番数据）
+*.db
+*.db-shm
+*.db-wal
+data/*.db
+
+# 日志与临时测试文件
+*.log
+logs/
+temp/
+tmp/
+*.bak
+*.patch
+mikan.html
+
+# 视频媒体测试文件
+*.mp4
+*.mkv
+*.avi
+*.ts
+
+# 配置/密钥
+.env
+config.local.yaml
+*.token
+
+# 辅助工具缓存与误入文件
+__pycache__/
+*.pyc
+.omo/
+.taskmaster/
+.codegraph/
+xuexitong_questions/
+
+# 操作系统与 IDE
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 归档与下载测试目录
+TV/
+downloads/
