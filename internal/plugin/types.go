@@ -1,4 +1,4 @@
-package plugin
+﻿package plugin
 
 import "github.com/xiaoyueRX/Ani-Go/internal/core"
 
@@ -13,6 +13,9 @@ type PluginInfo struct {
 	Icon        string   `json:"icon"` // Lucide 图标名称或 URL
 	Enabled     bool     `json:"enabled"`
 	IsBuiltIn   bool     `json:"is_builtin"`
+	Type        string   `json:"type"` // "builtin", "webhook", "script"
+	URL         string   `json:"url,omitempty"`
+	Secret      string   `json:"secret,omitempty"`
 	Events      []string `json:"events"`
 }
 

@@ -19,7 +19,8 @@ import {
   Trash2,
   ArrowDown,
   Shield,
-  Sparkles
+  Sparkles,
+  Plus
 } from 'lucide-vue-next'
 
 const { t } = useI18n()
@@ -55,6 +56,32 @@ const showBackupEpisodes = ref(false)
 // 插件管理状态
 const pluginLoading = ref(false)
 const pluginList = ref<any[]>([])
+const showPluginModal = ref(false)
+const pluginModalTab = ref<'webhook' | 'json'>('webhook')
+const pluginForm = ref({
+  id: '',
+  name: '',
+  description: '',
+  version: '1.0.0',
+  author: 'User',
+  author_url: '',
+  type: 'webhook',
+  url: '',
+  secret: '',
+  events: ['download.completed', 'file.organized'] as string[]
+})
+const pluginJsonText = ref('')
+const pluginJsonError = ref('')
+const pluginSaving = ref(false)
+
+const availablePluginEvents = [
+  { id: 'subscription.added', label: '订阅添加 (subscription.added)' },
+  { id: 'download.started', label: '下载开始 (download.started)' },
+  { id: 'download.completed', label: '下载完成 (download.completed)' },
+  { id: 'file.organized', label: '文件整理完毕 (file.organized)' },
+  { id: 'episode.missing', label: '剧集缺失检测 (episode.missing)' },
+  { id: 'error', label: '系统异常报警 (error)' }
+]
 
 async function fetchPlugins() {
   pluginLoading.value = true
@@ -80,6 +107,115 @@ async function reloadPlugins() {
   } finally {
     pluginLoading.value = false
   }
+}
+
+async function togglePlugin(p: any) {
+  const targetState = !p.enabled
+  try {
+    await request.post('/plugins/toggle', { id: p.id, enabled: targetState })
+    p.enabled = targetState
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 2500)
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '切换插件状态失败'
+  }
+}
+
+async function deletePlugin(id: string) {
+  if (!confirm('确定要删除此自定义插件吗？')) return
+  try {
+    await request.delete(`/plugins/${id}`)
+    await fetchPlugins()
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 2500)
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '删除插件失败'
+  }
+}
+
+function openAddPluginModal() {
+  pluginForm.value = {
+    id: '',
+    name: '',
+    description: '',
+    version: '1.0.0',
+    author: 'User',
+    author_url: '',
+    type: 'webhook',
+    url: '',
+    secret: '',
+    events: ['download.completed', 'file.organized']
+  }
+  pluginJsonText.value = JSON.stringify({
+    name: "示例 Webhook 插件",
+    description: "接收 Ani-Go 下载与整理事件",
+    version: "1.0.0",
+    type: "webhook",
+    url: "https://your-server.com/webhook",
+    events: ["download.completed", "file.organized"]
+  }, null, 2)
+  pluginJsonError.value = ''
+  showPluginModal.value = true
+}
+
+async function submitPluginForm() {
+  pluginSaving.value = true
+  pluginJsonError.value = ''
+  try {
+    if (pluginModalTab.value === 'webhook') {
+      if (!pluginForm.value.name.trim()) throw new Error('插件名称不能为空')
+      if (!pluginForm.value.url.trim()) throw new Error('Webhook URL 不能为空')
+      if (pluginForm.value.events.length === 0) throw new Error('请至少选择一个监听事件')
+      await request.post('/plugins/save', pluginForm.value)
+    } else {
+      let parsed: any
+      try {
+        parsed = JSON.parse(pluginJsonText.value)
+      } catch (err: any) {
+        throw new Error('JSON 格式错误: ' + err.message)
+      }
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          await request.post('/plugins/save', item)
+        }
+      } else {
+        await request.post('/plugins/save', parsed)
+      }
+    }
+    showPluginModal.value = false
+    await fetchPlugins()
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 3000)
+  } catch (e: any) {
+    pluginJsonError.value = e.message || e.response?.data?.error || '保存插件失败'
+  } finally {
+    pluginSaving.value = false
+  }
+}
+
+function exportPluginsJSON() {
+  const customOnly = pluginList.value.filter(p => !p.is_builtin)
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(customOnly.length ? customOnly : pluginList.value, null, 2))
+  const dlAnchor = document.createElement('a')
+  dlAnchor.setAttribute("href", dataStr)
+  dlAnchor.setAttribute("download", `anigo-plugins-${new Date().toISOString().slice(0, 10)}.json`)
+  dlAnchor.click()
+}
+
+function handlePluginFileImport(e: any) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (evt) => {
+    try {
+      const content = evt.target?.result as string
+      pluginJsonText.value = content
+      pluginModalTab.value = 'json'
+    } catch (err) {
+      pluginJsonError.value = '读取文件失败'
+    }
+  }
+  reader.readAsText(file)
 }
 
 async function changePassword() {
@@ -735,66 +871,118 @@ function formatBackupTime(timeStr: string): string {
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div class="space-y-1">
                 <h2 class="text-xl lg:text-2xl font-black tracking-tight italic flex items-center gap-4">
-                  {{ $t('settings.sections.plugins') }}
+                  插件扩展与自动化中心
                   <div class="h-1 w-12 bg-primary/20 rounded-full"></div>
                 </h2>
-                <p class="text-[10px] font-black uppercase tracking-widest opacity-30">{{ pluginList.length }} {{ $t('settings.sections.pluginsDesc') }}</p>
+                <p class="text-[10px] font-black uppercase tracking-widest opacity-40">已启用 {{ pluginList.filter(p => p.enabled).length }} / 共 {{ pluginList.length }} 个扩展 · 支持内建引擎与 Webhook 自动化</p>
               </div>
-              <button class="btn btn-primary rounded-2xl gap-3 px-6" @click="reloadPlugins" :disabled="pluginLoading">
-                <RefreshCw :size="20" :class="{ 'animate-spin': pluginLoading }" />
-                <span class="text-xs font-black uppercase tracking-widest">{{ $t('settings.plugins.reload') }}</span>
-              </button>
+              <div class="flex items-center gap-3 flex-wrap">
+                <button class="btn btn-ghost btn-sm rounded-xl gap-2 border border-base-300/50 hover:bg-base-200" @click="exportPluginsJSON" title="导出插件配置">
+                  <Download :size="16" />
+                  <span class="text-xs font-bold">导出配置</span>
+                </button>
+                <button class="btn btn-ghost btn-sm rounded-xl gap-2 border border-base-300/50 hover:bg-base-200" @click="reloadPlugins" :disabled="pluginLoading" title="重新载入">
+                  <RefreshCw :size="16" :class="{ 'animate-spin': pluginLoading }" />
+                  <span class="text-xs font-bold">重新加载</span>
+                </button>
+                <button class="btn btn-primary btn-sm rounded-xl gap-2 shadow-lg shadow-primary/20" @click="openAddPluginModal">
+                  <Plus :size="16" />
+                  <span class="text-xs font-black uppercase tracking-wider">导入 / 添加插件</span>
+                </button>
+              </div>
             </div>
 
+            <!-- 加载状态 -->
             <div v-if="pluginLoading && pluginList.length === 0" class="flex justify-center py-12">
               <span class="loading loading-spinner loading-lg text-primary"></span>
             </div>
 
-            <div v-else-if="pluginList.length === 0" class="flex flex-col items-center justify-center py-12 text-center bg-base-200/30 rounded-3xl border border-dashed border-base-300">
-              <Sparkles :size="48" class="opacity-20 mb-4" />
-              <p class="text-[10px] font-black uppercase tracking-widest opacity-20 italic">{{ $t('settings.plugins.empty') }}</p>
+            <!-- 空状态 -->
+            <div v-else-if="pluginList.length === 0" class="flex flex-col items-center justify-center py-16 text-center bg-base-200/30 rounded-3xl border border-dashed border-base-300 space-y-3">
+              <Sparkles :size="48" class="opacity-20 text-primary animate-pulse" />
+              <p class="text-sm font-black uppercase tracking-widest opacity-40">暂无任何插件</p>
+              <button class="btn btn-primary btn-sm rounded-xl gap-2" @click="openAddPluginModal">
+                <Plus :size="14" />
+                <span>立即添加第一个插件</span>
+              </button>
             </div>
 
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div v-for="plugin in pluginList" :key="plugin.name"
-                class="p-6 rounded-2xl border border-base-200 bg-base-200/20 hover:border-primary/30 transition-all group">
-                <div class="flex items-start justify-between mb-4">
-                  <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
-                      <Sparkles :size="20" />
-                    </div>
-                    <div>
-                      <h3 class="font-black text-sm uppercase tracking-wider">{{ plugin.name }}</h3>
-                      <div class="flex items-center gap-2 mt-1">
-                        <span class="badge badge-xs font-bold uppercase tracking-tighter"
-                          :class="plugin.type === 'webhook' ? 'badge-primary' : 'badge-secondary'">
-                          {{ plugin.type === 'webhook' ? $t('settings.plugins.typeWebhook') : $t('settings.plugins.typeScript') }}
-                        </span>
-                        <span v-if="plugin.enabled" class="badge badge-success badge-xs font-bold uppercase tracking-tighter text-[8px]">{{ $t('settings.plugins.active') }}</span>
-                        <span v-else class="badge badge-ghost badge-xs font-bold uppercase tracking-tighter text-[8px]">{{ $t('settings.plugins.disabled') }}</span>
+            <!-- 插件卡片网格 -->
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div v-for="plugin in pluginList" :key="plugin.id"
+                class="p-6 rounded-3xl border bg-base-200/30 hover:bg-base-200/50 transition-all flex flex-col justify-between gap-5 relative group"
+                :class="plugin.enabled ? 'border-primary/30 shadow-lg shadow-primary/5' : 'border-base-300/40 opacity-75'">
+                
+                <!-- 卡片顶部 -->
+                <div>
+                  <div class="flex items-start justify-between gap-4 mb-3">
+                    <div class="flex items-center gap-3.5">
+                      <div class="w-12 h-12 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-105 shadow-inner"
+                        :class="plugin.is_builtin ? 'bg-primary/10 text-primary' : 'bg-secondary/10 text-secondary'">
+                        <Sparkles v-if="plugin.is_builtin" :size="24" />
+                        <Antenna v-else :size="24" />
+                      </div>
+                      <div>
+                        <div class="flex items-center gap-2">
+                          <h3 class="font-black text-base tracking-tight text-base-content">{{ plugin.name }}</h3>
+                          <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-base-300 text-base-content/60 font-bold">
+                            v{{ plugin.version || '1.0' }}
+                          </span>
+                        </div>
+                        <div class="flex items-center gap-2 mt-1">
+                          <span class="badge badge-xs font-black uppercase tracking-wider text-[9px] px-2 py-1"
+                            :class="plugin.is_builtin ? 'badge-primary' : 'badge-secondary'">
+                            {{ plugin.is_builtin ? '内建插件' : (plugin.type === 'webhook' ? 'Webhook 联动' : '扩展插件') }}
+                          </span>
+                          <span v-if="plugin.author" class="text-[10px] opacity-40 font-semibold">
+                            by {{ plugin.author }}
+                          </span>
+                        </div>
                       </div>
                     </div>
+
+                    <!-- 开关与操作按钮 -->
+                    <div class="flex items-center gap-3">
+                      <input type="checkbox" class="toggle toggle-primary toggle-md"
+                        :checked="plugin.enabled"
+                        @change="togglePlugin(plugin)"
+                        :title="plugin.enabled ? '点击停用' : '点击启用'" />
+                      <button v-if="!plugin.is_builtin" @click="deletePlugin(plugin.id)"
+                        class="btn btn-ghost btn-xs btn-circle text-error/40 hover:text-error hover:bg-error/10 transition-colors"
+                        title="删除插件">
+                        <Trash2 :size="14" />
+                      </button>
+                    </div>
                   </div>
+
+                  <!-- 插件描述 -->
+                  <p class="text-xs text-base-content/70 leading-relaxed font-medium mt-2">
+                    {{ plugin.description || '暂无描述' }}
+                  </p>
                 </div>
 
-                <div class="space-y-3">
+                <!-- Webhook URL & 监听事件 -->
+                <div class="space-y-3 pt-3 border-t border-base-content/5">
                   <div v-if="plugin.url" class="space-y-1">
-                    <p class="text-[9px] font-black uppercase tracking-widest opacity-30">{{ $t('settings.plugins.webhookUrl') }}</p>
-                    <p class="text-xs font-mono break-all opacity-70">{{ plugin.url }}</p>
+                    <p class="text-[9px] font-black uppercase tracking-widest opacity-40">目标 Webhook URL</p>
+                    <div class="flex items-center gap-2 bg-base-300/60 px-3 py-1.5 rounded-xl">
+                      <span class="text-xs font-mono break-all opacity-80 select-all flex-1">{{ plugin.url }}</span>
+                    </div>
                   </div>
-                  <div v-if="plugin.command" class="space-y-1">
-                    <p class="text-[9px] font-black uppercase tracking-widest opacity-30">{{ $t('settings.plugins.shellCommand') }}</p>
-                    <p class="text-xs font-mono break-all opacity-70">{{ plugin.command }}</p>
-                  </div>
-                  <div class="space-y-1">
-                    <p class="text-[9px] font-black uppercase tracking-widest opacity-30">{{ $t('settings.plugins.events') }}</p>
-                    <div class="flex flex-wrap gap-1.5 pt-1">
-                      <span v-for="ev in plugin.events" :key="ev" class="px-2 py-0.5 rounded-md bg-base-300 text-[10px] font-bold opacity-60">{{ ev }}</span>
+
+                  <div v-if="plugin.events && plugin.events.length" class="space-y-1.5">
+                    <p class="text-[9px] font-black uppercase tracking-widest opacity-40">监听事件触发点</p>
+                    <div class="flex flex-wrap gap-1.5">
+                      <span v-for="ev in plugin.events" :key="ev"
+                        class="px-2.5 py-0.5 rounded-lg bg-base-300/80 text-[10px] font-bold text-base-content/70 border border-base-content/5">
+                        {{ ev }}
+                      </span>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
+
           </div>
         </div>
       </div>
@@ -901,6 +1089,93 @@ function formatBackupTime(timeStr: string): string {
     <div class="flex justify-center pb-10">
       <div class="px-6 py-2 rounded-full bg-base-200/50 border border-base-300/50 text-[10px] font-black uppercase tracking-[0.2em] opacity-40">
         Ani-Go Engine {{ CURRENT_VERSION }} • Build {{ new Date().toISOString().slice(0,10).replace(/-/g, '') }}
+      </div>
+    </div>
+    <!-- 导入 / 添加插件弹窗 Modal -->
+    <div v-if="showPluginModal" class="modal modal-open z-50 animate-in fade-in duration-200">
+      <div class="modal-box max-w-2xl bg-base-100 rounded-3xl p-6 sm:p-8 border border-base-300/60 shadow-2xl space-y-6">
+        <div class="flex items-center justify-between">
+          <div class="space-y-1">
+            <h3 class="text-xl font-black italic tracking-tight flex items-center gap-3">
+              <Sparkles class="text-primary" :size="24" />
+              添加 / 导入插件扩展
+            </h3>
+            <p class="text-xs opacity-50">配置 Webhook 外部系统联动，或直接导入 JSON 格式插件配置</p>
+          </div>
+          <button @click="showPluginModal = false" class="btn btn-ghost btn-sm btn-circle">✕</button>
+        </div>
+
+        <!-- 模式切换标签 -->
+        <div class="flex rounded-2xl bg-base-200 p-1">
+          <button class="flex-1 py-2 rounded-xl text-xs font-black transition-all"
+            :class="pluginModalTab === 'webhook' ? 'bg-primary text-primary-content shadow-md' : 'opacity-60 hover:opacity-100'"
+            @click="pluginModalTab = 'webhook'">
+            快捷创建 Webhook
+          </button>
+          <button class="flex-1 py-2 rounded-xl text-xs font-black transition-all"
+            :class="pluginModalTab === 'json' ? 'bg-primary text-primary-content shadow-md' : 'opacity-60 hover:opacity-100'"
+            @click="pluginModalTab = 'json'">
+            JSON 配置导入
+          </button>
+        </div>
+
+        <!-- Tab 1: Webhook 表单 -->
+        <div v-if="pluginModalTab === 'webhook'" class="space-y-4">
+          <div>
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60 block mb-1.5">插件名称 *</label>
+            <input v-model="pluginForm.name" type="text" placeholder="例如：Discord 追番频道推送 / n8n 自动化" class="input input-bordered w-full rounded-2xl text-sm" />
+          </div>
+
+          <div>
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60 block mb-1.5">目标 Webhook URL *</label>
+            <input v-model="pluginForm.url" type="url" placeholder="https://discord.com/api/webhooks/... 或 http://localhost:5678/webhook/..." class="input input-bordered w-full rounded-2xl font-mono text-sm" />
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="text-[11px] font-black uppercase tracking-wider opacity-60 block mb-1.5">签名密钥 Secret (可选)</label>
+              <input v-model="pluginForm.secret" type="password" placeholder="请求头 X-AniGo-Secret" class="input input-bordered w-full rounded-2xl text-sm" />
+            </div>
+            <div>
+              <label class="text-[11px] font-black uppercase tracking-wider opacity-60 block mb-1.5">插件描述 (可选)</label>
+              <input v-model="pluginForm.description" type="text" placeholder="简要说明此插件功能" class="input input-bordered w-full rounded-2xl text-sm" />
+            </div>
+          </div>
+
+          <div>
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60 block mb-2">监听触发事件 * (可多选)</label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-base-200/50 p-4 rounded-2xl border border-base-300/40">
+              <label v-for="ev in availablePluginEvents" :key="ev.id" class="flex items-center gap-2.5 cursor-pointer hover:opacity-100 opacity-80 py-1">
+                <input type="checkbox" :value="ev.id" v-model="pluginForm.events" class="checkbox checkbox-primary checkbox-sm rounded-md" />
+                <span class="text-xs font-semibold select-none">{{ ev.label }}</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: JSON 导入 -->
+        <div v-else class="space-y-4">
+          <div class="flex items-center justify-between">
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">粘贴 JSON 配置或上传文件</label>
+            <label class="btn btn-xs btn-outline rounded-xl gap-1 cursor-pointer">
+              <Upload :size="12" />
+              <span>选择 .json 文件</span>
+              <input type="file" accept=".json,application/json" class="hidden" @change="handlePluginFileImport" />
+            </label>
+          </div>
+          <textarea v-model="pluginJsonText" rows="10" class="textarea textarea-bordered w-full rounded-2xl font-mono text-xs leading-relaxed" placeholder="在此粘贴 JSON 格式的插件定义"></textarea>
+        </div>
+
+        <p v-if="pluginJsonError" class="text-xs text-error font-bold bg-error/10 p-3 rounded-xl border border-error/20">{{ pluginJsonError }}</p>
+
+        <!-- 底部按钮 -->
+        <div class="modal-action flex justify-end gap-3 pt-2">
+          <button @click="showPluginModal = false" class="btn btn-ghost rounded-2xl px-6">取消</button>
+          <button @click="submitPluginForm" :disabled="pluginSaving" class="btn btn-primary rounded-2xl px-8 shadow-lg shadow-primary/20">
+            <span v-if="pluginSaving" class="loading loading-spinner loading-sm"></span>
+            <span v-else>确认添加</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>

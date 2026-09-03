@@ -233,6 +233,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 插件管理
 	mux.HandleFunc("GET /api/plugins", s.handleListPlugins)
+	mux.HandleFunc("POST /api/plugins/save", s.handleSavePlugin)
+	mux.HandleFunc("DELETE /api/plugins/{id}", s.handleDeletePlugin)
 	mux.HandleFunc("POST /api/plugins/toggle", s.handleTogglePlugin)
 	mux.HandleFunc("POST /api/plugins/reload", s.handleReloadPlugins)
 

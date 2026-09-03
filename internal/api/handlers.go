@@ -24,6 +24,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 	"github.com/xiaoyueRX/Ani-Go/internal/migrate"
+	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 	"github.com/xiaoyueRX/Ani-Go/internal/search"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
@@ -2232,7 +2233,42 @@ func (s *Server) handleTogglePlugin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "设置已保存，下次启动生效"})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "插件状态已更新"})
+}
+
+// handleSavePlugin 添加或编辑自定义插件
+func (s *Server) handleSavePlugin(w http.ResponseWriter, r *http.Request) {
+	var p plugin.PluginInfo
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+		return
+	}
+	if p.Name == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "插件名称不能为空"})
+		return
+	}
+	if err := s.pluginManager.AddOrUpdatePlugin(p); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "插件已保存并启用"})
+}
+
+// handleDeletePlugin 删除自定义插件
+func (s *Server) handleDeletePlugin(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		id = strings.TrimPrefix(r.URL.Path, "/api/plugins/")
+	}
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "缺少插件 ID"})
+		return
+	}
+	if err := s.pluginManager.DeletePlugin(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "插件已删除"})
 }
 
 func (s *Server) handleBangumiAuthLink(w http.ResponseWriter, r *http.Request) {

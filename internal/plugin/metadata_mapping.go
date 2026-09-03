@@ -26,6 +26,7 @@ func (p *MetadataMappingPlugin) GetInfo() PluginInfo {
 		AuthorURL:   "https://github.com/xiaoyueRX",
 		Icon:        "Link",
 		IsBuiltIn:   true,
+		Type:        "builtin",
 		Events:      []string{core.EventSubscriptionAdded, core.EventSupplementTriggered},
 	}
 }
