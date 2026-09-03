@@ -41,6 +41,11 @@ func NewBGMTVProvider(userToken string, mirrorDomains []string) *BGMTVProvider {
 
 func (p *BGMTVProvider) Name() string { return "BGM.tv" }
 
+// SetUserToken 更新认证令牌
+func (p *BGMTVProvider) SetUserToken(token string) {
+	p.userToken = token
+}
+
 
 
 

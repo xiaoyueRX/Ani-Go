@@ -2288,7 +2288,39 @@ func (s *Server) handleBangumiAuthCallback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	database.DB.Save(&database.Setting{Key: "BGMTV_USER_TOKEN", Value: tokenResp.AccessToken})
 	database.DB.Save(&database.Setting{Key: "BANGUMI_USER_TOKEN", Value: tokenResp.AccessToken})
+
+	if p, ok := s.md.(*metadata.BGMTVProvider); ok {
+		p.SetUserToken(tokenResp.AccessToken)
+	}
+
+	// 自动获取当前登录用户的 username 并持久化
+	client := httpx.New(10 * time.Second)
+	meReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://api.bgm.tv/v0/me", nil)
+	if err == nil {
+		meReq.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+		meReq.Header.Set("User-Agent", "Ani-Go/1.0")
+		if meResp, err := client.Do(meReq); err == nil {
+			defer meResp.Body.Close()
+			if meResp.StatusCode == http.StatusOK {
+				var me struct {
+					Username string `json:"username"`
+					ID       int    `json:"id"`
+				}
+				if err := json.NewDecoder(meResp.Body).Decode(&me); err == nil {
+					uname := me.Username
+					if uname == "" && me.ID > 0 {
+						uname = fmt.Sprintf("%d", me.ID)
+					}
+					if uname != "" {
+						database.DB.Save(&database.Setting{Key: "BGMTV_USERNAME", Value: uname})
+						log.Printf("✅ Bangumi OAuth 授权成功，已自动关联用户: %s", uname)
+					}
+				}
+			}
+		}
+	}
 
 	http.Redirect(w, r, "/settings?tab=bangumi&status=success", http.StatusFound)
 }
