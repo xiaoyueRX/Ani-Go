@@ -164,10 +164,51 @@ const sortedDays = computed(() =>
     .sort((a, b) => weekOrder.indexOf(a.day_of_week) - weekOrder.indexOf(b.day_of_week))
 )
 
+const scheduleSearch = ref('')
+const onlyToday = ref(false)
+const todayWeekday = computed(() => {
+  const d = new Date().getDay()
+  return d === 0 ? 7 : d
+})
+
+function setScheduleSource(src: 'yuc' | 'bangumi') {
+  if (scheduleSource.value === src) return
+  scheduleSource.value = src
+  fetchSchedule()
+}
+
+const filteredDays = computed(() => {
+  let days = sortedDays.value
+  
+  if (onlyToday.value) {
+    days = days.filter(d => d.day_of_week === todayWeekday.value)
+  }
+
+  if (scheduleSearch.value.trim()) {
+    const q = scheduleSearch.value.toLowerCase()
+    days = days.map(d => {
+      const items = d.items.filter(i => 
+        i.title.toLowerCase().includes(q) || 
+        (i.bangumi_id && i.bangumi_id.includes(q))
+      )
+      return { ...d, items }
+    }).filter(d => d.items.length > 0)
+  }
+
+  return days
+})
+
 const subscribedSchedule = computed(() => {
   const map: Record<string, TorrentItem[]> = {}
   for (const day of weekDays.value) {
-    const items = day.items.filter(i => i.info_hash || subscribedIds.value[i.bangumi_id])
+    let items = day.items.filter(i => i.info_hash || subscribedIds.value[i.bangumi_id])
+    if (onlyToday.value && day.day_of_week !== todayWeekday.value) {
+      continue
+    }
+    if (scheduleSearch.value.trim()) {
+      const q = scheduleSearch.value.toLowerCase()
+      items = items.filter(i => i.title.toLowerCase().includes(q) || (i.bangumi_id && i.bangumi_id.includes(q)))
+    }
     if (items.length > 0) map[dayNames.value[day.day_of_week] || day.label] = items
   }
   return map
@@ -528,14 +569,65 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- 筛选过滤与源切换工具栏 -->
+    <div v-if="!loading" class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-base-100 p-4 rounded-3xl border border-base-200/80 shadow-sm">
+      <div class="flex items-center gap-2 flex-wrap">
+        <!-- 数据源切换 -->
+        <div class="flex p-1 bg-base-200/60 rounded-2xl border border-base-300/40 text-xs">
+          <button 
+            @click="setScheduleSource('yuc')" 
+            class="px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5"
+            :class="scheduleSource === 'yuc' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
+          >
+            <Antenna :size="13" />
+            <span>新番季度表</span>
+          </button>
+          <button 
+            @click="setScheduleSource('bangumi')" 
+            class="px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5"
+            :class="scheduleSource === 'bangumi' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
+          >
+            <Calendar :size="13" />
+            <span>Bangumi 每日放送</span>
+          </button>
+        </div>
+
+        <!-- 只看今日开关 -->
+        <button 
+          @click="onlyToday = !onlyToday" 
+          class="btn btn-sm rounded-xl font-bold gap-1.5 transition-all"
+          :class="onlyToday ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70 hover:opacity-100'"
+        >
+          <Clock :size="14" />
+          <span>只看今日</span>
+          <span class="badge badge-xs" :class="onlyToday ? 'bg-white/20 text-white' : 'badge-neutral'">
+            周{{ ['日','一','二','三','四','五','六'][new Date().getDay()] }}
+          </span>
+        </button>
+      </div>
+
+      <!-- 搜索框 -->
+      <div class="relative w-full sm:w-64">
+        <input 
+          v-model="scheduleSearch" 
+          type="text" 
+          placeholder="按番剧名实时过滤..." 
+          class="input input-bordered input-sm w-full rounded-xl pl-8 text-xs font-medium"
+        />
+        <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
+      </div>
+    </div>
+
     <!-- Empty State -->
-    <div v-else-if="sortedDays.length === 0" class="flex flex-col items-center justify-center py-32 text-center bg-base-100/30 rounded-[3rem] border-2 border-dashed border-base-200 max-w-4xl mx-auto">
+    <div v-else-if="filteredDays.length === 0" class="flex flex-col items-center justify-center py-32 text-center bg-base-100/30 rounded-[3rem] border-2 border-dashed border-base-200 max-w-4xl mx-auto">
       <div class="w-32 h-32 bg-base-200/50 rounded-full flex items-center justify-center mb-8 rotate-12">
         <Calendar :size="64" class="opacity-10" />
       </div>
-      <h3 class="text-2xl font-black tracking-tight mb-2">{{ $t('schedule.empty.title') }}</h3>
+      <h3 class="text-2xl font-black tracking-tight mb-2">
+        {{ scheduleSearch || onlyToday ? '未找到匹配的番剧' : $t('schedule.empty.title') }}
+      </h3>
       <p class="text-sm font-bold text-base-content/40 max-w-xs mx-auto mb-10 leading-relaxed">
-        {{ $t('schedule.empty.desc') }}
+        {{ scheduleSearch || onlyToday ? '请尝试更换搜索关键字或取消「只看今日」筛选' : $t('schedule.empty.desc') }}
       </p>
     </div>
 
@@ -543,11 +635,11 @@ onMounted(async () => {
     <div v-else class="space-y-12">
       <!-- Section Template -->
       <template v-if="activeTab === 'schedule'">
-        <div v-for="(day, index) in sortedDays" :key="day.day_of_week + day.label" class="space-y-6">
+        <div v-for="(day, index) in filteredDays" :key="day.day_of_week + day.label" class="space-y-6">
           <!-- SP 月份：可折叠 -->
           <template v-if="day.day_of_week === 0">
             <div class="collapse collapse-arrow bg-base-100/30 rounded-2xl border border-base-200/50">
-              <input type="checkbox" :checked="index === sortedDays.findIndex(d => d.day_of_week === 0)" />
+              <input type="checkbox" :checked="index === filteredDays.findIndex(d => d.day_of_week === 0)" />
               <div class="collapse-title text-lg font-black tracking-tight">
                 {{ day.label }} 
                 <span class="text-[10px] font-black uppercase tracking-widest text-base-content/30 ml-2">{{ day.items.length }} 部</span>
@@ -590,8 +682,14 @@ onMounted(async () => {
           <!-- 普通星期：保持不变 -->
           <template v-else>
             <div class="flex items-center gap-4 group">
-              <div class="w-1.5 h-6 bg-primary rounded-full shadow-[0_0_12px_rgba(var(--p),0.5)] group-hover:h-8 transition-all"></div>
-              <h2 class="text-2xl font-black tracking-tight italic">{{ day.label }}</h2>
+              <div class="w-1.5 h-6 bg-primary rounded-full shadow-[0_0_12px_rgba(var(--p),0.5)] group-hover:h-8 transition-all"
+                :class="{ 'bg-secondary w-2.5 h-8': day.day_of_week === todayWeekday }"></div>
+              <h2 class="text-2xl font-black tracking-tight italic flex items-center gap-2.5">
+                <span>{{ day.label }}</span>
+                <span v-if="day.day_of_week === todayWeekday" class="badge badge-primary badge-sm font-black text-[10px] tracking-wider uppercase shadow-sm">
+                  🌟 今日放送
+                </span>
+              </h2>
               <span class="text-[10px] font-black uppercase tracking-widest text-base-content/20 mt-1">{{ day.items.length }} {{ $t('schedule.entries') }}</span>
             </div>
 

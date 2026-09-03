@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
@@ -23,6 +24,9 @@ type BGMTVProvider struct {
 	userToken     string
 	mirrorDomains []string // API 域名列表: api.bgm.tv, api.bangumi.tv, api.chii.in
 	activeDomain  string
+	calMu         sync.RWMutex
+	calCache      []core.TorrentItem
+	calTime       time.Time
 }
 
 // NewBGMTVProvider 创建 BGM.tv 元数据提供者
@@ -308,10 +312,28 @@ func (p *BGMTVProvider) GetEpisodes(ctx context.Context, animeID string, season 
 
 // tryMirrors 依次尝试镜像域名发起 GET 请求，返回首个成功的响应
 
-// GetCalendar 获取 Bangumi 每日放送时间表
+// GetCalendar 获取 Bangumi 每日放送时间表（带内存缓存与故障回退）
 func (p *BGMTVProvider) GetCalendar(ctx context.Context) ([]core.TorrentItem, error) {
+	p.calMu.RLock()
+	if time.Since(p.calTime) < 1*time.Hour && len(p.calCache) > 0 {
+		cached := make([]core.TorrentItem, len(p.calCache))
+		copy(cached, p.calCache)
+		p.calMu.RUnlock()
+		return cached, nil
+	}
+	p.calMu.RUnlock()
+
 	resp, err := p.tryMirrors(ctx, "/calendar")
 	if err != nil {
+		p.calMu.RLock()
+		if len(p.calCache) > 0 {
+			log.Printf("⚠️ 获取 Bangumi 每日放送失败 (%v)，回退至过往缓存数据", err)
+			cached := make([]core.TorrentItem, len(p.calCache))
+			copy(cached, p.calCache)
+			p.calMu.RUnlock()
+			return cached, nil
+		}
+		p.calMu.RUnlock()
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -334,11 +356,17 @@ func (p *BGMTVProvider) GetCalendar(ctx context.Context) ([]core.TorrentItem, er
 				CoverURL:   item.Images.Large,
 				AiredDate:  item.AirDate,
 				SourceName: "BGM.tv",
-				// 将星期信息暂存在 EpisodeURL 字段（Hack，稍后在 handler 转换）
+				// 将星期信息暂存在 EpisodeURL 字段（稍后在 handler 转换）
 				EpisodeURL: strconv.Itoa(day.Weekday.ID),
 			})
 		}
 	}
+
+	p.calMu.Lock()
+	p.calCache = results
+	p.calTime = time.Now()
+	p.calMu.Unlock()
+
 	return results, nil
 }
 

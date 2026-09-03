@@ -5,9 +5,8 @@ import request from '../utils/request'
 import { 
   Search, Plus, AlertTriangle, 
   X, LayoutGrid, RefreshCw,
-  RotateCcw
+  RotateCcw, Trash2, Antenna, Check
 } from 'lucide-vue-next'
-import { Trash2 } from 'lucide-vue-next'
 import SubscriptionCard from '../components/SubscriptionCard.vue'
 
 import { useI18n } from 'vue-i18n'
@@ -33,11 +32,23 @@ const loading = ref(true)
 const error = ref('')
 const deletingId = ref<number | null>(null)
 const filterText = ref('')
-const filterType = ref<'all' | 'active' | 'completed'>('all')
+const filterType = ref<'all' | 'active' | 'completed' | 'stalled'>('all')
 const sortBy = ref<'created_at' | 'title' | 'progress' | 'year'>('created_at')
+
+const activeSubsCount = computed(() => subs.value.filter(s => s.enabled && !s.completed).length)
+const completedSubsCount = computed(() => subs.value.filter(s => s.completed).length)
+const stalledSubsCount = computed(() => subs.value.filter(s => s.stalled_episodes > 0).length)
 
 const batchDeleteMode = ref(false)
 const batchDeleteSelected = ref<Set<number>>(new Set())
+
+function toggleSelectAllBatch() {
+  if (batchDeleteSelected.value.size === filteredSubs.value.length) {
+    batchDeleteSelected.value = new Set()
+  } else {
+    batchDeleteSelected.value = new Set(filteredSubs.value.map(s => s.id))
+  }
+}
 const undoBarVisible = ref(false)
 const undoDeletedCount = ref(0)
 const undoDeletedIds = ref<number[]>([])
@@ -184,6 +195,7 @@ const filteredSubs = computed(() => {
   // 状态筛选
   if (filterType.value === 'active') list = list.filter(s => s.enabled && !s.completed)
   else if (filterType.value === 'completed') list = list.filter(s => s.completed)
+  else if (filterType.value === 'stalled') list = list.filter(s => s.stalled_episodes > 0)
   // 文字搜索
   const q = filterText.value.trim().toLowerCase()
   if (q) {
@@ -368,14 +380,17 @@ onUnmounted(() => {
       
       <div class="flex items-center gap-2 overflow-x-auto no-scrollbar max-w-full pb-1">
         <template v-if="batchDeleteMode">
-          <div class="flex items-center gap-3 flex-none">
+          <div class="flex items-center gap-2.5 flex-none">
+            <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-3 text-xs font-bold" @click="toggleSelectAllBatch">
+              {{ batchDeleteSelected.size === filteredSubs.length && filteredSubs.length > 0 ? '取消全选' : '全选本页' }}
+            </button>
             <span class="text-xs font-bold opacity-60 whitespace-nowrap">已选 {{ batchDeleteSelected.size }}</span>
-            <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-4" @click="exitBatchDeleteMode">
+            <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-3" @click="exitBatchDeleteMode">
               取消
             </button>
-            <button class="btn btn-error btn-xs rounded-xl h-10 min-h-0 px-4 gap-2 whitespace-nowrap" @click="openBatchDeleteModal">
+            <button class="btn btn-error btn-xs rounded-xl h-10 min-h-0 px-4 gap-1.5 whitespace-nowrap font-bold" :disabled="batchDeleteSelected.size === 0" @click="openBatchDeleteModal">
               <Trash2 :size="14" />
-              删除
+              删除 ({{ batchDeleteSelected.size }})
             </button>
           </div>
         </template>
@@ -410,30 +425,95 @@ onUnmounted(() => {
       </div>
     </div>
 
-      <div class="flex flex-wrap items-center gap-4 bg-base-100 p-3 rounded-[2rem] border border-base-200/50 shadow-sm">
-        <div class="relative w-full sm:w-80 group">
-          <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-base-content/20 group-focus-within:text-primary transition-colors">
-            <Search :size="20" />
-          </div>
-          <input 
-            v-model="filterText" 
-            type="text" 
-            :placeholder="$t('subs.searchPlaceholder')" 
-            class="input w-full bg-base-200/50 border-transparent focus:border-primary/30 focus:bg-base-100 focus:ring-0 rounded-2xl pl-12 transition-all font-bold text-sm h-12"
-          />
+    <!-- 订阅统计概览仪表盘 -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div 
+        @click="filterType = 'all'" 
+        class="bg-base-100 p-4 rounded-2xl border transition-all cursor-pointer hover:border-primary/50 shadow-sm flex items-center justify-between"
+        :class="filterType === 'all' ? 'border-primary shadow-md shadow-primary/10' : 'border-base-200/80'"
+      >
+        <div class="space-y-0.5">
+          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">全部追番</span>
+          <p class="text-xl font-black font-mono text-base-content">{{ subs.length }}</p>
         </div>
+        <div class="w-10 h-10 rounded-xl bg-base-200 text-base-content/60 flex items-center justify-center">
+          <LayoutGrid :size="20" />
+        </div>
+      </div>
 
-        <div class="flex p-1.5 bg-base-200/50 rounded-2xl gap-1 w-fit overflow-x-auto no-scrollbar">
-          <button 
-            v-for="t in ['all', 'active', 'completed']" 
-            :key="t"
-            class="px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap"
-            :class="filterType === t ? 'bg-base-100 text-primary shadow-sm ring-1 ring-base-300' : 'text-base-content/40 hover:text-base-content'"
-            @click="filterType = t as any"
-          >
-            {{ t === 'all' ? $t('subs.filter.all') : t === 'active' ? $t('subs.filter.active') : t === 'completed' ? $t('subs.filter.completed') : t }}
-          </button>
+      <div 
+        @click="filterType = 'active'" 
+        class="bg-base-100 p-4 rounded-2xl border transition-all cursor-pointer hover:border-primary/50 shadow-sm flex items-center justify-between"
+        :class="filterType === 'active' ? 'border-primary shadow-md shadow-primary/10' : 'border-base-200/80'"
+      >
+        <div class="space-y-0.5">
+          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">连载中</span>
+          <p class="text-xl font-black font-mono text-primary">{{ activeSubsCount }}</p>
         </div>
+        <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+          <Antenna :size="20" />
+        </div>
+      </div>
+
+      <div 
+        @click="filterType = 'completed'" 
+        class="bg-base-100 p-4 rounded-2xl border transition-all cursor-pointer hover:border-success/50 shadow-sm flex items-center justify-between"
+        :class="filterType === 'completed' ? 'border-success shadow-md shadow-success/10' : 'border-base-200/80'"
+      >
+        <div class="space-y-0.5">
+          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">完结归档</span>
+          <p class="text-xl font-black font-mono text-success">{{ completedSubsCount }}</p>
+        </div>
+        <div class="w-10 h-10 rounded-xl bg-success/10 text-success flex items-center justify-center">
+          <Check :size="20" />
+        </div>
+      </div>
+
+      <div 
+        @click="filterType = 'stalled'" 
+        class="bg-base-100 p-4 rounded-2xl border transition-all cursor-pointer hover:border-warning/50 shadow-sm flex items-center justify-between"
+        :class="filterType === 'stalled' ? 'border-warning shadow-md shadow-warning/10' : 'border-base-200/80'"
+      >
+        <div class="space-y-0.5">
+          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">剧集超时/异常</span>
+          <p class="text-xl font-black font-mono text-warning">{{ stalledSubsCount }}</p>
+        </div>
+        <div class="w-10 h-10 rounded-xl bg-warning/10 text-warning flex items-center justify-center">
+          <AlertTriangle :size="20" />
+        </div>
+      </div>
+    </div>
+
+    <!-- 搜索与排序工具栏 -->
+    <div class="flex flex-wrap items-center gap-4 bg-base-100 p-3 rounded-[2rem] border border-base-200/50 shadow-sm">
+      <div class="relative w-full sm:w-80 group">
+        <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-base-content/20 group-focus-within:text-primary transition-colors">
+          <Search :size="20" />
+        </div>
+        <input 
+          v-model="filterText" 
+          type="text" 
+          :placeholder="$t('subs.searchPlaceholder')" 
+          class="input w-full bg-base-200/50 border-transparent focus:border-primary/30 focus:bg-base-100 focus:ring-0 rounded-2xl pl-12 transition-all font-bold text-sm h-12"
+        />
+      </div>
+
+      <div class="flex p-1.5 bg-base-200/50 rounded-2xl gap-1 w-fit overflow-x-auto no-scrollbar">
+        <button 
+          v-for="t in [
+            { key: 'all', label: $t('subs.filter.all') || '全部' },
+            { key: 'active', label: $t('subs.filter.active') || '连载中' },
+            { key: 'completed', label: $t('subs.filter.completed') || '已完结' },
+            { key: 'stalled', label: '超时异常' }
+          ]" 
+          :key="t.key"
+          class="px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap"
+          :class="filterType === t.key ? 'bg-base-100 text-primary shadow-sm ring-1 ring-base-300 font-bold' : 'text-base-content/40 hover:text-base-content'"
+          @click="filterType = t.key as any"
+        >
+          {{ t.label }}
+        </button>
+      </div>
 
         <div class="flex items-center gap-2 px-3 h-11 bg-base-200/50 rounded-2xl border border-transparent focus-within:border-primary/30 transition-all">
           <LayoutGrid :size="16" class="opacity-30" />

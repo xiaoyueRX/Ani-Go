@@ -245,11 +245,13 @@ func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request)
 		Count          int
 	}
 	var statusCounts []statusCount
-	database.DB.Model(&database.Episode{}).
-		Select("subscription_id, status, count(*) as count").
-		Where("subscription_id IN ? AND deleted_at IS NULL", subIDs).
-		Group("subscription_id, status").
-		Scan(&statusCounts)
+	if len(subIDs) > 0 {
+		database.DB.Model(&database.Episode{}).
+			Select("subscription_id, status, count(*) as count").
+			Where("subscription_id IN ? AND deleted_at IS NULL", subIDs).
+			Group("subscription_id, status").
+			Scan(&statusCounts)
+	}
 
 	organizedMap := make(map[uint]int)
 	downloadingMap := make(map[uint]int)

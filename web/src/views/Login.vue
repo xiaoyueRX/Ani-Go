@@ -84,10 +84,8 @@ async function handleLogin() {
           <!-- Logo & Title -->
           <div class="flex flex-col items-center text-center mb-10">
             <div class="relative mb-6 group">
-               <div class="absolute inset-0 bg-primary blur-2xl opacity-20 group-hover:opacity-40 transition-opacity"></div>
-               <div class="w-20 h-20 rounded-3xl bg-primary flex items-center justify-center shadow-2xl rotate-3 group-hover:rotate-0 transition-all duration-500 relative z-10">
-                 <Antenna :size="40" class="text-primary-content" />
-               </div>
+               <div class="absolute inset-0 bg-primary blur-3xl opacity-30 group-hover:opacity-60 transition-opacity"></div>
+               <img src="/logo.png" alt="Ani-Go Logo" class="w-24 h-24 rounded-3xl shadow-2xl rotate-3 group-hover:rotate-0 transition-all duration-500 relative z-10 object-cover" />
             </div>
             <h1 class="text-4xl font-black tracking-tighter italic bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent mb-2">{{ $t('login.title') }}</h1>
             <p class="text-[10px] font-black tracking-[0.4em] uppercase opacity-30">{{ $t('login.subtitle') }}</p>

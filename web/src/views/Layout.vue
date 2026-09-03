@@ -106,8 +106,9 @@ function closeDrawer() {
               <Menu :size="24" />
             </label>
           </div>
-          <div class="flex-1 px-2">
-            <span class="text-lg font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">Ani-Go</span>
+          <div class="flex-1 px-2 flex items-center gap-2">
+            <img src="/logo.png" alt="Ani-Go" class="w-7 h-7 rounded-lg object-cover shadow-sm" />
+            <span class="text-lg font-black bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent italic">Ani-Go</span>
           </div>
           <div class="flex-none gap-2">
             <div class="dropdown dropdown-end">
@@ -184,9 +185,9 @@ function closeDrawer() {
         <!-- Logo Section -->
         <div class="px-8 py-10">
           <div class="flex items-center gap-4 group">
-            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-primary-focus flex items-center justify-center shadow-xl shadow-primary/20 -rotate-3 group-hover:rotate-0 transition-all duration-500 overflow-hidden">
-               <div class="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(255,255,255,0.3),transparent)]"></div>
-               <Antenna :size="28" class="text-primary-content relative z-10" />
+            <div class="relative">
+              <img src="/logo.png" alt="Ani-Go Logo" class="w-12 h-12 rounded-2xl shadow-xl shadow-primary/20 -rotate-3 group-hover:rotate-0 transition-all duration-500 object-cover" />
+              <div class="absolute inset-0 rounded-2xl bg-primary/20 blur-lg -z-10 group-hover:scale-110 transition-transform"></div>
             </div>
             <div>
               <h1 class="text-2xl font-black tracking-tighter leading-none italic">Ani-Go</h1>
