@@ -160,7 +160,14 @@ const dayNames = computed<Record<number, string>>(() => ({
 
 const sortedDays = computed(() =>
   [...weekDays.value]
-    .map(d => ({ ...d, label: dayNames.value[d.day_of_week] || d.label }))
+    // 只展示周一至周日正片放送，彻底排除 SP/OVA/剧场版等杂类分组
+    .filter(d => d.day_of_week >= 1 && d.day_of_week <= 7)
+    .map(d => ({
+      ...d,
+      label: dayNames.value[d.day_of_week] || d.label,
+      // 过滤无效或空标题条目，防止网格出现空白占位洞
+      items: (d.items || []).filter(item => item && item.title && item.title.trim().length > 0)
+    }))
     .sort((a, b) => weekOrder.indexOf(a.day_of_week) - weekOrder.indexOf(b.day_of_week))
 )
 
@@ -201,7 +208,8 @@ const filteredDays = computed(() => {
 const subscribedSchedule = computed(() => {
   const map: Record<string, TorrentItem[]> = {}
   for (const day of weekDays.value) {
-    let items = day.items.filter(i => i.info_hash || subscribedIds.value[i.bangumi_id])
+    if (day.day_of_week < 1 || day.day_of_week > 7) continue
+    let items = (day.items || []).filter(i => i && i.title && (i.info_hash || subscribedIds.value[i.bangumi_id]))
     if (onlyToday.value && day.day_of_week !== todayWeekday.value) {
       continue
     }
@@ -635,95 +643,64 @@ onMounted(async () => {
     <div v-else-if="!loading" class="space-y-12">
       <!-- Section Template -->
       <template v-if="activeTab === 'schedule'">
-        <div v-for="(day, index) in filteredDays" :key="day.day_of_week + day.label" class="space-y-6">
-          <!-- SP 月份：可折叠 -->
-          <template v-if="day.day_of_week === 0">
-            <div class="collapse collapse-arrow bg-base-100/30 rounded-2xl border border-base-200/50">
-              <input type="checkbox" :checked="index === filteredDays.findIndex(d => d.day_of_week === 0)" />
-              <div class="collapse-title text-lg font-black tracking-tight">
-                {{ day.label }} 
-                <span class="text-[10px] font-black uppercase tracking-widest text-base-content/30 ml-2">{{ day.items.length }} 部</span>
-              </div>
-              <div class="collapse-content">
-                <div class="grid gap-4 sm:gap-6 items-start pt-2 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
-                  <div v-for="item in day.items" :key="item.title"
-                    class="group relative bg-base-100/50 rounded-[1.8rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:border-primary/30 transition-all duration-500 cursor-pointer active:scale-95 flex flex-col"
-                    @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)">
-                    <div class="z-0 bg-base-200/50 relative">
-                      <div v-if="batchMode"
-                        class="absolute top-3 left-3 z-20 w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 pointer-events-none"
-                        :class="isSelected(item) ? 'bg-primary shadow-lg ring-2 ring-primary/50' : 'bg-black/40 backdrop-blur-sm border border-white/30 hover:bg-black/60'">
-                        <Check v-if="isSelected(item)" :size="14" class="text-primary-content" />
-                      </div>
-                      <img v-if="item.cover_url" :src="proxyImage(item.cover_url)" :alt="item.title" class="block w-full h-auto object-contain transition-transform duration-1000 group-hover:scale-105" loading="lazy" referrerpolicy="no-referrer"
-                        @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-                      <div class="aspect-video flex items-center justify-center text-base-content/5" v-if="!item.cover_url">
-                        <Image :size="48" />
-                      </div>
-                      <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-60 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-                    </div>
-                    <div v-if="item.info_hash || subscribedIds[item.bangumi_id]" class="absolute top-3 right-3 z-10 flex items-center gap-1">
-                       <div v-if="getItemStats(item)" class="px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[8px] font-black text-white tracking-wider leading-none">
-                         {{ getItemStats(item)?.downloaded }}<span v-if="getItemStats(item)?.total">/{{ getItemStats(item)?.total }}</span>
-                       </div>
-                       <div class="w-8 h-8 rounded-full bg-primary/90 backdrop-blur-md flex items-center justify-center text-primary-content shadow-lg border border-white/20 shadow-lg">
-                          <Check :size="16" />
-                       </div>
-                    </div>
-                    <div class="absolute bottom-0 left-0 w-full p-4 z-10">
-                       <p class="text-[10px] font-black leading-tight text-white line-clamp-2 uppercase tracking-wide group-hover:text-primary transition-colors">{{ item.title }}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </template>
-          
-          <!-- 普通星期：保持不变 -->
-          <template v-else>
-            <div class="flex items-center gap-4 group">
-              <div class="w-1.5 h-6 bg-primary rounded-full shadow-[0_0_12px_rgba(var(--p),0.5)] group-hover:h-8 transition-all"
-                :class="{ 'bg-secondary w-2.5 h-8': day.day_of_week === todayWeekday }"></div>
-              <h2 class="text-2xl font-black tracking-tight italic flex items-center gap-2.5">
-                <span>{{ day.label }}</span>
-                <span v-if="day.day_of_week === todayWeekday" class="badge badge-primary badge-sm font-black text-[10px] tracking-wider uppercase shadow-sm">
-                  🌟 今日放送
-                </span>
-              </h2>
-              <span class="text-[10px] font-black uppercase tracking-widest text-base-content/20 mt-1">{{ day.items.length }} {{ $t('schedule.entries') }}</span>
-            </div>
+        <div v-for="day in filteredDays" :key="day.day_of_week + day.label" class="space-y-6">
+          <div class="flex items-center gap-4 group">
+            <div class="w-1.5 h-6 bg-primary rounded-full shadow-[0_0_12px_rgba(var(--p),0.5)] group-hover:h-8 transition-all"
+              :class="{ 'bg-secondary w-2.5 h-8': day.day_of_week === todayWeekday }"></div>
+            <h2 class="text-2xl font-black tracking-tight italic flex items-center gap-2.5">
+              <span>{{ day.label }}</span>
+              <span v-if="day.day_of_week === todayWeekday" class="badge badge-primary badge-sm font-black text-[10px] tracking-wider uppercase shadow-sm">
+                🌟 今日放送
+              </span>
+            </h2>
+            <span class="text-[10px] font-black uppercase tracking-widest text-base-content/20 mt-1">{{ day.items.length }} {{ $t('schedule.entries') }}</span>
+          </div>
 
-            <div class="grid gap-4 sm:gap-6 items-start grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
-              <div v-for="item in day.items" :key="item.title"
-                class="group relative bg-base-100/50 rounded-[1.8rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:border-primary/30 transition-all duration-500 cursor-pointer active:scale-95 flex flex-col"
-                @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)">
-                <div class="z-0 bg-base-200/50 relative">
-                  <div v-if="batchMode"
-                    class="absolute top-3 left-3 z-20 w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 pointer-events-none"
-                    :class="isSelected(item) ? 'bg-primary shadow-lg ring-2 ring-primary/50' : 'bg-black/40 backdrop-blur-sm border border-white/30 hover:bg-black/60'">
-                    <Check v-if="isSelected(item)" :size="14" class="text-primary-content" />
-                  </div>
-                  <img v-if="item.cover_url" :src="proxyImage(item.cover_url)" :alt="item.title" class="block w-full h-auto object-contain transition-transform duration-1000 group-hover:scale-105" loading="lazy" referrerpolicy="no-referrer"
-                    @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-                  <div class="aspect-video flex items-center justify-center text-base-content/5" v-if="!item.cover_url">
-                    <Image :size="48" />
-                  </div>
-                  <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-60 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+          <div class="grid gap-4 sm:gap-6 items-start grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
+            <div v-for="item in day.items" :key="item.title"
+              class="group relative bg-base-100/60 rounded-[1.8rem] overflow-hidden border border-base-200/80 shadow-sm hover:shadow-2xl hover:border-primary/40 transition-all duration-500 cursor-pointer active:scale-95 flex flex-col"
+              @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)">
+              
+              <!-- 统一定高比例海报容器：杜绝海报大小不一与加载失败塌陷成空洞 -->
+              <div class="relative aspect-[3/4.2] w-full overflow-hidden bg-base-200/60">
+                <div v-if="batchMode"
+                  class="absolute top-3 left-3 z-20 w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 pointer-events-none"
+                  :class="isSelected(item) ? 'bg-primary shadow-lg ring-2 ring-primary/50' : 'bg-black/50 backdrop-blur-sm border border-white/30 hover:bg-black/70'">
+                  <Check v-if="isSelected(item)" :size="14" class="text-primary-content" />
                 </div>
-                <div v-if="item.info_hash || subscribedIds[item.bangumi_id]" class="absolute top-3 right-3 z-10 flex items-center gap-1">
+
+                <!-- 默认占位底图：即便图片 404 或网络延迟也维持几何网格完整，绝不留白洞 -->
+                <div class="absolute inset-0 flex items-center justify-center text-base-content/15 pointer-events-none">
+                  <Image :size="36" />
+                </div>
+
+                <img 
+                  v-if="item.cover_url" 
+                  :src="proxyImage(item.cover_url)" 
+                  :alt="item.title" 
+                  class="relative z-10 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
+                  loading="lazy" 
+                  referrerpolicy="no-referrer"
+                  @error="(e: Event) => { const el = (e.target as HTMLImageElement); el.style.opacity = '0'; }" 
+                />
+
+                <div class="absolute inset-0 z-10 bg-gradient-to-t from-black/90 via-black/25 to-transparent opacity-70 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+
+                <div v-if="item.info_hash || subscribedIds[item.bangumi_id]" class="absolute top-3 right-3 z-20 flex items-center gap-1">
                    <div v-if="getItemStats(item)" class="px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[8px] font-black text-white tracking-wider leading-none">
                      {{ getItemStats(item)?.downloaded }}<span v-if="getItemStats(item)?.total">/{{ getItemStats(item)?.total }}</span>
                    </div>
-                   <div class="w-8 h-8 rounded-full bg-primary/90 backdrop-blur-md flex items-center justify-center text-primary-content shadow-lg border border-white/20 shadow-lg">
+                   <div class="w-8 h-8 rounded-full bg-primary/90 backdrop-blur-md flex items-center justify-center text-primary-content shadow-lg border border-white/20">
                       <Check :size="16" />
                    </div>
                 </div>
-                <div class="absolute bottom-0 left-0 w-full p-4 z-10">
-                   <p class="text-[10px] font-black leading-tight text-white line-clamp-2 uppercase tracking-wide group-hover:text-primary transition-colors">{{ item.title }}</p>
+
+                <div class="absolute bottom-0 left-0 w-full p-3.5 z-20">
+                   <p class="text-[11px] font-black leading-tight text-white line-clamp-2 uppercase tracking-wide group-hover:text-primary transition-colors drop-shadow-sm">{{ item.title }}</p>
                 </div>
               </div>
             </div>
-          </template>
+          </div>
         </div>
       </template>
 
@@ -745,34 +722,45 @@ onMounted(async () => {
 
           <div class="grid gap-4 sm:gap-6 items-start grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
             <div v-for="item in items" :key="item.title"
-              class="group relative bg-base-100/50 rounded-[1.8rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:border-success/30 transition-all duration-500 cursor-pointer active:scale-95 flex flex-col"
+              class="group relative bg-base-100/60 rounded-[1.8rem] overflow-hidden border border-base-200/80 shadow-sm hover:shadow-2xl hover:border-success/40 transition-all duration-500 cursor-pointer active:scale-95 flex flex-col"
               @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)">
               
-              <!-- Poster -->
-              <div class="z-0 bg-base-200/50 relative">
+              <!-- 统一定高比例海报容器 -->
+              <div class="relative aspect-[3/4.2] w-full overflow-hidden bg-base-200/60">
                 <div v-if="batchMode"
                   class="absolute top-3 left-3 z-20 w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 pointer-events-none"
-                  :class="isSelected(item) ? 'bg-primary shadow-lg ring-2 ring-primary/50' : 'bg-black/40 backdrop-blur-sm border border-white/30 hover:bg-black/60'">
+                  :class="isSelected(item) ? 'bg-primary shadow-lg ring-2 ring-primary/50' : 'bg-black/50 backdrop-blur-sm border border-white/30 hover:bg-black/70'">
                   <Check v-if="isSelected(item)" :size="14" class="text-primary-content" />
                 </div>
-                <img v-if="item.cover_url" :src="proxyImage(item.cover_url)" :alt="item.title" class="block w-full h-auto object-contain transition-transform duration-1000 group-hover:scale-105" loading="lazy" referrerpolicy="no-referrer" />
-                <div class="aspect-video flex items-center justify-center text-base-content/5" v-if="!item.cover_url">
-                  <Image :size="48" />
+
+                <div class="absolute inset-0 flex items-center justify-center text-base-content/15 pointer-events-none">
+                  <Image :size="36" />
                 </div>
-                <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-60 pointer-events-none"></div>
-              </div>
 
-              <div class="absolute top-3 right-3 z-10 flex items-center gap-1">
-                 <div v-if="getItemStats(item)" class="px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[8px] font-black text-white tracking-wider leading-none">
-                   {{ getItemStats(item)?.downloaded }}<span v-if="getItemStats(item)?.total">/{{ getItemStats(item)?.total }}</span>
-                 </div>
-                 <div class="w-8 h-8 rounded-full bg-success/90 backdrop-blur-md flex items-center justify-center text-success-content shadow-lg border border-white/20">
-                    <Check :size="16" />
-                 </div>
-              </div>
+                <img 
+                  v-if="item.cover_url" 
+                  :src="proxyImage(item.cover_url)" 
+                  :alt="item.title" 
+                  class="relative z-10 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
+                  loading="lazy" 
+                  referrerpolicy="no-referrer"
+                  @error="(e: Event) => { const el = (e.target as HTMLImageElement); el.style.opacity = '0'; }" 
+                />
 
-              <div class="absolute bottom-0 left-0 w-full p-4 z-10">
-                 <p class="text-[10px] font-black leading-tight text-white line-clamp-2 uppercase tracking-wide group-hover:text-success transition-colors">{{ item.title }}</p>
+                <div class="absolute inset-0 z-10 bg-gradient-to-t from-black/90 via-black/25 to-transparent opacity-70 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+
+                <div class="absolute top-3 right-3 z-20 flex items-center gap-1">
+                   <div v-if="getItemStats(item)" class="px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[8px] font-black text-white tracking-wider leading-none">
+                     {{ getItemStats(item)?.downloaded }}<span v-if="getItemStats(item)?.total">/{{ getItemStats(item)?.total }}</span>
+                   </div>
+                   <div class="w-8 h-8 rounded-full bg-success/90 backdrop-blur-md flex items-center justify-center text-success-content shadow-lg border border-white/20">
+                      <Check :size="16" />
+                   </div>
+                </div>
+
+                <div class="absolute bottom-0 left-0 w-full p-3.5 z-20">
+                   <p class="text-[11px] font-black leading-tight text-white line-clamp-2 uppercase tracking-wide group-hover:text-success transition-colors drop-shadow-sm">{{ item.title }}</p>
+                </div>
               </div>
             </div>
           </div>
