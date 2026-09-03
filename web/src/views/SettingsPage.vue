@@ -244,7 +244,7 @@ async function connectBangumi() {
     }
   } catch (e: any) {
     if (newTab) newTab.close()
-    error.value = "无法获取 Bangumi 授权链接"
+    error.value = e.response?.data?.error || "无法获取 Bangumi 授权链接"
   }
 }
 
@@ -621,20 +621,27 @@ function formatBackupTime(timeStr: string): string {
         <!-- Section Fields -->
         <div v-for="section in tabs.find(t => t.key === activeTab)?.sections" :key="section.title" class="space-y-4 lg:space-y-6">
           <div class="px-4 flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4">
-            <div v-if="section.title === 'Bangumi OAuth2'" class="p-6 bg-primary/5 rounded-[2rem] border border-primary/10 w-full mb-6 flex flex-col sm:flex-row items-center justify-between gap-6">
-              <div class="flex items-center gap-6">
-                <div class="w-16 h-16 rounded-[1.5rem] bg-primary/10 flex items-center justify-center text-primary shadow-inner">
-                  <Antenna :size="32" />
+            <div v-if="section.title === 'Bangumi OAuth2'" class="p-6 bg-primary/5 rounded-[2rem] border border-primary/10 w-full mb-6 flex flex-col items-start gap-5">
+              <div class="w-full flex flex-col sm:flex-row items-center justify-between gap-6">
+                <div class="flex items-center gap-6">
+                  <div class="w-16 h-16 rounded-[1.5rem] bg-primary/10 flex items-center justify-center text-primary shadow-inner">
+                    <Antenna :size="32" />
+                  </div>
+                  <div class="space-y-1">
+                    <h3 class="text-xl font-black tracking-tight italic">连接 Bangumi 账号</h3>
+                    <p class="text-[10px] font-black uppercase tracking-widest opacity-40 leading-relaxed">连接后将自动同步您的收藏列表（想看、在看）</p>
+                  </div>
                 </div>
-                <div class="space-y-1">
-                  <h3 class="text-xl font-black tracking-tight italic">连接 Bangumi 账号</h3>
-                  <p class="text-[10px] font-black uppercase tracking-widest opacity-40 leading-relaxed">连接后将自动同步您的收藏列表（想看、在看）</p>
-                </div>
+                <button @click="connectBangumi" class="btn btn-primary btn-lg rounded-2xl gap-3 px-10 shadow-xl shadow-primary/20 hover:scale-105 active:scale-95 transition-all group">
+                  <Antenna :size="20" class="group-hover:animate-pulse" />
+                  <span class="text-xs font-black uppercase tracking-widest">OAuth 授权连接</span>
+                </button>
               </div>
-              <button @click="connectBangumi" class="btn btn-primary btn-lg rounded-2xl gap-3 px-10 shadow-xl shadow-primary/20 hover:scale-105 active:scale-95 transition-all group">
-                <Antenna :size="20" class="group-hover:animate-pulse" />
-                <span class="text-xs font-black uppercase tracking-widest">立即连接</span>
-              </button>
+              <div class="w-full text-xs opacity-75 bg-base-200/50 p-4 rounded-2xl border border-base-content/5 space-y-1.5">
+                <p class="font-bold text-primary">💡 支持两种连接方式：</p>
+                <p>• <b>方式一（推荐，超简单）</b>：直接前往 <a href="https://next.bgm.tv/demo/access-token" target="_blank" class="link link-primary font-bold">Bangumi 个人令牌页面 ↗</a> 生成一个 Token，粘贴到下方的 <code>Bangumi Token</code>，并在下方填写您的 <code>Bangumi 用户名</code>，点击页面底部「保存配置」即可！</p>
+                <p>• <b>方式二（OAuth2 自动授权）</b>：前往 <a href="https://bgm.tv/dev/app" target="_blank" class="link link-primary font-bold">Bangumi 开发者平台 ↗</a> 创建客户端应用，将获得的 Client ID 和 Secret 填入下方保存后，点击上方「OAuth 授权连接」按钮即可。</p>
+              </div>
             </div>
 
             <div class="space-y-1">

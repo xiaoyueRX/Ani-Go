@@ -2216,10 +2216,23 @@ func (s *Server) handleTogglePlugin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBangumiAuthLink(w http.ResponseWriter, r *http.Request) {
-	clientID := "bgm33669389335a4f78e" // 这里建议用户以后可以自己配置，我先放一个公共默认的或者指引
+	clientID := os.Getenv("BANGUMI_CLIENT_ID")
+	if clientID == "" {
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", "BANGUMI_CLIENT_ID").First(&setting).Error; err == nil && setting.Value != "" {
+			clientID = setting.Value
+		}
+	}
+	if clientID == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "请先在下方配置 Client ID（需在 bgm.tv/dev/app 创建应用），或直接在下方填入 Bangumi 访问令牌 (Token)",
+		})
+		return
+	}
+
 	redirectURI := fmt.Sprintf("%s/api/bangumi/auth/callback", s.getPublicBaseURL(r))
 	authURL := fmt.Sprintf("https://bgm.tv/oauth/authorize?client_id=%s&response_type=code&redirect_uri=%s", 
-		clientID, redirectURI)
+		clientID, url.QueryEscape(redirectURI))
 	writeJSON(w, http.StatusOK, map[string]string{"url": authURL})
 }
 
@@ -2230,7 +2243,14 @@ func (s *Server) handleBangumiAuthCallback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	clientID := "bgm33669389335a4f78e"
+	clientID := os.Getenv("BANGUMI_CLIENT_ID")
+	if clientID == "" {
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", "BANGUMI_CLIENT_ID").First(&setting).Error; err == nil && setting.Value != "" {
+			clientID = setting.Value
+		}
+	}
+
 	clientSecret := os.Getenv("BANGUMI_CLIENT_SECRET")
 	if clientSecret == "" {
 		var setting database.Setting
@@ -2239,8 +2259,8 @@ func (s *Server) handleBangumiAuthCallback(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	if clientSecret == "" {
-		http.Error(w, "BANGUMI_CLIENT_SECRET not configured", http.StatusInternalServerError)
+	if clientID == "" || clientSecret == "" {
+		http.Error(w, "BANGUMI_CLIENT_ID 或 BANGUMI_CLIENT_SECRET 未配置", http.StatusInternalServerError)
 		return
 	}
 
