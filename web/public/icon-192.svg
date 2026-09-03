@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 24 24" fill="none" stroke="#00e5ff" stroke-width="1.5">
-  <circle cx="12" cy="12" r="10"/>
-  <path d="M12 6v6l4 2"/>
-  <text x="12" y="20" text-anchor="middle" fill="#00e5ff" font-size="3" font-family="monospace">Ani-Go</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><defs><linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#8B5CF6"/><stop offset="100%" stop-color="#EC4899"/></linearGradient><filter id="glow"><feGaussianBlur stdDeviation="4" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><rect width="256" height="256" rx="60" fill="#1F2937"/><path d="M128 48 L208 196 L160 196 L128 132 L96 196 L48 196 Z" fill="url(#grad1)" filter="url(#glow)"/><path d="M116 116 L116 168 L156 142 Z" fill="#ffffff" filter="url(#glow)"/></svg>
