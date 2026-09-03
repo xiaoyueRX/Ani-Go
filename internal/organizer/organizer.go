@@ -109,7 +109,13 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 		}
 	} else {
 		if err := os.Rename(filePath, fullPath); err != nil {
-			return "", fmt.Errorf("移动文件失败: %w", err)
+			// 跨设备移动降级：复制后删除原文件 (解决跨卷 EXDEV 报错)
+			log.Printf("⚠️ 移动文件失败 (%v)，正在尝试跨设备复制并删除...", err)
+			if copyErr := copyFile(filePath, fullPath); copyErr != nil {
+				return "", fmt.Errorf("移动文件失败且跨设备复制失败: %w", copyErr)
+			}
+			_ = os.Remove(filePath)
+			log.Printf("📦 跨设备移动完成: %s -> %s", filePath, fullPath)
 		}
 	}
 

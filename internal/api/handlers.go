@@ -1413,12 +1413,13 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if s.yucSrc != nil {
-		schedule, err = s.yucSrc.FetchWeekSchedule(r.Context(), year, season)
+		yucCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		schedule, err = s.yucSrc.FetchWeekSchedule(yucCtx, year, season)
 		if err != nil {
-			log.Printf("⚠️  Yucwiki 获取时间表失败: %v，尝试使用 mikan", err)
+			log.Printf("⚠️  Yucwiki 获取时间表失败 (%v)，回退至 Mikan 数据源", err)
 		} else {
 			// yucwiki 获取成功后，额外获取 SP 条目
-			spItems, spErr := s.yucSrc.FetchSPItems(r.Context(), year, season)
+			spItems, spErr := s.yucSrc.FetchSPItems(yucCtx, year, season)
 			if spErr == nil && len(spItems) > 0 {
 				schedule = append(schedule, source.WeekDayItem{
 					DayOfWeek: 0,
@@ -1427,6 +1428,7 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
+		cancel()
 	}
 
 	if (err != nil || len(schedule) == 0) && s.mikanSrc != nil {
@@ -2442,11 +2444,17 @@ func (s *Server) handleBangumiAuthCallback(w http.ResponseWriter, r *http.Reques
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		http.Error(w, fmt.Sprintf("Bangumi 授权换取令牌失败 (HTTP %d): %s", resp.StatusCode, string(body)), http.StatusBadRequest)
+		return
+	}
+
 	var tokenResp struct {
 		AccessToken string `json:"access_token"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		http.Error(w, "failed to parse token response", http.StatusInternalServerError)
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil || tokenResp.AccessToken == "" {
+		http.Error(w, "解析 Bangumi 访问令牌失败或令牌为空", http.StatusInternalServerError)
 		return
 	}
 

@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
 import { 
   Menu, User, LogOut, Antenna, Languages, ExternalLink,
-  Calendar, LayoutGrid, Search, Download, Settings, Sparkles, X
+  Calendar, LayoutGrid, Search, Download, Settings, Sparkles, X, TriangleAlert
 } from 'lucide-vue-next'
 import { useVersion, CURRENT_VERSION } from '../composables/useVersion'
 

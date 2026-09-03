@@ -216,7 +216,7 @@ function sourceBadge(source: string): string {
            <span v-if="loading" class="loading loading-spinner loading-md"></span>
            <template v-else>
               <span class="text-xs font-black uppercase tracking-widest">{{ $t('search.execute') }}</span>
-              <LogIn :size="20" class="group-hover/btn:translate-x-1 transition-transform" />
+              <Search :size="18" class="group-hover/btn:scale-110 transition-transform" />
            </template>
          </button>
       </div>

@@ -20,6 +20,12 @@ func Init(dbPath string) error {
 		return err
 	}
 
+	sqlDB, err := DB.DB()
+	if err == nil {
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+	}
+
 	err = DB.AutoMigrate(
 		&Subscription{},
 		&Episode{},
