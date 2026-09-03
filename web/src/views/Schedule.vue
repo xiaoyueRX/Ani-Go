@@ -135,12 +135,12 @@ const years = computed(() => {
   return arr
 })
 
-const allSeasons = [
-  { value: 1, label: '1月冬' },
-  { value: 2, label: '4月春' },
-  { value: 3, label: '7月夏' },
-  { value: 4, label: '10月秋' },
-]
+const allSeasons = computed(() => [
+  { value: 1, label: t('schedule.seasons.winter') },
+  { value: 2, label: t('schedule.seasons.spring') },
+  { value: 3, label: t('schedule.seasons.summer') },
+  { value: 4, label: t('schedule.seasons.autumn') },
+])
 
 const maxSeason = computed(() => {
   if (selectedYear.value > currentYear) return 4
@@ -148,8 +148,8 @@ const maxSeason = computed(() => {
 })
 
 const seasons = computed(() => {
-  if (selectedYear.value < currentYear) return allSeasons
-  return allSeasons.filter(s => s.value <= maxSeason.value)
+  if (selectedYear.value < currentYear) return allSeasons.value
+  return allSeasons.value.filter(s => s.value <= maxSeason.value)
 })
 
 const weekOrder = [1, 2, 3, 4, 5, 6, 7, 0, 8]
@@ -533,7 +533,7 @@ onMounted(async () => {
         </div>
         <button v-if="!batchMode" class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl hover:bg-base-200 text-[10px] font-black uppercase tracking-widest gap-2 whitespace-nowrap" @click="enterBatchMode">
           <ListChecks :size="16" />
-          批量订阅
+          {{ $t('schedule.batchSubscribe') }}
         </button>
         <button 
           class="flex-none btn btn-ghost btn-circle hover:bg-base-200" 
@@ -580,7 +580,7 @@ onMounted(async () => {
             :class="scheduleSource === 'yuc' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
           >
             <Antenna :size="13" />
-            <span>新番季度表</span>
+            <span>{{ $t('schedule.sourceYuc') }}</span>
           </button>
           <button 
             @click="setScheduleSource('bangumi')" 
@@ -588,7 +588,7 @@ onMounted(async () => {
             :class="scheduleSource === 'bangumi' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
           >
             <Calendar :size="13" />
-            <span>Bangumi 每日放送</span>
+            <span>{{ $t('schedule.sourceBangumi') }}</span>
           </button>
         </div>
 
@@ -599,9 +599,9 @@ onMounted(async () => {
           :class="onlyToday ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70 hover:opacity-100'"
         >
           <Clock :size="14" />
-          <span>只看今日</span>
+          <span>{{ $t('schedule.todayOnly') }}</span>
           <span class="badge badge-xs" :class="onlyToday ? 'bg-white/20 text-white' : 'badge-neutral'">
-            周{{ ['日','一','二','三','四','五','六'][new Date().getDay()] }}
+            {{ dayNames[todayWeekday] }}
           </span>
         </button>
       </div>
@@ -611,7 +611,7 @@ onMounted(async () => {
         <input 
           v-model="scheduleSearch" 
           type="text" 
-          placeholder="按番剧名实时过滤..." 
+          :placeholder="$t('schedule.filterPlaceholder')" 
           class="input input-bordered input-sm w-full rounded-xl pl-8 text-xs font-medium"
         />
         <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
@@ -624,10 +624,10 @@ onMounted(async () => {
         <Calendar :size="64" class="opacity-10" />
       </div>
       <h3 class="text-2xl font-black tracking-tight mb-2">
-        {{ scheduleSearch || onlyToday ? '未找到匹配的番剧' : $t('schedule.empty.title') }}
+        {{ scheduleSearch || onlyToday ? $t('schedule.empty.noMatch') : $t('schedule.empty.title') }}
       </h3>
       <p class="text-sm font-bold text-base-content/40 max-w-xs mx-auto mb-10 leading-relaxed">
-        {{ scheduleSearch || onlyToday ? '请尝试更换搜索关键字或取消「只看今日」筛选' : $t('schedule.empty.desc') }}
+        {{ scheduleSearch || onlyToday ? $t('schedule.empty.noMatchDesc') : $t('schedule.empty.desc') }}
       </p>
     </div>
 
@@ -783,8 +783,7 @@ onMounted(async () => {
     <!-- 数据来源 -->
     <div class="text-center py-10">
       <p class="text-xs font-medium text-base-content/25 tracking-wide">
-        数据来源：<a href="https://yuc.wiki" target="_blank" rel="noopener" class="hover:text-primary transition-colors underline underline-offset-2">長門番堂 (yuc.wiki)</a>
-        — 感谢長門有C 的精心维护
+        {{ $t('schedule.credit') }}
       </p>
     </div>
 
@@ -794,15 +793,15 @@ onMounted(async () => {
         <div class="max-w-4xl mx-auto pointer-events-auto">
           <div class="bg-base-100 rounded-2xl sm:rounded-[2rem] border border-base-200/80 shadow-2xl p-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
             <div class="flex items-center gap-3 sm:gap-4 flex-wrap justify-center sm:justify-start">
-              <span class="text-xs sm:text-sm font-black tracking-tight">已选 <span class="text-primary">{{ selectedCount }}</span> 部</span>
-              <span v-if="defaultSubgroups.length > 0" class="text-[9px] font-black uppercase tracking-widest opacity-30">默认: {{ defaultSubgroups.join(', ') }}</span>
+              <span class="text-xs sm:text-sm font-black tracking-tight">{{ $t('schedule.batch.selected', { count: selectedCount }) }}</span>
+              <span v-if="defaultSubgroups.length > 0" class="text-[9px] font-black uppercase tracking-widest opacity-30">{{ $t('schedule.batch.default', { group: defaultSubgroups.join(', ') }) }}</span>
               <span v-if="selectedCount > 20" class="text-[8px] font-black text-error uppercase tracking-widest">(最多20部)</span>
             </div>
             <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-end">
-              <button class="btn btn-ghost btn-xs sm:btn-sm rounded-xl text-[10px] font-black uppercase tracking-widest flex-1 sm:flex-initial" @click="exitBatchMode">取消</button>
+              <button class="btn btn-ghost btn-xs sm:btn-sm rounded-xl text-[10px] font-black uppercase tracking-widest flex-1 sm:flex-initial" @click="exitBatchMode">{{ $t('common.cancel') }}</button>
               <button class="btn btn-primary btn-xs sm:btn-sm rounded-xl px-5 sm:px-6 text-[10px] font-black uppercase tracking-widest gap-1.5 flex-1 sm:flex-initial" :disabled="selectedCount === 0 || selectedCount > 20 || batchSubmitting" @click="confirmBatchSubscribe">
                 <span v-if="batchSubmitting" class="loading loading-spinner loading-xs"></span>
-                <template v-else>确认订阅 {{ selectedCount > 0 ? `(${selectedCount})` : '' }}</template>
+                <template v-else>{{ $t('schedule.batch.confirm') }} {{ selectedCount > 0 ? `(${selectedCount})` : '' }}</template>
               </button>
             </div>
           </div>

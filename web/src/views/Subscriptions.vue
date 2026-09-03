@@ -382,15 +382,15 @@ onUnmounted(() => {
         <template v-if="batchDeleteMode">
           <div class="flex items-center gap-2.5 flex-none">
             <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-3 text-xs font-bold" @click="toggleSelectAllBatch">
-              {{ batchDeleteSelected.size === filteredSubs.length && filteredSubs.length > 0 ? '取消全选' : '全选本页' }}
+              {{ batchDeleteSelected.size === filteredSubs.length && filteredSubs.length > 0 ? $t('subs.unselectAll') : $t('subs.selectAll') }}
             </button>
-            <span class="text-xs font-bold opacity-60 whitespace-nowrap">已选 {{ batchDeleteSelected.size }}</span>
+            <span class="text-xs font-bold opacity-60 whitespace-nowrap">{{ $t('subs.selectedCount', { count: batchDeleteSelected.size }) }}</span>
             <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-3" @click="exitBatchDeleteMode">
-              取消
+              {{ $t('common.cancel') }}
             </button>
             <button class="btn btn-error btn-xs rounded-xl h-10 min-h-0 px-4 gap-1.5 whitespace-nowrap font-bold" :disabled="batchDeleteSelected.size === 0" @click="openBatchDeleteModal">
               <Trash2 :size="14" />
-              删除 ({{ batchDeleteSelected.size }})
+              {{ $t('common.delete') }} ({{ batchDeleteSelected.size }})
             </button>
           </div>
         </template>
@@ -398,7 +398,7 @@ onUnmounted(() => {
           class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap"
           @click="enterBatchDeleteMode">
           <Trash2 :size="16" class="opacity-50" />
-          <span class="text-[10px] font-black uppercase tracking-widest">批量删除</span>
+          <span class="text-[10px] font-black uppercase tracking-widest">{{ $t('subs.batchDelete') }}</span>
         </button>
         <button 
           class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap" 
@@ -433,7 +433,7 @@ onUnmounted(() => {
         :class="filterType === 'all' ? 'border-primary shadow-md shadow-primary/10' : 'border-base-200/80'"
       >
         <div class="space-y-0.5">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">全部追番</span>
+          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">{{ $t('subs.stats.all') }}</span>
           <p class="text-xl font-black font-mono text-base-content">{{ subs.length }}</p>
         </div>
         <div class="w-10 h-10 rounded-xl bg-base-200 text-base-content/60 flex items-center justify-center">
@@ -447,7 +447,7 @@ onUnmounted(() => {
         :class="filterType === 'active' ? 'border-primary shadow-md shadow-primary/10' : 'border-base-200/80'"
       >
         <div class="space-y-0.5">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">连载中</span>
+          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">{{ $t('subs.stats.active') }}</span>
           <p class="text-xl font-black font-mono text-primary">{{ activeSubsCount }}</p>
         </div>
         <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
@@ -461,7 +461,7 @@ onUnmounted(() => {
         :class="filterType === 'completed' ? 'border-success shadow-md shadow-success/10' : 'border-base-200/80'"
       >
         <div class="space-y-0.5">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">完结归档</span>
+          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">{{ $t('subs.stats.completed') }}</span>
           <p class="text-xl font-black font-mono text-success">{{ completedSubsCount }}</p>
         </div>
         <div class="w-10 h-10 rounded-xl bg-success/10 text-success flex items-center justify-center">
@@ -475,7 +475,7 @@ onUnmounted(() => {
         :class="filterType === 'stalled' ? 'border-warning shadow-md shadow-warning/10' : 'border-base-200/80'"
       >
         <div class="space-y-0.5">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">剧集超时/异常</span>
+          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">{{ $t('subs.stats.stalled') }}</span>
           <p class="text-xl font-black font-mono text-warning">{{ stalledSubsCount }}</p>
         </div>
         <div class="w-10 h-10 rounded-xl bg-warning/10 text-warning flex items-center justify-center">
@@ -504,7 +504,7 @@ onUnmounted(() => {
             { key: 'all', label: $t('subs.filter.all') || '全部' },
             { key: 'active', label: $t('subs.filter.active') || '连载中' },
             { key: 'completed', label: $t('subs.filter.completed') || '已完结' },
-            { key: 'stalled', label: '超时异常' }
+            { key: 'stalled', label: $t('subs.filter.stalled') || '超时异常' }
           ]" 
           :key="t.key"
           class="px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap"
@@ -518,10 +518,10 @@ onUnmounted(() => {
         <div class="flex items-center gap-2 px-3 h-11 bg-base-200/50 rounded-2xl border border-transparent focus-within:border-primary/30 transition-all">
           <LayoutGrid :size="16" class="opacity-30" />
           <select v-model="sortBy" class="select select-ghost select-sm rounded-xl text-[10px] font-black uppercase tracking-widest bg-transparent border-none h-8 px-1 focus:ring-0">
-            <option value="created_at">按订阅时间</option>
-            <option value="title">按名称</option>
-            <option value="progress">按进度</option>
-            <option value="year">按年份</option>
+            <option value="created_at">{{ $t('subs.sort.createdAt') }}</option>
+            <option value="title">{{ $t('subs.sort.title') }}</option>
+            <option value="progress">{{ $t('subs.sort.progress') }}</option>
+            <option value="year">{{ $t('subs.sort.year') }}</option>
           </select>
         </div>
 
@@ -605,24 +605,24 @@ onUnmounted(() => {
       <div v-if="undoBarVisible" class="fixed bottom-16 lg:bottom-4 left-0 right-0 z-50 p-3 sm:p-4 pointer-events-none">
         <div class="max-w-lg mx-auto bg-base-300 rounded-2xl shadow-2xl px-6 py-4 flex items-center gap-4 pointer-events-auto">
           <span class="text-sm font-bold flex-1">
-            将在 {{ remainingSeconds }} 秒后删除 {{ undoCount }} 个订阅{{ undoDeleteFiles ? '（含文件）' : '' }}
+            {{ $t('subs.undo.msg', { seconds: remainingSeconds, count: undoCount, files: undoDeleteFiles ? $t('subs.undo.withFiles') : '' }) }}
           </span>
-          <button class="btn btn-primary btn-sm rounded-xl" @click="undoDelete">撤回</button>
+          <button class="btn btn-primary btn-sm rounded-xl" @click="undoDelete">{{ $t('subs.undo.btn') }}</button>
         </div>
       </div>
     </Transition>
 
     <dialog v-if="deleteModalOpen" class="modal modal-open" @click.self="deleteModalOpen = false">
       <div class="modal-box rounded-3xl">
-        <h3 class="text-lg font-black tracking-tight mb-4">删除「{{ deletingSub?.title_cn }}」</h3>
-        <p class="text-sm text-base-content/60 mb-6">将在 15 秒后执行删除，可撤回。</p>
+        <h3 class="text-lg font-black tracking-tight mb-4">{{ $t('subs.modal.deleteTitle', { title: deletingSub?.title_cn }) }}</h3>
+        <p class="text-sm text-base-content/60 mb-6">{{ $t('subs.modal.deleteDesc') }}</p>
         <label class="flex items-center gap-3 p-4 bg-base-200 rounded-2xl cursor-pointer mb-6">
           <input type="checkbox" v-model="deleteFilesChecked" class="checkbox checkbox-primary" />
-          <span class="text-sm font-bold">同时删除已下载的文件和种子</span>
+          <span class="text-sm font-bold">{{ $t('subs.modal.deleteFiles') }}</span>
         </label>
         <div class="flex gap-3 justify-end">
-          <button class="btn btn-ghost rounded-xl" @click="deleteModalOpen = false">取消</button>
-          <button class="btn btn-error rounded-xl" @click="confirmSingleDelete">确认删除</button>
+          <button class="btn btn-ghost rounded-xl" @click="deleteModalOpen = false">{{ $t('common.cancel') }}</button>
+          <button class="btn btn-error rounded-xl" @click="confirmSingleDelete">{{ $t('subs.modal.confirmDelete') }}</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop"><button>close</button></form>
@@ -630,15 +630,15 @@ onUnmounted(() => {
 
     <dialog v-if="batchDeleteModalOpen" class="modal modal-open" @click.self="batchDeleteModalOpen = false">
       <div class="modal-box rounded-3xl">
-        <h3 class="text-lg font-black tracking-tight mb-4">确定删除 {{ batchDeleteSelected.size }} 个订阅？</h3>
-        <p class="text-sm text-base-content/60 mb-6">将在 15 秒后执行删除，可撤回。</p>
+        <h3 class="text-lg font-black tracking-tight mb-4">{{ $t('subs.modal.batchDeleteTitle', { count: batchDeleteSelected.size }) }}</h3>
+        <p class="text-sm text-base-content/60 mb-6">{{ $t('subs.modal.deleteDesc') }}</p>
         <label class="flex items-center gap-3 p-4 bg-base-200 rounded-2xl cursor-pointer mb-6">
           <input type="checkbox" v-model="batchDeleteFilesChecked" class="checkbox checkbox-primary" />
-          <span class="text-sm font-bold">同时删除已下载的文件和种子</span>
+          <span class="text-sm font-bold">{{ $t('subs.modal.deleteFiles') }}</span>
         </label>
         <div class="flex gap-3 justify-end">
-          <button class="btn btn-ghost rounded-xl" @click="batchDeleteModalOpen = false">取消</button>
-          <button class="btn btn-error rounded-xl" @click="confirmBatchDeleteWithFiles">确认删除</button>
+          <button class="btn btn-ghost rounded-xl" @click="batchDeleteModalOpen = false">{{ $t('common.cancel') }}</button>
+          <button class="btn btn-error rounded-xl" @click="confirmBatchDeleteWithFiles">{{ $t('subs.modal.confirmDelete') }}</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop"><button>close</button></form>

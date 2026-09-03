@@ -36,6 +36,7 @@ mikan.html
 *.mkv
 *.avi
 *.ts
+!web/**/*.ts
 
 # 配置/密钥
 .env

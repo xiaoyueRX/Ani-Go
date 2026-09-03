@@ -127,33 +127,33 @@ const modelOptions = ref<{ label: string; value: string }[]>([])
 // 导航分组结构
 const tabGroups = computed(() => [
   {
-    name: '核心与存储',
+    name: t('settings.groups.core'),
     tabs: [
-      { key: 'paths', label: '存储与目录', icon: Folder },
-      { key: 'downloader', label: '下载客户端', icon: Download },
+      { key: 'paths', label: t('settings.tabs.paths'), icon: Folder },
+      { key: 'downloader', label: t('settings.tabs.downloader'), icon: Download },
     ]
   },
   {
-    name: '数据源与联动',
+    name: t('settings.groups.sources'),
     tabs: [
-      { key: 'mikan', label: 'Mikan 计划', icon: Antenna },
-      { key: 'bangumi', label: 'Bangumi 番组', icon: Antenna },
+      { key: 'mikan', label: t('settings.tabs.mikan'), icon: Antenna },
+      { key: 'bangumi', label: t('settings.tabs.bangumi'), icon: Antenna },
     ]
   },
   {
-    name: '扩展与智能',
+    name: t('settings.groups.extensions'),
     tabs: [
-      { key: 'ai', label: 'AI 辅助核心', icon: Cpu },
-      { key: 'notify', label: '消息通知推送', icon: Bell },
-      { key: 'plugins', label: '插件与自动化', icon: Sparkles },
+      { key: 'ai', label: t('settings.tabs.ai'), icon: Cpu },
+      { key: 'notify', label: t('settings.tabs.notify'), icon: Bell },
+      { key: 'plugins', label: t('settings.tabs.plugins'), icon: Sparkles },
     ]
   },
   {
-    name: '系统与运维',
+    name: t('settings.groups.system'),
     tabs: [
-      { key: 'backup', label: '数据备份恢复', icon: Database },
-      { key: 'logs', label: '系统运行日志', icon: FileText },
-      { key: 'account', label: '账户与安全', icon: Lock },
+      { key: 'backup', label: t('settings.tabs.backup'), icon: Database },
+      { key: 'logs', label: t('settings.tabs.logs'), icon: FileText },
+      { key: 'account', label: t('settings.tabs.account'), icon: Lock },
     ]
   }
 ])
@@ -172,115 +172,115 @@ interface FieldDef {
 }
 
 const tabs = computed(() => [
-  { key: 'paths', label: '存储与目录', icon: Folder, sections: [
-    { title: '文件系统与媒体库路径', desc: '配置番剧文件下载整理与数据库持久化位置', fields: [
-      { label: '数据库存储路径', key: 'DB_PATH', placeholder: './data/ani-go.db' },
-      { label: '番剧 TV 剧集根目录', key: 'TV_BASE_PATH', placeholder: '/data/media/anime' },
-      { label: '剧场版 / 电影根目录', key: 'MOVIE_BASE_PATH', placeholder: '/data/media/movies' },
+  { key: 'paths', label: t('settings.tabs.paths'), icon: Folder, sections: [
+    { title: t('settings.sections.pathsStorage'), desc: t('settings.sections.pathsStorageDesc'), fields: [
+      { label: t('settings.fields.db'), key: 'DB_PATH', placeholder: './data/ani-go.db' },
+      { label: t('settings.fields.tv'), key: 'TV_BASE_PATH', placeholder: '/data/media/anime' },
+      { label: t('settings.fields.movie'), key: 'MOVIE_BASE_PATH', placeholder: '/data/media/movies' },
     ]}
   ]},
-  { key: 'downloader', label: '下载客户端', icon: Download, sections: [
-    { title: '默认下载引擎', desc: '全局下载器客户端调度偏好', fields: [
-      { label: '活动下载引擎', key: 'DEFAULT_DOWNLOADER', placeholder: 'qbittorrent', type: 'select', selectOptions: [
-        { label: 'qBittorrent (推荐)', value: 'qbittorrent' },
-        { label: 'Transmission', value: 'transmission' },
-        { label: 'Aria2', value: 'aria2' },
+  { key: 'downloader', label: t('settings.tabs.downloader'), icon: Download, sections: [
+    { title: t('settings.sections.engine'), desc: t('settings.sections.engineDesc'), fields: [
+      { label: t('settings.fields.activeDownloader'), key: 'DEFAULT_DOWNLOADER', placeholder: 'qbittorrent', type: 'select', selectOptions: [
+        { label: t('settings.options.qbRecommend'), value: 'qbittorrent' },
+        { label: t('settings.options.transmission'), value: 'transmission' },
+        { label: t('settings.options.aria2'), value: 'aria2' },
       ]},
     ]},
-    { title: 'qBittorrent 配置', desc: '主流的高性能 BitTorrent 客户端', fields: [
-      { label: 'WebUI 地址 (Host)', key: 'QB_HOST', placeholder: 'http://localhost:8081' },
-      { label: '下载目标分类 (Category)', key: 'QB_CATEGORY', placeholder: 'ani-go' },
-      { label: 'WebUI 用户名', key: 'QB_USER', placeholder: 'admin' },
-      { label: 'WebUI 访问密码', key: 'QB_PASS', placeholder: '已配置，输入新密码覆盖', type: 'password' },
+    { title: t('settings.sections.qb'), desc: t('settings.sections.qbDesc'), fields: [
+      { label: t('settings.fields.qbHost'), key: 'QB_HOST', placeholder: 'http://localhost:8081' },
+      { label: t('settings.fields.qbCategory'), key: 'QB_CATEGORY', placeholder: 'ani-go' },
+      { label: t('settings.fields.qbUser'), key: 'QB_USER', placeholder: 'admin' },
+      { label: t('settings.fields.qbPass'), key: 'QB_PASS', placeholder: '••••••••', type: 'password' },
     ]},
-    { title: 'Transmission 配置', desc: '轻量级 Unix 风格客户端', fields: [
-      { label: 'RPC 服务端点', key: 'TR_HOST', placeholder: 'http://localhost:9091' },
-      { label: 'RPC 用户名', key: 'TR_USER', placeholder: 'Username' },
-      { label: 'RPC 访问密码', key: 'TR_PASS', placeholder: 'Access key', type: 'password' },
+    { title: t('settings.sections.tr'), desc: t('settings.sections.trDesc'), fields: [
+      { label: t('settings.fields.trHost'), key: 'TR_HOST', placeholder: 'http://localhost:9091' },
+      { label: t('settings.fields.trUser'), key: 'TR_USER', placeholder: 'Username' },
+      { label: t('settings.fields.trPass'), key: 'TR_PASS', placeholder: '••••••••', type: 'password' },
     ]},
-    { title: 'Aria2 配置', desc: '多协议轻量极速下载工具', fields: [
-      { label: 'RPC 端点', key: 'ARIA2_HOST', placeholder: 'http://localhost:6800/jsonrpc' },
-      { label: 'RPC 密钥 (Secret)', key: 'ARIA2_SECRET', placeholder: 'Secret Token', type: 'password' },
+    { title: t('settings.sections.aria2'), desc: t('settings.sections.aria2Desc'), fields: [
+      { label: t('settings.fields.aria2Host'), key: 'ARIA2_HOST', placeholder: 'http://localhost:6800/jsonrpc' },
+      { label: t('settings.fields.aria2Secret'), key: 'ARIA2_SECRET', placeholder: 'Secret Token', type: 'password' },
     ]},
-    { title: '种子自动维护', desc: '下载完成后自动管理做种生命周期', fields: [
-      { label: '自动删除已完成种子任务', key: 'SEED_CLEANUP_ENABLED', placeholder: '', type: 'select', selectOptions: [
-        { label: '开启（仅删种子，保留下载文件）', value: 'true' },
-        { label: '关闭', value: 'false' },
+    { title: t('settings.sections.seedCleanup'), desc: t('settings.sections.seedCleanupDesc'), fields: [
+      { label: t('settings.fields.seedCleanupEnabled'), key: 'SEED_CLEANUP_ENABLED', placeholder: '', type: 'select', selectOptions: [
+        { label: t('settings.options.seedDeleteTaskOnly'), value: 'true' },
+        { label: t('settings.options.disabled'), value: 'false' },
       ]},
-      { label: '清理扫描周期', key: 'SEED_CLEANUP_INTERVAL', placeholder: '1h' },
-      { label: '达标最小做种分享率 (Ratio)', key: 'SEED_CLEANUP_MIN_RATIO', placeholder: '1.0' },
+      { label: t('settings.fields.seedCleanupInterval'), key: 'SEED_CLEANUP_INTERVAL', placeholder: '1h' },
+      { label: t('settings.fields.seedCleanupMinRatio'), key: 'SEED_CLEANUP_MIN_RATIO', placeholder: '1.0' },
     ]}
   ]},
-  { key: 'mikan', label: 'Mikan 计划', icon: Antenna, sections: [
-    { title: 'Mikan 同步参数', desc: '配置番剧 RSS 订阅与网页抓取节点', fields: [
-      { label: '个人 RSS 订阅地址', key: 'MIKAN_RSS_URL', placeholder: 'https://mikanani.me/RSS/MyBangumi?token=***' },
-      { label: 'RSS 订阅模式', key: 'MIKAN_RSS_MODE', placeholder: '', type: 'select', selectOptions: [
-        { label: '个人订阅模式 (推荐)', value: 'personal' },
-        { label: '经典模式 (全局更新)', value: 'classic' },
+  { key: 'mikan', label: t('settings.tabs.mikan'), icon: Antenna, sections: [
+    { title: t('settings.sections.mikanSync'), desc: t('settings.sections.mikanSyncDesc'), fields: [
+      { label: t('settings.fields.mikanRss'), key: 'MIKAN_RSS_URL', placeholder: 'https://mikanani.me/RSS/MyBangumi?token=***' },
+      { label: t('settings.fields.mikanRssMode'), key: 'MIKAN_RSS_MODE', placeholder: '', type: 'select', selectOptions: [
+        { label: t('settings.options.rssPersonal'), value: 'personal' },
+        { label: t('settings.options.rssClassic'), value: 'classic' },
       ]},
-      { label: '当前主域名', key: 'MIKAN_DOMAIN', placeholder: 'mikanani.me' },
-      { label: '反代加速域名 (可选)', key: 'MIKAN_PROXY_DOMAIN', placeholder: '可选的代理加速地址' },
-      { label: '备选镜像节点列表', key: 'MIKAN_MIRROR_DOMAINS', placeholder: 'mikanani.me,mikanime.tv' },
+      { label: t('settings.fields.mikanDomain'), key: 'MIKAN_DOMAIN', placeholder: 'mikanani.me' },
+      { label: t('settings.fields.mikanProxy'), key: 'MIKAN_PROXY_DOMAIN', placeholder: 'mikanani.me' },
+      { label: t('settings.fields.mikanMirrors'), key: 'MIKAN_MIRROR_DOMAINS', placeholder: 'mikanani.me,mikanime.tv' },
     ]}
   ]},
-  { key: 'bangumi', label: 'Bangumi 番组', icon: Antenna, sections: [
-    { title: 'Bangumi OAuth2', desc: '在 bgm.tv/dev/app 创建客户端应用获取 Client ID 与 Client Secret', fields: [
-      { label: 'Client ID', key: 'BANGUMI_CLIENT_ID', placeholder: 'bgm... (Client ID)' },
-      { label: 'Client Secret', key: 'BANGUMI_CLIENT_SECRET', placeholder: 'Client Secret', type: 'password' },
+  { key: 'bangumi', label: t('settings.tabs.bangumi'), icon: Antenna, sections: [
+    { title: t('settings.sections.bangumiOAuth'), desc: t('settings.sections.bangumiOAuthDesc'), fields: [
+      { label: t('settings.fields.bangumiClientId'), key: 'BANGUMI_CLIENT_ID', placeholder: 'bgm... (Client ID)' },
+      { label: t('settings.fields.bangumiClientSecret'), key: 'BANGUMI_CLIENT_SECRET', placeholder: 'Client Secret', type: 'password' },
     ]},
-    { title: 'Bangumi 数据同步设置', desc: '用于追番列表双向同步与日历信息查询', fields: [
-      { label: 'Bangumi 用户名 / ID', key: 'BGMTV_USERNAME', placeholder: '输入您的 Bangumi 用户名或 ID' },
-      { label: '个人访问令牌 (User Token)', key: 'BGMTV_USER_TOKEN', placeholder: 'Bearer Token (OAuth 授权后自动填入)', type: 'password' },
-      { label: '自动同步间隔', key: 'BGMTV_SYNC_INTERVAL', placeholder: '6h (默认 6 小时)' },
-      { label: 'API 主域名', key: 'BGMTV_DOMAIN', placeholder: 'api.bgm.tv' },
-      { label: '镜像节点列表', key: 'BGMTV_MIRROR_DOMAINS', placeholder: 'api.bgm.tv,api.bangumi.tv,api.chii.in' },
+    { title: t('settings.sections.bangumiSync'), desc: t('settings.sections.bangumiSyncDesc'), fields: [
+      { label: t('settings.fields.bangumiUsername'), key: 'BGMTV_USERNAME', placeholder: 'Bangumi username' },
+      { label: t('settings.fields.bangumiToken'), key: 'BGMTV_USER_TOKEN', placeholder: 'Bearer Token', type: 'password' },
+      { label: t('settings.fields.bangumiSyncInterval'), key: 'BGMTV_SYNC_INTERVAL', placeholder: '6h' },
+      { label: t('settings.fields.bangumiDomain'), key: 'BGMTV_DOMAIN', placeholder: 'api.bgm.tv' },
+      { label: t('settings.fields.bangumiMirrors'), key: 'BGMTV_MIRROR_DOMAINS', placeholder: 'api.bgm.tv,api.bangumi.tv,api.chii.in' },
     ]}
   ]},
-  { key: 'ai', label: 'AI 辅助核心', icon: Cpu, sections: [
-    { title: '大语言模型参数', desc: '用于搜索意图解析、番剧别名扩写与智能分类', fields: [
-      { label: '接口协议', key: 'AI_PROTOCOL', placeholder: 'openai', type: 'select', selectOptions: [
-        { label: 'OpenAI 兼容 (OpenAI, DeepSeek, 硅基流动等)', value: 'openai' },
-        { label: 'Google Gemini', value: 'google' },
-        { label: 'Anthropic Claude', value: 'anthropic' },
-        { label: 'Ollama 本地部署', value: 'ollama' },
+  { key: 'ai', label: t('settings.tabs.ai'), icon: Cpu, sections: [
+    { title: t('settings.sections.aiModel'), desc: t('settings.sections.aiModelDesc'), fields: [
+      { label: t('settings.fields.aiProtocol'), key: 'AI_PROTOCOL', placeholder: 'openai', type: 'select', selectOptions: [
+        { label: t('settings.options.aiOpenai'), value: 'openai' },
+        { label: t('settings.options.aiGoogle'), value: 'google' },
+        { label: t('settings.options.aiAnthropic'), value: 'anthropic' },
+        { label: t('settings.options.aiOllama'), value: 'ollama' },
       ]},
-      { label: 'API 端点 (Endpoint)', key: 'AI_ENDPOINT', placeholder: 'https://api.openai.com/v1' },
-      { label: 'API 密钥 (API Key)', key: 'AI_API_KEY', placeholder: 'sk-...', type: 'password' },
-      { label: '模型名称 (Model)', key: 'AI_MODEL', placeholder: 'gpt-4o-mini / deepseek-chat' },
-      { label: '启用 AI 智能搜索扩写', key: 'AI_SMART_SEARCH', placeholder: '', type: 'select', selectOptions: [
-        { label: '开启 (推荐)', value: 'true' },
-        { label: '关闭', value: 'false' },
+      { label: t('settings.fields.aiEndpoint'), key: 'AI_ENDPOINT', placeholder: 'https://api.openai.com/v1' },
+      { label: t('settings.fields.aiKey'), key: 'AI_API_KEY', placeholder: 'sk-...', type: 'password' },
+      { label: t('settings.fields.aiModel'), key: 'AI_MODEL', placeholder: 'gpt-4o-mini / deepseek-chat' },
+      { label: t('settings.fields.aiSmartSearch'), key: 'AI_SMART_SEARCH', placeholder: '', type: 'select', selectOptions: [
+        { label: t('settings.options.enabled'), value: 'true' },
+        { label: t('settings.options.disabled'), value: 'false' },
       ]},
     ]}
   ]},
-  { key: 'notify', label: '消息通知推送', icon: Bell, sections: [
-    { title: 'Telegram 推送', desc: '通过 Telegram Bot 发送追番与下载通知', fields: [
-      { label: 'Bot Token', key: 'TELEGRAM_BOT_TOKEN', placeholder: '123456:ABC...', type: 'password', testChannel: 'Telegram' },
-      { label: 'Chat ID', key: 'TELEGRAM_CHAT_ID', placeholder: '123456789' },
+  { key: 'notify', label: t('settings.tabs.notify'), icon: Bell, sections: [
+    { title: t('settings.sections.notifyTg'), desc: t('settings.sections.notifyTgDesc'), fields: [
+      { label: t('settings.fields.tgToken'), key: 'TELEGRAM_BOT_TOKEN', placeholder: '123456:ABC...', type: 'password', testChannel: 'Telegram' },
+      { label: t('settings.fields.tgChatId'), key: 'TELEGRAM_CHAT_ID', placeholder: '123456789' },
     ]},
-    { title: '协作平台 Webhook', desc: '向主流群组机器人实时转发事件', fields: [
-      { label: '钉钉 Webhook', key: 'DINGTALK_WEBHOOK', placeholder: 'https://oapi.dingtalk.com/robot/send?access_token=...', testChannel: 'DingTalk' },
-      { label: '钉钉签名 Secret (可选)', key: 'DINGTALK_SECRET', placeholder: 'SEC...', type: 'password' },
-      { label: '企业微信 Webhook', key: 'WECOM_WEBHOOK', placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...', testChannel: 'WeCom' },
-      { label: '飞书 Webhook', key: 'FEISHU_WEBHOOK', placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/...', testChannel: 'Feishu' },
+    { title: t('settings.sections.notifyWebhook'), desc: t('settings.sections.notifyWebhookDesc'), fields: [
+      { label: t('settings.fields.dingtalkWebhook'), key: 'DINGTALK_WEBHOOK', placeholder: 'https://oapi.dingtalk.com/...', testChannel: 'DingTalk' },
+      { label: t('settings.fields.dingtalkSecret'), key: 'DINGTALK_SECRET', placeholder: 'SEC...', type: 'password' },
+      { label: t('settings.fields.wecomWebhook'), key: 'WECOM_WEBHOOK', placeholder: 'https://qyapi.weixin.qq.com/...', testChannel: 'WeCom' },
+      { label: t('settings.fields.feishuWebhook'), key: 'FEISHU_WEBHOOK', placeholder: 'https://open.feishu.cn/...', testChannel: 'Feishu' },
     ]},
-    { title: 'QQ (OneBot 协议)', desc: '通过 OneBot/Go-CQHttp 协议推送到 QQ 号或群', fields: [
-      { label: 'OneBot 端点', key: 'ONEBOT_HOST', placeholder: 'http://localhost:5700', testChannel: 'OneBot' },
-      { label: 'OneBot Token (可选)', key: 'ONEBOT_TOKEN', placeholder: 'Access Token', type: 'password' },
-      { label: '目标 QQ 号', key: 'ONEBOT_USER_ID', placeholder: '10001' },
-      { label: '目标 QQ 群号', key: 'ONEBOT_GROUP_ID', placeholder: '20002' },
+    { title: t('settings.sections.notifyQQ'), desc: t('settings.sections.notifyQQDesc'), fields: [
+      { label: t('settings.fields.qqHost'), key: 'ONEBOT_HOST', placeholder: 'http://localhost:5700', testChannel: 'OneBot' },
+      { label: t('settings.fields.qqToken'), key: 'ONEBOT_TOKEN', placeholder: 'Access Token', type: 'password' },
+      { label: t('settings.fields.qqUserId'), key: 'ONEBOT_USER_ID', placeholder: '10001' },
+      { label: t('settings.fields.qqGroupId'), key: 'ONEBOT_GROUP_ID', placeholder: '20002' },
     ]}
   ]},
-  { key: 'plugins', label: '插件与自动化', icon: Sparkles, sections: [] },
-  { key: 'backup', label: '数据备份恢复', icon: Database, sections: [
-    { title: '定时自动归档', desc: '设置定时快照与历史文件保留策略', fields: [
-      { label: '备份存储目录', key: 'BACKUP_PATH', placeholder: './data/backups' },
-      { label: '定时备份 Cron 表达式', key: 'BACKUP_CRON', placeholder: '0 0 * * *' },
-      { label: '保留备份份数', key: 'BACKUP_KEEP_COUNT', placeholder: '7' },
+  { key: 'plugins', label: t('settings.tabs.plugins'), icon: Sparkles, sections: [] },
+  { key: 'backup', label: t('settings.tabs.backup'), icon: Database, sections: [
+    { title: t('settings.sections.backupCron'), desc: t('settings.sections.backupCronDesc'), fields: [
+      { label: t('settings.fields.backupPath'), key: 'BACKUP_PATH', placeholder: './data/backups' },
+      { label: t('settings.fields.backupCron'), key: 'BACKUP_CRON', placeholder: '0 0 * * *' },
+      { label: t('settings.fields.backupKeepCount'), key: 'BACKUP_KEEP_COUNT', placeholder: '7' },
     ]}
   ]},
-  { key: 'logs', label: '系统运行日志', icon: FileText, sections: [] },
-  { key: 'account', label: '账户与安全', icon: Lock, sections: [] },
+  { key: 'logs', label: t('settings.tabs.logs'), icon: FileText, sections: [] },
+  { key: 'account', label: t('settings.tabs.account'), icon: Lock, sections: [] },
 ])
 
 const allFields = computed(() => {
@@ -838,10 +838,10 @@ onUnmounted(() => {
           <div class="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-inner">
             <Settings :size="20" />
           </div>
-          <h1 class="text-2xl sm:text-3xl font-black tracking-tight italic">系统设置</h1>
+          <h1 class="text-2xl sm:text-3xl font-black tracking-tight italic">{{ $t('settings.title') }}</h1>
           <span class="badge badge-neutral text-xs font-mono font-bold">v{{ CURRENT_VERSION }}</span>
         </div>
-        <p class="text-xs text-base-content/60 font-medium">配置全局运行参数、数据源联动、下载客户端及自动化扩展</p>
+        <p class="text-xs text-base-content/60 font-medium">{{ $t('settings.subtitle') }}</p>
       </div>
 
       <div class="flex items-center gap-3">
@@ -851,8 +851,8 @@ onUnmounted(() => {
           :disabled="loading"
         >
           <Check :size="18" />
-          <span class="text-xs font-black uppercase tracking-wider">保存全部配置</span>
-          <kbd class="hidden md:inline-block kbd kbd-xs bg-primary-content/20 text-primary-content font-mono border-0 ml-1">Ctrl+S</kbd>
+          <span class="text-xs font-black uppercase tracking-wider">{{ $t('settings.saveAll') }}</span>
+          <kbd class="hidden md:inline-block kbd kbd-xs bg-primary-content/20 text-primary-content font-mono border-0 ml-1">{{ $t('settings.ctrlS') }}</kbd>
         </button>
       </div>
     </div>
@@ -863,8 +863,8 @@ onUnmounted(() => {
         <div class="flex items-center gap-3">
           <Check :size="18" class="shrink-0" />
           <div>
-            <h4 class="font-black text-xs">配置更新成功</h4>
-            <p class="text-[11px] opacity-80">修改已生效并写入数据库。</p>
+            <h4 class="font-black text-xs">{{ $t('settings.updateSuccess') }}</h4>
+            <p class="text-[11px] opacity-80">{{ $t('settings.updateSuccessDesc') }}</p>
           </div>
         </div>
         <button @click="saved = false" class="btn btn-ghost btn-xs btn-circle">✕</button>
@@ -875,7 +875,7 @@ onUnmounted(() => {
         <div class="flex items-center gap-3">
           <Shield :size="18" class="shrink-0" />
           <div>
-            <h4 class="font-black text-xs">操作遇到问题</h4>
+            <h4 class="font-black text-xs">{{ $t('settings.errorTitle') }}</h4>
             <p class="text-[11px] opacity-80">{{ error }}</p>
           </div>
         </div>
@@ -941,8 +941,8 @@ onUnmounted(() => {
                 <Timer :size="20" />
               </div>
               <div>
-                <h3 class="text-base font-black tracking-tight">网络镜像延迟诊断</h3>
-                <p class="text-[11px] opacity-50">实时探测多节点响应速度，点击可用节点即可切换</p>
+                <h3 class="text-base font-black tracking-tight">{{ $t('settings.mikan.mirrorAudit') }}</h3>
+                <p class="text-[11px] opacity-50">{{ $t('settings.mikan.mirrorAuditDesc') }}</p>
               </div>
             </div>
             <button 
@@ -952,7 +952,7 @@ onUnmounted(() => {
             >
               <RefreshCw v-if="mirrorTesting" :size="14" class="animate-spin" />
               <Timer v-else :size="14" />
-              <span class="text-xs font-bold">{{ mirrorTesting ? '正在测速...' : '开始网络诊断' }}</span>
+              <span class="text-xs font-bold">{{ mirrorTesting ? $t('settings.mikan.running') : $t('settings.mikan.runDiagnostics') }}</span>
             </button>
           </div>
 
@@ -973,14 +973,14 @@ onUnmounted(() => {
                   <span class="text-xs font-mono font-bold">{{ r.domain }}</span>
                 </div>
                 <span v-if="(activeTab === 'bangumi' ? getVal('BGMTV_DOMAIN') : getVal('MIKAN_DOMAIN')) === r.domain" class="text-[10px] font-bold text-primary block pl-4">
-                  当前连接节点
+                  {{ $t('settings.mikan.currentRoute') }}
                 </span>
               </div>
               <div class="text-right">
                 <span v-if="r.ok" class="text-sm font-mono font-black" :class="r.latency_ms < 500 ? 'text-success' : 'text-warning'">
                   {{ r.latency_ms }}<span class="text-[10px] opacity-60">ms</span>
                 </span>
-                <span v-else class="text-xs text-error font-bold">无法访问</span>
+                <span v-else class="text-xs text-error font-bold">{{ $t('settings.mikan.unreachable') }}</span>
               </div>
             </div>
           </div>
@@ -995,14 +995,14 @@ onUnmounted(() => {
               </div>
               <div class="flex-1 min-w-0 space-y-1 text-left">
                 <div class="flex items-center gap-2.5 flex-wrap">
-                  <h3 class="text-base font-black tracking-tight whitespace-nowrap break-keep text-left">连接 Bangumi 账号</h3>
+                  <h3 class="text-base font-black tracking-tight whitespace-nowrap break-keep text-left">{{ $t('settings.bangumi.connectTitle') }}</h3>
                   <span v-if="getVal('BGMTV_USERNAME')" class="badge badge-success badge-sm font-bold text-[10px] shrink-0 whitespace-nowrap">
-                    已绑定: {{ getVal('BGMTV_USERNAME') }}
+                    {{ $t('settings.bangumi.bound') }}: {{ getVal('BGMTV_USERNAME') }}
                   </span>
-                  <span v-else class="badge badge-ghost badge-sm text-[10px] shrink-0 whitespace-nowrap">未连接</span>
+                  <span v-else class="badge badge-ghost badge-sm text-[10px] shrink-0 whitespace-nowrap">{{ $t('settings.bangumi.unconnected') }}</span>
                 </div>
                 <p class="text-xs opacity-60 leading-normal text-left break-words">
-                  连接后自动双向同步番剧收藏、追番状态与个人进度
+                  {{ $t('settings.bangumi.connectDesc') }}
                 </p>
               </div>
             </div>
@@ -1012,14 +1012,14 @@ onUnmounted(() => {
               class="btn btn-primary rounded-xl gap-2 px-6 shadow-md hover:scale-[1.02] active:scale-95 transition-all shrink-0 whitespace-nowrap self-start sm:self-auto"
             >
               <Antenna :size="16" class="shrink-0" />
-              <span class="text-xs font-black whitespace-nowrap">立即连接</span>
+              <span class="text-xs font-black whitespace-nowrap">{{ $t('settings.bangumi.connectNow') }}</span>
             </button>
           </div>
 
           <div class="w-full text-xs bg-base-200/50 p-4 rounded-2xl border border-base-300/40 space-y-1.5 text-base-content/75 block text-left">
-            <p class="font-bold text-primary">💡 支持两种极简绑定模式：</p>
-            <p>1. <b>个人令牌模式（最推荐）</b>：直接在 <a href="https://next.bgm.tv/demo/access-token" target="_blank" class="link link-primary font-bold">Bangumi 访问令牌申请页 ↗</a> 生成 Token，填入下方「个人访问令牌」保存即可！</p>
-            <p>2. <b>OAuth2 应用模式</b>：在 <a href="https://bgm.tv/dev/app" target="_blank" class="link link-primary font-bold">Bangumi 开发者中心 ↗</a> 创建 App 后，填入下方「Bangumi OAuth2」区块的 Client ID 与 Secret，点击上方「立即连接」一键完成跳转授权。</p>
+            <p class="font-bold text-primary">{{ $t('settings.bangumi.tipsTitle') }}</p>
+            <p>{{ $t('settings.bangumi.tip1Token') }} <a href="https://next.bgm.tv/demo/access-token" target="_blank" class="link link-primary font-bold">{{ $t('settings.bangumi.tip1Link') }}</a> {{ $t('settings.bangumi.tip1Suffix') }}</p>
+            <p>{{ $t('settings.bangumi.tip2OAuth') }} <a href="https://bgm.tv/dev/app" target="_blank" class="link link-primary font-bold">{{ $t('settings.bangumi.tip2Link') }}</a> {{ $t('settings.bangumi.tip2Suffix') }}</p>
           </div>
         </div>
 
@@ -1048,7 +1048,7 @@ onUnmounted(() => {
                   <span v-if="isConfigured(field.key)" class="w-1.5 h-1.5 rounded-full bg-success"></span>
                 </label>
                 <span v-if="field.testChannel" class="text-[10px] text-primary cursor-pointer hover:underline font-bold" @click="sendTestNotify(field.testChannel)">
-                  发送自检测试
+                  {{ $t('settings.notify.sendTest') }}
                 </span>
               </div>
 
@@ -1078,10 +1078,10 @@ onUnmounted(() => {
                   @click="fetchAIModels" 
                   :disabled="modelLoading || !getVal('AI_ENDPOINT')"
                   class="btn btn-outline btn-sm rounded-xl gap-1.5 h-10 px-4"
-                  title="从端点获取可用模型"
+                  :title="$t('settings.ai.fetchTooltip')"
                 >
                   <RefreshCw v-if="modelLoading" :size="14" class="animate-spin" />
-                  <span class="text-xs font-bold">{{ modelLoading ? '获取中' : '获取模型' }}</span>
+                  <span class="text-xs font-bold">{{ modelLoading ? $t('settings.ai.loadingModels') : $t('settings.ai.fetchModels') }}</span>
                 </button>
               </div>
 
@@ -1111,21 +1111,21 @@ onUnmounted(() => {
         <div v-if="activeTab === 'plugins'" class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-6">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h3 class="text-base font-black tracking-tight">插件扩展与事件自动化</h3>
-              <p class="text-xs opacity-50 mt-0.5">支持内建规范整理插件与外部 Webhook 实时触发联动</p>
+              <h3 class="text-base font-black tracking-tight">{{ $t('settings.plugins.title') }}</h3>
+              <p class="text-xs opacity-50 mt-0.5">{{ $t('settings.plugins.desc') }}</p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
               <button class="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-300" @click="exportPluginsJSON">
                 <Download :size="14" />
-                <span class="text-xs font-bold">导出配置</span>
+                <span class="text-xs font-bold">{{ $t('settings.plugins.exportConfig') }}</span>
               </button>
               <button class="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-300" @click="reloadPlugins" :disabled="pluginLoading">
                 <RefreshCw :size="14" :class="{ 'animate-spin': pluginLoading }" />
-                <span class="text-xs font-bold">重载插件</span>
+                <span class="text-xs font-bold">{{ $t('settings.plugins.reload') }}</span>
               </button>
               <button class="btn btn-primary btn-sm rounded-xl gap-1.5 shadow-md" @click="openAddPluginModal">
                 <Plus :size="14" />
-                <span class="text-xs font-black">导入 / 添加插件</span>
+                <span class="text-xs font-black">{{ $t('settings.plugins.add') }}</span>
               </button>
             </div>
           </div>
@@ -1156,7 +1156,7 @@ onUnmounted(() => {
                       </div>
                       <div class="flex items-center gap-1.5 mt-0.5">
                         <span class="badge badge-xs text-[9px]" :class="plugin.is_builtin ? 'badge-primary' : 'badge-secondary'">
-                          {{ plugin.is_builtin ? '内建功能' : 'Webhook 联动' }}
+                          {{ plugin.is_builtin ? $t('settings.plugins.builtin') : $t('settings.plugins.webhookType') }}
                         </span>
                         <span v-if="plugin.author" class="text-[10px] opacity-40">by {{ plugin.author }}</span>
                       </div>
@@ -1170,7 +1170,7 @@ onUnmounted(() => {
                       class="toggle toggle-primary toggle-sm"
                       :checked="plugin.enabled"
                       @change="togglePlugin(plugin)" 
-                      :title="plugin.enabled ? '点击停用' : '点击启用'"
+                      :title="plugin.enabled ? $t('settings.plugins.disableTip') : $t('settings.plugins.enableTip')"
                     />
                     <button 
                       v-if="!plugin.is_builtin" 
@@ -1183,21 +1183,21 @@ onUnmounted(() => {
                 </div>
 
                 <p class="text-xs text-base-content/70 leading-relaxed font-medium">
-                  {{ plugin.description || '暂无描述' }}
+                  {{ plugin.description || $t('settings.plugins.noDesc') }}
                 </p>
               </div>
 
               <!-- 底部事件与目标 URL -->
               <div class="space-y-2 pt-2 border-t border-base-content/5 text-xs">
                 <div v-if="plugin.url" class="space-y-0.5">
-                  <span class="text-[9px] font-black uppercase tracking-wider opacity-40">目标 Webhook</span>
+                  <span class="text-[9px] font-black uppercase tracking-wider opacity-40">{{ $t('settings.plugins.targetWebhook') }}</span>
                   <div class="bg-base-300/60 px-2.5 py-1 rounded-lg font-mono text-[11px] truncate select-all">
                     {{ plugin.url }}
                   </div>
                 </div>
 
                 <div v-if="plugin.events && plugin.events.length" class="space-y-1">
-                  <span class="text-[9px] font-black uppercase tracking-wider opacity-40">监听事件点</span>
+                  <span class="text-[9px] font-black uppercase tracking-wider opacity-40">{{ $t('settings.plugins.listenEvents') }}</span>
                   <div class="flex flex-wrap gap-1">
                     <span v-for="ev in plugin.events" :key="ev" class="px-2 py-0.5 rounded-md bg-base-300 text-[10px] font-mono font-bold opacity-75">
                       {{ ev }}
@@ -1214,13 +1214,13 @@ onUnmounted(() => {
           <div class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h3 class="text-base font-black tracking-tight">数据库备份归档</h3>
-                <p class="text-xs opacity-50 mt-0.5">导出包含系统所有订阅状态、下载记录与配置参数的 JSON 快照</p>
+                <h3 class="text-base font-black tracking-tight">{{ $t('settings.backup.title') }}</h3>
+                <p class="text-xs opacity-50 mt-0.5">{{ $t('settings.backup.desc') }}</p>
               </div>
               <div class="flex items-center gap-3">
                 <label class="flex items-center gap-2 cursor-pointer select-none">
                   <input type="checkbox" v-model="showBackupEpisodes" class="checkbox checkbox-primary checkbox-sm rounded-md" />
-                  <span class="text-xs font-bold">包含剧集下载记录</span>
+                  <span class="text-xs font-bold">{{ $t('settings.backup.includeEpisodes') }}</span>
                 </label>
                 <button 
                   @click="createBackup" 
@@ -1228,7 +1228,7 @@ onUnmounted(() => {
                   class="btn btn-primary btn-sm rounded-xl px-5 gap-1.5 shadow-md"
                 >
                   <Database :size="14" />
-                  <span class="text-xs font-bold">{{ creatingBackup ? '正在创建...' : '立即创建快照' }}</span>
+                  <span class="text-xs font-bold">{{ creatingBackup ? $t('settings.backup.creating') : $t('settings.backup.createNow') }}</span>
                 </button>
               </div>
             </div>
@@ -1238,15 +1238,15 @@ onUnmounted(() => {
               <table class="table table-sm w-full">
                 <thead>
                   <tr class="bg-base-200/50 text-xs text-base-content/60">
-                    <th>备份文件名</th>
-                    <th>大小</th>
-                    <th>创建时间</th>
-                    <th class="text-right">操作</th>
+                    <th>{{ $t('settings.backup.tableFile') }}</th>
+                    <th>{{ $t('settings.backup.tableSize') }}</th>
+                    <th>{{ $t('settings.backup.tableTime') }}</th>
+                    <th class="text-right">{{ $t('settings.backup.tableAction') }}</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-if="backupList.length === 0">
-                    <td colspan="4" class="text-center py-8 opacity-40 text-xs">暂无历史备份，点击上方按钮创建</td>
+                    <td colspan="4" class="text-center py-8 opacity-40 text-xs">{{ $t('settings.backup.empty') }}</td>
                   </tr>
                   <tr v-for="b in backupList" :key="b.name" class="hover:bg-base-200/30 text-xs">
                     <td class="font-mono font-bold">{{ b.name }}</td>
@@ -1254,13 +1254,13 @@ onUnmounted(() => {
                     <td class="opacity-70">{{ formatBackupTime(b.mod_time) }}</td>
                     <td class="text-right">
                       <div class="flex items-center justify-end gap-1.5">
-                        <button @click="downloadBackup(b.name)" class="btn btn-ghost btn-xs rounded-lg" title="下载到本地">
+                        <button @click="downloadBackup(b.name)" class="btn btn-ghost btn-xs rounded-lg" :title="$t('settings.backup.download')">
                           <Download :size="13" />
                         </button>
-                        <button @click="restoreBackup(b.name)" class="btn btn-ghost btn-xs text-warning rounded-lg" title="从该备份恢复">
+                        <button @click="restoreBackup(b.name)" class="btn btn-ghost btn-xs text-warning rounded-lg" :title="$t('settings.backup.restore')">
                           <RotateCcw :size="13" />
                         </button>
-                        <button @click="deleteBackup(b.name)" class="btn btn-ghost btn-xs text-error rounded-lg" title="删除备份">
+                        <button @click="deleteBackup(b.name)" class="btn btn-ghost btn-xs text-error rounded-lg" :title="$t('settings.backup.delete')">
                           <Trash2 :size="13" />
                         </button>
                       </div>
@@ -1277,10 +1277,10 @@ onUnmounted(() => {
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 class="text-base font-black tracking-tight flex items-center gap-2">
-                <span>实时运行控制台</span>
-                <span class="badge badge-neutral badge-xs font-mono">{{ filteredLogs.length }} / {{ logs.length }} 行日志</span>
+                <span>{{ $t('settings.logs.consoleTitle') }}</span>
+                <span class="badge badge-neutral badge-xs font-mono">{{ $t('settings.logs.lineCount', { filtered: filteredLogs.length, total: logs.length }) }}</span>
               </h3>
-              <p class="text-xs opacity-50 mt-0.5">监控后端服务请求、订阅爬取、刮削与下载器状态</p>
+              <p class="text-xs opacity-50 mt-0.5">{{ $t('settings.logs.consoleDesc') }}</p>
             </div>
 
             <div class="flex items-center gap-2.5 flex-wrap">
@@ -1289,7 +1289,7 @@ onUnmounted(() => {
                 <input 
                   v-model="logFilter" 
                   type="text" 
-                  placeholder="搜索日志关键字..." 
+                  :placeholder="$t('settings.logs.searchPlaceholder')" 
                   class="input input-bordered input-sm rounded-xl pl-8 text-xs font-mono w-44 focus:w-56 transition-all"
                 />
                 <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
@@ -1298,7 +1298,7 @@ onUnmounted(() => {
               <!-- 自动轮询开关 -->
               <label class="flex items-center gap-1.5 cursor-pointer text-xs font-bold border border-base-300/60 px-3 py-1.5 rounded-xl hover:bg-base-200/40 transition-colors">
                 <input type="checkbox" v-model="autoRefreshLogs" class="checkbox checkbox-primary checkbox-xs rounded" />
-                <span>自动刷新 (3s)</span>
+                <span>{{ $t('settings.logs.autoRefresh') }}</span>
               </label>
 
               <!-- 自动滚底开关 -->
@@ -1316,7 +1316,7 @@ onUnmounted(() => {
               <!-- 手动刷新按钮 -->
               <button @click="fetchLogs" :disabled="logLoading" class="btn btn-primary btn-sm rounded-xl gap-1 shadow-sm">
                 <RefreshCw :size="13" :class="{ 'animate-spin': logLoading }" />
-                <span class="text-xs font-bold">刷新</span>
+                <span class="text-xs font-bold">{{ $t('common.refresh') }}</span>
               </button>
             </div>
           </div>
@@ -1366,8 +1366,8 @@ onUnmounted(() => {
           <!-- 管理员头像管理卡片 -->
           <div class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-6">
             <div>
-              <h3 class="text-base font-black tracking-tight">管理员头像</h3>
-              <p class="text-xs opacity-50 mt-0.5">支持从本地直接上传图片文件（JPG/PNG/WebP/GIF/SVG），或填入外部图床链接</p>
+              <h3 class="text-base font-black tracking-tight">{{ $t('settings.account.avatarTitle') }}</h3>
+              <p class="text-xs opacity-50 mt-0.5">{{ $t('settings.account.avatarDesc') }}</p>
             </div>
 
             <div class="flex flex-col sm:flex-row items-center sm:items-start gap-6 p-5 rounded-2xl bg-base-200/30 border border-base-200/60">
@@ -1409,7 +1409,7 @@ onUnmounted(() => {
                   >
                     <RefreshCw v-if="avatarUploading" :size="14" class="animate-spin" />
                     <Upload v-else :size="14" />
-                    <span class="text-xs font-bold">{{ avatarUploading ? '正在上传...' : '选择本地图片上传' }}</span>
+                    <span class="text-xs font-bold">{{ avatarUploading ? $t('common.loading') : $t('settings.account.upload') }}</span>
                   </button>
                   <button 
                     v-if="getVal('USER_AVATAR_URL')" 
@@ -1418,13 +1418,13 @@ onUnmounted(() => {
                     class="btn btn-ghost btn-sm rounded-xl text-error/70 hover:text-error text-xs font-bold gap-1"
                   >
                     <Trash2 :size="13" />
-                    <span>清除头像</span>
+                    <span>{{ $t('settings.account.resetAvatar') }}</span>
                   </button>
                   <span class="text-[11px] opacity-40">支持 JPG, PNG, WebP, GIF, SVG，最大 5MB</span>
                 </div>
 
                 <div class="space-y-1.5">
-                  <label class="text-[11px] font-black uppercase tracking-wider opacity-60">或使用外部图片 URL</label>
+                  <label class="text-[11px] font-black uppercase tracking-wider opacity-60">{{ $t('settings.account.avatarUrlLabel') }}</label>
                   <div class="relative">
                     <input 
                       type="text" 
@@ -1452,22 +1452,22 @@ onUnmounted(() => {
           <!-- 修改管理员密码卡片 -->
           <div class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5">
             <div>
-              <h3 class="text-base font-black tracking-tight">修改管理员密码</h3>
-              <p class="text-xs opacity-50 mt-0.5">建议定期更换密码以保障管理终端安全</p>
+              <h3 class="text-base font-black tracking-tight">{{ $t('settings.account.title') }}</h3>
+              <p class="text-xs opacity-50 mt-0.5">{{ $t('settings.account.desc') }}</p>
             </div>
 
             <div class="max-w-md space-y-4">
               <div class="space-y-1">
-                <label class="text-xs font-bold text-base-content/75">当前旧密码</label>
-                <input v-model="oldPassword" type="password" placeholder="输入当前密码" class="input input-bordered w-full rounded-xl text-xs" />
+                <label class="text-xs font-bold text-base-content/75">{{ $t('settings.account.oldPass') }}</label>
+                <input v-model="oldPassword" type="password" :placeholder="$t('settings.account.oldPassPlaceholder')" class="input input-bordered w-full rounded-xl text-xs" />
               </div>
               <div class="space-y-1">
-                <label class="text-xs font-bold text-base-content/75">新密码</label>
-                <input v-model="newPassword" type="password" placeholder="至少 6 位密码" class="input input-bordered w-full rounded-xl text-xs" />
+                <label class="text-xs font-bold text-base-content/75">{{ $t('settings.account.newPass') }}</label>
+                <input v-model="newPassword" type="password" :placeholder="$t('settings.account.newPassPlaceholder')" class="input input-bordered w-full rounded-xl text-xs" />
               </div>
               <div class="space-y-1">
-                <label class="text-xs font-bold text-base-content/75">确认新密码</label>
-                <input v-model="confirmPassword" type="password" placeholder="再次输入新密码" class="input input-bordered w-full rounded-xl text-xs" />
+                <label class="text-xs font-bold text-base-content/75">{{ $t('settings.account.confirmPass') }}</label>
+                <input v-model="confirmPassword" type="password" :placeholder="$t('settings.account.confirmPassPlaceholder')" class="input input-bordered w-full rounded-xl text-xs" />
               </div>
 
               <div class="pt-2">
@@ -1477,7 +1477,7 @@ onUnmounted(() => {
                   class="btn btn-primary rounded-xl px-7 gap-2 shadow-md"
                 >
                   <Lock :size="14" />
-                  <span class="text-xs font-black">{{ changingPassword ? '正在更新...' : '确认修改密码' }}</span>
+                  <span class="text-xs font-black">{{ changingPassword ? $t('settings.account.submitting') : $t('settings.account.submit') }}</span>
                 </button>
               </div>
 
