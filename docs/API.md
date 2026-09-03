@@ -1,6 +1,6 @@
 # Ani-Go API 文档
 
-> **版本**: v1.3.0  
+> **版本**: v0.5.1  
 > **基础路径**: `/api`  
 > **认证方式**: JWT Bearer Token  
 > **内容类型**: `application/json; charset=utf-8`

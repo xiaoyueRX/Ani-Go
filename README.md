@@ -13,46 +13,43 @@
 - 🗂️ **自动整理**：重命名 + 建目录，Jellyfin 直接刮削
 - 🌐 **GFW 镜像回退**：Mikan / BGM.tv / TMDB 多镜像自动切换
 - 🤖 **AI 辅助**（可选）：OpenAI / Google / Anthropic / Ollama
-- 🧩 **插件系统**：开放钩子，支持第三方扩展
-- 📡 **API 文档**：详见 [API 文档](./docs/API.md) 或 `http://localhost:20001/api/login`
-- 🌍 **Web UI + PWA**：Vue3 管理订阅、下载队列、设置，可安装为独立应用
+- 🧩 **插件系统**：开放钩子，支持第三方扩展 (Webhook / Shell / JavaScript)
+- 📡 **API 文档**：详见 [API 文档](./docs/API.md) 或 \http://localhost:20001/api/login- 🌍 **Web UI + PWA**：Vue3 管理订阅、下载队列、设置，可安装为独立应用
 
 均支持**中英双语**，语言切换即时生效。
 
 ## 快速开始
 
-```bash
-git clone https://github.com/xiaoyueRX/Ani-Go.git
+\\ash
+git clone --depth 1 https://github.com/xiaoyueRX/Ani-Go.git
 cd Ani-Go
 cp .env.example .env        # 填入 MIKAN_RSS_URL、QB_HOST 等
 docker compose up -d
-```
+\
+浏览器打开 \http://localhost:20001\，默认账号 \dmin\ / \dmin\。
 
-浏览器打开 `http://localhost:20001`，默认账号 `admin` / `admin`。
+手动构建（推荐 WSL2 或原生 Linux）：
 
-手动构建：
-
-```bash
+\\ash
 cd web && npm install && npm run build && cd ..
 go build -o anigo .
 ./anigo
-```
-
+\
 ## 环境变量
 
-完整变量见 [`.env.example`](.env.example)，核心几项：
+完整变量见 [\.env.example\](.env.example)，核心几项：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `MIKAN_RSS_URL` | Mikan 个人 RSS 地址 | - |
-| `DEFAULT_DOWNLOADER` | 默认下载器 | `qbittorrent` |
-| `QB_HOST` / `QB_USER` / `QB_PASS` | qBittorrent 连接 | `http://localhost:8081` |
-| `TV_BASE_PATH` | 番剧根目录 | `./TV/番剧` |
-| `PORT` | Web UI 端口 | `20001` |
+| \MIKAN_RSS_URL\ | Mikan 个人 RSS 地址 | - |
+| \DEFAULT_DOWNLOADER\ | 默认下载器 | \qbittorrent\ |
+| \QB_HOST\ / \QB_USER\ / \QB_PASS\ | qBittorrent 连接 | \http://localhost:8081\ |
+| \TV_BASE_PATH\ | 番剧根目录 | \./TV/番剧\ |
+| \PORT\ | Web UI 端口 | \20001\ |
 
 ## 当前版本
 
-**v0.5.0** — 稳定性加固与插件管理闭环（下载完成通知 Panic 修复、番剧级死种超时配置、插件管理 Tab、备份恢复修复）。
+**v0.5.1** — 数据库安全加固与极致稳定性 (Security & Stability Hotfix)。完全重构了调度层的并发控制，修复了 SQLite 并发锁库、凭证覆盖、路径穿越等多个隐秘安全漏洞。代码仓库经过全面瘦身（Clone 大小仅 2.2MB）。
 
 ## License
 

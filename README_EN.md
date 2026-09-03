@@ -13,45 +13,43 @@
 - 🗂️ **Auto Organization**: rename + create directories, Jellyfin-ready
 - 🌐 **GFW Mirror Fallback**: auto-switching mirrors for Mikan / BGM.tv / TMDB
 - 🤖 **AI Assisted** (optional): OpenAI / Google / Anthropic / Ollama
-- 🧩 **Plugin System**: open hooks for third-party extensions
+- 🧩 **Plugin System**: open hooks for third-party extensions (Webhook / Shell / JavaScript)
 - 🌍 **Web UI + PWA**: Vue3 to manage subscriptions, downloads, settings — installable as an app
 
 Fully **bilingual (CN/EN)** with instant language switching.
 
 ## Quick Start
 
-```bash
-git clone https://github.com/xiaoyueRX/Ani-Go.git
+\\ash
+git clone --depth 1 https://github.com/xiaoyueRX/Ani-Go.git
 cd Ani-Go
 cp .env.example .env        # fill in MIKAN_RSS_URL, QB_HOST, etc.
 docker compose up -d
-```
+\
+Open \http://localhost:20001\ in your browser. Default account: \dmin\ / \dmin\.
 
-Open `http://localhost:20001` in your browser. Default account: `admin` / `admin`.
+Manual build (Recommended: WSL2 or native Linux):
 
-Manual build:
-
-```bash
+\\ash
 cd web && npm install && npm run build && cd ..
 go build -o anigo .
 ./anigo
-```
-
+\
 ## Environment Variables
 
-See [`.env.example`](.env.example) for the full list. Key ones:
+See [\.env.example\](.env.example) for the full list. Key ones:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MIKAN_RSS_URL` | Mikan personal RSS URL | - |
-| `DEFAULT_DOWNLOADER` | Default downloader | `qbittorrent` |
-| `QB_HOST` / `QB_USER` / `QB_PASS` | qBittorrent connection | `http://localhost:8081` |
-| `TV_BASE_PATH` | Anime root directory | `./TV/番剧` |
-| `PORT` | Web UI port | `20001` |
+| \MIKAN_RSS_URL\ | Mikan personal RSS URL | - |
+| \DEFAULT_DOWNLOADER\ | Default downloader | \qbittorrent\ |
+| \QB_HOST\ / \QB_USER\ / \QB_PASS\ | qBittorrent connection | \http://localhost:8081\ |
+| \TV_BASE_PATH\ | Anime root directory | \./TV/番剧\ |
+| \PORT\ | Web UI port | \20001\ |
 
 ## Current Version
 
-**v0.5.0** — stability hardening & plugin management loop (download-complete notification panic fix, per-subscription stall timeout config, plugin management tab, backup restore fixes).
+**v0.5.1** — Security & Stability Hotfix. Completely refactored the concurrency control of the scheduler layer, fixed multiple hidden vulnerabilities such as SQLite concurrency DB lock, credential masking overwrite, and path traversal. The code repository has been thoroughly slimmed down (Clone size is only 2.2MB).
 
 ## License
 
