@@ -950,10 +950,116 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 		setting := database.Setting{Key: key, Value: value}
 		database.DB.Where("key = ?", key).Assign(setting).FirstOrCreate(&setting)
+
+		if key == "USER_AVATAR_URL" {
+			database.DB.Model(&database.User{}).Where("1 = 1").Update("avatar_url", value)
+		}
 	}
 
 	log.Printf("✅ 已更新 %d 项设置", len(req.Settings))
 	writeJSON(w, http.StatusOK, map[string]string{"message": "设置已更新"})
+}
+
+// handleUploadAvatar 上传管理员头像图片
+// POST /api/user/avatar
+func (s *Server) handleUploadAvatar(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("claims").(*auth.Claims)
+	if !ok || claims == nil {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "未登录或登录已过期"})
+		return
+	}
+
+	// 限制文件大小最大 5MB
+	if err := r.ParseMultipartForm(5 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "文件过大，头像不能超过 5MB"})
+		return
+	}
+
+	file, header, err := r.FormFile("avatar")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "未找到上传的文件，字段名应为 avatar"})
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp" && ext != ".gif" && ext != ".svg" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "格式不支持，仅允许 PNG, JPG, WebP, GIF 或 SVG 图片"})
+		return
+	}
+
+	uploadDir := "./data/uploads"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建上传目录失败"})
+		return
+	}
+
+	// 删除此用户旧的头像文件
+	oldFiles, _ := filepath.Glob(filepath.Join(uploadDir, fmt.Sprintf("avatar_%s.*", claims.Username)))
+	for _, old := range oldFiles {
+		os.Remove(old)
+	}
+
+	destFilename := fmt.Sprintf("avatar_%s%s", claims.Username, ext)
+	destPath := filepath.Join(uploadDir, destFilename)
+
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建头像文件失败"})
+		return
+	}
+	defer destFile.Close()
+
+	if _, err := io.Copy(destFile, file); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存头像文件内容失败"})
+		return
+	}
+
+	avatarURL := fmt.Sprintf("/api/user/avatar?t=%d", time.Now().Unix())
+
+	// 同步到数据库
+	database.DB.Model(&database.User{}).Where("username = ?", claims.Username).Update("avatar_url", avatarURL)
+	database.DB.Save(&database.Setting{Key: "USER_AVATAR_URL", Value: avatarURL})
+
+	log.Printf("✅ 用户 %s 上传了新头像: %s", claims.Username, destFilename)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"avatar_url": avatarURL,
+		"message":    "头像上传成功",
+	})
+}
+
+// handleGetAvatar 读取并返回管理员头像
+// GET /api/user/avatar
+func (s *Server) handleGetAvatar(w http.ResponseWriter, r *http.Request) {
+	uploadDir := "./data/uploads"
+	matches, err := filepath.Glob(filepath.Join(uploadDir, "avatar_*"))
+	if err != nil || len(matches) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+
+	// 读取最新的头像文件
+	latest := matches[len(matches)-1]
+	ext := strings.ToLower(filepath.Ext(latest))
+	switch ext {
+	case ".png":
+		w.Header().Set("Content-Type", "image/png")
+	case ".jpg", ".jpeg":
+		w.Header().Set("Content-Type", "image/jpeg")
+	case ".webp":
+		w.Header().Set("Content-Type", "image/webp")
+	case ".gif":
+		w.Header().Set("Content-Type", "image/gif")
+	case ".svg":
+		w.Header().Set("Content-Type", "image/svg+xml")
+	default:
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	http.ServeFile(w, r, latest)
 }
 
 // handleGetLogs 获取系统日志（最近 100 行，过滤认证和心跳噪音）

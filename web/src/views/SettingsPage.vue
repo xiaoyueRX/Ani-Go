@@ -11,7 +11,7 @@ import {
   RefreshCw, User, Database, 
   RotateCcw, Upload, Trash2, 
   Shield, Sparkles, Plus, 
-  Copy, Search, ExternalLink
+  Copy, Search, Camera
 } from 'lucide-vue-next'
 import { CURRENT_VERSION } from '../composables/useVersion'
 
@@ -31,6 +31,12 @@ const showPasswords = ref<Set<string>>(new Set())
 const mirrorTesting = ref(false)
 const mirrorResults = ref<{ domain: string; latency_ms: number; ok: boolean }[]>([])
 const selectedMirror = ref('')
+
+// 管理员头像上传与预览
+const avatarUploading = ref(false)
+const avatarFileInput = ref<HTMLInputElement | null>(null)
+const avatarError = ref('')
+const avatarSuccess = ref('')
 
 // 账户密码修改
 const oldPassword = ref('')
@@ -83,12 +89,35 @@ const logs = ref<string[]>([])
 const logLoading = ref(false)
 const logFilter = ref('')
 const autoRefreshLogs = ref(false)
+const autoScrollBottom = ref(true)
+const logContainerRef = ref<HTMLElement | null>(null)
 let logTimer: any = null
 
+const logLevels = [
+  { key: 'all', label: '全部' },
+  { key: 'error', label: '仅错误 (❌)' },
+  { key: 'warn', label: '仅警告 (⚠️)' },
+  { key: 'info', label: '成功与信息 (✅/ℹ️)' },
+  { key: 'plugin', label: '插件与任务 (🔗/🚀)' }
+]
+const currentLogLevel = ref('all')
+
 const filteredLogs = computed(() => {
-  if (!logFilter.value.trim()) return logs.value
+  let list = Array.isArray(logs.value) ? logs.value : []
+  
+  if (currentLogLevel.value === 'error') {
+    list = list.filter(l => typeof l === 'string' && (l.includes('❌') || l.includes('ERROR') || l.includes('error') || l.includes('failed')))
+  } else if (currentLogLevel.value === 'warn') {
+    list = list.filter(l => typeof l === 'string' && (l.includes('⚠️') || l.includes('WARN') || l.includes('warn')))
+  } else if (currentLogLevel.value === 'info') {
+    list = list.filter(l => typeof l === 'string' && (l.includes('✅') || l.includes('ℹ️') || l.includes('SUCCESS') || l.includes('success')))
+  } else if (currentLogLevel.value === 'plugin') {
+    list = list.filter(l => typeof l === 'string' && (l.includes('🔗') || l.includes('🚀') || l.includes('插件') || l.includes('plugin')))
+  }
+
+  if (!logFilter.value.trim()) return list
   const q = logFilter.value.toLowerCase()
-  return logs.value.filter(line => line.toLowerCase().includes(q))
+  return list.filter(l => typeof l === 'string' && l.toLowerCase().includes(q))
 })
 
 // AI 模型列表
@@ -249,11 +278,7 @@ const tabs = computed(() => [
     ]}
   ]},
   { key: 'logs', label: '系统运行日志', icon: FileText, sections: [] },
-  { key: 'account', label: '账户与安全', icon: Lock, sections: [
-    { title: '账户资料', desc: '自定义管理员资料', fields: [
-      { label: '管理员头像 URL', key: 'USER_AVATAR_URL', placeholder: 'https://example.com/avatar.png' },
-    ]}
-  ]},
+  { key: 'account', label: '账户与安全', icon: Lock, sections: [] },
 ])
 
 const allFields = computed(() => {
@@ -263,6 +288,7 @@ const allFields = computed(() => {
       for (const f of section.fields) m[f.key] = f
     }
   }
+  m['USER_AVATAR_URL'] = { label: '管理员头像', key: 'USER_AVATAR_URL', placeholder: '' }
   return m
 })
 
@@ -283,6 +309,14 @@ function togglePassword(key: string) {
 function inputType(field: FieldDef): string {
   if (field.type !== 'password') return 'text'
   return showPasswords.value.has(field.key) ? 'text' : 'password'
+}
+
+function proxyImage(url: string | undefined): string {
+  if (!url) return ''
+  if (url.startsWith('/api/') || url.startsWith('data:') || url.includes('api/proxy/image')) return url
+  let target = url
+  if (url.startsWith('//')) target = 'https:' + url
+  return `/api/proxy/image?url=${encodeURIComponent(target)}`
 }
 
 // 基础网络请求
@@ -634,21 +668,35 @@ function formatBackupTime(timeStr: string): string {
   })
 }
 
-// 系统日志
+// 系统日志逻辑
 async function fetchLogs() {
   logLoading.value = true
   try {
-    const { data } = await request.get('/logs')
-    logs.value = data || []
+    const { data } = await request.get('/logs?lines=300')
+    if (data && Array.isArray(data.lines)) {
+      logs.value = data.lines
+    } else if (Array.isArray(data)) {
+      logs.value = data
+    } else {
+      logs.value = []
+    }
+    if (autoScrollBottom.value) {
+      setTimeout(() => {
+        if (logContainerRef.value) {
+          logContainerRef.value.scrollTop = logContainerRef.value.scrollHeight
+        }
+      }, 50)
+    }
   } catch (e: any) {
-    // 静默失败
+    console.error('获取系统日志失败:', e)
   } finally {
     logLoading.value = false
   }
 }
 
 function copyAllLogs() {
-  navigator.clipboard.writeText(logs.value.join('\n'))
+  const content = (Array.isArray(logs.value) ? logs.value : []).join('\n')
+  navigator.clipboard.writeText(content)
   saved.value = true
   setTimeout(() => { saved.value = false }, 2000)
 }
@@ -661,6 +709,71 @@ watch(autoRefreshLogs, (val) => {
     logTimer = null
   }
 })
+
+// 头像上传逻辑
+function triggerAvatarSelect() {
+  avatarFileInput.value?.click()
+}
+
+async function handleAvatarFileChange(e: Event) {
+  const target = e.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+
+  if (file.size > 5 * 1024 * 1024) {
+    avatarError.value = '图片大小不能超过 5MB'
+    return
+  }
+
+  avatarUploading.value = true
+  avatarError.value = ''
+  avatarSuccess.value = ''
+
+  const formData = new FormData()
+  formData.append('avatar', file)
+
+  try {
+    const { data } = await request.post('/user/avatar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    if (data.avatar_url) {
+      setVal('USER_AVATAR_URL', data.avatar_url)
+      avatarSuccess.value = '头像上传成功！已实时生效'
+      setTimeout(() => { avatarSuccess.value = '' }, 3000)
+      window.dispatchEvent(new CustomEvent('avatar-updated', { detail: data.avatar_url }))
+    }
+  } catch (err: any) {
+    avatarError.value = err?.response?.data?.error || '头像上传失败'
+  } finally {
+    avatarUploading.value = false
+    if (target) target.value = ''
+  }
+}
+
+async function saveAvatarUrl() {
+  const url = getVal('USER_AVATAR_URL')
+  if (!url) return
+  try {
+    await request.put('/settings', { settings: { USER_AVATAR_URL: url } })
+    avatarSuccess.value = '头像链接已应用！'
+    setTimeout(() => { avatarSuccess.value = '' }, 3000)
+    window.dispatchEvent(new CustomEvent('avatar-updated', { detail: url }))
+  } catch (err: any) {
+    avatarError.value = err?.response?.data?.error || '保存头像链接失败'
+  }
+}
+
+async function clearAvatar() {
+  setVal('USER_AVATAR_URL', '')
+  try {
+    await request.put('/settings', { settings: { USER_AVATAR_URL: '' } })
+    window.dispatchEvent(new CustomEvent('avatar-updated', { detail: '' }))
+    avatarSuccess.value = '头像已重置为默认'
+    setTimeout(() => { avatarSuccess.value = '' }, 2500)
+  } catch (err: any) {
+    avatarError.value = '重置头像失败'
+  }
+}
 
 // 修改密码
 async function changePassword() {
@@ -689,6 +802,12 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     saveAll()
   }
 }
+
+watch(activeTab, (newTab) => {
+  if (newTab === 'logs') {
+    fetchLogs()
+  }
+})
 
 onMounted(() => {
   fetchSettings()
@@ -1139,7 +1258,7 @@ onUnmounted(() => {
             <div>
               <h3 class="text-base font-black tracking-tight flex items-center gap-2">
                 <span>实时运行控制台</span>
-                <span class="badge badge-neutral badge-xs font-mono">{{ logs.length }} 行日志</span>
+                <span class="badge badge-neutral badge-xs font-mono">{{ filteredLogs.length }} / {{ logs.length }} 行日志</span>
               </h3>
               <p class="text-xs opacity-50 mt-0.5">监控后端服务请求、订阅爬取、刮削与下载器状态</p>
             </div>
@@ -1150,88 +1269,203 @@ onUnmounted(() => {
                 <input 
                   v-model="logFilter" 
                   type="text" 
-                  placeholder="搜索日志过滤..." 
+                  placeholder="搜索日志关键字..." 
                   class="input input-bordered input-sm rounded-xl pl-8 text-xs font-mono w-44 focus:w-56 transition-all"
                 />
                 <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
               </div>
 
               <!-- 自动轮询开关 -->
-              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-bold border border-base-300/60 px-3 py-1.5 rounded-xl">
+              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-bold border border-base-300/60 px-3 py-1.5 rounded-xl hover:bg-base-200/40 transition-colors">
                 <input type="checkbox" v-model="autoRefreshLogs" class="checkbox checkbox-primary checkbox-xs rounded" />
                 <span>自动刷新 (3s)</span>
               </label>
 
+              <!-- 自动滚底开关 -->
+              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-bold border border-base-300/60 px-3 py-1.5 rounded-xl hover:bg-base-200/40 transition-colors">
+                <input type="checkbox" v-model="autoScrollBottom" class="checkbox checkbox-primary checkbox-xs rounded" />
+                <span>锁定底部</span>
+              </label>
+
               <!-- 复制按钮 -->
-              <button @click="copyAllLogs" class="btn btn-ghost btn-sm rounded-xl gap-1 border border-base-300/60">
+              <button @click="copyAllLogs" class="btn btn-ghost btn-sm rounded-xl gap-1 border border-base-300/60" title="复制所有日志">
                 <Copy :size="13" />
                 <span class="text-xs font-bold">复制</span>
               </button>
 
               <!-- 手动刷新按钮 -->
-              <button @click="fetchLogs" :disabled="logLoading" class="btn btn-primary btn-sm rounded-xl gap-1">
+              <button @click="fetchLogs" :disabled="logLoading" class="btn btn-primary btn-sm rounded-xl gap-1 shadow-sm">
                 <RefreshCw :size="13" :class="{ 'animate-spin': logLoading }" />
                 <span class="text-xs font-bold">刷新</span>
               </button>
             </div>
           </div>
 
+          <!-- 快捷过滤标签栏 -->
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+            <span class="text-[11px] font-bold opacity-40 mr-1">级别筛选:</span>
+            <button 
+              v-for="lvl in logLevels" 
+              :key="lvl.key"
+              @click="currentLogLevel = lvl.key"
+              class="btn btn-xs rounded-lg font-bold transition-all"
+              :class="currentLogLevel === lvl.key ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
+            >
+              {{ lvl.label }}
+            </button>
+          </div>
+
           <!-- 终端风格滚动窗口 -->
-          <div class="bg-[#12161f] text-gray-300 rounded-2xl p-4 font-mono text-[11px] leading-relaxed max-h-[560px] overflow-y-auto space-y-1 select-text border border-white/5 shadow-inner">
+          <div 
+            ref="logContainerRef"
+            class="bg-[#12161f] text-gray-300 rounded-2xl p-4 font-mono text-[11px] leading-relaxed max-h-[580px] overflow-y-auto space-y-1 select-text border border-white/5 shadow-inner"
+          >
             <div 
               v-for="(line, i) in filteredLogs" 
               :key="i"
-              class="py-0.5 px-1 rounded hover:bg-white/5 transition-colors break-all"
+              class="py-0.5 px-1.5 rounded hover:bg-white/5 transition-colors break-all font-mono"
               :class="{
-                'text-rose-400 font-bold': line.includes('❌') || line.includes('ERROR') || line.includes('error'),
-                'text-amber-300 font-bold': line.includes('⚠️') || line.includes('WARN'),
-                'text-emerald-400': line.includes('✅') || line.includes('SUCCESS'),
-                'text-cyan-400': line.includes('🔌') || line.includes('🚀')
+                'text-rose-400 font-bold bg-rose-500/10': line.includes('❌') || line.includes('ERROR') || line.includes('error') || line.includes('failed'),
+                'text-amber-300 font-bold bg-amber-500/10': line.includes('⚠️') || line.includes('WARN') || line.includes('warn'),
+                'text-emerald-400': line.includes('✅') || line.includes('SUCCESS') || line.includes('success'),
+                'text-cyan-400': line.includes('🔌') || line.includes('🚀') || line.includes('🔗')
               }"
             >
               {{ line }}
             </div>
-            <div v-if="filteredLogs.length === 0" class="text-center py-12 opacity-30 text-xs">
-              {{ logFilter ? '未搜索到匹配日志行' : '暂无系统日志' }}
+            <div v-if="filteredLogs.length === 0" class="text-center py-16 opacity-30 text-xs flex flex-col items-center gap-2">
+              <FileText :size="24" />
+              <span>{{ logFilter || currentLogLevel !== 'all' ? '未找到符合筛选条件的日志' : (logLoading ? '正在加载日志...' : '暂无运行日志') }}</span>
             </div>
           </div>
         </div>
 
         <!-- 7. 账户安全 (Account Tab) -->
-        <div v-if="activeTab === 'account'" class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5">
-          <div>
-            <h3 class="text-base font-black tracking-tight">修改管理员密码</h3>
-            <p class="text-xs opacity-50 mt-0.5">建议定期更换密码以保障管理终端安全</p>
+        <div v-if="activeTab === 'account'" class="space-y-6">
+          
+          <!-- 管理员头像管理卡片 -->
+          <div class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-6">
+            <div>
+              <h3 class="text-base font-black tracking-tight">管理员头像</h3>
+              <p class="text-xs opacity-50 mt-0.5">支持从本地直接上传图片文件（JPG/PNG/WebP/GIF/SVG），或填入外部图床链接</p>
+            </div>
+
+            <div class="flex flex-col sm:flex-row items-center sm:items-start gap-6 p-5 rounded-2xl bg-base-200/30 border border-base-200/60">
+              <!-- 头像圆形预览与悬浮更换 -->
+              <div class="relative group cursor-pointer shrink-0" @click="triggerAvatarSelect" title="点击更换头像">
+                <div class="w-24 h-24 rounded-full overflow-hidden border-2 border-primary/20 shadow-md bg-base-100 flex items-center justify-center">
+                  <img 
+                    v-if="getVal('USER_AVATAR_URL')" 
+                    :src="proxyImage(getVal('USER_AVATAR_URL'))" 
+                    alt="Avatar" 
+                    class="w-full h-full object-cover"
+                  />
+                  <div v-else class="w-full h-full bg-primary/10 flex items-center justify-center text-primary">
+                    <User :size="40" />
+                  </div>
+                </div>
+                <!-- 悬浮蒙层 -->
+                <div class="absolute inset-0 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-all duration-200 text-[11px] font-bold gap-1 shadow-inner">
+                  <Camera :size="22" />
+                  <span>更换图片</span>
+                </div>
+              </div>
+
+              <!-- 上传按钮与配置输入区 -->
+              <div class="space-y-4 flex-1 w-full">
+                <div class="flex items-center gap-3 flex-wrap">
+                  <input 
+                    ref="avatarFileInput" 
+                    type="file" 
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" 
+                    class="hidden" 
+                    @change="handleAvatarFileChange" 
+                  />
+                  <button 
+                    type="button" 
+                    @click="triggerAvatarSelect" 
+                    :disabled="avatarUploading"
+                    class="btn btn-primary btn-sm rounded-xl gap-2 shadow-md shadow-primary/20"
+                  >
+                    <RefreshCw v-if="avatarUploading" :size="14" class="animate-spin" />
+                    <Upload v-else :size="14" />
+                    <span class="text-xs font-bold">{{ avatarUploading ? '正在上传...' : '选择本地图片上传' }}</span>
+                  </button>
+                  <button 
+                    v-if="getVal('USER_AVATAR_URL')" 
+                    type="button" 
+                    @click="clearAvatar" 
+                    class="btn btn-ghost btn-sm rounded-xl text-error/70 hover:text-error text-xs font-bold gap-1"
+                  >
+                    <Trash2 :size="13" />
+                    <span>清除头像</span>
+                  </button>
+                  <span class="text-[11px] opacity-40">支持 JPG, PNG, WebP, GIF, SVG，最大 5MB</span>
+                </div>
+
+                <div class="space-y-1.5">
+                  <label class="text-[11px] font-black uppercase tracking-wider opacity-60">或使用外部图片 URL</label>
+                  <div class="relative">
+                    <input 
+                      type="text" 
+                      :value="getVal('USER_AVATAR_URL')" 
+                      @input="(e: Event) => setVal('USER_AVATAR_URL', (e.target as HTMLInputElement).value)"
+                      placeholder="https://example.com/avatar.png" 
+                      class="input input-bordered input-sm w-full rounded-xl text-xs font-mono pr-20" 
+                    />
+                    <button 
+                      type="button" 
+                      @click="saveAvatarUrl"
+                      class="absolute right-1 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs rounded-lg text-primary font-bold hover:bg-primary/10"
+                    >
+                      应用链接
+                    </button>
+                  </div>
+                </div>
+
+                <p v-if="avatarError" class="text-xs text-error font-bold bg-error/10 p-3 rounded-xl border border-error/20">{{ avatarError }}</p>
+                <p v-if="avatarSuccess" class="text-xs text-success font-bold bg-success/10 p-3 rounded-xl border border-success/20">{{ avatarSuccess }}</p>
+              </div>
+            </div>
           </div>
 
-          <div class="max-w-md space-y-4">
-            <div class="space-y-1">
-              <label class="text-xs font-bold text-base-content/75">当前旧密码</label>
-              <input v-model="oldPassword" type="password" placeholder="输入当前密码" class="input input-bordered w-full rounded-xl text-xs" />
-            </div>
-            <div class="space-y-1">
-              <label class="text-xs font-bold text-base-content/75">新密码</label>
-              <input v-model="newPassword" type="password" placeholder="至少 6 位密码" class="input input-bordered w-full rounded-xl text-xs" />
-            </div>
-            <div class="space-y-1">
-              <label class="text-xs font-bold text-base-content/75">确认新密码</label>
-              <input v-model="confirmPassword" type="password" placeholder="再次输入新密码" class="input input-bordered w-full rounded-xl text-xs" />
+          <!-- 修改管理员密码卡片 -->
+          <div class="bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5">
+            <div>
+              <h3 class="text-base font-black tracking-tight">修改管理员密码</h3>
+              <p class="text-xs opacity-50 mt-0.5">建议定期更换密码以保障管理终端安全</p>
             </div>
 
-            <div class="pt-2">
-              <button 
-                @click="changePassword" 
-                :disabled="changingPassword"
-                class="btn btn-primary rounded-xl px-7 gap-2 shadow-md"
-              >
-                <Lock :size="14" />
-                <span class="text-xs font-black">{{ changingPassword ? '正在更新...' : '确认修改密码' }}</span>
-              </button>
-            </div>
+            <div class="max-w-md space-y-4">
+              <div class="space-y-1">
+                <label class="text-xs font-bold text-base-content/75">当前旧密码</label>
+                <input v-model="oldPassword" type="password" placeholder="输入当前密码" class="input input-bordered w-full rounded-xl text-xs" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-xs font-bold text-base-content/75">新密码</label>
+                <input v-model="newPassword" type="password" placeholder="至少 6 位密码" class="input input-bordered w-full rounded-xl text-xs" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-xs font-bold text-base-content/75">确认新密码</label>
+                <input v-model="confirmPassword" type="password" placeholder="再次输入新密码" class="input input-bordered w-full rounded-xl text-xs" />
+              </div>
 
-            <p v-if="passwordMsg" class="text-success text-xs font-bold bg-success/10 p-3 rounded-xl border border-success/20">{{ passwordMsg }}</p>
-            <p v-if="passwordError" class="text-error text-xs font-bold bg-error/10 p-3 rounded-xl border border-error/20">{{ passwordError }}</p>
+              <div class="pt-2">
+                <button 
+                  @click="changePassword" 
+                  :disabled="changingPassword"
+                  class="btn btn-primary rounded-xl px-7 gap-2 shadow-md"
+                >
+                  <Lock :size="14" />
+                  <span class="text-xs font-black">{{ changingPassword ? '正在更新...' : '确认修改密码' }}</span>
+                </button>
+              </div>
+
+              <p v-if="passwordMsg" class="text-success text-xs font-bold bg-success/10 p-3 rounded-xl border border-success/20">{{ passwordMsg }}</p>
+              <p v-if="passwordError" class="text-error text-xs font-bold bg-error/10 p-3 rounded-xl border border-error/20">{{ passwordError }}</p>
+            </div>
           </div>
+
         </div>
 
       </main>

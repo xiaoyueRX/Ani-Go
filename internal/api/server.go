@@ -178,9 +178,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/login", handleLogin)
 	mux.HandleFunc("/api/health", handleHealth)
 
-	// 用户信息
+	// 用户信息与头像
 	mux.HandleFunc("GET /api/me", handleMe)
 	mux.HandleFunc("POST /api/user/change-password", s.handleChangePassword)
+	mux.HandleFunc("POST /api/user/avatar", s.handleUploadAvatar)
+	mux.HandleFunc("GET /api/user/avatar", s.handleGetAvatar)
 
 	// 订阅管理 CRUD
 	mux.HandleFunc("GET /api/subscriptions", s.handleListSubscriptions)

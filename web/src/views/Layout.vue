@@ -40,7 +40,7 @@ window.showToast = showToast
 
 function proxyImage(url: string | undefined): string {
   if (!url) return ''
-  if (url.includes('api/proxy/image')) return url
+  if (url.startsWith('/api/') || url.startsWith('data:') || url.includes('api/proxy/image')) return url
   let target = url
   if (url.startsWith('//')) target = 'https:' + url
   return `/api/proxy/image?url=${encodeURIComponent(target)}`
@@ -57,6 +57,12 @@ onMounted(async () => {
     username.value = data.username
     userAvatar.value = data.avatar_url || ''
   } catch { /* 401 handled by interceptor */ }
+
+  window.addEventListener('avatar-updated', ((e: CustomEvent) => {
+    if (e.detail) {
+      userAvatar.value = e.detail
+    }
+  }) as EventListener)
 
   // Check for updates if enabled in backend settings
   try {

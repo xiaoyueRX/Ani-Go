@@ -60,11 +60,12 @@ func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// 放行登录接口、健康检查、OAuth 回调以及公开代理流
+		// 放行登录接口、健康检查、OAuth 回调以及公开代理流和头像查看
 		if path == "/api/login" || path == "/api/login/" ||
 			path == "/api/health" || path == "/api/health/" ||
 			path == "/api/bangumi/auth/callback" ||
 			strings.HasPrefix(path, "/api/proxy/image") ||
+			((r.Method == http.MethodGet || r.Method == http.MethodHead) && strings.HasPrefix(path, "/api/user/avatar")) ||
 			path == "/api/events/stream" {
 			next.ServeHTTP(w, r)
 			return
