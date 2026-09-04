@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g. v0.5.2)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  # ---- 1. 构建前端静态资源 ----
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build Web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload Frontend Dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/dist
+          retention-days: 1
+
+  # ---- 2. 跨平台编译与发布 Release ----
+  release:
+    name: Build Binaries & Publish Release
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download Frontend Dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/dist
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Build and Package Multi-Platform Binaries
+        id: build
+        run: |
+          # 确定版本号
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            TAG_NAME="${{ inputs.tag_name }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          else
+            TAG_NAME="v0.5.1"
+          fi
+          echo "Building Release for tag: ${TAG_NAME}"
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+
+          # 创建产物输出目录
+          OUTPUT_DIR="${GITHUB_WORKSPACE}/release-assets"
+          PACKAGES_DIR="${OUTPUT_DIR}/packages"
+          mkdir -p "${PACKAGES_DIR}"
+
+          # 目标平台矩阵: (GOOS GOARCH)
+          TARGETS=(
+            "linux amd64"
+            "linux arm64"
+            "linux arm"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+            "windows arm64"
+          )
+
+          for target in "${TARGETS[@]}"; do
+            read -r GOOS GOARCH <<< "$target"
+            ARCH_NAME="${GOARCH}"
+            if [ "$GOARCH" = "arm" ]; then
+              ARCH_NAME="armv7"
+            fi
+
+            PKG_NAME="ani-go-${TAG_NAME}-${GOOS}-${ARCH_NAME}"
+            STAGE_DIR="${OUTPUT_DIR}/${PKG_NAME}"
+            mkdir -p "${STAGE_DIR}"
+
+            BIN_NAME="anigo"
+            if [ "$GOOS" = "windows" ]; then
+              BIN_NAME="anigo.exe"
+            fi
+
+            echo "==> Building ${GOOS}/${GOARCH} -> ${STAGE_DIR}/${BIN_NAME}..."
+            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
+              -trimpath \
+              -ldflags="-s -w -X main.version=${TAG_NAME}" \
+              -o "${STAGE_DIR}/${BIN_NAME}" .
+
+            # 补充基础说明与配置示例
+            if [ -f .env.example ]; then
+              cp .env.example "${STAGE_DIR}/.env.example"
+            fi
+            if [ -f README.md ]; then
+              cp README.md "${STAGE_DIR}/README.md"
+            fi
+            if [ -f LICENSE ]; then
+              cp LICENSE "${STAGE_DIR}/LICENSE"
+            fi
+
+            # 打包压缩
+            cd "${OUTPUT_DIR}"
+            if [ "$GOOS" = "windows" ]; then
+              zip -r "${PACKAGES_DIR}/${PKG_NAME}.zip" "${PKG_NAME}"
+            else
+              tar -czvf "${PACKAGES_DIR}/${PKG_NAME}.tar.gz" "${PKG_NAME}"
+            fi
+            cd "${GITHUB_WORKSPACE}"
+          done
+
+          # 生成 SHA256 校验和文件
+          cd "${PACKAGES_DIR}"
+          sha256sum * > checksums.txt
+          echo "==> Generated Checksums:"
+          cat checksums.txt
+          cd "${GITHUB_WORKSPACE}"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build.outputs.tag_name }}
+          name: Ani-Go ${{ steps.build.outputs.tag_name }}
+          files: |
+            release-assets/packages/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

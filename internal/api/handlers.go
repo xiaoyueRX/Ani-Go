@@ -804,8 +804,12 @@ func getStallTimeout(sub ...database.Subscription) time.Duration {
 }
 
 func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
+	v := s.version
+	if v == "" {
+		v = "v0.5.1"
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"version": "v0.5.1",
+		"version": v,
 		"changelog": []string{
 			"🛡️ 架构稳固：剔除数据库事务内网络依赖，杜绝 SQLite 并发锁死隐患",
 			"🔐 凭证保护：修复下载器密钥脱敏保存与空密码覆盖缺陷",

@@ -123,11 +123,14 @@ docker compose up -d
 
 ### 方式二：单文件独立运行
 
-从 [Releases](https://github.com/xiaoyueRX/Ani-Go/releases) 下载对应操作系统的最新预编译二进制文件：
+从 [Releases](https://github.com/xiaoyueRX/Ani-Go/releases) 下载对应操作系统的最新预编译二进制文件，或在 Linux / macOS 上通过一键脚本安装：
 
 ```bash
+# Linux / macOS 一键安装与配置
+curl -fsSL https://raw.githubusercontent.com/xiaoyueRX/Ani-Go/main/install.sh | sh
+
 # 启动 Ani-Go（前端静态资源已完整内嵌在二进制中）
-./anigo
+anigo
 ```
 
 浏览器打开 `http://localhost:20001` 即可开始使用。

@@ -123,11 +123,14 @@ docker compose up -d
 
 ### Method 2: Standalone Binary
 
-Download the latest precompiled binary for your operating system from [Releases](https://github.com/xiaoyueRX/Ani-Go/releases):
+Download the latest precompiled binary for your operating system from [Releases](https://github.com/xiaoyueRX/Ani-Go/releases), or install via the one-line script on Linux / macOS:
 
 ```bash
+# Linux / macOS one-line install & setup
+curl -fsSL https://raw.githubusercontent.com/xiaoyueRX/Ani-Go/main/install.sh | sh
+
 # Launch Ani-Go (frontend is embedded inside the binary)
-./anigo
+anigo
 ```
 
 Navigate to `http://localhost:20001` in your browser.
