@@ -7,7 +7,8 @@ import {
   Menu, User, LogOut, Antenna, Languages, ExternalLink,
   Calendar, LayoutGrid, Search, Download, Settings, Sparkles, X, TriangleAlert
 } from 'lucide-vue-next'
-import { useVersion, CURRENT_VERSION } from '../composables/useVersion'
+import { useVersion } from '../composables/useVersion'
+import ChangelogModal from '../components/ChangelogModal.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -16,7 +17,7 @@ const username = ref('')
 const userAvatar = ref('')
 const isDrawerOpen = ref(false)
 
-const { latestVersion, hasNewVersion, checkGitHubUpdate } = useVersion()
+const { currentVersion, latestVersion, hasNewVersion, checkGitHubUpdate } = useVersion()
 
 interface Toast {
   id: number
@@ -107,7 +108,7 @@ function closeDrawer() {
           <div class="flex flex-col">
             <div class="flex items-center gap-1.5">
               <span class="text-xl font-black bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent italic tracking-tight">Ani-Go</span>
-              <span class="badge badge-primary badge-xs font-mono font-bold">v{{ CURRENT_VERSION }}</span>
+              <span class="badge badge-primary badge-xs font-mono font-bold">{{ currentVersion }}</span>
             </div>
             <span class="text-[9px] font-bold text-base-content/40 uppercase tracking-[0.2em]">Anime Sync Engine</span>
           </div>
@@ -175,7 +176,7 @@ function closeDrawer() {
         <div class="flex items-center gap-2 cursor-pointer" @click="router.push('/schedule')">
           <img src="/logo.png" alt="Ani-Go" class="w-7 h-7 rounded-lg object-cover shadow-sm" />
           <span class="text-lg font-black bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent italic">Ani-Go</span>
-          <span class="badge badge-neutral badge-xs font-mono font-bold opacity-60">v{{ CURRENT_VERSION }}</span>
+          <span class="badge badge-neutral badge-xs font-mono font-bold opacity-60">{{ currentVersion }}</span>
         </div>
         <div class="dropdown dropdown-end">
           <label tabindex="0" class="btn btn-ghost btn-circle btn-sm avatar online">
@@ -226,7 +227,7 @@ function closeDrawer() {
             <span>GitHub: xiaoyueRX/Ani-Go</span>
           </a>
           <span class="opacity-30">•</span>
-          <span class="font-mono">v{{ CURRENT_VERSION }}</span>
+          <span class="font-mono">{{ currentVersion }}</span>
         </div>
       </footer>
 

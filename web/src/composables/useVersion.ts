@@ -1,9 +1,13 @@
 import { ref, onMounted } from 'vue'
 import request from '../utils/request'
 
-export const CURRENT_VERSION = 'v0.5.1'
+export const CURRENT_VERSION = 'v0.5.2'
 const VERSION_KEY = 'ani-go-last-version'
 const AUTO_UPDATE_KEY = 'ani-go-auto-update'
+
+export const currentVersion = ref(CURRENT_VERSION)
+
+export const formatVersion = (v: string) => (v ? (v.startsWith('v') ? v : `v${v}`) : 'v0.5.2')
 
 export interface VersionInfo {
   version: string
@@ -19,6 +23,9 @@ export function useVersion() {
   const checkVersion = async () => {
     try {
       const { data } = await request.get<VersionInfo>('/version')
+      if (data?.version) {
+        currentVersion.value = data.version
+      }
       const lastVersion = localStorage.getItem(VERSION_KEY)
 
       if (lastVersion && lastVersion !== data.version) {
@@ -42,7 +49,7 @@ export function useVersion() {
       if (res.ok) {
         const data = await res.json()
         const latest = data.tag_name
-        if (latest !== CURRENT_VERSION) {
+        if (latest && latest !== currentVersion.value) {
           latestVersion.value = latest
           hasNewVersion.value = true
         }
@@ -53,6 +60,7 @@ export function useVersion() {
   }
 
   return {
+    currentVersion,
     latestVersion,
     changelog,
     showChangelog,

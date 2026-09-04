@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { X, Zap, CheckCircle2 } from 'lucide-vue-next'
-import { CURRENT_VERSION } from '../composables/useVersion'
+import { CURRENT_VERSION, currentVersion } from '../composables/useVersion'
 
 const props = defineProps<{
   show: boolean
@@ -25,7 +25,7 @@ const close = () => {
             <Zap :size="24" />
           </div>
           <div>
-            <h3 class="text-2xl font-black tracking-tighter italic">🎉 {{ CURRENT_VERSION }} 更新内容</h3>
+            <h3 class="text-2xl font-black tracking-tighter italic">🎉 {{ currentVersion }} 更新内容</h3>
             <p class="text-[10px] font-black uppercase tracking-[0.2em] opacity-30 mt-1">What's New in Ani-Go</p>
           </div>
         </div>

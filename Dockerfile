@@ -27,8 +27,9 @@ COPY --from=frontend-builder /src/web/dist ./web/dist
 # Go 原生交叉编译：amd64 / arm64 / armv7 等
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
+ARG APP_VERSION=v0.5.2
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w" -trimpath -o /anigo .
+    go build -ldflags="-s -w -X main.version=${APP_VERSION}" -trimpath -o /anigo .
 
 # ---- Stage 3: 极简运行环境 ----
 FROM alpine:3.20

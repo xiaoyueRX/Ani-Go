@@ -4,6 +4,27 @@ Ani-Go 的更新日志。所有版本遵循 [语义化版本](https://semver.org
 
 ---
 
+## v0.5.2 — 2026-09-04 (Performance, Mikan Schedule & Standalone Releases)
+
+### 性能与架构优化 (Performance)
+- **GORM 预编译缓存**：数据库开启 `PrepareStmt: true`，高频轮询查询自动复用预编译语句缓存，消除重复 SQL 解析开销。
+- **RSS 轮询查询风暴消除**：改造 `pollRSS` 为单次批量查重预拉取（`torrent_url IN ?`），$N$ 次数据库往返降低至 1 次，修复新增计数重复递增缺陷。
+- **整理器批量拉取**：文件整理支持批量预加载订阅信息，移除多余的重复状态更新，消除 $N+1$ 查询。
+- **HTTP 连接池与环境代理统一**：`YucWiki` 及全部网络客户端统一收拢至 `httpx`，复用共享连接池，全面支持容器及系统环境变量代理（`HTTP_PROXY` / `HTTPS_PROXY`）。
+
+### 新增特性 (Features)
+- **Mikan 默认时间表与 Yuc.wiki 插件**：放送时间表默认使用 Mikan 广播源，并新增内置 `yuc_schedule` 插件支持一键切换周间新番。
+- **Bangumi 季度自动同步**：时间表支持根据所选年份与季度自动同步对应放送列表。
+- **多平台 Release 自动化流水线**：新增 GitHub Actions Release 工作流，全自动交叉编译 7 大平台架构独立二进制（Linux/macOS/Windows, amd64/arm64/armv7）并生成校验和与一键安装脚本。
+
+### 缺陷修复 (Fixes)
+- **媒体命名模板设置覆盖**：修复 `MergeFromSettings` 无法覆盖默认模板的问题，现支持设置页自定义模板实时生效。
+- **年份为0路径优化**：优化路径格式化正则，无年份或为 0 时智能消除空括号并规范化路径。
+- **文件整理计数精准化**：修复整理统计中 `successCount` 遗漏的问题，明确分离成功与失败计数，全失败时触发专项告警。
+- **版本号动态化**：前端与后端全面联动 `/api/version` 动态渲染当前运行版本，修复重复前缀问题。
+
+---
+
 ## v0.5.1 — 2026-09-03 (Security & Stability Hotfix)
 
 ### 安全与缺陷修复 (Security & Fixes)

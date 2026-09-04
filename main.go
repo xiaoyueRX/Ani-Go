@@ -28,7 +28,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
 
-var version = "v0.5.1"
+var version = "v0.5.2"
 
 func main() {
 	printBanner()
