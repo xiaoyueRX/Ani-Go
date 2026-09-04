@@ -86,6 +86,14 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 	}
 	fullPath := filepath.Join(basePath, finalPath)
 
+	// 边界检查：防御性防止任何非法路径穿越逃逸 basePath
+	cleanBase := filepath.Clean(basePath)
+	cleanTarget := filepath.Clean(fullPath)
+	rel, relErr := filepath.Rel(cleanBase, cleanTarget)
+	if relErr != nil || strings.HasPrefix(rel, "..") || rel == "." {
+		return "", fmt.Errorf("非法目标路径越界: %s", fullPath)
+	}
+
 	// 补充扩展名
 	if filepath.Ext(fullPath) == "" {
 		fullPath += filepath.Ext(filePath)
