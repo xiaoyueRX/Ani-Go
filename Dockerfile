@@ -12,7 +12,7 @@ COPY web/ ./
 RUN npm run build
 
 # ---- Stage 2: Go 后端构建（利用 Go 原生极速交叉编译，无需 QEMU） ----
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS backend-builder
 
 WORKDIR /src
 RUN apk add --no-cache git ca-certificates tzdata
