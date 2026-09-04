@@ -16,7 +16,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v4
         with:
@@ -28,7 +28,7 @@ jobs:
         working-directory: web
         run: npm ci && npm run build
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
           cache: true
@@ -46,14 +46,30 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      # Docker 元数据（标签、注解）
+      # 检查是否配置了 Docker Hub 凭据
+      - name: 检查 Docker Hub 配置
+        id: dockerhub-check
+        run: |
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+            echo "image=${{ secrets.DOCKERHUB_USERNAME }}/ani-go" >> $GITHUB_OUTPUT
+            echo "Docker Hub 凭据已检测到，将同时推送到 Docker Hub: ${{ secrets.DOCKERHUB_USERNAME }}/ani-go"
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "image=" >> $GITHUB_OUTPUT
+            echo "未配置 DOCKERHUB_USERNAME / DOCKERHUB_TOKEN，仅推送到 GHCR"
+          fi
+
+      # Docker 元数据（多仓库标签与注解）
       - name: Docker 元数据
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            ${{ steps.dockerhub-check.outputs.image }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -78,7 +94,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 构建并推送多架构镜像
+      # 登录 Docker Hub (如果配置了 DOCKERHUB_USERNAME 与 DOCKERHUB_TOKEN)
+      - name: 登录 Docker Hub
+        if: steps.dockerhub-check.outputs.enabled == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 构建并推送多架构镜像（同时支持 GHCR 和 Docker Hub）
       - name: 构建并推送
         uses: docker/build-push-action@v6
         with:
