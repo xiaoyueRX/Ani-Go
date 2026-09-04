@@ -188,10 +188,10 @@ func (o *TVOrganizer) buildVarValues(anime core.Anime, episode core.Episode) cor
 
 // 模板变量正则：匹配 {var_name} 和 {var_name:format}
 var reTemplateVar = regexp.MustCompile(`\{(\w+)(?::(\w+))?\}`)
-var yearSegmentPattern = regexp.MustCompile(`(?m)(?:^|/)\s*\((?:0|)\)(?:/|$)|\s+\((?:0|)\)`)
+var yearSegmentPattern = regexp.MustCompile(`(?m)\s*\((?:0|)\)`)
 
 // removeYearSegment removes the optional parentheses around {year} when
-// the value is absent, while preserving unrelated literal parentheses.
+// the value is absent (0 or empty), while preserving unrelated literal parentheses.
 func removeYearSegment(path string) string {
 	trimmed := yearSegmentPattern.ReplaceAllString(path, "")
 	return strings.TrimSpace(trimmed)

@@ -594,13 +594,13 @@ func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
 	if v, ok := getter("AI_MODEL"); ok && c.AI.Model == "" {
 		c.AI.Model = v
 	}
-	if v, ok := getter("TV_TEMPLATE"); ok && (c.Organizer.TVTemplate == "" || c.Organizer.TVTemplate == "old-tv") {
+	if v, ok := getter("TV_TEMPLATE"); ok && v != "" {
 		c.Organizer.TVTemplate = v
 	}
-	if v, ok := getter("MOVIE_TEMPLATE"); ok && c.Organizer.MovieTemplate == "" {
+	if v, ok := getter("MOVIE_TEMPLATE"); ok && v != "" {
 		c.Organizer.MovieTemplate = v
 	}
-	if v, ok := getter("OTHER_TEMPLATE"); ok && c.Organizer.OtherTemplate == "" {
+	if v, ok := getter("OTHER_TEMPLATE"); ok && v != "" {
 		c.Organizer.OtherTemplate = v
 	}
 }

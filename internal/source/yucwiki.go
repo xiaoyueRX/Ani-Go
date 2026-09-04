@@ -2,7 +2,6 @@ package source
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 type YucWikiSource struct {
@@ -28,16 +28,9 @@ type yucCacheItem struct {
 }
 
 func NewYucWikiSource() *YucWikiSource {
-	// YucWiki 证书常年过期，必须用 Insecure
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
 	return &YucWikiSource{
-		httpClient: &http.Client{
-			Transport: tr,
-			Timeout:   20 * time.Second,
-		},
-		baseURL: "https://yuc.wiki",
+		httpClient: httpx.NewInsecure(20 * time.Second),
+		baseURL:    "https://yuc.wiki",
 	}
 }
 

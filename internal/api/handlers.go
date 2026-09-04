@@ -2461,7 +2461,7 @@ func (s *Server) handleBangumiAuthCallback(w http.ResponseWriter, r *http.Reques
 	data.Set("code", code)
 	data.Set("redirect_uri", redirectURI)
 
-	resp, err := http.PostForm("https://bgm.tv/oauth/access_token", data)
+	resp, err := httpx.Default.PostForm("https://bgm.tv/oauth/access_token", data)
 	if err != nil {
 		http.Error(w, "failed to exchange token: "+err.Error(), http.StatusInternalServerError)
 		return

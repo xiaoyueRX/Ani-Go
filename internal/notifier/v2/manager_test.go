@@ -30,3 +30,10 @@ func TestOrganizedNotification_AllFailuresUseAlert(t *testing.T) {
 		t.Fatalf("优先级 = %d, 期望 2", msg.Priority)
 	}
 }
+
+func TestOrganizedNotification_ZeroCountsSuppressed(t *testing.T) {
+	msg := organizedNotification(map[string]interface{}{"success": 0, "failed": 0})
+	if msg != nil {
+		t.Fatalf("当 success=0 && failed=0 时应静默返回 nil，实际得到: %+v", msg)
+	}
+}

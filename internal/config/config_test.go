@@ -418,9 +418,7 @@ func TestSplitEnv_TrailingComma(t *testing.T) {
 
 func TestMergeFromSettings_TemplateKeysAlwaysApply(t *testing.T) {
 	cfg := Load()
-	cfg.Organizer.TVTemplate = "old-tv"
-	cfg.Organizer.MovieTemplate = ""
-	cfg.Organizer.OtherTemplate = ""
+	// 即使已有非空默认模板配置，从设置读取的非空模板也必须覆盖成功
 
 	cfg.MergeFromSettings(func(key string) (string, bool) {
 		values := map[string]string{

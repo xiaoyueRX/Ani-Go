@@ -195,10 +195,28 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 		return
 	}
 
+	// 批量去重查询：一次性拉取批次内已有 URL 到内存集合，消除循环 N 次 DB 查询 (OPTIMIZE_TASK.md 第 2 条)
+	existingURLs := make(map[string]bool, len(items))
+	if len(items) > 0 {
+		urls := make([]string, 0, len(items))
+		for _, it := range items {
+			if it.URL != "" {
+				urls = append(urls, it.URL)
+			}
+		}
+		if len(urls) > 0 {
+			var records []string
+			database.DB.Model(&database.DownloadRecord{}).Where("torrent_url IN ?", urls).Pluck("torrent_url", &records)
+			for _, u := range records {
+				existingURLs[u] = true
+			}
+		}
+	}
+
 	newCount := 0
 	for _, item := range items {
-		// 去重检查：通过 torrent URL 判断是否已下载
-		if isDuplicate(item.URL) {
+		// 去重检查：通过内存集合判断是否已下载
+		if existingURLs[item.URL] {
 			continue
 		}
 
@@ -291,10 +309,9 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 
 		// 记录到数据库并创建剧集记录
 		recordDownload(item)
+		existingURLs[item.URL] = true
 		season, epNum := parser.ExtractEpisode(item.Title)
 		createEpisodeRecordWithParsed(targetSubID, item, season, epNum)
-		newCount++
-
 		newCount++
 
 		// 更新订阅进度
@@ -449,13 +466,29 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 
 	log.Printf("📂 发现 %d 个待整理的文件", len(episodes))
 
+	// 批量预查相关订阅，避免循环逐条查询 DB (N+1)
+	subIDs := make([]uint, 0, len(episodes))
+	for _, ep := range episodes {
+		if ep.SubscriptionID > 0 {
+			subIDs = append(subIDs, ep.SubscriptionID)
+		}
+	}
+	subMap := make(map[uint]database.Subscription, len(subIDs))
+	if len(subIDs) > 0 {
+		var subs []database.Subscription
+		database.DB.Where("id IN ?", subIDs).Find(&subs)
+		for _, s := range subs {
+			subMap[s.ID] = s
+		}
+	}
+
 	successCount := 0
 	failureCount := 0
 	lastOrganizedPath := ""
 	for _, ep := range episodes {
 		// 1. 根据 Subscription 获取番剧元数据
-		var sub database.Subscription
-		if err := database.DB.First(&sub, ep.SubscriptionID).Error; err != nil {
+		sub, ok := subMap[ep.SubscriptionID]
+		if !ok {
 			log.Printf("⚠️  整理跳过，找不到对应的订阅记录: %d", ep.SubscriptionID)
 			failureCount++
 			continue
@@ -583,14 +616,10 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 			failureCount++
 			continue
 		}
-		{
-			var count int64
-			database.DB.Model(&database.Episode{}).
-				Where("subscription_id = ? AND status IN (?, ?) AND deleted_at IS NULL", sub.ID, "organized", "downloading").
-				Count(&count)
-			database.DB.Model(&sub).Update("current_episodes", int(count))
-		}
+		successCount++
+		lastOrganizedPath = newPath
 
+		// 更新订阅进度（统计 organized 状态剧集）
 		var count int64
 		database.DB.Model(&database.Episode{}).
 			Where("subscription_id = ? AND status = ? AND deleted_at IS NULL", sub.ID, "organized").
@@ -611,7 +640,13 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 	}
 
 	if successCount > 0 || failureCount > 0 {
-		log.Printf("✅ 整理完成：成功 %d 个，失败 %d 个", successCount, failureCount)
+		if successCount == 0 {
+			log.Printf("❌ 整理全部失败：共 %d 个文件失败", failureCount)
+		} else if failureCount > 0 {
+			log.Printf("⚠️  整理部分完成：成功 %d 个，失败 %d 个", successCount, failureCount)
+		} else {
+			log.Printf("✅ 整理完成：成功 %d 个", successCount)
+		}
 	}
 }
 

@@ -14,7 +14,8 @@ var DB *gorm.DB
 func Init(dbPath string) error {
 	var err error
 	DB, err = gorm.Open(sqlite.Open(dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		PrepareStmt: true, // 复用预编译语句缓存，降低 SQLite 解析开销与 CPU 峰值
+		Logger:      logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		return err

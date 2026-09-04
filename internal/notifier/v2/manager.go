@@ -187,6 +187,10 @@ func (m *NotifyManager) subscribeEvents() {
 func organizedNotification(data map[string]interface{}) *NotifyMessage {
 	success := intValue(data["success"])
 	failed := intValue(data["failed"])
+	if success == 0 && failed == 0 {
+		return nil
+	}
+
 	msg := &NotifyMessage{
 		EventType:  "file.organized",
 		MaxRetries: 3,
@@ -194,13 +198,17 @@ func organizedNotification(data map[string]interface{}) *NotifyMessage {
 
 	if success == 0 && failed > 0 {
 		msg.Title = "🚨 文件整理失败"
-		msg.Content = fmt.Sprintf("成功: %d 个, 失败: %d 个", success, failed)
+		msg.Content = fmt.Sprintf("失败: %d 个 (全部整理失败)", failed)
 		msg.Priority = 2
 		return msg
 	}
 
 	msg.Title = "📁 文件整理结果"
-	msg.Content = fmt.Sprintf("成功: %d 个, 失败: %d 个\n最终路径: %s", success, failed, data["final_path"])
+	if failed > 0 {
+		msg.Content = fmt.Sprintf("成功: %d 个, 失败: %d 个\n最终路径: %s", success, failed, data["final_path"])
+	} else {
+		msg.Content = fmt.Sprintf("成功整理: %d 个\n最终路径: %s", success, data["final_path"])
+	}
 	msg.Priority = 1
 	return msg
 }

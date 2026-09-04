@@ -68,17 +68,52 @@ func TestSanitizePath_IllegalChars(t *testing.T) {
 }
 
 func TestRenderTemplate_ZeroYearOmitsYearSegment(t *testing.T) {
-	tmpl := "{title_cn}{year}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}"
-	v := core.VarValues{
-		TitleCN: "孤独摇滚",
-		TitleEN: "Bocchi the Rock",
-		Season:  1,
-		Ep:      1,
-		Ext:     ".mkv",
+	tests := []struct {
+		tmpl     string
+		v        core.VarValues
+		expected string
+	}{
+		{
+			tmpl: "{title_cn}{year}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}",
+			v: core.VarValues{
+				TitleCN: "孤独摇滚",
+				TitleEN: "Bocchi the Rock",
+				Season:  1,
+				Ep:      1,
+				Ext:     ".mkv",
+			},
+			expected: "孤独摇滚/Season 1/Bocchi the Rock S01E01.mkv",
+		},
+		{
+			tmpl: "{title_cn} ({year})/Season {season}/{title_en} S{season:02}E{ep:02}{ext}",
+			v: core.VarValues{
+				TitleCN: "孤独摇滚",
+				TitleEN: "Bocchi the Rock",
+				Year:    0,
+				Season:  1,
+				Ep:      1,
+				Ext:     ".mkv",
+			},
+			expected: "孤独摇滚/Season 1/Bocchi the Rock S01E01.mkv",
+		},
+		{
+			tmpl: "{title_cn}({year})/Season {season}/{title_en} S{season:02}E{ep:02}{ext}",
+			v: core.VarValues{
+				TitleCN: "孤独摇滚",
+				TitleEN: "Bocchi the Rock",
+				Year:    -1,
+				Season:  1,
+				Ep:      1,
+				Ext:     ".mkv",
+			},
+			expected: "孤独摇滚/Season 1/Bocchi the Rock S01E01.mkv",
+		},
 	}
 
-	if got := renderTemplate(tmpl, v); got != "孤独摇滚/Season 1/Bocchi the Rock S01E01.mkv" {
-		t.Fatalf("渲染结果 = %q", got)
+	for _, tt := range tests {
+		if got := renderTemplate(tt.tmpl, tt.v); got != tt.expected {
+			t.Fatalf("模板 %q 渲染结果:\n  得到: %q\n  期望: %q", tt.tmpl, got, tt.expected)
+		}
 	}
 }
 
