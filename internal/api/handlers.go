@@ -1340,41 +1340,61 @@ func (s *Server) handleGetBangumiSubject(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleScheduleBangumi(w http.ResponseWriter, r *http.Request) {
-	p := s.getBGMProvider()
-	if p == nil {
-		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "Bangumi 服务未就绪"})
-		return
-	}
-	
-	items, err := p.GetCalendar(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-		return
-	}
+	year, _ := strconv.Atoi(r.URL.Query().Get("year"))
+	season, _ := strconv.Atoi(r.URL.Query().Get("season"))
 
-	// 转换为 WeekDayItem 结构
+	now := time.Now()
+	currYear := now.Year()
+	currSeason := int((now.Month()-1)/3) + 1 // 1: 1-3月, 2: 4-6月, 3: 7-9月, 4: 10-12月
+
 	weekLabel := map[int]string{
 		1: "星期一", 2: "星期二", 3: "星期三", 4: "星期四",
 		5: "星期五", 6: "星期六", 7: "星期日",
 	}
-	
-	groups := make(map[int][]core.TorrentItem)
-	for _, item := range items {
-		day, _ := strconv.Atoi(item.EpisodeURL)
-		if day == 0 { day = 7 } // Bangumi 0 可能表示周日
-		item.EpisodeURL = "" // 清除 hack 字段
-		groups[day] = append(groups[day], item)
-	}
 
-	schedule := make([]source.WeekDayItem, 0, 7)
-	for i := 1; i <= 7; i++ {
-		dayItems := groups[i]
-		if dayItems == nil { dayItems = []core.TorrentItem{} }
-		schedule = append(schedule, source.WeekDayItem{
-			DayOfWeek: i,
-			Label:     weekLabel[i],
-			Items:     dayItems,
-		})
+	var schedule []source.WeekDayItem
+
+	// 如果选定的是其他特定历史/未来季度，则通过季度新番源获取按星期归类的番剧，实现同步历史季度
+	if year > 0 && season > 0 && (year != currYear || season != currSeason) {
+		var err error
+		if s.mikanSrc != nil {
+			schedule, err = s.mikanSrc.FetchWeekSchedule(r.Context(), year, season)
+		}
+		if (err != nil || len(schedule) == 0) && s.yucSrc != nil && s.pluginManager != nil && s.pluginManager.IsPluginEnabled("yuc_schedule") {
+			yucCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+			schedule, _ = s.yucSrc.FetchWeekSchedule(yucCtx, year, season)
+			cancel()
+		}
+	} else {
+		// 当前季度/实时：优先使用 Bangumi 每日放送官方日历接口
+		p := s.getBGMProvider()
+		if p != nil {
+			items, bErr := p.GetCalendar(r.Context())
+			if bErr == nil && len(items) > 0 {
+				groups := make(map[int][]core.TorrentItem)
+				for _, item := range items {
+					day, _ := strconv.Atoi(item.EpisodeURL)
+					if day == 0 { day = 7 } // Bangumi 0 可能表示周日
+					item.EpisodeURL = "" // 清除 hack 字段
+					groups[day] = append(groups[day], item)
+				}
+
+				for i := 1; i <= 7; i++ {
+					dayItems := groups[i]
+					if dayItems == nil { dayItems = []core.TorrentItem{} }
+					schedule = append(schedule, source.WeekDayItem{
+						DayOfWeek: i,
+						Label:     weekLabel[i],
+						Items:     dayItems,
+					})
+				}
+			}
+		}
+
+		// 若 Bangumi 获取失败，回退至 Mikan 当前季度时间表
+		if len(schedule) == 0 && s.mikanSrc != nil {
+			schedule, _ = s.mikanSrc.FetchWeekSchedule(r.Context(), currYear, currSeason)
+		}
 	}
 
 	// 同时获取订阅列表，标注已订阅的番剧
@@ -1410,33 +1430,31 @@ func (s *Server) handleScheduleBangumi(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 	year, _ := strconv.Atoi(r.URL.Query().Get("year"))
 	season, _ := strconv.Atoi(r.URL.Query().Get("season"))
+	sourceParam := r.URL.Query().Get("source")
 
 	var schedule []source.WeekDayItem
 	var err error
 
-	if s.yucSrc != nil {
+	yucEnabled := s.pluginManager != nil && s.pluginManager.IsPluginEnabled("yuc_schedule")
+
+	// 1. 若显式请求 yuc 且 yuc_schedule 插件已启用
+	if sourceParam == "yuc" && yucEnabled && s.yucSrc != nil {
 		yucCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 		schedule, err = s.yucSrc.FetchWeekSchedule(yucCtx, year, season)
-		if err != nil {
-			log.Printf("⚠️  Yucwiki 获取时间表失败 (%v)，回退至 Mikan 数据源", err)
-		} else {
-			// yucwiki 获取成功后，额外获取 SP 条目
-			spItems, spErr := s.yucSrc.FetchSPItems(yucCtx, year, season)
-			if spErr == nil && len(spItems) > 0 {
-				schedule = append(schedule, source.WeekDayItem{
-					DayOfWeek: 0,
-					Label:     "网络放送 & 其他",
-					Items:     spItems,
-				})
-			}
-		}
 		cancel()
 	}
 
-	if (err != nil || len(schedule) == 0) && s.mikanSrc != nil {
+	// 2. 默认使用 Mikan 蜜柑计划数据源
+	if len(schedule) == 0 && s.mikanSrc != nil {
 		schedule, err = s.mikanSrc.FetchWeekSchedule(r.Context(), year, season)
 		if err != nil {
 			log.Printf("⚠️  Mikan 获取时间表失败: %v", err)
+			// 若 Mikan 失败且启用了 yuc 插件，作为第二备用回退
+			if yucEnabled && s.yucSrc != nil {
+				yucCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+				schedule, err = s.yucSrc.FetchWeekSchedule(yucCtx, year, season)
+				cancel()
+			}
 		}
 	}
 

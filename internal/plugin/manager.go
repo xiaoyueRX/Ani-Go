@@ -35,7 +35,7 @@ func NewManager(bus core.EventBus) *Manager {
 		customSubs:    make(map[string][]customSubRef),
 	}
 	// 注册内建插件
-	m.builtInPlugins = append(m.builtInPlugins, &MetadataMappingPlugin{}, &GeekNamingPlugin{})
+	m.builtInPlugins = append(m.builtInPlugins, &MetadataMappingPlugin{}, &GeekNamingPlugin{}, &YucSchedulePlugin{})
 	return m
 }
 
@@ -69,7 +69,11 @@ func (m *Manager) Load() {
 		info := p.GetInfo()
 		enabled, exists := m.activePlugins[info.ID]
 		if !exists {
-			enabled = true
+			if info.ID == "yuc_schedule" {
+				enabled = false
+			} else {
+				enabled = true
+			}
 		}
 
 		if enabled {
@@ -139,7 +143,11 @@ func (m *Manager) GetPluginList() []PluginInfo {
 		info := p.GetInfo()
 		enabled, exists := m.activePlugins[info.ID]
 		if !exists {
-			enabled = true
+			if info.ID == "yuc_schedule" {
+				enabled = false
+			} else {
+				enabled = true
+			}
 		}
 		info.Enabled = enabled
 		list = append(list, info)
@@ -153,6 +161,22 @@ func (m *Manager) GetPluginList() []PluginInfo {
 		list = append(list, cp)
 	}
 	return list
+}
+
+func (m *Manager) IsPluginEnabled(id string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	enabled, exists := m.activePlugins[id]
+	if !exists {
+		if id == "yuc_schedule" {
+			return false
+		}
+		return true
+	}
+	return enabled
 }
 
 func (m *Manager) GetPlugins() interface{} {

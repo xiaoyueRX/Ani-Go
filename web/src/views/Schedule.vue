@@ -55,8 +55,19 @@ const router = useRouter()
 const weekDays = ref<WeekDay[]>([])
 const subscribedIds = ref<Record<string, boolean>>({})
 const loading = ref(true)
-const scheduleSource = ref<"yuc" | "bangumi">("yuc")
+const scheduleSource = ref<"mikan" | "bangumi" | "yuc">("mikan")
+const isYucPluginEnabled = ref(false)
 const error = ref('')
+
+async function checkYucPlugin() {
+  try {
+    const { data } = await request.get('/plugins')
+    if (Array.isArray(data)) {
+      const p = data.find((item: any) => item.id === 'yuc_schedule')
+      isYucPluginEnabled.value = !!(p && p.enabled)
+    }
+  } catch {}
+}
 const activeTab = ref<'schedule' | 'mysub'>('schedule')
 const selectedItem = ref<TorrentItem | null>(null)
 const selectedMetadata = ref<{anime: BangumiAnime, episodes: BangumiEpisode[]} | null>(null)
@@ -178,7 +189,7 @@ const todayWeekday = computed(() => {
   return d === 0 ? 7 : d
 })
 
-function setScheduleSource(src: 'yuc' | 'bangumi') {
+function setScheduleSource(src: 'mikan' | 'bangumi' | 'yuc') {
   if (scheduleSource.value === src) return
   scheduleSource.value = src
   fetchSchedule()
@@ -270,12 +281,20 @@ async function toggleSource(source: "yuc" | "bangumi") {
 async function fetchSchedule() {
   loading.value = true; error.value = ''
   try {
-    const endpoint = scheduleSource.value === 'bangumi' ? '/schedule/bangumi' : '/schedule'
+    let endpoint = '/schedule'
+    const params: Record<string, any> = { 
+      year: selectedYear.value, 
+      season: selectedSeason.value 
+    }
+    if (scheduleSource.value === 'bangumi') {
+      endpoint = '/schedule/bangumi'
+    } else if (scheduleSource.value === 'yuc') {
+      params.source = 'yuc'
+    } else {
+      params.source = 'mikan'
+    }
     const { data } = await request.get(endpoint, { 
-      params: { 
-        year: selectedYear.value, 
-        season: selectedSeason.value 
-      },
+      params,
       timeout: 30000 
     })
     weekDays.value = data.days || []
@@ -493,6 +512,7 @@ async function confirmBatchSubscribe() {
 const selectedCount = computed(() => selectedItems.value.size)
 
 onMounted(async () => {
+  await checkYucPlugin()
   await initAuth()
   await fetchSchedule()
   checkVersion()
@@ -582,14 +602,16 @@ onMounted(async () => {
       <div class="flex items-center gap-2 flex-wrap">
         <!-- 数据源切换 -->
         <div class="flex p-1 bg-base-200/60 rounded-2xl border border-base-300/40 text-xs">
+          <!-- 蜜柑计划 (默认) -->
           <button 
-            @click="setScheduleSource('yuc')" 
+            @click="setScheduleSource('mikan')" 
             class="px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5"
-            :class="scheduleSource === 'yuc' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
+            :class="scheduleSource === 'mikan' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
           >
-            <Antenna :size="13" />
-            <span>{{ $t('schedule.sourceYuc') }}</span>
+            <Sparkles :size="13" />
+            <span>{{ $t('schedule.sourceMikan') }}</span>
           </button>
+          <!-- Bangumi 每日放送 -->
           <button 
             @click="setScheduleSource('bangumi')" 
             class="px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5"
@@ -597,6 +619,16 @@ onMounted(async () => {
           >
             <Calendar :size="13" />
             <span>{{ $t('schedule.sourceBangumi') }}</span>
+          </button>
+          <!-- 長門番堂 (yuc.wiki) 仅在开启插件后显示 -->
+          <button 
+            v-if="isYucPluginEnabled"
+            @click="setScheduleSource('yuc')" 
+            class="px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5"
+            :class="scheduleSource === 'yuc' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
+          >
+            <Antenna :size="13" />
+            <span>{{ $t('schedule.sourceYuc') }}</span>
           </button>
         </div>
 
@@ -770,8 +802,8 @@ onMounted(async () => {
 
     <!-- 数据来源 -->
     <div class="text-center py-10">
-      <p class="text-xs font-medium text-base-content/25 tracking-wide">
-        {{ $t('schedule.credit') }}
+      <p class="text-xs font-medium text-base-content/30 tracking-wide">
+        {{ scheduleSource === 'bangumi' ? '数据来源：Bangumi 放送日历 (bgm.tv)' : (scheduleSource === 'yuc' ? $t('schedule.credit') : '数据来源：蜜柑计划 (mikanani.me)') }}
       </p>
     </div>
 

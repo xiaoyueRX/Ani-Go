@@ -303,7 +303,7 @@ func (m *MikanSource) searchBySeason(ctx context.Context, title string) ([]core.
 			y--
 		}
 
-		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%d", y, s)
+		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%s", y, url.QueryEscape(seasonToMikanStr(s)))
 		resp, err := m.tryMirrors(ctx, path)
 		if err != nil {
 			continue
@@ -369,6 +369,21 @@ func (m *MikanSource) IsAvailable(ctx context.Context) bool {
 // 番剧周时间表相关
 // ============================================================
 
+func seasonToMikanStr(season int) string {
+	switch season {
+	case 1:
+		return "冬"
+	case 2:
+		return "春"
+	case 3:
+		return "夏"
+	case 4:
+		return "秋"
+	default:
+		return "冬"
+	}
+}
+
 // FetchWeekSchedule 获取指定季度番剧按星期分组列表
 // 如果未指定 year/season (即为0)，则依次尝试当前/上一季度，直到拿到数据为止
 func (m *MikanSource) FetchWeekSchedule(ctx context.Context, year, season int) ([]WeekDayItem, error) {
@@ -378,7 +393,7 @@ func (m *MikanSource) FetchWeekSchedule(ctx context.Context, year, season int) (
 	}
 
 	if year > 0 && season > 0 {
-		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%d", year, season)
+		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%s", year, url.QueryEscape(seasonToMikanStr(season)))
 		return m.fetchPath(ctx, path, weekLabel)
 	}
 
@@ -395,7 +410,7 @@ func (m *MikanSource) FetchWeekSchedule(ctx context.Context, year, season int) (
 			y--
 		}
 
-		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%d", y, s)
+		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%s", y, url.QueryEscape(seasonToMikanStr(s)))
 		result, err := m.fetchPath(ctx, path, weekLabel)
 		if err == nil && len(result) > 0 {
 			return result, nil

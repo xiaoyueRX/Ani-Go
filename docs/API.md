@@ -1079,7 +1079,7 @@ curl -H "Authorization: Bearer ***   "http://localhost:20001/api/mikan/groups?ba
 
 ### GET /api/schedule
 
-获取新番时间表（优先 yuc.wiki 数据源，回退 Mikan）。
+获取季度新番时间表（默认使用蜜柑计划 Mikan 数据源；开启 `yuc_schedule` 插件后支持通过 `source=yuc` 切换至 yuc.wiki 数据源）。
 
 **认证**: ✅ 需要 JWT Token
 
@@ -1087,17 +1087,43 @@ curl -H "Authorization: Bearer ***   "http://localhost:20001/api/mikan/groups?ba
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `year` | int | ❌ | 年份（默认当前年） |
-| `season` | int | ❌ | 季度 1-4（默认当前季度） |
+| `year` | int | ❌ | 年份（默认当前年，如 `2024`） |
+| `season` | int | ❌ | 季度 1-4（默认当前季度，1:冬, 2:春, 3:夏, 4:秋） |
+| `source` | string | ❌ | 数据源：`mikan`（默认）或 `yuc`（需启用 `yuc_schedule` 插件） |
 
 **请求示例**:
 ```
-GET /api/schedule?year=2025&season=1
+GET /api/schedule?year=2025&season=1&source=mikan
 ```
 
 **curl 示例**:
 ```bash
-curl -H "Authorization: Bearer ***   "http://localhost:20001/api/schedule?year=2026&season=2"
+curl -H "Authorization: Bearer ***" "http://localhost:20001/api/schedule?year=2026&season=2"
+```
+
+---
+
+### GET /api/schedule/bangumi
+
+获取 Bangumi 放送时间表。当前季度返回实时每日放送日历；指定历史/未来年份和季度时，自动同步对应季度的放送列表。
+
+**认证**: ✅ 需要 JWT Token
+
+**请求参数**: Query
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `year` | int | ❌ | 年份（如 `2024`，默认当前年） |
+| `season` | int | ❌ | 季度 1-4（默认当前季度） |
+
+**请求示例**:
+```
+GET /api/schedule/bangumi?year=2024&season=4
+```
+
+**curl 示例**:
+```bash
+curl -H "Authorization: Bearer ***" "http://localhost:20001/api/schedule/bangumi?year=2024&season=4"
 ```
 
 **响应示例**:
