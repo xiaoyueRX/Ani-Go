@@ -56,7 +56,7 @@ fi
 
 # 默认回退版本
 if [ -z "$version" ]; then
-  version="v0.5.1"
+  version="v0.6.0"
 fi
 
 case "$version" in v*) ;; *) version="v$version" ;; esac
@@ -83,13 +83,24 @@ fi
 dest="$INSTALL_DIR/versions/$version"
 rm -rf "$dest"
 mkdir -p "$dest"
-tar -xzf "$tmp/$archive_name" -C "$dest" --strip-components=1
+tar -xzf "$tmp/$archive_name" -C "$dest" --strip-components=1 || tar -xzf "$tmp/$archive_name" -C "$dest"
+
+# 兼容解压后二进制在子目录或根目录的情况
+if [ ! -f "$dest/anigo" ] && [ -f "$dest/$pkg_name/anigo" ]; then
+  mv "$dest/$pkg_name"/* "$dest/"
+  rm -rf "$dest/$pkg_name"
+fi
 
 # 4. 创建可执行软链接
 mkdir -p "$BIN_DIR"
-chmod +x "$dest/anigo"
-ln -sf "$dest/anigo" "$BIN_DIR/anigo"
-ln -sfn "$dest" "$INSTALL_DIR/current"
+if [ -f "$dest/anigo" ]; then
+  chmod +x "$dest/anigo"
+  ln -sf "$dest/anigo" "$BIN_DIR/anigo"
+  ln -sfn "$dest" "$INSTALL_DIR/current"
+else
+  echo "❌ 安装失败: 未能在解压包中找到 anigo 可执行文件" >&2
+  exit 1
+fi
 
 # 如果没有 .env 则自动提供默认示例
 if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$dest/.env.example" ]; then

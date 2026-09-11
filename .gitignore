@@ -3,6 +3,11 @@ ani-go*
 Ani-Go*
 anigo*
 bin/
+release-assets/
+packages/
+checksums.txt
+*.tar.gz
+*.zip
 *.exe
 *.dll
 *.so

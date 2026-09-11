@@ -33,6 +33,8 @@ func Init(dbPath string) error {
 		&DownloadRecord{},
 		&Setting{},
 		&User{},
+		&NotificationLog{},
+		&ParserCache{},
 	)
 	if err != nil {
 		return err

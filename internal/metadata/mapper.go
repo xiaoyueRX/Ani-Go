@@ -54,7 +54,10 @@ func (m *Mapper) MapBangumiToExternal(ctx context.Context, bgmID string, title s
 
 func (m *Mapper) queryARM(ctx context.Context, bgmID string) (tmdbID, imdbID string) {
 	url := fmt.Sprintf("https://api.arm.moe/api/v1/relations/bgm/%s", bgmID)
-	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", ""
+	}
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return "", ""

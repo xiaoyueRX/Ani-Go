@@ -28,7 +28,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
 
-var version = "v0.5.2"
+var version = "v0.6.0"
 
 func main() {
 	printBanner()
@@ -183,6 +183,7 @@ func main() {
 		cfg.Organizer.MovieBasePath,
 		cfg.Organizer.UseHardLink,
 		pluginMgr,
+		cfg.Organizer.OVABasePath,
 	)
 	// 极客命名插件为可选功能，默认关闭以避免改变既有媒体库路径；
 	// 仅当显式设置 ANIGO_GEEK_NAMING=1 时启用
@@ -192,24 +193,27 @@ func main() {
 	}
 	log.Println("✅ 文件整理器已就绪")
 
-	// 初始化通知系统 v2（支持 Telegram/钉钉/企业微信/飞书/QQ OneBot）
+	// 初始化通知系统 v2（支持全部 16 种通道统一队列分发与重试）
 	notifyMgr := v2.NewNotifyManager(nil, bus)
-	// 从配置创建通知器并热加载
-	reloadNotifiersV2(cfg, notifyMgr)
-	if len(notifyMgr.GetStats()) > 0 || true { // 统计暂时为空，用 provider 名称判断
-		names := []string{}
-		for _, n := range notifyMgr.Notifiers() {
-			names = append(names, n.Name())
-		}
-		if len(names) > 0 {
-			log.Printf("🔔 已启用 %d 个通知渠道: %v", len(names), names)
-		}
+	notifyMgr.SetReloader(notifier.BuildAllNotifiersFromSettingsAndEnv)
+	// 绑定通知中心与消息通知推送插件的生命周期
+	plugin.DefaultExtendedNotifiersPlugin.SetController(notifyMgr)
+	notifyMgr.SetEnabled(pluginMgr.IsPluginEnabled("extended-notifiers"))
+	// 从配置与数据库创建通知器并热加载
+	notifyMgr.Reload()
+	names := []string{}
+	for _, n := range notifyMgr.Notifiers() {
+		names = append(names, n.Name())
 	}
-	notifyMgr.Start()
+	if len(names) > 0 {
+		log.Printf("🔔 已配置 %d 个通知渠道: %v", len(names), names)
+	}
 	defer notifyMgr.Stop()
 
+	dynamicDL := downloader.NewDynamicDownloader(dl)
+
 	// 启动调度器
-	sched := scheduler.New(cfg, multiSource, dl, org, bus, primaryMetadata, aiClient)
+	sched := scheduler.New(cfg, multiSource, dynamicDL, org, bus, primaryMetadata, aiClient)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -227,10 +231,11 @@ func main() {
 	}
 
 	// 启动 HTTP API 服务（含 JWT 鉴权中间件 + 嵌入式前端静态文件）
-	api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, version, cfg.Server.AllowedOrigins, dl, sched.TriggerSupplement, pluginMgr, taskParser, mikanSource.(*source.MikanSource), yucSource.(*source.YucWikiSource), multiSource, staticHandler(), cfg.Server.LogPath, notifyMgr, primaryMetadata, bus, api.ServerOptions{
+	api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, version, cfg.Server.AllowedOrigins, dynamicDL, sched.TriggerSupplement, pluginMgr, taskParser, mikanSource.(*source.MikanSource), yucSource.(*source.YucWikiSource), multiSource, staticHandler(), cfg.Server.LogPath, notifyMgr, primaryMetadata, bus, api.ServerOptions{
 		SmartSearchEnabled: cfg.AI.SmartSearchEnabled,
 		AIChat:             aiClient,
 		BackupManager:      sched.GetBackupManager(),
+		Organizer:          org,
 	})
 
 	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -410,20 +415,8 @@ func printConfig(cfg *config.Config) {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 }
 
-// reloadNotifiersV2 从配置创建通知器并热加载到 NotifyManager
+// reloadNotifiersV2 从配置与数据库创建全渠道通知器并热加载到 NotifyManager
 func reloadNotifiersV2(cfg *config.Config, mgr *v2.NotifyManager) {
-	notifierCfg := v2.NotifierConfig{
-		TelegramBotToken: cfg.Notifier.TelegramBotToken,
-		TelegramChatID:   cfg.Notifier.TelegramChatID,
-		DingTalkWebhook:  cfg.Notifier.DingTalkWebhook,
-		DingTalkSecret:   "", // 暂不支持
-		WeComWebhook:     cfg.Notifier.WecomWebhook,
-		FeishuWebhook:    cfg.Notifier.FeishuWebhook,
-		OneBotHost:       cfg.Notifier.OneBotHost,
-		OneBotToken:      cfg.Notifier.OneBotToken,
-		OneBotUserID:     cfg.Notifier.OneBotUserID,
-		OneBotGroupID:    cfg.Notifier.OneBotGroupID,
-	}
-	notifiers := v2.CreateNotifiersFromConfig(notifierCfg)
+	notifiers := notifier.BuildAllNotifiersFromSettingsAndEnv()
 	mgr.ReloadNotifiers(notifiers)
 }

@@ -16,8 +16,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.Database.Path != "ani-go.db" {
 		t.Errorf("数据库路径 = %s", cfg.Database.Path)
 	}
-	if cfg.Mikan.Domain != "mikanime.tv" {
-		t.Errorf("Mikan 域名 = %s, 期望 mikanime.tv", cfg.Mikan.Domain)
+	if cfg.Mikan.Domain != "mikanani.me" {
+		t.Errorf("Mikan 域名 = %s, 期望 mikanani.me", cfg.Mikan.Domain)
 	}
 	if len(cfg.Mikan.MirrorDomains) != 3 {
 		t.Errorf("Mikan 镜像数 = %d, 期望 3", len(cfg.Mikan.MirrorDomains))
@@ -434,3 +434,64 @@ func TestMergeFromSettings_TemplateKeysAlwaysApply(t *testing.T) {
 		t.Fatalf("模板未按设置覆盖: %+v", cfg.Organizer)
 	}
 }
+
+func TestMergeFromSettings_OverridesDefaultsWhenNoEnv(t *testing.T) {
+	os.Unsetenv("QB_HOST")
+	os.Unsetenv("TV_BASE_PATH")
+	os.Unsetenv("METADATA_PRIMARY")
+	os.Unsetenv("DEFAULT_DOWNLOADER")
+	os.Unsetenv("DOWNLOADER_DEFAULT")
+	os.Unsetenv("SEED_CLEANUP_ENABLED")
+	os.Unsetenv("TR_HOST")
+
+	cfg := Load()
+	cfg.MergeFromSettings(func(key string) (string, bool) {
+		values := map[string]string{
+			"QB_HOST":              "http://192.168.1.50:8080",
+			"TV_BASE_PATH":         "/mnt/media/anime",
+			"METADATA_PRIMARY":     "bangumi",
+			"DEFAULT_DOWNLOADER":   "aria2",
+			"SEED_CLEANUP_ENABLED": "false",
+			"TR_HOST":              "http://192.168.1.51:9091",
+		}
+		v, ok := values[key]
+		return v, ok
+	})
+
+	if cfg.Downloaders.QBittorrent.Host != "http://192.168.1.50:8080" {
+		t.Errorf("QB_HOST expected overridden, got %s", cfg.Downloaders.QBittorrent.Host)
+	}
+	if cfg.Organizer.TVBasePath != "/mnt/media/anime" {
+		t.Errorf("TV_BASE_PATH expected overridden, got %s", cfg.Organizer.TVBasePath)
+	}
+	if cfg.Metadata.Primary != "bangumi" {
+		t.Errorf("METADATA_PRIMARY expected overridden, got %s", cfg.Metadata.Primary)
+	}
+	if cfg.Downloaders.Default != "aria2" {
+		t.Errorf("DEFAULT_DOWNLOADER expected overridden to aria2, got %s", cfg.Downloaders.Default)
+	}
+	if cfg.Scheduler.SeedCleanupEnabled != false {
+		t.Errorf("SEED_CLEANUP_ENABLED expected overridden to false, got %v", cfg.Scheduler.SeedCleanupEnabled)
+	}
+	if !cfg.Downloaders.Transmission.Enabled || cfg.Downloaders.Transmission.Host != "http://192.168.1.51:9091" {
+		t.Errorf("TR_HOST expected overridden and enabled, got %+v", cfg.Downloaders.Transmission)
+	}
+}
+
+func TestMergeFromSettings_EnvTakesPrecedenceOverDB(t *testing.T) {
+	os.Setenv("QB_HOST", "http://env-qb:8080")
+	defer os.Unsetenv("QB_HOST")
+
+	cfg := Load()
+	cfg.MergeFromSettings(func(key string) (string, bool) {
+		if key == "QB_HOST" {
+			return "http://db-qb:8080", true
+		}
+		return "", false
+	})
+
+	if cfg.Downloaders.QBittorrent.Host != "http://env-qb:8080" {
+		t.Errorf("QB_HOST should keep env value http://env-qb:8080, got %s", cfg.Downloaders.QBittorrent.Host)
+	}
+}
+

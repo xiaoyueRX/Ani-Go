@@ -218,8 +218,12 @@ func Load() *Config {
 	}
 	if v := os.Getenv("QB_USER"); v != "" {
 		cfg.Downloaders.QBittorrent.Username = v
+	} else if v := os.Getenv("QB_USERNAME"); v != "" {
+		cfg.Downloaders.QBittorrent.Username = v
 	}
 	if v := os.Getenv("QB_PASS"); v != "" {
+		cfg.Downloaders.QBittorrent.Password = v
+	} else if v := os.Getenv("QB_PASSWORD"); v != "" {
 		cfg.Downloaders.QBittorrent.Password = v
 	}
 	if v := os.Getenv("QB_CATEGORY"); v != "" {
@@ -231,8 +235,12 @@ func Load() *Config {
 	}
 	if v := os.Getenv("TR_USER"); v != "" {
 		cfg.Downloaders.Transmission.Username = v
+	} else if v := os.Getenv("TR_USERNAME"); v != "" {
+		cfg.Downloaders.Transmission.Username = v
 	}
 	if v := os.Getenv("TR_PASS"); v != "" {
+		cfg.Downloaders.Transmission.Password = v
+	} else if v := os.Getenv("TR_PASSWORD"); v != "" {
 		cfg.Downloaders.Transmission.Password = v
 	}
 	if v := os.Getenv("ARIA2_HOST"); v != "" {
@@ -242,7 +250,9 @@ func Load() *Config {
 	if v := os.Getenv("ARIA2_SECRET"); v != "" {
 		cfg.Downloaders.Aria2.Secret = v
 	}
-	if v := os.Getenv("DOWNLOADER_DEFAULT"); v != "" {
+	if v := os.Getenv("DEFAULT_DOWNLOADER"); v != "" {
+		cfg.Downloaders.Default = v
+	} else if v := os.Getenv("DOWNLOADER_DEFAULT"); v != "" {
 		cfg.Downloaders.Default = v
 	}
 	if v := os.Getenv("METADATA_PRIMARY"); v != "" {
@@ -486,7 +496,7 @@ func defaults() *Config {
 		Server:   ServerConfig{Host: "0.0.0.0", Port: 20001, LogPath: "./data/ani-go.log", AllowedOrigins: []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:20001"}},
 		Database: DatabaseConfig{Path: "ani-go.db"},
 		Mikan: MikanConfig{
-			Domain: "mikanime.tv", MirrorDomains: []string{"mikanime.tv", "mikanani.kas.pub", "mikanani.me"},
+			Domain: "mikanani.me", MirrorDomains: []string{"mikanani.me", "mikanime.tv", "mikanani.kas.pub"},
 			RSSMode: core.RSSModePersonal,
 		},
 		Downloaders: DownloadersConfig{
@@ -532,75 +542,216 @@ func defaults() *Config {
 // MergeFromSettings 从数据库设置表读取配置，填充 env var 未设置的字段
 // 优先级：环境变量 > 数据库设置 > 默认值
 func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
-	if v, ok := getter("MIKAN_RSS_URL"); ok && c.Mikan.PersonalRSSURL == "" {
+	get := func(keys ...string) (string, bool) {
+		for _, k := range keys {
+			if os.Getenv(k) != "" {
+				return "", false
+			}
+		}
+		for _, k := range keys {
+			if v, ok := getter(k); ok && strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v), true
+			}
+		}
+		return "", false
+	}
+
+	getBool := func(target *bool, keys ...string) {
+		for _, k := range keys {
+			if os.Getenv(k) != "" {
+				return
+			}
+		}
+		for _, k := range keys {
+			if v, ok := getter(k); ok && strings.TrimSpace(v) != "" {
+				s := strings.TrimSpace(v)
+				*target = (s == "true" || s == "1")
+				return
+			}
+		}
+	}
+
+	getDuration := func(target *time.Duration, keys ...string) {
+		if v, ok := get(keys...); ok {
+			if d, err := time.ParseDuration(v); err == nil {
+				*target = d
+			}
+		}
+	}
+
+	getFloat := func(target *float64, keys ...string) {
+		if v, ok := get(keys...); ok {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				*target = f
+			}
+		}
+	}
+
+	getInt := func(target *int, keys ...string) {
+		if v, ok := get(keys...); ok {
+			if i, err := strconv.Atoi(v); err == nil {
+				*target = i
+			}
+		}
+	}
+
+	getSlice := func(target *[]string, keys ...string) {
+		if v, ok := get(keys...); ok {
+			*target = splitEnv(v)
+		}
+	}
+
+	// Mikan 配置
+	if v, ok := get("MIKAN_RSS_URL"); ok {
 		c.Mikan.PersonalRSSURL = v
 	}
-	if v, ok := getter("MIKAN_DOMAIN"); ok && c.Mikan.Domain == "" {
+	if v, ok := get("MIKAN_DOMAIN"); ok {
 		c.Mikan.Domain = v
 	}
-	if v, ok := getter("MIKAN_RSS_MODE"); ok && c.Mikan.RSSMode == "" {
-		c.Mikan.RSSMode = v
+	if v, ok := get("MIKAN_PROXY_DOMAIN"); ok {
+		c.Mikan.ProxyDomain = v
 	}
-	if v, ok := getter("QB_HOST"); ok && c.Downloaders.QBittorrent.Host == "" {
+	getSlice(&c.Mikan.MirrorDomains, "MIKAN_MIRROR_DOMAINS")
+	if v, ok := get("MIKAN_RSS_MODE"); ok {
+		if v == core.RSSModeClassic || v == core.RSSModePersonal {
+			c.Mikan.RSSMode = v
+		}
+	}
+
+	// 默认下载器
+	if v, ok := get("DEFAULT_DOWNLOADER", "DOWNLOADER_DEFAULT"); ok {
+		c.Downloaders.Default = v
+	}
+
+	// qBittorrent 配置
+	if v, ok := get("QB_HOST"); ok {
 		c.Downloaders.QBittorrent.Host = v
 		c.Downloaders.QBittorrent.Enabled = true
 	}
-	if v, ok := getter("QB_USER"); ok && c.Downloaders.QBittorrent.Username == "" {
+	if v, ok := get("QB_USER", "QB_USERNAME"); ok {
 		c.Downloaders.QBittorrent.Username = v
 	}
-	if v, ok := getter("QB_PASS"); ok && c.Downloaders.QBittorrent.Password == "" {
+	if v, ok := get("QB_PASS", "QB_PASSWORD"); ok {
 		c.Downloaders.QBittorrent.Password = v
 	}
-	if v, ok := getter("QB_CATEGORY"); ok && c.Downloaders.QBittorrent.Category == "" {
+	if v, ok := get("QB_CATEGORY"); ok {
 		c.Downloaders.QBittorrent.Category = v
 	}
-	if v, ok := getter("METADATA_PRIMARY"); ok && c.Metadata.Primary == "" {
+
+	// Transmission 配置
+	if v, ok := get("TR_HOST"); ok {
+		c.Downloaders.Transmission.Host = v
+		c.Downloaders.Transmission.Enabled = true
+	}
+	if v, ok := get("TR_USER", "TR_USERNAME"); ok {
+		c.Downloaders.Transmission.Username = v
+	}
+	if v, ok := get("TR_PASS", "TR_PASSWORD"); ok {
+		c.Downloaders.Transmission.Password = v
+	}
+
+	// Aria2 配置
+	if v, ok := get("ARIA2_HOST"); ok {
+		c.Downloaders.Aria2.Host = v
+		c.Downloaders.Aria2.Enabled = true
+	}
+	if v, ok := get("ARIA2_SECRET"); ok {
+		c.Downloaders.Aria2.Secret = v
+	}
+
+	// 做种清理配置
+	getBool(&c.Scheduler.SeedCleanupEnabled, "SEED_CLEANUP_ENABLED")
+	getDuration(&c.Scheduler.SeedCleanupInterval, "SEED_CLEANUP_INTERVAL")
+	getDuration(&c.Scheduler.SeedCleanupMinSeedTime, "SEED_CLEANUP_MIN_SEED_TIME")
+	getFloat(&c.Scheduler.SeedCleanupMinRatio, "SEED_CLEANUP_MIN_RATIO")
+
+	// 元数据配置
+	if v, ok := get("METADATA_PRIMARY"); ok {
 		c.Metadata.Primary = v
 	}
-	if v, ok := getter("TMDB_API_KEY"); ok && c.Metadata.TMDB.APIKey == "" {
+	if v, ok := get("TMDB_API_KEY"); ok {
 		c.Metadata.TMDB.APIKey = v
 		c.Metadata.TMDB.Enabled = true
 	}
-	if v, ok := getter("BGMTV_USER_TOKEN"); ok && c.Metadata.BGMTV.UserToken == "" {
+	if v, ok := get("TMDB_LANGUAGE"); ok {
+		c.Metadata.TMDB.Language = v
+	}
+	getSlice(&c.Metadata.TMDB.MirrorDomains, "TMDB_MIRROR_DOMAINS")
+	if v, ok := get("BGMTV_USER_TOKEN"); ok {
 		c.Metadata.BGMTV.UserToken = v
 		c.Metadata.BGMTV.Enabled = true
 	}
-	if v, ok := getter("BGMTV_USERNAME"); ok && c.Metadata.BGMTV.Username == "" {
+	if v, ok := get("BGMTV_USERNAME"); ok {
 		c.Metadata.BGMTV.Username = v
 	}
-	if v, ok := getter("DOWNLOADER_DEFAULT"); ok && c.Downloaders.Default == "qbittorrent" {
-		c.Downloaders.Default = v
-	}
-	if v, ok := getter("BGMTV_SYNC_INTERVAL"); ok && c.Scheduler.SyncBangumiInterval == 0 {
-		if d, err := time.ParseDuration(v); err == nil {
-			c.Scheduler.SyncBangumiInterval = d
-		}
-	}
-	if v, ok := getter("TV_BASE_PATH"); ok && c.Organizer.TVBasePath == "" {
+	getSlice(&c.Metadata.BGMTV.MirrorDomains, "BGMTV_MIRROR_DOMAINS")
+	getDuration(&c.Scheduler.SyncBangumiInterval, "BGMTV_SYNC_INTERVAL")
+
+	// 媒体整理与模板
+	if v, ok := get("TV_BASE_PATH"); ok {
 		c.Organizer.TVBasePath = v
 	}
-	if v, ok := getter("MOVIE_BASE_PATH"); ok && c.Organizer.MovieBasePath == "" {
+	if v, ok := get("MOVIE_BASE_PATH"); ok {
 		c.Organizer.MovieBasePath = v
 	}
-	if v, ok := getter("OVA_BASE_PATH"); ok && c.Organizer.OVABasePath == "" {
+	if v, ok := get("OVA_BASE_PATH"); ok {
 		c.Organizer.OVABasePath = v
 	}
-	if v, ok := getter("AI_ENABLED"); ok {
-		c.AI.Enabled = v == "true"
-	}
-	if v, ok := getter("AI_API_KEY"); ok && c.AI.APIKey == "" {
-		c.AI.APIKey = v
-	}
-	if v, ok := getter("AI_MODEL"); ok && c.AI.Model == "" {
-		c.AI.Model = v
-	}
-	if v, ok := getter("TV_TEMPLATE"); ok && v != "" {
+	if v, ok := get("TV_TEMPLATE"); ok {
 		c.Organizer.TVTemplate = v
 	}
-	if v, ok := getter("MOVIE_TEMPLATE"); ok && v != "" {
+	if v, ok := get("MOVIE_TEMPLATE"); ok {
 		c.Organizer.MovieTemplate = v
 	}
-	if v, ok := getter("OTHER_TEMPLATE"); ok && v != "" {
+	if v, ok := get("OTHER_TEMPLATE"); ok {
 		c.Organizer.OtherTemplate = v
+	}
+	getBool(&c.Organizer.UseHardLink, "USE_HARDLINK")
+
+	// AI 配置
+	getBool(&c.AI.Enabled, "AI_ENABLED")
+	getBool(&c.AI.SmartSearchEnabled, "AI_SMART_SEARCH")
+	if v, ok := get("AI_PROTOCOL"); ok {
+		c.AI.Protocol = v
+	}
+	if v, ok := get("AI_ENDPOINT"); ok {
+		c.AI.Endpoint = v
+	}
+	if v, ok := get("AI_API_KEY"); ok {
+		c.AI.APIKey = v
+	}
+	if v, ok := get("AI_MODEL"); ok {
+		c.AI.Model = v
+	}
+	if v, ok := get("AI_BACKUP_MODEL"); ok {
+		c.AI.BackupModel = v
+	}
+
+	// 订阅与整理调度周期
+	getDuration(&c.Scheduler.RSSInterval, "RSS_INTERVAL")
+	getDuration(&c.Scheduler.OrganizerInterval, "ORGANIZER_INTERVAL")
+	getDuration(&c.Scheduler.SupplementInterval, "SUPPLEMENT_INTERVAL")
+
+	// 备份调度
+	if v, ok := get("BACKUP_PATH"); ok {
+		c.Scheduler.BackupPath = v
+	}
+	if v, ok := get("BACKUP_CRON"); ok {
+		c.Scheduler.BackupCron = v
+	}
+	getInt(&c.Scheduler.BackupKeepCount, "BACKUP_KEEP_COUNT")
+
+	// 外部搜索源
+	getBool(&c.Sources.Nyaa.Enabled, "NYAA_ENABLED")
+	if v, ok := get("NYAA_DOMAIN"); ok {
+		c.Sources.Nyaa.Domain = v
+	}
+	getBool(&c.Sources.ACGRIP.Enabled, "ACGRIP_ENABLED")
+	if v, ok := get("ACGRIP_DOMAIN"); ok {
+		c.Sources.ACGRIP.Domain = v
+	}
+	getBool(&c.Sources.AnimeTosho.Enabled, "ANIMETOSHO_ENABLED")
+	if v, ok := get("ANIMETOSHO_DOMAIN"); ok {
+		c.Sources.AnimeTosho.Domain = v
 	}
 }

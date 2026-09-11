@@ -22,7 +22,11 @@ cp .env.example .env
 - **Phase 5 (Multi-Platform Messaging + Task Parser)**: Complete ✅ — 16-platform notification, natural language task parser (regex + AI), EventBus auto-push
 - **Phase 6 (Data Migration)**: Complete ✅ — AutoBangumi SQLite import
 - **Phase 7 (Frontend Polish + Search Fix + Schedule + Mirror Speed Test)**: Complete ✅ — Mikan search fix, IconSax icons, UI polish, settings restructure, new season schedule (yuc.wiki + poster images + auto-refresh), search→subscribe flow (group selection + RSS resolution), PWA support, remember password, episode status management, Mikan mirror speed test (auto speed test on startup + manual speed test in settings)
-- **Tests**: 108 tests passing
+- **Phase 8 (i18n + Batch Operations + Comprehensive Audit)**: Complete ✅
+- **Phase 9 (v0.5.0 Stability Hardening + Plugin Management Loop)**: Complete ✅
+- **Phase 10 (v0.5.3 Notification Matrix + Downloader Hot-Swap + Regex Sandbox + Zero-Defect Audit)**: Complete ✅ — Unified 16-channel v2.NotifyManager with hot reload & plugin lifecycle, DynamicDownloader runtime hot-swap, 10-slot custom regex sandbox, line-by-line audit with all 10 bugs eliminated, go test -race 100% PASS
+- **Phase 11 (v0.5.4 Notification Delivery Logs & Analytics + Batch Download Controls & Modal + Live RSS Inspector)**: Complete ✅ — Async queue persistence with `NotificationLog` & delivery rate metrics dashboard, downloads center new modal & pause/resume all controls, 15s RSS feed inspector & parser debugger, go test -race 100% PASS
+- **Tests**: All package unit tests and race detection (`go test -race ./...`) 100% PASS
 
 ## Tech Stack
 

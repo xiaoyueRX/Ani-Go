@@ -179,8 +179,12 @@ type DownloadTask struct {
 	Status       string
 	Progress     float32
 	SpeedDown    int64
+	SpeedUp      int64
 	Size         int64
 	Done         int64
+	Uploaded     int64
+	Ratio        float64
+	SeedingTime  int64
 }
 
 type Event struct {
@@ -203,6 +207,8 @@ type Downloader interface {
 	List(ctx context.Context) ([]DownloadTask, error)
 	GetStatus(ctx context.Context, hash string) (DownloadTask, error)
 	Delete(ctx context.Context, hash string, deleteFiles bool) error
+	Pause(ctx context.Context, hash string) error
+	Resume(ctx context.Context, hash string) error
 	IsAvailable(ctx context.Context) bool
 }
 

@@ -9,6 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 )
 
 // ============================================================
@@ -128,9 +132,9 @@ func LoadCustomPatternsFromSettings(getSetting func(key string) (string, bool)) 
 		key := fmt.Sprintf("custom_regex_%d", i)
 		val, ok := getSetting(key)
 		if !ok || strings.TrimSpace(val) == "" {
-			break
+			continue
 		}
-		patterns = append(patterns, val)
+		patterns = append(patterns, strings.TrimSpace(val))
 	}
 	if err := SetCustomRegexPatterns(patterns); err != nil {
 		log.Printf("⚠️  加载自定义正则失败: %v", err)
@@ -141,6 +145,17 @@ func LoadCustomPatternsFromSettings(getSetting func(key string) (string, bool)) 
 // 参考 ani-rss RenameUtil.rename() 的解析逻辑
 // 优先尝试用户自定义正则，再回退到内置 8 种模式
 func ParseMikanTitle(rawTitle string) TitleInfo {
+	if cached, ok := parser.GetCachedTitleResult(rawTitle); ok {
+		return TitleInfo{
+			Title:      cached.CleanTitle,
+			RawTitle:   rawTitle,
+			Subgroup:   cached.Subgroup,
+			Episode:    cached.Episode,
+			Season:     cached.Season,
+			Resolution: cached.Resolution,
+		}
+	}
+
 	info := TitleInfo{
 		RawTitle: rawTitle,
 		Season:   1,
@@ -277,6 +292,36 @@ func ParseMikanTitle(rawTitle string) TitleInfo {
 	}
 
 	info.Title = strings.TrimSpace(title)
+	_ = parser.SaveCachedTitleResult(rawTitle, info.Title, info.Season, info.Episode, info.Subgroup, info.Resolution, 1.0, "regex")
+	return info
+}
+
+// ParseMikanTitleAdvanced 在本地正则的基础上，利用放送时间戳与 Bangumi 单集日历进行二阶段零成本对齐
+func ParseMikanTitleAdvanced(rawTitle string, pubDate time.Time, episodes []core.Episode) TitleInfo {
+	if cached, ok := parser.GetCachedTitleResult(rawTitle); ok {
+		return TitleInfo{
+			Title:      cached.CleanTitle,
+			RawTitle:   rawTitle,
+			Subgroup:   cached.Subgroup,
+			Episode:    cached.Episode,
+			Season:     cached.Season,
+			Resolution: cached.Resolution,
+		}
+	}
+
+	info := ParseMikanTitle(rawTitle)
+
+	// 第二级：若有放送时间戳与单集日历，进行确定性对齐校准
+	if !pubDate.IsZero() && len(episodes) > 0 {
+		match := parser.MatchEpisodeByAirDate(pubDate, rawTitle, episodes)
+		if match.Matched {
+			info.Season = match.Season
+			info.Episode = match.Episode
+			_ = parser.SaveCachedTitleResult(rawTitle, info.Title, info.Season, info.Episode, info.Subgroup, info.Resolution, match.Confidence, "airdate")
+			return info
+		}
+	}
+
 	return info
 }
 

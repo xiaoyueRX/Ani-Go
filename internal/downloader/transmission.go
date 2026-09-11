@@ -45,15 +45,19 @@ type trResponse struct {
 }
 
 type trTorrent struct {
-	ID              int     `json:"id"`
-	HashString      string  `json:"hashString"`
-	Name            string  `json:"name"`
-	DownloadDir     string  `json:"downloadDir"`
-	Status          int     `json:"status"`
-	PercentDone     float64 `json:"percentDone"`
-	RateDownload    int64   `json:"rateDownload"`
-	TotalSize       int64   `json:"totalSize"`
-	DownloadedEver  int64   `json:"downloadedEver"`
+	ID             int     `json:"id"`
+	HashString     string  `json:"hashString"`
+	Name           string  `json:"name"`
+	DownloadDir    string  `json:"downloadDir"`
+	Status         int     `json:"status"`
+	PercentDone    float64 `json:"percentDone"`
+	RateDownload   int64   `json:"rateDownload"`
+	RateUpload     int64   `json:"rateUpload"`
+	TotalSize      int64   `json:"totalSize"`
+	DownloadedEver int64   `json:"downloadedEver"`
+	UploadedEver   int64   `json:"uploadedEver"`
+	UploadRatio    float64 `json:"uploadRatio"`
+	SecondsSeeding int64   `json:"secondsSeeding"`
 }
 
 // 状态常量
@@ -81,9 +85,15 @@ var trTagCounter atomic.Uint64
 
 // NewTransmission 创建 Transmission 下载器实例
 func NewTransmission(host, username, password string) *Transmission {
+	h := strings.TrimRight(host, "/")
+	if strings.HasSuffix(h, "/transmission/rpc") {
+		h = strings.TrimSuffix(h, "/transmission/rpc")
+	} else if strings.HasSuffix(h, "/transmission") {
+		h = strings.TrimSuffix(h, "/transmission")
+	}
 	return &Transmission{
 		httpClient: httpx.New(30 * time.Second),
-		host:       strings.TrimRight(host, "/"),
+		host:       h,
 		username:   username,
 		password:   password,
 	}
@@ -97,8 +107,8 @@ func (t *Transmission) call(ctx context.Context, method string, args map[string]
 }
 
 func (t *Transmission) callWithRetry(ctx context.Context, method string, args map[string]interface{}, attempt int) (trResponse, error) {
-	if attempt > 2 {
-		return trResponse{}, fmt.Errorf("Transmission 会话重试次数超限 (多次返回 409 Conflict)")
+	if attempt > 3 {
+		return trResponse{}, fmt.Errorf("Transmission 会话重试次数超限 (多次返回 409 Conflict 或临时连接故障)")
 	}
 
 	t.mu.Lock()
@@ -124,6 +134,15 @@ func (t *Transmission) callWithRetry(ctx context.Context, method string, args ma
 
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
+		// 瞬时连接重置或网络抖动重试
+		if ctx.Err() == nil && attempt < 2 {
+			select {
+			case <-ctx.Done():
+				return trResponse{}, ctx.Err()
+			case <-time.After(time.Duration(50*(attempt+1)) * time.Millisecond):
+				return t.callWithRetry(ctx, method, args, attempt+1)
+			}
+		}
 		return trResponse{}, fmt.Errorf("Transmission RPC 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -138,6 +157,18 @@ func (t *Transmission) callWithRetry(ctx context.Context, method string, args ma
 			return t.callWithRetry(ctx, method, args, attempt+1)
 		}
 		return trResponse{}, fmt.Errorf("Transmission 返回 409 但未提供新 Session ID")
+	}
+
+	// 502/503/504 等临时网关异常退避重试
+	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		if ctx.Err() == nil && attempt < 2 {
+			select {
+			case <-ctx.Done():
+				return trResponse{}, ctx.Err()
+			case <-time.After(time.Duration(100*(attempt+1)) * time.Millisecond):
+				return t.callWithRetry(ctx, method, args, attempt+1)
+			}
+		}
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -181,7 +212,11 @@ func (t *Transmission) Add(ctx context.Context, item core.TorrentItem, savePath 
 // List 获取所有下载任务
 func (t *Transmission) List(ctx context.Context) ([]core.DownloadTask, error) {
 	args := map[string]interface{}{
-		"fields": []string{"id", "hashString", "name", "downloadDir", "status", "percentDone", "rateDownload", "totalSize", "downloadedEver"},
+		"fields": []string{
+			"id", "hashString", "name", "downloadDir", "status", "percentDone",
+			"rateDownload", "rateUpload", "totalSize", "downloadedEver",
+			"uploadedEver", "uploadRatio", "secondsSeeding",
+		},
 	}
 	resp, err := t.call(ctx, "torrent-get", args)
 	if err != nil {
@@ -198,14 +233,18 @@ func (t *Transmission) List(ctx context.Context) ([]core.DownloadTask, error) {
 	tasks := make([]core.DownloadTask, 0, len(result.Torrents))
 	for _, tr := range result.Torrents {
 		tasks = append(tasks, core.DownloadTask{
-			Hash:      tr.HashString,
-			Name:      tr.Name,
-			SavePath:  tr.DownloadDir,
-			Status:    trStatusString(tr.Status),
-			Progress:  float32(tr.PercentDone),
-			SpeedDown: tr.RateDownload,
-			Size:      tr.TotalSize,
-			Done:      tr.DownloadedEver,
+			Hash:        tr.HashString,
+			Name:        tr.Name,
+			SavePath:    tr.DownloadDir,
+			Status:      trStatusString(tr.Status),
+			Progress:    float32(tr.PercentDone),
+			SpeedDown:   tr.RateDownload,
+			SpeedUp:     tr.RateUpload,
+			Size:        tr.TotalSize,
+			Done:        tr.DownloadedEver,
+			Uploaded:    tr.UploadedEver,
+			Ratio:       tr.UploadRatio,
+			SeedingTime: tr.SecondsSeeding,
 		})
 	}
 	return tasks, nil
@@ -217,8 +256,9 @@ func (t *Transmission) GetStatus(ctx context.Context, hash string) (core.Downloa
 	if err != nil {
 		return core.DownloadTask{}, err
 	}
+	cleanHash := strings.TrimSpace(hash)
 	for _, task := range tasks {
-		if task.Hash == hash {
+		if strings.EqualFold(task.Hash, cleanHash) || strings.EqualFold(task.Name, cleanHash) {
 			return task, nil
 		}
 	}
@@ -228,7 +268,7 @@ func (t *Transmission) GetStatus(ctx context.Context, hash string) (core.Downloa
 // Delete 删除下载任务
 func (t *Transmission) Delete(ctx context.Context, hash string, deleteFiles bool) error {
 	args := map[string]interface{}{
-		"ids":               []string{hash},
+		"ids":               []string{strings.TrimSpace(hash)},
 		"delete-local-data": deleteFiles,
 	}
 	_, err := t.call(ctx, "torrent-remove", args)
@@ -239,9 +279,37 @@ func (t *Transmission) Delete(ctx context.Context, hash string, deleteFiles bool
 	return nil
 }
 
-// IsAvailable 检测 Transmission 是否可用
+// Pause 暂停下载任务
+func (t *Transmission) Pause(ctx context.Context, hash string) error {
+	args := map[string]interface{}{
+		"ids": []string{strings.TrimSpace(hash)},
+	}
+	_, err := t.call(ctx, "torrent-stop", args)
+	if err != nil {
+		return fmt.Errorf("Transmission 暂停任务失败: %w", err)
+	}
+	log.Printf("⏸️  [Transmission] 已暂停任务: %s", hash)
+	return nil
+}
+
+// Resume 恢复下载任务
+func (t *Transmission) Resume(ctx context.Context, hash string) error {
+	args := map[string]interface{}{
+		"ids": []string{strings.TrimSpace(hash)},
+	}
+	_, err := t.call(ctx, "torrent-start", args)
+	if err != nil {
+		return fmt.Errorf("Transmission 恢复任务失败: %w", err)
+	}
+	log.Printf("▶️  [Transmission] 已恢复任务: %s", hash)
+	return nil
+}
+
+// IsAvailable 检测 Transmission 是否可用（含 5s 超时保护）
 func (t *Transmission) IsAvailable(ctx context.Context) bool {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	args := map[string]interface{}{}
-	_, err := t.call(ctx, "session-get", args)
+	_, err := t.call(checkCtx, "session-get", args)
 	return err == nil
 }

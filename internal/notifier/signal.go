@@ -27,9 +27,17 @@ func NewSignalNotifier() *SignalNotifier {
 		}
 	}
 
+	return NewSignalNotifierWithParams(
+		os.Getenv("SIGNAL_API_URL"),
+		os.Getenv("SIGNAL_SENDER"),
+		recipients,
+	)
+}
+
+func NewSignalNotifierWithParams(apiURL, sender string, recipients []string) *SignalNotifier {
 	return &SignalNotifier{
-		APIURL:     os.Getenv("SIGNAL_API_URL"),
-		Sender:     os.Getenv("SIGNAL_SENDER"),
+		APIURL:     apiURL,
+		Sender:     sender,
 		Recipients: recipients,
 	}
 }

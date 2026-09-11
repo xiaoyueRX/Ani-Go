@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 )
 
 //go:embed web/dist
@@ -29,12 +30,12 @@ func staticHandler() http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-
-		if path == "/" {
+		if path == "" || path == "/" {
 			path = "/index.html"
 		}
 
-		f, err := staticFS.Open(path[1:])
+		cleanPath := strings.TrimPrefix(path, "/")
+		f, err := staticFS.Open(cleanPath)
 		if err != nil {
 			indexData, indexErr := fs.ReadFile(staticFS, "index.html")
 			if indexErr != nil {
@@ -46,7 +47,19 @@ func staticHandler() http.Handler {
 			w.Write(indexData)
 			return
 		}
+		stat, statErr := f.Stat()
 		f.Close()
+		if statErr != nil || stat.IsDir() {
+			indexData, indexErr := fs.ReadFile(staticFS, "index.html")
+			if indexErr != nil {
+				http.Error(w, "内部错误", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.Write(indexData)
+			return
+		}
 
 		// index.html 禁止缓存（确保新版本立即生效）
 		if path == "/index.html" || path == "/" {

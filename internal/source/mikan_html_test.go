@@ -129,6 +129,35 @@ func TestParseMikanSearchHTML_Empty(t *testing.T) {
 	}
 }
 
+func TestParseMikanSearchHTML_Table(t *testing.T) {
+	html := `<!DOCTYPE html>
+<html>
+<body>
+<table>
+  <tbody>
+    <tr class="js-search-results-row">
+      <td><a href="/Home/Episode/8e70118dec1215ce01a88d71f6d1e3a066546122" class="magnet-link-wrap">[桜都字幕组] 飙马野郎 - 01 [1080P]</a></td>
+      <td><a data-clipboard-text="magnet:?xt=urn:btih:8e70118dec1215ce01a88d71f6d1e3a066546122&amp;tr=http://tracker.org" class="js-magnet"></a></td>
+    </tr>
+  </tbody>
+</table>
+</body>
+</html>`
+	items := parseMikanSearchHTML(html, "mikanani.me")
+	if len(items) != 1 {
+		t.Fatalf("期望 1 个表格搜索结果，实际 %d", len(items))
+	}
+	if items[0].Title != "[桜都字幕组] 飙马野郎 - 01 [1080P]" {
+		t.Errorf("标题不符: %s", items[0].Title)
+	}
+	if items[0].GroupName != "桜都字幕组" {
+		t.Errorf("字幕组不符: %s", items[0].GroupName)
+	}
+	if items[0].InfoHash != "8e70118dec1215ce01a88d71f6d1e3a066546122" {
+		t.Errorf("InfoHash 不符: %s", items[0].InfoHash)
+	}
+}
+
 func TestExtractInfoHash(t *testing.T) {
 	tests := []struct {
 		magnet string

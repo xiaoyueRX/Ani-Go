@@ -3,25 +3,42 @@
 
 services:
   ani-go:
-    build: .
+    # 优先使用官方 GHCR 镜像（若本地二次开发可切换为 build: .）
+    image: ghcr.io/xiaoyuerx/ani-go:latest
+    # build: .
     container_name: ani-go
     restart: unless-stopped
+    user: "1000:1000"
     ports:
       - "20001:20001"
     env_file:
       - .env
     volumes:
-      # 番剧媒体库根目录（修改为你的实际路径）
-      # NAS 示例: /volume1/Media:/TV/Media
-      # fnOS 示例: /vol2/1000/TV:/TV/Media
-      - /path/to/your/media:/TV/Media
-      # 数据库持久化
-      - ./data:/data
+      # 【推荐规范 1】单根卷挂载（同卷零拷贝硬链接 Hardlink 最佳实践）：
+      # 将宿主机统一存储父目录挂载至容器 /data，此时下载与整理在同一卷内
+      # 群晖示例: /volume1/data:/data
+      # 飞牛 fnOS 示例: /vol2/1000/data:/data
+      - /path/to/your/data:/data
+
+      # 【兼容方案 2】独立分目录挂载（若下载与媒体库在不同存储卷，将自动回退为跨盘复制）：
+      # - /path/to/your/media:/data/media
+      # - ./data:/data/db
     environment:
+      - TZ=Asia/Shanghai
       - PORT=20001
-      - DB_PATH=/data/ani-go.db
-      - TV_BASE_PATH=/TV/Media/番剧
-      - MOVIE_BASE_PATH=/TV/Media/剧场版
-      - OVA_BASE_PATH=/TV/Media/OVA
-    # Lucky/Nginx 反向代理时取消注释：
+      - PUID=1000
+      - PGID=1000
+      - DB_PATH=/data/db/ani-go.db
+      - TV_BASE_PATH=/data/media/番剧
+      - MOVIE_BASE_PATH=/data/media/剧场版
+      - OVA_BASE_PATH=/data/media/OVA
+      - USE_HARDLINK=true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:20001/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Lucky / Nginx 反向代理时如需特定网络模式可按需解开：
     # network_mode: bridge
+

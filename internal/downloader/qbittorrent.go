@@ -5,6 +5,7 @@ package downloader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -31,6 +32,8 @@ type QBittorrent struct {
 	password   string
 	category   string
 	loginMu    sync.Mutex
+	loggedIn   bool
+	lastLogin  time.Time
 	retryCount int
 }
 
@@ -52,6 +55,9 @@ func (q *QBittorrent) Name() string { return "qBittorrent" }
 
 // login 登录 qBittorrent Web UI，获取会话 Cookie
 func (q *QBittorrent) login(ctx context.Context) error {
+	q.loginMu.Lock()
+	defer q.loginMu.Unlock()
+
 	data := url.Values{}
 	data.Set("username", q.username)
 	data.Set("password", q.password)
@@ -77,6 +83,8 @@ func (q *QBittorrent) login(ctx context.Context) error {
 		return fmt.Errorf("登录失败 (状态码 %d): %s", resp.StatusCode, string(body))
 	}
 
+	q.loggedIn = true
+	q.lastLogin = time.Now()
 	log.Println("✅ qBittorrent 登录成功")
 	return nil
 }
@@ -153,16 +161,13 @@ func (q *QBittorrent) addWithRetry(ctx context.Context, item core.TorrentItem, s
 		log.Printf("⚠️ 添加种子返回异常状态码 %d，尝试重新登录重试", resp.StatusCode)
 	}
 
-	// 清除 Cookie 重新登录
+	// 标记会话失效并重新登录
 	q.loginMu.Lock()
-	q.httpClient.Jar = nil
-	jar, _ := cookiejar.New(nil)
-	q.httpClient.Jar = jar
+	q.loggedIn = false
+	q.loginMu.Unlock()
 	if loginErr := q.login(ctx); loginErr != nil {
-		q.loginMu.Unlock()
 		return fmt.Errorf("重新登录失败: %w", loginErr)
 	}
-	q.loginMu.Unlock()
 
 	// 重试添加
 	log.Printf("🔄 重试添加种子 (%d/1): %s", attempt+1, item.Title)
@@ -187,6 +192,35 @@ func (q *QBittorrent) List(ctx context.Context) ([]core.DownloadTask, error) {
 		return nil, fmt.Errorf("查询下载列表失败: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// 若遇到 401/403 认证过期，尝试重新登录并重试一次
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+		_ = resp.Body.Close()
+		q.loginMu.Lock()
+		q.loggedIn = false
+		q.loginMu.Unlock()
+		if loginErr := q.login(ctx); loginErr != nil {
+			return nil, fmt.Errorf("重新登录失败: %w", loginErr)
+		}
+		reqRetry, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			q.host+"/api/v2/torrents/info", nil)
+		if err != nil {
+			return nil, err
+		}
+		reqRetry.Header.Set("Referer", q.host)
+		respRetry, err := q.httpClient.Do(reqRetry)
+		if err != nil {
+			return nil, fmt.Errorf("查询下载列表重试失败: %w", err)
+		}
+		defer respRetry.Body.Close()
+		if respRetry.StatusCode == http.StatusNoContent {
+			return []core.DownloadTask{}, nil
+		}
+		if respRetry.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("查询下载列表重试返回状态码: %d", respRetry.StatusCode)
+		}
+		return parseQBittorrentList(respRetry.Body)
+	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return nil, fmt.Errorf("查询下载列表返回状态码: %d", resp.StatusCode)
@@ -278,6 +312,70 @@ func (q *QBittorrent) Delete(ctx context.Context, hash string, deleteFiles bool)
 	return nil
 }
 
+// Pause 暂停下载/做种任务
+func (q *QBittorrent) Pause(ctx context.Context, hash string) error {
+	if err := q.ensureLogin(ctx); err != nil {
+		return err
+	}
+
+	data := url.Values{}
+	data.Set("hashes", hash)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		q.host+"/api/v2/torrents/pause", strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("创建暂停请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Referer", q.host)
+
+	resp, err := q.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("暂停种子请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("暂停种子失败 (状态码 %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.Printf("⏸️ [qBittorrent] 已暂停任务: %s", hash)
+	return nil
+}
+
+// Resume 恢复下载/做种任务
+func (q *QBittorrent) Resume(ctx context.Context, hash string) error {
+	if err := q.ensureLogin(ctx); err != nil {
+		return err
+	}
+
+	data := url.Values{}
+	data.Set("hashes", hash)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		q.host+"/api/v2/torrents/resume", strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("创建恢复请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Referer", q.host)
+
+	resp, err := q.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("恢复种子请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("恢复种子失败 (状态码 %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.Printf("▶️ [qBittorrent] 已恢复任务: %s", hash)
+	return nil
+}
+
 // AddTags 给指定种子添加标签（参考 ani-rss 的 addTags 方法）
 func (q *QBittorrent) AddTags(ctx context.Context, hash string, tags string) error {
 	if err := q.ensureLogin(ctx); err != nil {
@@ -326,7 +424,10 @@ func (q *QBittorrent) GetTorrentHashByURL(ctx context.Context, torrentURL string
 
 // IsAvailable 检测 qBittorrent 是否可用
 func (q *QBittorrent) IsAvailable(ctx context.Context) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodGet,
 		q.host+"/api/v2/app/version", nil)
 	if err != nil {
 		return false
@@ -340,31 +441,14 @@ func (q *QBittorrent) IsAvailable(ctx context.Context) bool {
 	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent
 }
 
-// ensureLogin 确保已登录，如果 Cookie 过期则重新登录
+// ensureLogin 确保已登录，如果未登录或 Cookie 过期则登录
 func (q *QBittorrent) ensureLogin(ctx context.Context) error {
-	// 先尝试访问需要认证的接口
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		q.host+"/api/v2/torrents/info", nil)
-	if err != nil {
-		return q.login(ctx)
+	q.loginMu.Lock()
+	valid := q.loggedIn && time.Since(q.lastLogin) < 30*time.Minute
+	q.loginMu.Unlock()
+	if valid {
+		return nil
 	}
-	req.Header.Set("Referer", q.host)
-	resp, err := q.httpClient.Do(req)
-	if err == nil {
-		// 403/401 = 未登录/过期，需要重新登录
-		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
-			resp.Body.Close()
-			return q.login(ctx)
-		}
-		// 200 = 明确已登录（有数据或空列表但已认证）
-		// 204 = 空列表但已认证（qBittorrent 空列表也返回 204）
-		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
-			resp.Body.Close()
-			return nil
-		}
-		resp.Body.Close()
-	}
-	// 其他情况（网络错误等）尝试登录
 	return q.login(ctx)
 }
 
@@ -381,13 +465,20 @@ type qbTorrentInfo struct {
 	State       string  `json:"state"`
 	Progress    float32 `json:"progress"`
 	DlSpeed     int64   `json:"dlspeed"`
+	UpSpeed     int64   `json:"upspeed"`
 	Size        int64   `json:"size"`
 	Completed   int64   `json:"completed"`
+	Uploaded    int64   `json:"uploaded"`
+	Ratio       float64 `json:"ratio"`
+	SeedingTime int64   `json:"seeding_time"`
 }
 
 func parseQBittorrentList(r io.Reader) ([]core.DownloadTask, error) {
 	var infos []qbTorrentInfo
 	if err := json.NewDecoder(r).Decode(&infos); err != nil {
+		if errors.Is(err, io.EOF) {
+			return []core.DownloadTask{}, nil
+		}
 		return nil, fmt.Errorf("JSON 解码失败: %w", err)
 	}
 
@@ -401,8 +492,12 @@ func parseQBittorrentList(r io.Reader) ([]core.DownloadTask, error) {
 			Status:       info.State,
 			Progress:     info.Progress,
 			SpeedDown:    info.DlSpeed,
+			SpeedUp:      info.UpSpeed,
 			Size:         info.Size,
 			Done:         info.Completed,
+			Uploaded:     info.Uploaded,
+			Ratio:        info.Ratio,
+			SeedingTime:  info.SeedingTime,
 		})
 	}
 	return tasks, nil

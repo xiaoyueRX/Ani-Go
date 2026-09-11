@@ -208,5 +208,8 @@ func MigrateFromPath(sourcePath string) (*Stats, error) {
 	if err != nil {
 		return nil, fmt.Errorf("无法打开源数据库: %w", err)
 	}
+	if sqlDB, err := sourceDB.DB(); err == nil {
+		defer sqlDB.Close()
+	}
 	return MigrateFrom(sourceDB)
 }

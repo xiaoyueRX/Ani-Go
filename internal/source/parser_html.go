@@ -94,6 +94,84 @@ func parseMikanSearchHTML(html, domain string) []core.TorrentItem {
 		})
 	})
 
+	// 方法3：从搜索结果的种子表格中提取具体种子条目 (tr.js-search-results-row 或 table tr)
+	doc.Find("tr.js-search-results-row, table tbody tr").Each(func(_ int, tr *goquery.Selection) {
+		link := tr.Find("a.magnet-link-wrap").First()
+		if link.Length() == 0 {
+			link = tr.Find("a[href*=\"/Home/Episode/\"]").First()
+		}
+		if link.Length() == 0 {
+			return
+		}
+
+		title := strings.TrimSpace(link.Text())
+		href, _ := link.Attr("href")
+		if title == "" {
+			return
+		}
+
+		magnet := ""
+		if m, ok := tr.Find("a[data-clipboard-text]").Attr("data-clipboard-text"); ok && m != "" {
+			magnet = m
+		} else if m, ok := tr.Find("input[data-magnet]").Attr("data-magnet"); ok && m != "" {
+			magnet = m
+		}
+
+		torrentURL := ""
+		if t, ok := tr.Find("a[href*=\"/Download/\"]").Attr("href"); ok && t != "" {
+			if strings.HasPrefix(t, "/") {
+				torrentURL = "https://" + domain + t
+			} else {
+				torrentURL = t
+			}
+		}
+
+		fullURL := ""
+		if href != "" {
+			if strings.HasPrefix(href, "/") {
+				fullURL = "https://" + domain + href
+			} else {
+				fullURL = href
+			}
+		}
+		if fullURL == "" {
+			fullURL = torrentURL
+		}
+
+		key := magnet
+		if key == "" {
+			key = fullURL
+		}
+		if key == "" {
+			key = title
+		}
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+
+		infoHash := extractInfoHash(magnet)
+		if infoHash == "" && href != "" && strings.HasPrefix(href, "/Home/Episode/") {
+			infoHash = strings.TrimPrefix(href, "/Home/Episode/")
+		}
+
+		groupName := ""
+		if strings.HasPrefix(title, "[") {
+			if idx := strings.Index(title, "]"); idx > 1 {
+				groupName = title[1:idx]
+			}
+		}
+
+		items = append(items, core.TorrentItem{
+			Title:      title,
+			URL:        fullURL,
+			MagnetURL:  magnet,
+			InfoHash:   infoHash,
+			SourceName: "Mikan",
+			GroupName:  groupName,
+		})
+	})
+
 	return items
 }
 
@@ -333,10 +411,11 @@ func parseSize(s string) int64 {
 	}
 }
 
-// extractInfoHash 从磁力链接中提取 40 位十六进制 BT InfoHash
+var infoHashRegex = regexp.MustCompile(`(?i)btih:([0-9a-fA-F]{40}|[2-7a-zA-Z]{32})`)
+
+// extractInfoHash 从磁力链接中提取 40 位 Hex 或 32 位 Base32 BT InfoHash
 func extractInfoHash(magnetURL string) string {
-	re := regexp.MustCompile(`btih:([0-9a-fA-F]{40})`)
-	matches := re.FindStringSubmatch(magnetURL)
+	matches := infoHashRegex.FindStringSubmatch(magnetURL)
 	if len(matches) < 2 {
 		return ""
 	}

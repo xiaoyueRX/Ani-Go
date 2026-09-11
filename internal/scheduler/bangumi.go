@@ -14,9 +14,20 @@ import (
 // pollSyncBangumi 同步 Bangumi 收藏到本地订阅
 func (s *Scheduler) pollSyncBangumi(ctx context.Context) {
 	username := s.cfg.Metadata.BGMTV.Username
+	if database.DB != nil {
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", "BGMTV_USERNAME").First(&setting).Error; err == nil && setting.Value != "" {
+			username = setting.Value
+		}
+	}
 	if username == "" || s.metadataProvider == nil || s.metadataProvider.Name() != "BGM.tv" {
 		return
 	}
+	if !s.pollSyncBangumiRunning.CompareAndSwap(false, true) {
+		log.Println("⏳ 上一轮 Bangumi 收藏同步尚未完成，跳过本次触发")
+		return
+	}
+	defer s.pollSyncBangumiRunning.Store(false)
 
 	log.Printf("🔄 开始同步 Bangumi 收藏 (用户: %s)...", username)
 

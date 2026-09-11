@@ -8,7 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/event"
 )
 
@@ -39,17 +42,27 @@ type NotifyManager struct {
 	queue     chan *NotifyMessage
 	retryChan chan *NotifyMessage
 	dlq       chan *NotifyMessage // 死信队列
+	logQueue  chan *database.NotificationLog // 日志持久化队列
 
 	workerCount int
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
 
-	mu    sync.RWMutex
-	stats map[string]int64
+	mu          sync.RWMutex
+	enabled     bool
+	running     bool
+	eventSubs   []eventSubRef
+	stats       map[string]int64
+	reloader    func() []Notifier
 
 	// 事件路由规则：事件类型 -> 目标渠道列表（空=全渠道）
 	routeRules map[string][]string
+}
+
+type eventSubRef struct {
+	evType string
+	subID  core.SubscriptionID
 }
 
 func NewNotifyManager(notifiers []Notifier, bus *event.Bus) *NotifyManager {
@@ -60,9 +73,11 @@ func NewNotifyManager(notifiers []Notifier, bus *event.Bus) *NotifyManager {
 		queue:       make(chan *NotifyMessage, 5000),
 		retryChan:   make(chan *NotifyMessage, 1000),
 		dlq:         make(chan *NotifyMessage, 1000),
+		logQueue:    make(chan *database.NotificationLog, 1000),
 		workerCount: 4,
 		ctx:         ctx,
 		cancel:      cancel,
+		enabled:     true,
 		stats:       make(map[string]int64),
 		routeRules: map[string][]string{
 			"download.started":   {}, // 全渠道
@@ -74,31 +89,84 @@ func NewNotifyManager(notifiers []Notifier, bus *event.Bus) *NotifyManager {
 	}
 }
 
-// Start 启动通知管理器
+// SetReloader 设置通知器加载函数
+func (m *NotifyManager) SetReloader(reloader func() []Notifier) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reloader = reloader
+}
+
+// Reload 重新加载全渠道通知器
+func (m *NotifyManager) Reload() {
+	m.mu.RLock()
+	reloader := m.reloader
+	m.mu.RUnlock()
+	if reloader != nil {
+		m.ReloadNotifiers(reloader())
+	}
+}
+
+// SetEnabled 设置通知中心启停状态（完全控制底层协程生命周期与事件监听）
+func (m *NotifyManager) SetEnabled(enabled bool) {
+	if enabled {
+		m.Start()
+	} else {
+		m.Stop()
+	}
+}
+
+// IsEnabled 获取通知中心启停状态
+func (m *NotifyManager) IsEnabled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.enabled && m.running
+}
+
+// Start 启动通知管理器（保证幂等与协程安全）
 func (m *NotifyManager) Start() {
-	m.wg.Add(1)
+	m.mu.Lock()
+	if m.running {
+		m.mu.Unlock()
+		return
+	}
+	m.ctx, m.cancel = context.WithCancel(context.Background())
+	m.queue = make(chan *NotifyMessage, 5000)
+	m.retryChan = make(chan *NotifyMessage, 1000)
+	m.dlq = make(chan *NotifyMessage, 1000)
+	m.logQueue = make(chan *database.NotificationLog, 1000)
+	m.running = true
+	m.enabled = true
+	m.mu.Unlock()
+
+	m.wg.Add(4)
 	go m.worker()
-
-	// 重试调度器
-	m.wg.Add(1)
 	go m.retryScheduler()
-
-	// 死信队列处理
-	m.wg.Add(1)
 	go m.handleDLQ()
+	go m.handleLogPersist()
 
-	// 订阅事件总线
 	m.subscribeEvents()
-
 	log.Printf("🚀 通知中心启动: Workers=%d, Providers=%v", m.workerCount, m.getProviderNames())
 }
 
-// Stop 优雅关闭
+// Stop 优雅关闭通知管理器并回收所有后台协程
 func (m *NotifyManager) Stop() {
-	m.cancel()
+	m.mu.Lock()
+	if !m.running {
+		m.mu.Unlock()
+		return
+	}
+	m.running = false
+	m.enabled = false
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.unsubscribeEvents()
 	close(m.queue)
+	close(m.logQueue)
+	m.mu.Unlock()
+
 	m.wg.Wait()
-	log.Println("🛑 通知中心已关闭")
+	log.Println("🛑 通知中心已关闭（0 协程/0 网络消耗）")
 }
 
 // subscribeEvents 订阅核心业务事件
@@ -107,11 +175,17 @@ func (m *NotifyManager) subscribeEvents() {
 		log.Println("⚠️ EventBus 未初始化，通知功能不可用")
 		return
 	}
+	m.unsubscribeEvents()
+
+	sub := func(evType string, handler core.EventHandler) {
+		id := m.bus.Subscribe(evType, handler)
+		m.eventSubs = append(m.eventSubs, eventSubRef{evType: evType, subID: id})
+	}
 
 	// 下载开始
-	m.bus.Subscribe(core.EventDownloadStarted, func(e core.Event) {
+	sub(core.EventDownloadStarted, func(e core.Event) {
 		title := "📥 开始下载"
-		msg := e.Payload["title"].(string)
+		msg := fmt.Sprintf("%v", e.Payload["title"])
 		m.Publish(&NotifyMessage{
 			Title:      title,
 			Content:    msg,
@@ -122,7 +196,7 @@ func (m *NotifyManager) subscribeEvents() {
 	})
 
 	// 下载完成
-	m.bus.Subscribe(core.EventDownloadCompleted, func(e core.Event) {
+	sub(core.EventDownloadCompleted, func(e core.Event) {
 		title := "✅ 下载完成"
 		data := e.Payload
 
@@ -137,8 +211,18 @@ func (m *NotifyManager) subscribeEvents() {
 			sizeStr = "未知"
 		}
 
-		msg := fmt.Sprintf("标题: %s\n大小: %s\n耗时: %s",
-			data["title"], sizeStr, data["duration"])
+		animeTitle, _ := data["anime_title"].(string)
+		if animeTitle == "" {
+			animeTitle = fmt.Sprintf("%v", data["title"])
+		}
+		epVal := data["episode"]
+		var epText string
+		if epVal != nil {
+			epText = fmt.Sprintf(" 第 %v 集", epVal)
+		}
+
+		msg := fmt.Sprintf("番剧: 《%s》%s\n文件大小: %s\n下载耗时: %s",
+			animeTitle, epText, sizeStr, data["duration"])
 		m.Publish(&NotifyMessage{
 			Title:      title,
 			Content:    msg,
@@ -149,16 +233,23 @@ func (m *NotifyManager) subscribeEvents() {
 	})
 
 	// 文件整理结果（每个整理批次发送一次）
-	m.bus.Subscribe(core.EventFileOrganized, func(e core.Event) {
+	sub(core.EventFileOrganized, func(e core.Event) {
 		m.Publish(organizedNotification(e.Payload))
 	})
 
 	// 补全缺失集数
-	m.bus.Subscribe(core.EventSupplementCompleted, func(e core.Event) {
-		title := "⚠️ 发现缺失集数"
+	sub(core.EventSupplementCompleted, func(e core.Event) {
 		data := e.Payload
-		msg := fmt.Sprintf("番剧: %s\n缺失: S%02dE%02d",
-			data["title"], data["season"], data["episode"])
+		if data == nil {
+			return
+		}
+		newCount, _ := data["new_count"].(int)
+		if newCount <= 0 {
+			// 没有实际新增的补全任务，不打扰用户
+			return
+		}
+		title := "📥 历史剧集补全"
+		msg := fmt.Sprintf("番剧: %v\n已自动识别并添加 %d 个缺失集数下载任务", data["title"], newCount)
 		m.Publish(&NotifyMessage{
 			Title:      title,
 			Content:    msg,
@@ -169,9 +260,9 @@ func (m *NotifyManager) subscribeEvents() {
 	})
 
 	// 错误事件（通用）
-	m.bus.Subscribe(core.EventDownloadFailed, func(e core.Event) {
+	sub(core.EventDownloadFailed, func(e core.Event) {
 		title := "🚨 系统错误"
-		msg := e.Payload["message"].(string)
+		msg := fmt.Sprintf("%v", e.Payload["message"])
 		m.Publish(&NotifyMessage{
 			Title:      title,
 			Content:    msg,
@@ -184,7 +275,21 @@ func (m *NotifyManager) subscribeEvents() {
 	log.Println("📡 已订阅事件: download.started, download.completed, file.organized, episode.missing, error")
 }
 
+// unsubscribeEvents 注销所有事件监听
+func (m *NotifyManager) unsubscribeEvents() {
+	if m.bus == nil {
+		return
+	}
+	for _, s := range m.eventSubs {
+		m.bus.Unsubscribe(s.evType, s.subID)
+	}
+	m.eventSubs = nil
+}
+
 func organizedNotification(data map[string]interface{}) *NotifyMessage {
+	if data == nil {
+		return nil
+	}
 	success := intValue(data["success"])
 	failed := intValue(data["failed"])
 	if success == 0 && failed == 0 {
@@ -196,18 +301,40 @@ func organizedNotification(data map[string]interface{}) *NotifyMessage {
 		MaxRetries: 3,
 	}
 
+	animeTitle, _ := data["anime_title"].(string)
+	epVal := data["episode"]
+
 	if success == 0 && failed > 0 {
 		msg.Title = "🚨 文件整理失败"
-		msg.Content = fmt.Sprintf("失败: %d 个 (全部整理失败)", failed)
+		if animeTitle != "" {
+			msg.Content = fmt.Sprintf("番剧: 《%s》\n失败: %d 个 (全部整理失败)", animeTitle, failed)
+		} else {
+			msg.Content = fmt.Sprintf("失败: %d 个 (全部整理失败)", failed)
+		}
 		msg.Priority = 2
 		return msg
 	}
 
-	msg.Title = "📁 文件整理结果"
 	if failed > 0 {
-		msg.Content = fmt.Sprintf("成功: %d 个, 失败: %d 个\n最终路径: %s", success, failed, data["final_path"])
+		msg.Title = "📁 文件整理结果"
+		if animeTitle != "" {
+			msg.Content = fmt.Sprintf("番剧: 《%s》\n成功: %d 个, 失败: %d 个\n最新路径: %s", animeTitle, success, failed, data["final_path"])
+		} else {
+			msg.Content = fmt.Sprintf("成功: %d 个, 失败: %d 个\n最新路径: %s", success, failed, data["final_path"])
+		}
+		msg.Priority = 1
+		return msg
+	}
+
+	msg.Title = "📁 媒体已整理入库"
+	if success == 1 && animeTitle != "" {
+		if epVal != nil && fmt.Sprintf("%v", epVal) != "0" {
+			msg.Content = fmt.Sprintf("番剧: 《%s》 第 %v 集已成功归档入库！\n最终路径: %s", animeTitle, epVal, data["final_path"])
+		} else {
+			msg.Content = fmt.Sprintf("番剧: 《%s》 已成功归档入库！\n最终路径: %s", animeTitle, data["final_path"])
+		}
 	} else {
-		msg.Content = fmt.Sprintf("成功整理: %d 个\n最终路径: %s", success, data["final_path"])
+		msg.Content = fmt.Sprintf("成功: %d 个剧集文件已整理入库\n最新路径: %s", success, data["final_path"])
 	}
 	msg.Priority = 1
 	return msg
@@ -223,6 +350,10 @@ func intValue(value interface{}) int {
 
 // Publish 发布通知消息（非阻塞）
 func (m *NotifyManager) Publish(msg *NotifyMessage) {
+	if msg == nil || !m.IsEnabled() {
+		return
+	}
+
 	if msg.CreatedAt.IsZero() {
 		msg.CreatedAt = time.Now()
 	}
@@ -244,15 +375,31 @@ func (m *NotifyManager) Publish(msg *NotifyMessage) {
 
 // SendTest 发送测试消息（同步，用于 WebUI 测试按钮）
 func (m *NotifyManager) SendTest(ctx context.Context, channel, title, message string) error {
+	if !m.IsEnabled() {
+		return fmt.Errorf("消息通知推送插件当前处于停用状态，请先在插件管理中启用")
+	}
+
 	var targets []Notifier
+	targetName := strings.ToLower(strings.TrimSpace(channel))
+	m.mu.RLock()
 	for _, n := range m.notifiers {
-		if channel == "" || channel == n.Name() {
+		curName := strings.ToLower(n.Name())
+		if channel == "" || curName == targetName ||
+			strings.Contains(curName, targetName) ||
+			strings.Contains(targetName, curName) ||
+			(targetName == "qq" && strings.Contains(curName, "qq")) ||
+			(targetName == "smtp" && (curName == "email" || strings.Contains(curName, "smtp"))) ||
+			(targetName == "serverchan" && strings.Contains(curName, "serverchan")) ||
+			(targetName == "wecom" && (curName == "企业微信" || strings.Contains(curName, "wecom"))) ||
+			(targetName == "dingtalk" && (curName == "钉钉" || strings.Contains(curName, "ding"))) ||
+			(targetName == "feishu" && (curName == "飞书" || strings.Contains(curName, "feishu"))) {
 			targets = append(targets, n)
 		}
 	}
+	m.mu.RUnlock()
 
 	if len(targets) == 0 {
-		return fmt.Errorf("未找到通知渠道: %s", channel)
+		return fmt.Errorf("未找到通知渠道: %s (请检查该渠道是否已填写配置并保存)", channel)
 	}
 
 	var errs []string
@@ -292,13 +439,19 @@ func (m *NotifyManager) worker() {
 
 // process 执行分发
 func (m *NotifyManager) process(msg *NotifyMessage) {
+	if msg == nil {
+		return
+	}
+
 	// 确定目标 Notifiers
+	m.mu.RLock()
 	var targets []Notifier
 	for _, n := range m.notifiers {
 		if msg.Target == "" || msg.Target == n.Name() {
 			targets = append(targets, n)
 		}
 	}
+	m.mu.RUnlock()
 
 	if len(targets) == 0 {
 		log.Printf("⚠️ 无可用通知渠道: %s", msg.Target)
@@ -316,6 +469,7 @@ func (m *NotifyManager) process(msg *NotifyMessage) {
 				m.handleFailure(notifier, msg, err)
 			} else {
 				m.incStat(notifier.Name() + ".success")
+				m.recordLog(msg.EventType, notifier.Name(), msg.Title, msg.Content, "success", "", msg.RetryCount)
 			}
 		}(n)
 	}
@@ -326,6 +480,7 @@ func (m *NotifyManager) process(msg *NotifyMessage) {
 func (m *NotifyManager) handleFailure(n Notifier, msg *NotifyMessage, err error) {
 	log.Printf("⚠️ [%s] 发送失败: %v (重试 %d/%d)", n.Name(), err, msg.RetryCount, msg.MaxRetries)
 	m.incStat(n.Name() + ".failure")
+	m.recordLog(msg.EventType, n.Name(), msg.Title, msg.Content, "failed", err.Error(), msg.RetryCount)
 
 	if msg.RetryCount >= msg.MaxRetries {
 		m.dlq <- msg
@@ -394,9 +549,171 @@ func (m *NotifyManager) handleDLQ() {
 			return
 		case msg := <-m.dlq:
 			log.Printf("💀 [DLQ] 永久失败: Title=%s, Target=%s, Err=%s", msg.Title, msg.Target, msg.LastError)
-			// TODO: 持久化到数据库
+			m.recordLog(msg.EventType, msg.Target, msg.Title, msg.Content, "dlq", msg.LastError, msg.RetryCount)
 		}
 	}
+}
+
+// handleLogPersist 异步持久化通知记录协程
+func (m *NotifyManager) handleLogPersist() {
+	defer m.wg.Done()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case entry, ok := <-m.logQueue:
+			if !ok {
+				return
+			}
+			if entry != nil && database.DB != nil {
+				if err := database.DB.Create(entry).Error; err != nil {
+					log.Printf("⚠️ 持久化通知记录失败: %v", err)
+				}
+			}
+		}
+	}
+}
+
+// recordLog 记录通知投递流水
+func (m *NotifyManager) recordLog(eventType, channel, title, content, status, errorMsg string, retryCount int) {
+	entry := &database.NotificationLog{
+		EventType:  eventType,
+		Channel:    channel,
+		Title:      title,
+		Content:    content,
+		Status:     status,
+		ErrorMsg:   errorMsg,
+		RetryCount: retryCount,
+	}
+	select {
+	case m.logQueue <- entry:
+	default:
+		go func() {
+			if database.DB != nil {
+				_ = database.DB.Create(entry).Error
+			}
+		}()
+	}
+}
+
+// RecordManualLog 记录手动测试等外部通知事件
+func (m *NotifyManager) RecordManualLog(eventType, channel, title, content, status, errorMsg string) {
+	m.recordLog(eventType, channel, title, content, status, errorMsg, 0)
+}
+
+// ============================================================
+// 日志查询与统计方法
+// ============================================================
+
+// NotificationLogFilter 日志筛选参数
+type NotificationLogFilter struct {
+	Channel   string
+	Status    string
+	EventType string
+	Page      int
+	PageSize  int
+}
+
+// NotificationStats 统计数据
+type NotificationStats struct {
+	Total        int64                     `json:"total"`
+	Success      int64                     `json:"success"`
+	Failed       int64                     `json:"failed"`
+	DLQ          int64                     `json:"dlq"`
+	ChannelStats map[string]ChannelStatDTO `json:"channel_stats"`
+}
+
+type ChannelStatDTO struct {
+	Success int64 `json:"success"`
+	Failed  int64 `json:"failed"`
+}
+
+// GetNotificationLogs 分页查询通知日志
+func GetNotificationLogs(filter NotificationLogFilter) (int64, []database.NotificationLog, error) {
+	if database.DB == nil {
+		return 0, nil, fmt.Errorf("数据库未初始化")
+	}
+	query := database.DB.Model(&database.NotificationLog{})
+	if filter.Channel != "" && filter.Channel != "all" {
+		query = query.Where("channel = ?", filter.Channel)
+	}
+	if filter.Status != "" && filter.Status != "all" {
+		query = query.Where("status = ?", filter.Status)
+	}
+	if filter.EventType != "" && filter.EventType != "all" {
+		query = query.Where("event_type = ?", filter.EventType)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return 0, nil, err
+	}
+
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	var logs []database.NotificationLog
+	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&logs).Error; err != nil {
+		return 0, nil, err
+	}
+	return total, logs, nil
+}
+
+// ClearNotificationLogs 清空通知日志（days <= 0 则全部清空，否则清空 N 天前）
+func ClearNotificationLogs(days int) error {
+	if database.DB == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	if days <= 0 {
+		return database.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&database.NotificationLog{}).Error
+	}
+	cutoff := time.Now().AddDate(0, 0, -days)
+	return database.DB.Where("created_at < ?", cutoff).Unscoped().Delete(&database.NotificationLog{}).Error
+}
+
+// GetNotificationStats 获取通知统计数据
+func GetNotificationStats() (NotificationStats, error) {
+	stats := NotificationStats{
+		ChannelStats: make(map[string]ChannelStatDTO),
+	}
+	if database.DB == nil {
+		return stats, nil
+	}
+
+	database.DB.Model(&database.NotificationLog{}).Count(&stats.Total)
+	database.DB.Model(&database.NotificationLog{}).Where("status = ?", "success").Count(&stats.Success)
+	database.DB.Model(&database.NotificationLog{}).Where("status = ?", "failed").Count(&stats.Failed)
+	database.DB.Model(&database.NotificationLog{}).Where("status = ?", "dlq").Count(&stats.DLQ)
+
+	type row struct {
+		Channel string
+		Status  string
+		Count   int64
+	}
+	var rows []row
+	database.DB.Model(&database.NotificationLog{}).
+		Select("channel, status, count(*) as count").
+		Group("channel, status").
+		Find(&rows)
+
+	for _, r := range rows {
+		cs := stats.ChannelStats[r.Channel]
+		if r.Status == "success" {
+			cs.Success += r.Count
+		} else {
+			cs.Failed += r.Count
+		}
+		stats.ChannelStats[r.Channel] = cs
+	}
+
+	return stats, nil
 }
 
 // GetStats 获取统计信息

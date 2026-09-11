@@ -16,6 +16,8 @@ const { t, locale } = useI18n()
 const username = ref('')
 const userAvatar = ref('')
 const isDrawerOpen = ref(false)
+const isDefaultPassword = ref(false)
+const dismissDefaultPasswordAlert = ref(false)
 
 const { currentVersion, latestVersion, hasNewVersion, checkGitHubUpdate } = useVersion()
 
@@ -57,6 +59,7 @@ onMounted(async () => {
     const { data } = await request.get('/me')
     username.value = data.username
     userAvatar.value = data.avatar_url || ''
+    isDefaultPassword.value = !!data.is_default_password
   } catch { /* 401 handled by interceptor */ }
 
   window.addEventListener('avatar-updated', ((e: CustomEvent) => {
@@ -203,6 +206,18 @@ function closeDrawer() {
           </ul>
         </div>
       </header>
+
+      <!-- Default Password Security Alert Banner -->
+      <div v-if="isDefaultPassword && !dismissDefaultPasswordAlert" class="bg-warning/15 border-b border-warning/30 px-4 py-2.5 flex items-center justify-between text-warning text-xs sm:text-sm font-medium">
+        <div class="flex items-center gap-2 max-w-[85%]">
+          <TriangleAlert :size="18" class="shrink-0 text-warning" />
+          <span>{{ locale === 'zh' ? '安全提醒：当前管理员仍在使用默认密码 (admin)，极易遭遇扫描入侵，请立即修改！' : 'Security Warning: You are using the default password (admin). Please change it immediately!' }}</span>
+        </div>
+        <div class="flex items-center gap-3 shrink-0">
+          <router-link to="/settings" class="btn btn-warning btn-xs rounded-lg font-bold">{{ locale === 'zh' ? '前往修改' : 'Change' }}</router-link>
+          <button @click="dismissDefaultPasswordAlert = true" class="btn btn-ghost btn-xs btn-circle opacity-60 hover:opacity-100"><X :size="14" /></button>
+        </div>
+      </div>
 
       <!-- Main Page Router View -->
       <main class="flex-1 p-3 sm:p-5 md:p-8 max-w-[2000px] mx-auto w-full pb-24 lg:pb-8 overflow-x-hidden">

@@ -222,8 +222,11 @@ func (p *TMDBProvider) GetEpisodes(ctx context.Context, animeID string, season i
 
 // GetExternalIDs 获取关联的外部 ID (如 IMDB)
 func (p *TMDBProvider) GetExternalIDs(ctx context.Context, tmdbID string) (imdbID string, err error) {
-	// TMDB 的 ID 格式通常为 "tv/123" 或 "movie/456"
-	path := fmt.Sprintf("/%s/external_ids?api_key=%s", tmdbID, p.apiKey)
+	id := strings.Trim(tmdbID, "/")
+	if !strings.HasPrefix(id, "tv/") && !strings.HasPrefix(id, "movie/") {
+		id = "tv/" + id
+	}
+	path := fmt.Sprintf("/%s/external_ids?api_key=%s", id, p.apiKey)
 	resp, err := p.tryMirrors(ctx, path)
 	if err != nil {
 		return "", err

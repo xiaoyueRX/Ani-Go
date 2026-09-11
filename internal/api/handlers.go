@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -20,10 +23,15 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/ai"
 	"github.com/xiaoyueRX/Ani-Go/internal/auth"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
-	"github.com/xiaoyueRX/Ani-Go/internal/metadata"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/downloader"
+	"github.com/xiaoyueRX/Ani-Go/internal/metadata"
+	"gorm.io/gorm"
 	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 	"github.com/xiaoyueRX/Ani-Go/internal/migrate"
+	"github.com/xiaoyueRX/Ani-Go/internal/notifier"
+	v2 "github.com/xiaoyueRX/Ani-Go/internal/notifier/v2"
+	"github.com/xiaoyueRX/Ani-Go/internal/organizer"
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 	"github.com/xiaoyueRX/Ani-Go/internal/search"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
@@ -60,8 +68,9 @@ type subscriptionResponse struct {
 	SkipBulkUpdate     bool   `json:"skip_bulk_update"`
 	StallTimeoutHours  int    `json:"stall_timeout_hours"`
 	StalledEpisodes    int    `json:"stalled_episodes"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
+	CreatedAt          string  `json:"created_at"`
+	UpdatedAt          string  `json:"updated_at"`
+	DeletedAt          *string `json:"deleted_at,omitempty"`
 }
 
 type createSubscriptionRequest struct {
@@ -186,6 +195,13 @@ func toSubscriptionResponse(sub database.Subscription) subscriptionResponse {
 		StallTimeoutHours: sub.StallTimeoutHours,
 		CreatedAt:         sub.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:         sub.UpdatedAt.Format(time.RFC3339),
+		DeletedAt: func() *string {
+			if sub.DeletedAt.Valid {
+				t := sub.DeletedAt.Time.Format(time.RFC3339)
+				return &t
+			}
+			return nil
+		}(),
 	}
 }
 
@@ -212,9 +228,15 @@ func toEpisodeResponse(ep database.Episode) episodeResponse {
 }
 
 // handleListSubscriptions 获取订阅列表
-// GET /api/subscriptions?enabled=true&completed=false
+// GET /api/subscriptions?enabled=true&completed=false&deleted=false
 func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request) {
-	query := database.DB.Model(&database.Subscription{})
+	isDeleted := r.URL.Query().Get("deleted") == "true"
+	var query *gorm.DB
+	if isDeleted {
+		query = database.DB.Unscoped().Model(&database.Subscription{}).Where("deleted_at IS NOT NULL")
+	} else {
+		query = database.DB.Model(&database.Subscription{})
+	}
 
 	if v := r.URL.Query().Get("enabled"); v != "" {
 		b, _ := strconv.ParseBool(v)
@@ -226,7 +248,11 @@ func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request)
 	}
 
 	var subs []database.Subscription
-	if err := query.Order("created_at DESC").Find(&subs).Error; err != nil {
+	orderClause := "created_at DESC"
+	if isDeleted {
+		orderClause = "deleted_at DESC"
+	}
+	if err := query.Order(orderClause).Find(&subs).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "查询订阅失败"})
 		return
 	}
@@ -758,31 +784,258 @@ func (s *Server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type downloadResponse struct {
-		Hash      string  `json:"hash"`
-		Name      string  `json:"name"`
-		SavePath  string  `json:"save_path"`
-		Status    string  `json:"status"`
-		Progress  float32 `json:"progress"`
-		SpeedDown int64   `json:"speed_down"`
-		Size      int64   `json:"size"`
-		Done      int64   `json:"done"`
+		Hash        string  `json:"hash"`
+		Name        string  `json:"name"`
+		SavePath    string  `json:"save_path"`
+		Status      string  `json:"status"`
+		Progress    float32 `json:"progress"`
+		SpeedDown   int64   `json:"speed_down"`
+		SpeedUp     int64   `json:"speed_up"`
+		Size        int64   `json:"size"`
+		Done        int64   `json:"done"`
+		Uploaded    int64   `json:"uploaded"`
+		Ratio       float64 `json:"ratio"`
+		SeedingTime int64   `json:"seeding_time"`
 	}
 
 	result := make([]downloadResponse, 0, len(tasks))
 	for _, t := range tasks {
 		result = append(result, downloadResponse{
-			Hash:      t.Hash,
-			Name:      t.Name,
-			SavePath:  t.SavePath,
-			Status:    t.Status,
-			Progress:  t.Progress,
-			SpeedDown: t.SpeedDown,
-			Size:      t.Size,
-			Done:      t.Done,
+			Hash:        t.Hash,
+			Name:        t.Name,
+			SavePath:    t.SavePath,
+			Status:      t.Status,
+			Progress:    t.Progress,
+			SpeedDown:   t.SpeedDown,
+			SpeedUp:     t.SpeedUp,
+			Size:        t.Size,
+			Done:        t.Done,
+			Uploaded:    t.Uploaded,
+			Ratio:       t.Ratio,
+			SeedingTime: t.SeedingTime,
 		})
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleCreateDownload 直接添加下载任务（无需订阅）
+// POST /api/downloads
+func (s *Server) handleCreateDownload(w http.ResponseWriter, r *http.Request) {
+	if s.downloader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "下载器未配置"})
+		return
+	}
+
+	var req struct {
+		Title      string `json:"title"`
+		URL        string `json:"url"`
+		Magnet     string `json:"magnet"`
+		InfoHash   string `json:"info_hash"`
+		SavePath   string `json:"save_path"`
+		GroupName  string `json:"group_name"`
+		Resolution string `json:"resolution"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求参数格式错误"})
+		return
+	}
+
+	if req.URL == "" && req.Magnet == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "必须提供 url 或 magnet 下载链接"})
+		return
+	}
+	if req.Title == "" {
+		if req.Magnet != "" {
+			req.Title = "Magnet Download"
+		} else {
+			req.Title = "Direct Download"
+		}
+	}
+
+	item := core.TorrentItem{
+		Title:      req.Title,
+		URL:        req.URL,
+		MagnetURL:  req.Magnet,
+		InfoHash:   req.InfoHash,
+		GroupName:  req.GroupName,
+		Resolution: req.Resolution,
+	}
+
+	if err := s.downloader.Add(r.Context(), item, req.SavePath); err != nil {
+		log.Printf("❌ 直接添加下载任务失败: %v", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("添加下载失败: %v", err)})
+		return
+	}
+
+	log.Printf("📥 用户通过 API 直接添加下载任务: %s", req.Title)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "添加下载任务成功",
+		"title":   req.Title,
+	})
+}
+
+// handleDeleteDownload 删除下载任务
+// DELETE /api/downloads/{hash}
+func (s *Server) handleDeleteDownload(w http.ResponseWriter, r *http.Request) {
+	if s.downloader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "下载器未配置"})
+		return
+	}
+
+	hash := r.PathValue("hash")
+	if hash == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "缺少 hash 参数"})
+		return
+	}
+
+	deleteFiles := r.URL.Query().Get("delete_files") == "true"
+
+	if err := s.downloader.Delete(r.Context(), hash, deleteFiles); err != nil {
+		log.Printf("❌ 删除下载任务失败 [%s]: %v", hash, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("删除下载任务失败: %v", err)})
+		return
+	}
+
+	log.Printf("🗑️  已删除下载任务 [%s] (delete_files=%v)", hash, deleteFiles)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "删除任务成功",
+		"hash":    hash,
+	})
+}
+
+// handlePauseDownload 暂停下载任务
+// POST /api/downloads/{hash}/pause
+func (s *Server) handlePauseDownload(w http.ResponseWriter, r *http.Request) {
+	if s.downloader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "下载器未配置"})
+		return
+	}
+
+	hash := r.PathValue("hash")
+	if hash == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "缺少 hash 参数"})
+		return
+	}
+
+	if err := s.downloader.Pause(r.Context(), hash); err != nil {
+		log.Printf("❌ 暂停下载任务失败 [%s]: %v", hash, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("暂停任务失败: %v", err)})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "暂停任务成功",
+		"hash":    hash,
+	})
+}
+
+// handleResumeDownload 恢复下载任务
+// POST /api/downloads/{hash}/resume
+func (s *Server) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
+	if s.downloader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "下载器未配置"})
+		return
+	}
+
+	hash := r.PathValue("hash")
+	if hash == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "缺少 hash 参数"})
+		return
+	}
+
+	if err := s.downloader.Resume(r.Context(), hash); err != nil {
+		log.Printf("❌ 恢复下载任务失败 [%s]: %v", hash, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("恢复任务失败: %v", err)})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "恢复任务成功",
+		"hash":    hash,
+	})
+}
+
+type testDownloaderRequest struct {
+	Type     string `json:"type"`     // "qbittorrent" / "transmission" / "aria2"
+	Host     string `json:"host"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Secret   string `json:"secret"`
+	Category string `json:"category"`
+}
+
+// handleTestDownloader 测试下载器连接与健康状态
+// POST /api/downloader/test
+func (s *Server) handleTestDownloader(w http.ResponseWriter, r *http.Request) {
+	var req testDownloaderRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	var targetDL core.Downloader
+
+	dlType := strings.ToLower(strings.TrimSpace(req.Type))
+	if dlType == "" && req.Host == "" {
+		// 未指定具体配置，直接探测当前系统生效的下载器
+		targetDL = s.downloader
+	} else {
+		// 根据前端传入的临时配置构造测试实例
+		switch dlType {
+		case "transmission":
+			host := req.Host
+			if host == "" {
+				host = "http://localhost:9091"
+			}
+			targetDL = downloader.NewTransmission(host, req.Username, req.Password)
+		case "aria2":
+			host := req.Host
+			if host == "" {
+				host = "http://localhost:6800/jsonrpc"
+			}
+			targetDL = downloader.NewAria2(host, req.Secret)
+		default: // qbittorrent
+			host := req.Host
+			if host == "" {
+				host = "http://localhost:8081"
+			}
+			cat := req.Category
+			if cat == "" {
+				cat = "ani-go"
+			}
+			targetDL = downloader.NewQBittorrent(host, req.Username, req.Password, cat)
+		}
+	}
+
+	if targetDL == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "未配置下载器或下载器不可用",
+		})
+		return
+	}
+
+	start := time.Now()
+	available := targetDL.IsAvailable(ctx)
+	elapsed := time.Since(start).Milliseconds()
+
+	if !available {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success":    false,
+			"name":       targetDL.Name(),
+			"latency_ms": elapsed,
+			"error":      fmt.Sprintf("%s 服务无法连通，请检查地址、端口或鉴权凭据", targetDL.Name()),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"name":       targetDL.Name(),
+		"latency_ms": elapsed,
+		"message":    fmt.Sprintf("%s 连接正常 (响应耗时 %dms)", targetDL.Name(), elapsed),
+	})
 }
 
 // ============================================================
@@ -806,16 +1059,17 @@ func getStallTimeout(sub ...database.Subscription) time.Duration {
 func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 	v := s.version
 	if v == "" {
-		v = "v0.5.1"
+		v = "v0.6.0"
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"version": v,
 		"changelog": []string{
-			"🛡️ 架构稳固：剔除数据库事务内网络依赖，杜绝 SQLite 并发锁死隐患",
-			"🔐 凭证保护：修复下载器密钥脱敏保存与空密码覆盖缺陷",
-			"🚀 插件生态：重构插件管理系统，支持多事件 Webhook 联动与配置导入导出",
-			"⏱️ 细粒度控制：支持番剧级 Stall 超时配置，死种检测更灵活精确",
-			"📂 路径安全：全面加固数据迁移与文件管理接口的路径穿越防护",
+			"🏛️ 微内核与插件解耦架构：主干专注于五步极速流水线，周边生态全插拔，停用时 0 协程、0 网络、0 错误日志",
+			"🧠 智能消歧与 Token 熔断保护：Bangumi 放送时间对齐（0 Token 化解 95% 歧义）、终身唯一 SQLite 解析缓存与每日限额熔断",
+			"🤖 原生外部 AI 控制 (MCP Server)：标准 SSE + Bearer 强鉴权，暴露 6 项业务运维工具与 4 项系统治理工具",
+			"🛡️ 做种生命周期与磁盘防爆急停：完成做种仅删任务记录永不删物理硬链接，剩余空间 < 5GB 自动熔断阻断新增下载",
+			"👁️ 媒体整理 Dry-Run 预检：提供路径预览与冲突检测 API，无写入安全预测整理结果",
+			"⚡ 下载器高可用与深度加固：Aria2 / Transmission URL 自动清洗、qB 超时防护、下载器连通性一键测试",
 		},
 	})
 }
@@ -963,7 +1217,77 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("✅ 已更新 %d 项设置", len(req.Settings))
+
+	// 热重载通知系统（全渠道即时生效）
+	if s.notifyMgr != nil {
+		s.notifyMgr.ReloadNotifiers(notifier.BuildAllNotifiersFromSettingsAndEnv())
+	}
+
+	// 热重载下载器实例（支持切换 qBittorrent/Transmission/Aria2 无需重启）
+	if dyn, ok := s.downloader.(*downloader.DynamicDownloader); ok {
+		newDL := s.buildDownloaderFromSettings()
+		if newDL != nil {
+			dyn.Swap(newDL)
+			log.Printf("⬇️ [下载器热重载] 当前生效下载器已切换为: %s", newDL.Name())
+		}
+	}
+
+	// 热重载自定义正则规则
+	source.LoadCustomPatternsFromSettings(func(key string) (string, bool) {
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", key).First(&setting).Error; err != nil {
+			return "", false
+		}
+		return setting.Value, true
+	})
+
 	writeJSON(w, http.StatusOK, map[string]string{"message": "设置已更新"})
+}
+
+// buildDownloaderFromSettings 从数据库设置与环境变量动态构建下载器实例
+func (s *Server) buildDownloaderFromSettings() core.Downloader {
+	getSetting := func(key string) string {
+		var st database.Setting
+		if database.DB != nil {
+			if err := database.DB.Where("key = ?", key).First(&st).Error; err == nil && st.Value != "" {
+				return strings.TrimSpace(st.Value)
+			}
+		}
+		return strings.TrimSpace(os.Getenv(key))
+	}
+
+	defaultDL := getSetting("DEFAULT_DOWNLOADER")
+	if defaultDL == "" {
+		defaultDL = getSetting("DOWNLOADER_DEFAULT")
+	}
+	if defaultDL == "" {
+		defaultDL = "qbittorrent"
+	}
+
+	switch strings.ToLower(defaultDL) {
+	case "transmission":
+		host := getSetting("TR_HOST")
+		if host == "" {
+			host = "http://localhost:9091"
+		}
+		return downloader.NewTransmission(host, getSetting("TR_USER"), getSetting("TR_PASS"))
+	case "aria2":
+		host := getSetting("ARIA2_HOST")
+		if host == "" {
+			host = "http://localhost:6800/jsonrpc"
+		}
+		return downloader.NewAria2(host, getSetting("ARIA2_SECRET"))
+	default:
+		host := getSetting("QB_HOST")
+		if host == "" {
+			host = "http://localhost:8081"
+		}
+		cat := getSetting("QB_CATEGORY")
+		if cat == "" {
+			cat = "ani-go"
+		}
+		return downloader.NewQBittorrent(host, getSetting("QB_USER"), getSetting("QB_PASS"), cat)
+	}
 }
 
 // handleUploadAvatar 上传管理员头像图片
@@ -1017,6 +1341,8 @@ func (s *Server) handleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	defer destFile.Close()
 
 	if _, err := io.Copy(destFile, file); err != nil {
+		destFile.Close()
+		_ = os.Remove(destPath)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存头像文件内容失败"})
 		return
 	}
@@ -1147,17 +1473,12 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 // handleGetCustomRegex 获取当前自定义正则规则
 // GET /api/settings/custom-regex
 func (s *Server) handleGetCustomRegex(w http.ResponseWriter, r *http.Request) {
-	var rawPatterns []string
+	rawPatterns := make([]string, 10)
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("custom_regex_%d", i)
 		var setting database.Setting
-		if err := database.DB.Where("key = ?", key).First(&setting).Error; err != nil {
-			break
-		}
-		if v := strings.TrimSpace(setting.Value); v != "" {
-			rawPatterns = append(rawPatterns, v)
-		} else {
-			break
+		if err := database.DB.Where("key = ?", key).First(&setting).Error; err == nil {
+			rawPatterns[i] = strings.TrimSpace(setting.Value)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -1184,6 +1505,38 @@ func (s *Server) handleReloadCustomRegex(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message":  "自定义正则已重新加载",
 		"compiled": source.GetCustomRegexPatterns(),
+	})
+}
+
+// handleTestCustomRegex 测试自定义正则解析效果
+// POST /api/settings/custom-regex/test
+func (s *Server) handleTestCustomRegex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 POST"})
+		return
+	}
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+		return
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请输入测试标题"})
+		return
+	}
+
+	info := source.ParseMikanTitle(req.Title)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"title":      info.Title,
+		"raw_title":  info.RawTitle,
+		"subgroup":   info.Subgroup,
+		"season":     info.Season,
+		"episode":    info.Episode,
+		"resolution": info.Resolution,
+		"is_batch":   info.IsBatch,
+		"is_special": info.IsSpecial,
 	})
 }
 
@@ -1594,7 +1947,7 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 域名白名单校验（使用 URL 解析 + 后缀匹配，防止 SSRF 绕过）
-	allowedDomains := []string{"i0.hdslb.com", "lain.bgm.tv", "img.mikanani.me", "mikanani.me", "image.tmdb.org", "bilibili.com", "bgm.tv", "mikanime.tv", "yuc.wiki", "yucc.wiki", "yucwiki.net"}
+	allowedDomains := []string{"i0.hdslb.com", "lain.bgm.tv", "img.mikanani.me", "mikanani.me", "mikanani.kas.pub", "image.tmdb.org", "bilibili.com", "bgm.tv", "mikanime.tv", "yuc.wiki", "yucc.wiki", "yucwiki.net"}
 	parsedURL, err := url.Parse(imageURL)
 	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		http.Error(w, "invalid url", http.StatusBadRequest)
@@ -1709,6 +2062,7 @@ type migrateRequest struct {
 }
 
 // handleMigrateData 从 AutoBangumi / ani-rss SQLite 数据库迁移数据
+// 支持 JSON ({"source_path": "data/..."}) 与 multipart/form-data (上传 .db 文件)
 // POST /api/migrate
 func (s *Server) handleMigrateData(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1716,44 +2070,112 @@ func (s *Server) handleMigrateData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req migrateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+	if s.pluginManager != nil && !s.pluginManager.IsPluginEnabled("data-migrate") {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "数据导入与迁移插件 (data-migrate) 当前处于停用状态，请先在插件管理中启用"})
 		return
 	}
 
-	if req.SourcePath == "" {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请提供 source_path（源数据库文件路径）"})
-		return
-	}
+	var sourcePath string
+	var needCleanup bool
 
-	// 安全校验：限制迁移文件只能在 data/ 目录下，防止读取任意 SQLite 文件
-	cleanPath := filepath.ToSlash(filepath.Clean(req.SourcePath))
-	dataDir := "data"
-	if !filepath.IsAbs(req.SourcePath) {
-		// 相对路径检查
-		if !strings.HasPrefix(cleanPath, dataDir+"/") && cleanPath != dataDir {
-			writeJSON(w, http.StatusForbidden, errorResponse{Error: "迁移文件路径必须在 data/ 目录下"})
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		// 处理文件上传
+		if err := r.ParseMultipartForm(50 << 20); err != nil { // 50MB
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "上传文件解析失败: " + err.Error()})
 			return
 		}
+		file, handler, err := r.FormFile("file")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请选择要上传的数据库文件 (file)"})
+			return
+		}
+		defer file.Close()
+
+		ext := strings.ToLower(filepath.Ext(handler.Filename))
+		if ext != ".db" && ext != ".sqlite" && ext != ".sqlite3" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "仅支持上传 .db, .sqlite 或 .sqlite3 数据库文件"})
+			return
+		}
+
+		if err := os.MkdirAll("data", 0755); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建 data 目录失败"})
+			return
+		}
+
+		tempPath := filepath.Join("data", fmt.Sprintf("upload_migrate_%d%s", time.Now().UnixNano(), ext))
+		dest, err := os.Create(tempPath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存上传文件失败: " + err.Error()})
+			return
+		}
+		if _, err := io.Copy(dest, file); err != nil {
+			dest.Close()
+			os.Remove(tempPath)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "写入文件失败: " + err.Error()})
+			return
+		}
+		dest.Close()
+
+		sourcePath = tempPath
+		needCleanup = true
 	} else {
-		// 绝对路径检查：解析后必须在 data/ 下
-		absDataDir, _ := filepath.Abs(dataDir)
-		slashAbsDataDir := filepath.ToSlash(absDataDir)
-		if !strings.HasPrefix(cleanPath, slashAbsDataDir+"/") && cleanPath != slashAbsDataDir {
-			writeJSON(w, http.StatusForbidden, errorResponse{Error: "迁移文件路径必须在 data/ 目录下"})
+		// JSON 路径参数
+		var req migrateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
 			return
 		}
+		if req.SourcePath == "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请提供 source_path（源数据库文件路径）或上传文件"})
+			return
+		}
+
+		// 安全校验：限制迁移文件只能在 data/ 目录下，防止读取任意 SQLite 文件
+		cleanPath := filepath.ToSlash(filepath.Clean(req.SourcePath))
+		dataDir := "data"
+		if !filepath.IsAbs(req.SourcePath) {
+			if !strings.HasPrefix(cleanPath, dataDir+"/") && cleanPath != dataDir {
+				writeJSON(w, http.StatusForbidden, errorResponse{Error: "迁移文件路径必须在 data/ 目录下"})
+				return
+			}
+		} else {
+			absDataDir, _ := filepath.Abs(dataDir)
+			slashAbsDataDir := filepath.ToSlash(absDataDir)
+			if !strings.HasPrefix(cleanPath, slashAbsDataDir+"/") && cleanPath != slashAbsDataDir {
+				writeJSON(w, http.StatusForbidden, errorResponse{Error: "迁移文件路径必须在 data/ 目录下"})
+				return
+			}
+		}
+		sourcePath = req.SourcePath
 	}
 
-	stats, err := migrate.MigrateFromPath(req.SourcePath)
+	if needCleanup {
+		defer os.Remove(sourcePath)
+	}
+
+	stats, err := migrate.MigrateFromPath(sourcePath)
 	if err != nil {
 		log.Printf("❌ 数据迁移失败: %v", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "迁移失败: " + err.Error()})
 		return
 	}
 
-	log.Printf("✅ 数据迁移成功: 迁移了 %d 条订阅", stats.Subscriptions)
+	log.Printf("✅ 数据迁移成功: 迁移了 %d 条订阅, %d 集, %d 下载记录",
+		stats.Subscriptions, stats.Episodes, stats.Downloads)
+
+	if s.eventBus != nil {
+		s.eventBus.Publish(core.Event{
+			Type: "data.migrate",
+			Time: time.Now(),
+			Payload: map[string]interface{}{
+				"subscriptions": stats.Subscriptions,
+				"episodes":      stats.Episodes,
+				"downloads":     stats.Downloads,
+			},
+		})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "迁移成功",
 		"stats":   stats,
@@ -2016,25 +2438,64 @@ func (s *Server) handleTestNotify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	// 校验消息通知推送插件状态
+	if s.pluginManager != nil && !s.pluginManager.IsPluginEnabled("extended-notifiers") {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "消息通知推送插件当前处于停用状态，请先在插件管理中启用",
+		})
+		return
+	}
+
 	if req.Channel != "" {
-		// 单渠道测试
-		err := s.notifyMgr.SendTest(ctx, req.Channel, req.Title, req.Message)
+		// 单渠道测试：先由 v2 核心管理器测试
+		var err error
+		if s.notifyMgr != nil {
+			err = s.notifyMgr.SendTest(ctx, req.Channel, req.Title, req.Message)
+		}
+		// 若核心未匹配到渠道，尝试扩展推送插件支持的渠道
+		if err != nil || s.notifyMgr == nil {
+			extErr := s.testExtendedNotifier(ctx, req.Channel, req.Title, req.Message)
+			if extErr != nil {
+				if !strings.Contains(extErr.Error(), "未找到通知渠道") {
+					err = extErr
+				}
+			} else {
+				err = nil
+			}
+		}
+
 		if err != nil {
+			if s.notifyMgr != nil {
+				s.notifyMgr.RecordManualLog("manual.test", req.Channel, req.Title, req.Message, "failed", err.Error())
+			}
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"success": false,
 				"error":   err.Error(),
 			})
 			return
 		}
+		if s.notifyMgr != nil {
+			s.notifyMgr.RecordManualLog("manual.test", req.Channel, req.Title, req.Message, "success", "")
+		}
 	} else {
 		// 全渠道测试
-		err := s.notifyMgr.SendTest(ctx, "", req.Title, req.Message)
+		var err error
+		if s.notifyMgr != nil {
+			err = s.notifyMgr.SendTest(ctx, "", req.Title, req.Message)
+		}
 		if err != nil {
+			if s.notifyMgr != nil {
+				s.notifyMgr.RecordManualLog("manual.test", "all", req.Title, req.Message, "failed", err.Error())
+			}
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"success": false,
 				"error":   err.Error(),
 			})
 			return
+		}
+		if s.notifyMgr != nil {
+			s.notifyMgr.RecordManualLog("manual.test", "all", req.Title, req.Message, "success", "")
 		}
 	}
 
@@ -2042,6 +2503,131 @@ func (s *Server) handleTestNotify(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "测试通知已发送",
 	})
+}
+
+// testExtendedNotifier 测试扩展通知插件通道 (Bark, ServerChan, Discord, Slack, Gotify, Ntfy, Pushover, Email)
+func (s *Server) testExtendedNotifier(ctx context.Context, channel, title, message string) error {
+	if s.pluginManager != nil && !s.pluginManager.IsPluginEnabled("extended-notifiers") {
+		return fmt.Errorf("消息通知推送插件当前处于停用状态，请先在插件管理中启用")
+	}
+
+	getSetting := func(key string) string {
+		var st database.Setting
+		if err := database.DB.Where("key = ?", key).First(&st).Error; err == nil {
+			return strings.TrimSpace(st.Value)
+		}
+		return ""
+	}
+
+	var target core.Notifier
+	switch strings.ToLower(channel) {
+	case "bark":
+		key := getSetting("BARK_DEVICE_KEY")
+		if key == "" {
+			return fmt.Errorf("Bark 设备密钥 (BARK_DEVICE_KEY) 未配置")
+		}
+		target = notifier.NewPushNotifier(notifier.PushBark, getSetting("BARK_SERVER_URL"), key, "")
+	case "serverchan":
+		key := getSetting("SERVERCHAN_KEY")
+		if key == "" {
+			return fmt.Errorf("Server酱 SCKEY (SERVERCHAN_KEY) 未配置")
+		}
+		target = notifier.NewPushNotifier(notifier.PushServerChan, "", key, "")
+	case "discord":
+		webhook := getSetting("DISCORD_WEBHOOK")
+		if webhook == "" {
+			return fmt.Errorf("Discord Webhook 未配置")
+		}
+		target = notifier.NewDiscordNotifier(webhook)
+	case "slack":
+		webhook := getSetting("SLACK_WEBHOOK")
+		if webhook == "" {
+			return fmt.Errorf("Slack Webhook 未配置")
+		}
+		target = notifier.NewSlackNotifier(webhook)
+	case "gotify":
+		url := getSetting("GOTIFY_URL")
+		token := getSetting("GOTIFY_TOKEN")
+		if url == "" || token == "" {
+			return fmt.Errorf("Gotify URL 或 Token 未配置")
+		}
+		target = notifier.NewPushNotifier(notifier.PushGotify, url, token, "")
+	case "ntfy":
+		topic := getSetting("NTFY_TOPIC")
+		if topic == "" {
+			return fmt.Errorf("Ntfy Topic 未配置")
+		}
+		target = notifier.NewPushNotifier(notifier.PushNtfy, getSetting("NTFY_URL"), topic, "")
+	case "pushover":
+		token := getSetting("PUSHOVER_TOKEN")
+		user := getSetting("PUSHOVER_USER")
+		if token == "" || user == "" {
+			return fmt.Errorf("Pushover Token 或 User 未配置")
+		}
+		target = notifier.NewPushNotifier(notifier.PushPushover, "", token, user)
+	case "email", "smtp":
+		host := getSetting("EMAIL_SMTP_HOST")
+		port := getSetting("EMAIL_SMTP_PORT")
+		user := getSetting("EMAIL_SMTP_USER")
+		pass := getSetting("EMAIL_SMTP_PASS")
+		from := getSetting("EMAIL_SMTP_FROM")
+		if from == "" {
+			from = user
+		}
+		toStr := getSetting("EMAIL_SMTP_TO")
+		if host == "" || user == "" || toStr == "" {
+			return fmt.Errorf("SMTP 服务器、用户名或收件人邮箱未配置")
+		}
+		var toList []string
+		for _, item := range strings.Split(toStr, ",") {
+			trimmed := strings.TrimSpace(item)
+			if trimmed != "" {
+				toList = append(toList, trimmed)
+			}
+		}
+		target = notifier.NewEmailNotifier(host, port, user, pass, from, toList)
+	case "matrix":
+		hs := getSetting("MATRIX_HOMESERVER")
+		token := getSetting("MATRIX_TOKEN")
+		room := getSetting("MATRIX_ROOM_ID")
+		if hs == "" || token == "" || room == "" {
+			return fmt.Errorf("Matrix 服务器、Token 或 Room ID 未配置")
+		}
+		target = notifier.NewMatrixNotifier(hs, token, room)
+	case "line":
+		token := getSetting("LINE_CHANNEL_TOKEN")
+		user := getSetting("LINE_USER_ID")
+		if token == "" || user == "" {
+			return fmt.Errorf("LINE Channel Token 或 User ID 未配置")
+		}
+		target = notifier.NewLINENotifier(token, user)
+	case "whatsapp":
+		phone := getSetting("WHATSAPP_PHONE_ID")
+		token := getSetting("WHATSAPP_TOKEN")
+		to := getSetting("WHATSAPP_TO")
+		if phone == "" || token == "" || to == "" {
+			return fmt.Errorf("WhatsApp Phone ID, Token 或 接收者号码未配置")
+		}
+		target = notifier.NewWhatsAppNotifier(phone, token, to)
+	case "signal":
+		url := getSetting("SIGNAL_API_URL")
+		sender := getSetting("SIGNAL_SENDER")
+		recipients := getSetting("SIGNAL_RECIPIENTS")
+		if url == "" || sender == "" || recipients == "" {
+			return fmt.Errorf("Signal API URL, Sender 或 接收者未配置")
+		}
+		var rList []string
+		for _, r := range strings.Split(recipients, ",") {
+			if trimmed := strings.TrimSpace(r); trimmed != "" {
+				rList = append(rList, trimmed)
+			}
+		}
+		target = notifier.NewSignalNotifierWithParams(url, sender, rList)
+	default:
+		return fmt.Errorf("未找到通知渠道: %s", channel)
+	}
+
+	return target.Send(ctx, title, message)
 }
 
 // ============================================================
@@ -2157,7 +2743,7 @@ func (s *Server) fetchGoogleModels(ctx context.Context, endpoint, apiKey string)
 	if !strings.Contains(modelsEndpoint, "generativelanguage.googleapis.com") {
 		modelsEndpoint = "https://generativelanguage.googleapis.com"
 	}
-	modelsEndpoint = modelsEndpoint + "/v1beta/models?key=" + apiKey
+	modelsEndpoint = modelsEndpoint + "/v1beta/models?key=" + url.QueryEscape(apiKey)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsEndpoint, nil)
 	if err != nil {
@@ -2525,3 +3111,384 @@ func (s *Server) getPublicBaseURL(r *http.Request) string {
 	}
 	return fmt.Sprintf("%s://%s", scheme, r.Host)
 }
+
+// ============================================================
+// 批量下载控制
+// ============================================================
+
+// handlePauseAllDownloads 批量暂停所有活跃任务
+// POST /api/downloads/pause-all
+func (s *Server) handlePauseAllDownloads(w http.ResponseWriter, r *http.Request) {
+	if s.downloader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "下载器未配置"})
+		return
+	}
+
+	tasks, err := s.downloader.List(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("获取任务列表失败: %v", err)})
+		return
+	}
+
+	var count int64
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for _, t := range tasks {
+		if t.Status == "downloading" || t.Status == "seeding" || t.Status == "queued" {
+			wg.Add(1)
+			go func(hash string) {
+				defer wg.Done()
+				if err := s.downloader.Pause(r.Context(), hash); err == nil {
+					mu.Lock()
+					count++
+					mu.Unlock()
+				}
+			}(t.Hash)
+		}
+	}
+	wg.Wait()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("已成功暂停 %d 个下载任务", count),
+		"count":   count,
+	})
+}
+
+// handleResumeAllDownloads 批量恢复所有暂停任务
+// POST /api/downloads/resume-all
+func (s *Server) handleResumeAllDownloads(w http.ResponseWriter, r *http.Request) {
+	if s.downloader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "下载器未配置"})
+		return
+	}
+
+	tasks, err := s.downloader.List(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("获取任务列表失败: %v", err)})
+		return
+	}
+
+	var count int64
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for _, t := range tasks {
+		if t.Status == "paused" {
+			wg.Add(1)
+			go func(hash string) {
+				defer wg.Done()
+				if err := s.downloader.Resume(r.Context(), hash); err == nil {
+					mu.Lock()
+					count++
+					mu.Unlock()
+				}
+			}(t.Hash)
+		}
+	}
+	wg.Wait()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("已成功恢复 %d 个下载任务", count),
+		"count":   count,
+	})
+}
+
+// ============================================================
+// 通知履历与投递监控 API
+// ============================================================
+
+// handleListNotificationLogs 查询通知投递流水
+// GET /api/notifications/logs
+func (s *Server) handleListNotificationLogs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	filter := v2.NotificationLogFilter{
+		Channel:   q.Get("channel"),
+		Status:    q.Get("status"),
+		EventType: q.Get("eventType"),
+		Page:      page,
+		PageSize:  pageSize,
+	}
+
+	total, logs, err := v2.GetNotificationLogs(filter)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("查询通知日志失败: %v", err)})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":    total,
+		"page":     page,
+		"pageSize": pageSize,
+		"logs":     logs,
+	})
+}
+
+// handleClearNotificationLogs 清空通知日志
+// DELETE /api/notifications/logs
+func (s *Server) handleClearNotificationLogs(w http.ResponseWriter, r *http.Request) {
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	if err := v2.ClearNotificationLogs(days); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("清空通知日志失败: %v", err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "通知记录清理完成",
+	})
+}
+
+// handleGetNotificationStats 查询通知汇总与渠道分布
+// GET /api/notifications/stats
+func (s *Server) handleGetNotificationStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := v2.GetNotificationStats()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("获取通知统计失败: %v", err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// ============================================================
+// RSS 源深度解析探针
+// ============================================================
+
+type rssPreviewItem struct {
+	Title       string  `json:"title"`
+	Link        string  `json:"link"`
+	PubDate     string  `json:"pub_date"`
+	Magnet      string  `json:"magnet"`
+	Size        int64   `json:"size"`
+	ParsedTitle string  `json:"parsed_title"`
+	Episode     float32 `json:"episode"`
+	Season      int     `json:"season"`
+	Subgroup    string  `json:"subgroup"`
+	Resolution  string  `json:"resolution"`
+	IsBatch     bool    `json:"is_batch"`
+	IsSpecial   bool    `json:"is_special"`
+}
+
+// handlePreviewRSS 实时拉取并解析任意 RSS 订阅源内容与正则特征
+// POST /api/rss/preview
+func (s *Server) handlePreviewRSS(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.URL) == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "必须提供有效的 RSS URL"})
+		return
+	}
+
+	targetURL := strings.TrimSpace(req.URL)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	urlsToTry := []string{targetURL}
+	if u, err := url.Parse(targetURL); err == nil && (strings.Contains(u.Host, "mikanani.me") || strings.Contains(u.Host, "mikanime.tv")) {
+		mirrors := []string{"mikanime.tv", "mikanani.me"}
+		for _, m := range mirrors {
+			altURL := *u
+			altURL.Host = m
+			s := altURL.String()
+			if s != targetURL {
+				urlsToTry = append(urlsToTry, s)
+			}
+		}
+	}
+
+	client := httpx.New(8 * time.Second)
+	var resp *http.Response
+	var lastErr error
+
+	for _, tryURL := range urlsToTry {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, tryURL, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (Ani-Go/0.5.4 RSS-Inspector)")
+
+		r, err := client.Do(httpReq)
+		if err == nil && r.StatusCode == http.StatusOK {
+			resp = r
+			break
+		}
+		if r != nil {
+			r.Body.Close()
+			lastErr = fmt.Errorf("RSS 服务器返回状态码: %d", r.StatusCode)
+		} else {
+			lastErr = err
+		}
+	}
+
+	if resp == nil {
+		writeJSON(w, http.StatusBadGateway, errorResponse{Error: fmt.Sprintf("拉取 RSS 内容失败: %v", lastErr)})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("读取 RSS 数据失败: %v", err)})
+		return
+	}
+
+	type genericRSSItem struct {
+		Title       string `xml:"title"`
+		Link        string `xml:"link"`
+		PubDate     string `xml:"pubDate"`
+		Description string `xml:"description"`
+		Enclosure   struct {
+			URL    string `xml:"url,attr"`
+			Length int64  `xml:"length,attr"`
+		} `xml:"enclosure"`
+		Torrent struct {
+			MagnetURI string `xml:"magnetURI"`
+		} `xml:"torrent"`
+	}
+
+	type genericRSS struct {
+		Channel struct {
+			Title string           `xml:"title"`
+			Items []genericRSSItem `xml:"item"`
+		} `xml:"channel"`
+	}
+
+	var parsed genericRSS
+	if err := xml.Unmarshal(body, &parsed); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("解析 RSS XML 失败: %v", err)})
+		return
+	}
+
+	var results []rssPreviewItem
+	for _, it := range parsed.Channel.Items {
+		info := source.ParseMikanTitle(it.Title)
+
+		magnet := it.Torrent.MagnetURI
+		if magnet == "" && strings.HasPrefix(it.Enclosure.URL, "magnet:") {
+			magnet = it.Enclosure.URL
+		}
+		if magnet == "" && strings.Contains(it.Description, "magnet:?xt=") {
+			start := strings.Index(it.Description, "magnet:?xt=")
+			end := strings.IndexAny(it.Description[start:], " \"'<>\n\r\t")
+			if end > 0 {
+				magnet = it.Description[start : start+end]
+			} else {
+				magnet = it.Description[start:]
+			}
+		}
+
+		results = append(results, rssPreviewItem{
+			Title:       it.Title,
+			Link:        it.Link,
+			PubDate:     it.PubDate,
+			Magnet:      magnet,
+			Size:        it.Enclosure.Length,
+			ParsedTitle: info.Title,
+			Episode:     info.Episode,
+			Season:      info.Season,
+			Subgroup:    info.Subgroup,
+			Resolution:  info.Resolution,
+			IsBatch:     info.IsBatch,
+			IsSpecial:   info.IsSpecial,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"feed": map[string]interface{}{
+			"title": parsed.Channel.Title,
+			"url":   targetURL,
+		},
+		"total": len(results),
+		"items": results,
+	})
+}
+
+// handleGenerateMCPToken 生成并持久化新的 MCP Token
+// POST /api/mcp/token/generate
+func (s *Server) handleGenerateMCPToken(w http.ResponseWriter, r *http.Request) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "生成 Token 失败"})
+		return
+	}
+	token := hex.EncodeToString(b)
+
+	setting := database.Setting{Key: "MCP_TOKEN", Value: token}
+	if err := database.DB.Where("key = ?", "MCP_TOKEN").Assign(setting).FirstOrCreate(&setting).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "持久化 Token 失败"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"token": token,
+	})
+}
+
+type organizePreviewRequest struct {
+	FilePath string                  `json:"file_path"`
+	Anime    core.Anime              `json:"anime"`
+	Episode  core.Episode            `json:"episode"`
+	Items    []organizer.PreviewItem `json:"items"`
+}
+
+// handlePreviewOrganize 文件整理 Dry-Run 路径预览（不产生任何文件操作）
+// POST /api/organize/preview
+func (s *Server) handlePreviewOrganize(w http.ResponseWriter, r *http.Request) {
+	if s.organizer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "文件整理器未初始化"})
+		return
+	}
+
+	var req organizePreviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的请求数据: " + err.Error()})
+		return
+	}
+
+	ctx := r.Context()
+
+	// 批量预览模式
+	if len(req.Items) > 0 {
+		results, err := s.organizer.PreviewBatch(ctx, req.Items)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "批量整理预览失败: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"code": 0,
+			"data": results,
+		})
+		return
+	}
+
+	// 单项预览模式
+	if req.FilePath == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "file_path 或 items 不能为空"})
+		return
+	}
+
+	result, err := s.organizer.Preview(ctx, req.FilePath, req.Anime, req.Episode)
+	if err != nil && result.Action != "cancelled" {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "整理预览失败: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"code": 0,
+		"data": result,
+	})
+}
+
+
+

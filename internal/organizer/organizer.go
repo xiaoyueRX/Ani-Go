@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 )
 
@@ -30,6 +31,7 @@ type TVOrganizer struct {
 	otherTemplate string
 	tvBasePath    string
 	movieBasePath string
+	ovaBasePath   string
 	useHardLink   bool
 	pluginManager *plugin.Manager             // 插件管理器，用于触发整理完成事件
 	hookManager   *core.WaterfallHookManager // Waterfall 钩子管理器
@@ -38,13 +40,18 @@ type TVOrganizer struct {
 var _ core.Organizer = (*TVOrganizer)(nil)
 
 // New 创建文件整理器实例
-func New(tvTemplate, movieTemplate, otherTemplate, tvBasePath, movieBasePath string, useHardLink bool, pluginManager *plugin.Manager) *TVOrganizer {
+func New(tvTemplate, movieTemplate, otherTemplate, tvBasePath, movieBasePath string, useHardLink bool, pluginManager *plugin.Manager, opts ...string) *TVOrganizer {
+	ovaPath := "./TV/OVA"
+	if len(opts) > 0 && opts[0] != "" {
+		ovaPath = opts[0]
+	}
 	return &TVOrganizer{
 		tvTemplate:    tvTemplate,
 		movieTemplate: movieTemplate,
 		otherTemplate: otherTemplate,
 		tvBasePath:    tvBasePath,
 		movieBasePath: movieBasePath,
+		ovaBasePath:   ovaPath,
 		useHardLink:   useHardLink,
 		pluginManager: pluginManager,
 		hookManager:   core.NewWaterfallHookManager(),
@@ -80,23 +87,17 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 	}
 
 	// 确保目标路径是绝对路径
-	basePath := o.tvBasePath
-	if anime.Type == "Movie" {
-		basePath = o.movieBasePath
-	}
+	basePath := o.getBasePath(anime.Type)
 	fullPath := filepath.Join(basePath, finalPath)
 
-	// 边界检查：防御性防止任何非法路径穿越逃逸 basePath
-	cleanBase := filepath.Clean(basePath)
-	cleanTarget := filepath.Clean(fullPath)
-	rel, relErr := filepath.Rel(cleanBase, cleanTarget)
-	if relErr != nil || strings.HasPrefix(rel, "..") || rel == "." {
-		return "", fmt.Errorf("非法目标路径越界: %s", fullPath)
+	// 补充扩展名
+	if filepath.Ext(fullPath) == "" && filePath != "" {
+		fullPath += filepath.Ext(filePath)
 	}
 
-	// 补充扩展名
-	if filepath.Ext(fullPath) == "" {
-		fullPath += filepath.Ext(filePath)
+	// 边界检查：防御性防止任何非法路径穿越逃逸 basePath（必须在最终完整路径上校验）
+	if err := checkPathEscape(basePath, fullPath); err != nil {
+		return "", err
 	}
 
 	// 创建目标目录
@@ -106,7 +107,9 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 	}
 
 	// 移动或硬链接文件
-	if o.useHardLink {
+	useHardLink := o.isHardLinkEnabled()
+
+	if useHardLink {
 		if linkErr := os.Link(filePath, fullPath); linkErr != nil {
 			// 任何硬链接失败都回退到复制（跨设备、权限、目录不存在等）
 			log.Printf("⚠️ 硬链接创建失败 (%v)，正在降级为文件复制...", linkErr)
@@ -145,23 +148,115 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 	return fullPath, nil
 }
 
+// normalizeAnimeType 规范化番剧分类类型（大小写无关，支持常见别名）
+func normalizeAnimeType(t string) string {
+	t = strings.ToLower(strings.TrimSpace(t))
+	switch t {
+	case "movie", "film", "劇場版", "剧场版":
+		return "movie"
+	case "tv", "series", "animation", "scripted", "miniseries":
+		return "tv"
+	case "ova", "oad", "special", "sp", "extra":
+		return "ova"
+	default:
+		return "other"
+	}
+}
+
 // selectTemplate 根据类型选择模板
 func (o *TVOrganizer) selectTemplate(anime core.Anime) string {
-	switch anime.Type {
-	case "Movie":
+	normType := normalizeAnimeType(anime.Type)
+	switch normType {
+	case "movie":
+		if database.DB != nil {
+			var setting database.Setting
+			if err := database.DB.Where("key = ?", "MOVIE_TEMPLATE").First(&setting).Error; err == nil && setting.Value != "" {
+				return setting.Value
+			}
+		}
 		if o.movieTemplate != "" {
 			return o.movieTemplate
 		}
 		return "{title_cn} ({year})/{title_en}{ext}"
+	case "tv":
+		if database.DB != nil {
+			var setting database.Setting
+			if err := database.DB.Where("key = ?", "TV_TEMPLATE").First(&setting).Error; err == nil && setting.Value != "" {
+				return setting.Value
+			}
+		}
+		if o.tvTemplate != "" {
+			return o.tvTemplate
+		}
+		return "{title_cn}{year}/Season {season}/{title_en} [tmdbid={tmdb_id}] S{season:02}E{ep:02}{ext}"
 	default:
+		// OVA, Special, 或未指定类型 (other)
+		if database.DB != nil {
+			var setting database.Setting
+			if err := database.DB.Where("key = ?", "OTHER_TEMPLATE").First(&setting).Error; err == nil && setting.Value != "" {
+				return setting.Value
+			}
+		}
 		if o.otherTemplate != "" {
 			return o.otherTemplate
 		}
 		if o.tvTemplate != "" {
 			return o.tvTemplate
 		}
-		return "{title_cn}{year}/Season {season}/{title_en} [tmdbid={tmdb_id}] S{season:02}E{ep:02}{ext}"
+		return "{title_cn}{year}/Specials/{title_en} S00E{ep:02}{ext}"
 	}
+}
+
+func (o *TVOrganizer) getBasePath(animeType string) string {
+	normType := normalizeAnimeType(animeType)
+	var basePath string
+	switch normType {
+	case "movie":
+		basePath = o.movieBasePath
+		if database.DB != nil {
+			var movieBaseSetting database.Setting
+			if err := database.DB.Where("key = ?", "MOVIE_BASE_PATH").First(&movieBaseSetting).Error; err == nil && movieBaseSetting.Value != "" {
+				basePath = movieBaseSetting.Value
+			}
+		}
+		if basePath == "" {
+			basePath = "./TV/Media/剧场版"
+		}
+	case "ova":
+		basePath = o.ovaBasePath
+		if database.DB != nil {
+			var ovaBaseSetting database.Setting
+			if err := database.DB.Where("key = ?", "OVA_BASE_PATH").First(&ovaBaseSetting).Error; err == nil && ovaBaseSetting.Value != "" {
+				basePath = ovaBaseSetting.Value
+			}
+		}
+		if basePath == "" {
+			basePath = "./TV/Media/OVA"
+		}
+	default:
+		basePath = o.tvBasePath
+		if database.DB != nil {
+			var baseSetting database.Setting
+			if err := database.DB.Where("key = ?", "TV_BASE_PATH").First(&baseSetting).Error; err == nil && baseSetting.Value != "" {
+				basePath = baseSetting.Value
+			}
+		}
+		if basePath == "" {
+			basePath = "./TV/Media/番剧"
+		}
+	}
+	return basePath
+}
+
+func (o *TVOrganizer) isHardLinkEnabled() bool {
+	useHardLink := o.useHardLink
+	if database.DB != nil {
+		var hlSetting database.Setting
+		if err := database.DB.Where("key = ?", "USE_HARDLINK").First(&hlSetting).Error; err == nil {
+			useHardLink = (hlSetting.Value == "true" || hlSetting.Value == "1")
+		}
+	}
+	return useHardLink
 }
 
 // VarValues 保存模板变量名到值的映射
@@ -228,13 +323,40 @@ func renderTemplate(template string, v core.VarValues) string {
 	return result
 }
 
+// checkPathEscape 防御性防止任何非法路径穿越逃逸 basePath
+func checkPathEscape(basePath, fullPath string) error {
+	absBase, err1 := filepath.Abs(basePath)
+	absTarget, err2 := filepath.Abs(fullPath)
+	if err1 != nil || err2 != nil {
+		return fmt.Errorf("解析路径失败: %s", fullPath)
+	}
+	cleanBase := filepath.Clean(absBase)
+	cleanTarget := filepath.Clean(absTarget)
+	rel, relErr := filepath.Rel(cleanBase, cleanTarget)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == "." {
+		return fmt.Errorf("非法目标路径越界: %s", fullPath)
+	}
+	return nil
+}
+
+// cleanVarValue 清理变量值中的路径穿越符与控制字符
+func cleanVarValue(val string) string {
+	val = strings.ReplaceAll(val, "\x00", "")
+	val = strings.ReplaceAll(val, "\r", "")
+	val = strings.ReplaceAll(val, "\n", "")
+	for strings.Contains(val, "..") {
+		val = strings.ReplaceAll(val, "..", "")
+	}
+	return val
+}
+
 // resolveVar 根据变量名获取对应的值
 func resolveVar(name string, v core.VarValues) string {
 	switch name {
 	case "title_cn":
-		return v.TitleCN
+		return cleanVarValue(v.TitleCN)
 	case "title_en":
-		return v.TitleEN
+		return cleanVarValue(v.TitleEN)
 	case "year":
 		if v.Year > 0 {
 			return fmt.Sprintf("%d", v.Year)
@@ -245,11 +367,11 @@ func resolveVar(name string, v core.VarValues) string {
 	case "ep":
 		return fmt.Sprintf("%02g", v.Ep)
 	case "ext":
-		return v.Ext
+		return cleanVarValue(v.Ext)
 	case "tmdb_id":
-		return v.TMDBID
+		return cleanVarValue(v.TMDBID)
 	case "imdb_id":
-		return v.IMDBID
+		return cleanVarValue(v.IMDBID)
 	default:
 		return "{" + name + "}"
 	}
@@ -294,10 +416,11 @@ func copyFile(srcPath, dstPath string) error {
 	if err != nil {
 		return fmt.Errorf("创建目标文件失败: %w", err)
 	}
-	defer dst.Close()
 
 	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		_ = os.Remove(dstPath)
 		return fmt.Errorf("复制文件数据失败: %w", err)
 	}
-	return nil
+	return dst.Close()
 }

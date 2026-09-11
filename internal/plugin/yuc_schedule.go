@@ -8,7 +8,8 @@ import (
 )
 
 type YucSchedulePlugin struct {
-	mu sync.Mutex
+	mu      sync.Mutex
+	enabled bool
 }
 
 func (p *YucSchedulePlugin) GetInfo() PluginInfo {
@@ -27,6 +28,17 @@ func (p *YucSchedulePlugin) GetInfo() PluginInfo {
 }
 
 func (p *YucSchedulePlugin) Init(bus core.EventBus, ctx core.Context) error {
-	log.Println("🔌 [插件] 長門番堂 (yuc.wiki) 时间表插件已加载")
+	p.mu.Lock()
+	p.enabled = true
+	p.mu.Unlock()
+	log.Println("🔌 [插件] 長門番堂 (yuc.wiki) 时间表插件已加载并启用")
+	return nil
+}
+
+func (p *YucSchedulePlugin) Stop(bus core.EventBus) error {
+	p.mu.Lock()
+	p.enabled = false
+	p.mu.Unlock()
+	log.Println("🔌 [插件] 長門番堂 (yuc.wiki) 时间表插件已停用")
 	return nil
 }

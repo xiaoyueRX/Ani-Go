@@ -1,5 +1,13 @@
 # AGENTS.md
 
+> 📌 **【架构分层与开发设计准则】**
+> 1. **核心功能与插件划分标准**：
+>    - **微内核核心（Core）**：仅限「RSS 抓取 ──► 标题消歧 ──► 下载调度 ──► 规范硬链接 ──► Jellyfin 播放」五步主干流水线。
+>    - **扩展功能（Plugin）**：除上述五步外的辅助功能（通知、AI/MCP、NFO刮削、备份迁移等）均应作为可独立启停的插件实现。
+>    - **资源释放准则**：插件停用时应完整释放后台协程与网络连接，杜绝空载开销。
+> 2. **轻量化性能基准**：常驻内存 15MB~30MB，空载 CPU 0.0%，保障在 J1900 等轻量硬件上稳定运行。
+> 3. **完整设计规范参见**：[docs/00_DESIGN_PHILOSOPHY.md](docs/00_DESIGN_PHILOSOPHY.md)
+
 ## 技术栈
 - **后端**: Go 1.25+, 原生 `http.ServeMux`（禁止 Gin/Fiber/Echo）
 - **数据库**: SQLite via GORM (`github.com/glebarez/sqlite` — 纯 Go，**禁止 CGO**)

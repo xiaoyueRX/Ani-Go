@@ -94,12 +94,21 @@ func (m *MikanSource) tryMirrors(ctx context.Context, path string) (*http.Respon
 	m.mu.RUnlock()
 
 	domains := make([]string, 0, 1+len(mirrorDomains))
-	domains = append(domains, domain)
-	domains = append(domains, mirrorDomains...)
+	if domain != "" {
+		domains = append(domains, domain)
+	}
+	for _, d := range mirrorDomains {
+		if d != domain {
+			domains = append(domains, d)
+		}
+	}
+
+	// 快速探测与请求客户端：单个镜像最长 6 秒，防止慢镜像/坏镜像长达 30 秒卡死整体流程
+	fastClient := httpx.New(6 * time.Second)
 
 	var lastErr error
-	for _, domain := range domains {
-		url := fmt.Sprintf("https://%s%s", domain, path)
+	for _, d := range domains {
+		url := fmt.Sprintf("https://%s%s", d, path)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			lastErr = err
@@ -107,16 +116,18 @@ func (m *MikanSource) tryMirrors(ctx context.Context, path string) (*http.Respon
 		}
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
-		resp, err := m.httpClient.Do(req)
+		resp, err := fastClient.Do(req)
 		if err != nil {
 			lastErr = err
 			continue
 		}
 		if resp.StatusCode == http.StatusOK {
+			// 成功连通，自动将当前可用的优质镜像置为主域名
+			m.SetDomain(d)
 			return resp, nil
 		}
 		resp.Body.Close()
-		lastErr = fmt.Errorf("镜像 %s 返回状态码: %d", domain, resp.StatusCode)
+		lastErr = fmt.Errorf("镜像 %s 返回状态码: %d", d, resp.StatusCode)
 	}
 	return nil, fmt.Errorf("所有镜像均不可达: %w", lastErr)
 }

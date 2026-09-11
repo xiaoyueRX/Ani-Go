@@ -35,7 +35,14 @@ func NewManager(bus core.EventBus) *Manager {
 		customSubs:    make(map[string][]customSubRef),
 	}
 	// 注册内建插件
-	m.builtInPlugins = append(m.builtInPlugins, &MetadataMappingPlugin{}, &GeekNamingPlugin{}, &YucSchedulePlugin{})
+	m.builtInPlugins = append(m.builtInPlugins,
+		&MetadataMappingPlugin{},
+		DefaultGeekNamingPlugin,
+		&YucSchedulePlugin{},
+		&DataMigratePlugin{},
+		DefaultExtendedNotifiersPlugin,
+		NewNFOScraperPlugin(),
+	)
 	return m
 }
 
@@ -64,23 +71,37 @@ func (m *Manager) Load() {
 		json.Unmarshal([]byte(customSetting.Value), &m.customPlugins)
 	}
 
-	// 启动内建插件
+	// 管理内建插件生命周期（严格恐慌隔离与无感启停）
 	for _, p := range m.builtInPlugins {
 		info := p.GetInfo()
 		enabled, exists := m.activePlugins[info.ID]
 		if !exists {
-			if info.ID == "yuc_schedule" {
-				enabled = false
-			} else {
-				enabled = true
-			}
+			enabled = !isDefaultDisabled(info.ID)
 		}
 
 		if enabled {
 			log.Printf("🔌 [插件] 启动内建插件: %s (%s)", info.Name, info.Version)
-			if err := p.Init(m.bus, nil); err != nil {
-				log.Printf("❌ [插件] 启动失败 [%s]: %v", info.ID, err)
-			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("❌ [插件 %s] 启动捕获 panic: %v", info.ID, r)
+					}
+				}()
+				if err := p.Init(m.bus, nil); err != nil {
+					log.Printf("❌ [插件] 启动失败 [%s]: %v", info.ID, err)
+				}
+			}()
+		} else {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("❌ [插件 %s] 停用捕获 panic: %v", info.ID, r)
+					}
+				}()
+				if err := p.Stop(m.bus); err != nil {
+					log.Printf("❌ [插件] 停用失败 [%s]: %v", info.ID, err)
+				}
+			}()
 		}
 	}
 
@@ -103,6 +124,11 @@ func (m *Manager) startWebhookPlugin(p PluginInfo) {
 		secret := p.Secret
 		subID := m.bus.Subscribe(et, func(ev core.Event) {
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("⚠️ [插件 %s] Webhook 发送异常崩溃捕获: %v", p.Name, r)
+					}
+				}()
 				payloadData, err := json.Marshal(map[string]interface{}{
 					"event":     ev.Type,
 					"timestamp": ev.Time.Unix(),
@@ -134,6 +160,10 @@ func (m *Manager) startWebhookPlugin(p PluginInfo) {
 	log.Printf("🔌 [插件] 已加载自定义 Webhook: %s -> %s (事件: %v)", p.Name, p.URL, p.Events)
 }
 
+func isDefaultDisabled(id string) bool {
+	return id == "yuc_schedule" || id == "nfo_scraper"
+}
+
 func (m *Manager) GetPluginList() []PluginInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -143,11 +173,7 @@ func (m *Manager) GetPluginList() []PluginInfo {
 		info := p.GetInfo()
 		enabled, exists := m.activePlugins[info.ID]
 		if !exists {
-			if info.ID == "yuc_schedule" {
-				enabled = false
-			} else {
-				enabled = true
-			}
+			enabled = !isDefaultDisabled(info.ID)
 		}
 		info.Enabled = enabled
 		list = append(list, info)
@@ -171,10 +197,7 @@ func (m *Manager) IsPluginEnabled(id string) bool {
 	defer m.mu.RUnlock()
 	enabled, exists := m.activePlugins[id]
 	if !exists {
-		if id == "yuc_schedule" {
-			return false
-		}
-		return true
+		return !isDefaultDisabled(id)
 	}
 	return enabled
 }
@@ -200,6 +223,21 @@ func (m *Manager) TogglePlugin(id string, enabled bool) error {
 
 	m.Load()
 	return nil
+}
+
+// List 获取插件列表
+func (m *Manager) List() []PluginInfo {
+	return m.GetPluginList()
+}
+
+// Enable 启用指定插件
+func (m *Manager) Enable(id string) error {
+	return m.TogglePlugin(id, true)
+}
+
+// Disable 停用指定插件
+func (m *Manager) Disable(id string) error {
+	return m.TogglePlugin(id, false)
 }
 
 func (m *Manager) AddOrUpdatePlugin(p PluginInfo) error {

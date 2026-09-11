@@ -17,10 +17,12 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/mcp"
+	"github.com/xiaoyueRX/Ani-Go/internal/notifier/v2"
+	"github.com/xiaoyueRX/Ani-Go/internal/organizer"
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 	"github.com/xiaoyueRX/Ani-Go/internal/search"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
-	"github.com/xiaoyueRX/Ani-Go/internal/notifier/v2"
 )
 
 // Server 持有 API 所需的依赖
@@ -40,6 +42,8 @@ type Server struct {
 	notifyMgr         *v2.NotifyManager
 	backupManager     *backup.BackupManager // 备份管理器
 	md                core.MetadataProvider
+	mcpServer         *mcp.Server           // MCP 服务端
+	organizer         *organizer.TVOrganizer // 文件整理器（用于 Dry-Run 预览）
 }
 
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
@@ -48,6 +52,7 @@ type ServerOptions struct {
 	SmartSearchEnabled bool
 	AIChat             ai.Classifier
 	BackupManager      *backup.BackupManager
+	Organizer          *organizer.TVOrganizer
 }
 
 func StartServer(ctx context.Context, host string, port int, version string, allowedOrigins []string, dl core.Downloader, triggerSupp func(ctx context.Context, subID uint) error, pluginMgr *plugin.Manager, parser core.TaskParser, mikan *source.MikanSource, yuc *source.YucWikiSource, multi core.Source, staticHandler http.Handler, logPath string, notifyMgr *v2.NotifyManager, md core.MetadataProvider, bus core.EventBus, options ...ServerOptions) *http.Server {
@@ -60,6 +65,40 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 	if bm == nil {
 		bm = backup.NewBackupManager(&config.Config{})
 	}
+
+	// 初始化 MCP 服务端
+	mcpServer := mcp.NewServer(func() string {
+		var s database.Setting
+		if err := database.DB.Where("key = ?", "MCP_TOKEN").First(&s).Error; err == nil {
+			return strings.TrimSpace(s.Value)
+		}
+		return ""
+	})
+	mcpServer.RegisterAnimeOpsTools(mcp.AnimeOpsDeps{
+		Downloader:        dl,
+		MultiSource:       multi,
+		TriggerSupplement: triggerSupp,
+		TriggerRefresh: func() {
+			if triggerSupp == nil {
+				return
+			}
+			go func() {
+				var subs []database.Subscription
+				if err := database.DB.Where("enabled = ?", true).Find(&subs).Error; err == nil {
+					for _, sub := range subs {
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+						_ = triggerSupp(ctx, sub.ID)
+						cancel()
+					}
+				}
+			}()
+		},
+	})
+	mcpServer.RegisterGovernanceTools(mcp.GovernanceDeps{
+		PluginManager: pluginMgr,
+		Downloader:    dl,
+		Version:       version,
+	})
 
 	s := &Server{
 		downloader:        dl,
@@ -77,6 +116,8 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 		notifyMgr:         notifyMgr,
 		backupManager:     bm,
 		md:                md,
+		mcpServer:         mcpServer,
+		organizer:         opts.Organizer,
 	}
 
 	mux := http.NewServeMux()
@@ -92,20 +133,15 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 	var finalHandler http.Handler
 	if staticHandler != nil {
 		finalHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// API 路由优先
-			if len(r.URL.Path) >= 5 && r.URL.Path[:5] == "/api/" {
-				apiHandler.ServeHTTP(w, r)
-				return
-			}
-			// /api/health 和 /api/login 也走 API
-			if r.URL.Path == "/api/health" || r.URL.Path == "/api/login" || r.URL.Path == "/api/me" || strings.HasPrefix(r.URL.Path, "/api/proxy/image") {
+			// API 与 MCP 路由优先走 API Handler（MCP 自带独立 Bearer Token 强鉴权）
+			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/mcp/") {
 				apiHandler.ServeHTTP(w, r)
 				return
 			}
 			// 其余全部交给静态文件处理器（含 SPA 回退）
 			staticHandler.ServeHTTP(w, r)
 		})
-		log.Println("✅ 前端静态文件处理器已挂载（非 /api/* 路径 → SPA 回退）")
+		log.Println("✅ 前端静态文件处理器已挂载（非 /api/* 或 /mcp/* 路径 → SPA 回退）")
 	} else {
 		finalHandler = apiHandler
 	}
@@ -114,9 +150,9 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      finalHandler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 90 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
@@ -202,12 +238,20 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 下载队列
 	mux.HandleFunc("GET /api/downloads", s.handleListDownloads)
+	mux.HandleFunc("POST /api/downloads", s.handleCreateDownload)
+	mux.HandleFunc("POST /api/downloads/pause-all", s.handlePauseAllDownloads)
+	mux.HandleFunc("POST /api/downloads/resume-all", s.handleResumeAllDownloads)
+	mux.HandleFunc("DELETE /api/downloads/{hash}", s.handleDeleteDownload)
+	mux.HandleFunc("POST /api/downloads/{hash}/pause", s.handlePauseDownload)
+	mux.HandleFunc("POST /api/downloads/{hash}/resume", s.handleResumeDownload)
+	mux.HandleFunc("POST /api/downloader/test", s.handleTestDownloader)
 
 	// 设置
 	mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", s.handleUpdateSettings)
 	mux.HandleFunc("GET /api/settings/custom-regex", s.handleGetCustomRegex)
 	mux.HandleFunc("POST /api/settings/custom-regex/reload", s.handleReloadCustomRegex)
+	mux.HandleFunc("POST /api/settings/custom-regex/test", s.handleTestCustomRegex)
 	mux.HandleFunc("GET /api/logs", s.handleGetLogs)
 
 	// 备份管理
@@ -217,8 +261,17 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/backup/{name}", s.handleDeleteBackup)
 	mux.HandleFunc("GET /api/backup/download/{name}", s.handleDownloadBackup)
 
-	// 通知测试
+	// 通知测试与投递日志监控
 	mux.HandleFunc("POST /api/notify/test", s.handleTestNotify)
+	mux.HandleFunc("GET /api/notifications/logs", s.handleListNotificationLogs)
+	mux.HandleFunc("DELETE /api/notifications/logs", s.handleClearNotificationLogs)
+	mux.HandleFunc("GET /api/notifications/stats", s.handleGetNotificationStats)
+
+	// RSS 探针
+	mux.HandleFunc("POST /api/rss/preview", s.handlePreviewRSS)
+
+	// 整理路径 Dry-Run 预览
+	mux.HandleFunc("POST /api/organize/preview", s.handlePreviewOrganize)
 
 	// 数据迁移
 	mux.HandleFunc("POST /api/migrate", s.handleMigrateData)
@@ -264,6 +317,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 事件流 (SSE)
 	mux.HandleFunc("GET /api/events/stream", s.handleEventStream)
+
+	// MCP 协议服务 (SSE + JSON-RPC)
+	mux.HandleFunc("GET /mcp/sse", s.mcpServer.HandleSSE)
+	mux.HandleFunc("POST /mcp/messages", s.mcpServer.HandleMessages)
+	mux.HandleFunc("POST /api/mcp/token/generate", s.handleGenerateMCPToken)
 }
 
 // ============================================================
@@ -344,16 +402,20 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 
 	var user database.User
 	if err := database.DB.Where("username = ?", claims.Username).First(&user).Error; err != nil {
-		writeJSON(w, http.StatusOK, map[string]string{
-			"username":  claims.Username,
-			"avatar_url": "",
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"username":            claims.Username,
+			"avatar_url":          "",
+			"is_default_password": false,
 		})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"username":  claims.Username,
-		"avatar_url": user.AvatarURL,
+	isDefaultPassword := auth.CheckPassword("admin", user.PasswordHash)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"username":            claims.Username,
+		"avatar_url":          user.AvatarURL,
+		"is_default_password": isDefaultPassword,
 	})
 }
 

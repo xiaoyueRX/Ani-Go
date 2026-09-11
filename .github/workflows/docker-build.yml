@@ -16,7 +16,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
@@ -28,13 +28,13 @@ jobs:
         working-directory: web
         run: npm ci && npm run build
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
           cache: true
 
-      - name: 运行 Go 测试
-        run: go test ./... -v
+      - name: 运行 Go 单元与竞态测试
+        run: go test -race ./...
 
   # ---- 构建与推送 ----
   build-and-push:
@@ -46,7 +46,7 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       # 检查是否配置了 Docker Hub 凭据
       - name: 检查 Docker Hub 配置

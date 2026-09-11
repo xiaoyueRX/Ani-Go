@@ -174,6 +174,46 @@ func (c *Client) SuggestMerge(ctx context.Context, titles []string) ([]MergeSugg
 	return parseMergeResult(result)
 }
 
+// DisambiguateTitle 使用大模型对疑难标题进行上下文消歧推断
+func (c *Client) DisambiguateTitle(ctx context.Context, rawTitle, animeTitle string, pubDate time.Time) (*DisambiguateResult, error) {
+	// 配额熔断检查
+	count, ok := GetDefaultQuotaManager().CheckAndIncrement()
+	if !ok {
+		return nil, fmt.Errorf("AI 每日调用次数已达上限 (%d/%d)，自动熔断保护中: %w", count, GetDefaultQuotaManager().GetDailyLimit(), ErrQuotaExceeded)
+	}
+
+	systemPrompt := "你是一个动漫元数据精准解析专家。请严格根据标题和上下文提取季度、集数、字幕组和分辨率，返回纯 JSON，不要包含任何额外解释或 Markdown 格式。"
+
+	timeStr := ""
+	if !pubDate.IsZero() {
+		timeStr = fmt.Sprintf("种子发布时间: %s", pubDate.Format("2006-01-02 15:04:05"))
+	}
+
+	userPrompt := fmt.Sprintf(`请解析以下动漫种子标题：
+番剧名称: %s
+种子标题: %s
+%s
+
+字段格式要求：
+{
+  "season": 季度(数字,默认1),
+  "episode": 集数(支持小数如 1 或 12.5),
+  "subgroup": "字幕组名称(提取不到为空)",
+  "resolution": "分辨率(如 1080p, 720p, 4k)",
+  "confidence": 置信度(0.0-1.0),
+  "explanation": "简短提取依据"
+}
+
+请只返回单行 JSON 对象。`, animeTitle, rawTitle, timeStr)
+
+	resp, err := c.Chat(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseDisambiguateResult(resp)
+}
+
 // ============================================================
 // JSON 解析辅助
 // ============================================================
@@ -208,6 +248,22 @@ func parseMergeResult(raw string) ([]MergeSuggestion, error) {
 		return nil, fmt.Errorf("AI 归并建议解析失败: %w", err)
 	}
 	return suggestions, nil
+}
+
+func parseDisambiguateResult(raw string) (*DisambiguateResult, error) {
+	var dr DisambiguateResult
+	if err := json.Unmarshal([]byte(raw), &dr); err != nil {
+		if start := strings.Index(raw, "{"); start >= 0 {
+			if end := strings.LastIndex(raw, "}"); end > start {
+				if err := json.Unmarshal([]byte(raw[start:end+1]), &dr); err != nil {
+					return nil, fmt.Errorf("AI 消歧结果解析失败: %w", err)
+				}
+				return &dr, nil
+			}
+		}
+		return nil, fmt.Errorf("AI 消歧结果解析失败: %w", err)
+	}
+	return &dr, nil
 }
 
 // ============================================================

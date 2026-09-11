@@ -76,17 +76,17 @@ func WithRetry(ctx context.Context, config RetryConfig, fn func() (string, error
 
 // WithFallback 执行带备用模型的操作
 func WithFallback(ctx context.Context, primaryFn, fallbackFn func() (string, error), primaryName, fallbackName string) (string, error) {
-	resp, err := primaryFn()
-	if err == nil {
+	resp, primaryErr := primaryFn()
+	if primaryErr == nil {
 		return resp, nil
 	}
 
-	log.Printf("⚠️ 主模型 %s 失败(%v)，切换备用模型 %s", primaryName, err, fallbackName)
-	resp, err = fallbackFn()
-	if err == nil {
+	log.Printf("⚠️ 主模型 %s 失败(%v)，切换备用模型 %s", primaryName, primaryErr, fallbackName)
+	resp, fallbackErr := fallbackFn()
+	if fallbackErr == nil {
 		return resp, nil
 	}
-	return "", fmt.Errorf("主模型与备用模型均失败: 主=%v, 备=%w", err, err)
+	return "", fmt.Errorf("主模型与备用模型均失败: 主=%v, 备=%w", primaryErr, fallbackErr)
 }
 
 // CircuitBreaker 熔断器

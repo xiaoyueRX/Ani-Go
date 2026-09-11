@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/organizer"
 )
 
 func setupTestDB(t *testing.T) {
@@ -259,6 +261,22 @@ func TestHandleDeleteSubscription_Success(t *testing.T) {
 	if count != 0 {
 		t.Errorf("关联剧集应级联删除, 实际还有 %d 条", count)
 	}
+
+	// 测试回收站列表接口
+	recycleReq := httptest.NewRequest(http.MethodGet, "/api/subscriptions?deleted=true", nil)
+	recycleW := httptest.NewRecorder()
+	s.handleListSubscriptions(recycleW, recycleReq)
+	if recycleW.Code != http.StatusOK {
+		t.Errorf("回收站查询失败: 状态码 %d", recycleW.Code)
+	}
+	var deletedSubs []subscriptionResponse
+	json.Unmarshal(recycleW.Body.Bytes(), &deletedSubs)
+	if len(deletedSubs) != 1 {
+		t.Errorf("期望回收站有 1 条记录, 实际有 %d 条", len(deletedSubs))
+	}
+	if deletedSubs[0].DeletedAt == nil {
+		t.Error("回收站返回数据的 DeletedAt 应不为 nil")
+	}
 }
 
 func TestHandleGetSettings_Empty(t *testing.T) {
@@ -401,6 +419,12 @@ func (s *stubDownloader) GetStatus(ctx context.Context, hash string) (core.Downl
 func (s *stubDownloader) Delete(ctx context.Context, hash string, deleteFiles bool) error {
 	return nil
 }
+func (s *stubDownloader) Pause(ctx context.Context, hash string) error {
+	return nil
+}
+func (s *stubDownloader) Resume(ctx context.Context, hash string) error {
+	return nil
+}
 func (s *stubDownloader) IsAvailable(ctx context.Context) bool { return true }
 
 func TestHandleListDownloads_WithData(t *testing.T) {
@@ -420,3 +444,283 @@ func TestHandleListDownloads_WithData(t *testing.T) {
 		t.Errorf("期望状态 200, 实际 %d", w.Code)
 	}
 }
+
+func TestHandleDownloadActions(t *testing.T) {
+	s := &Server{
+		downloader: &stubDownloader{},
+	}
+
+	// 1. Create download
+	body := strings.NewReader(`{"title":"Test Anime","magnet":"magnet:?xt=urn:btih:test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/downloads", body)
+	w := httptest.NewRecorder()
+	s.handleCreateDownload(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("handleCreateDownload 期望 200, 实际 %d: %s", w.Code, w.Body.String())
+	}
+
+	// 2. Pause download
+	req = httptest.NewRequest(http.MethodPost, "/api/downloads/abc/pause", nil)
+	req.SetPathValue("hash", "abc")
+	w = httptest.NewRecorder()
+	s.handlePauseDownload(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("handlePauseDownload 期望 200, 实际 %d: %s", w.Code, w.Body.String())
+	}
+
+	// 3. Resume download
+	req = httptest.NewRequest(http.MethodPost, "/api/downloads/abc/resume", nil)
+	req.SetPathValue("hash", "abc")
+	w = httptest.NewRecorder()
+	s.handleResumeDownload(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("handleResumeDownload 期望 200, 实际 %d: %s", w.Code, w.Body.String())
+	}
+
+	// 4. Delete download
+	req = httptest.NewRequest(http.MethodDelete, "/api/downloads/abc?delete_files=true", nil)
+	req.SetPathValue("hash", "abc")
+	w = httptest.NewRecorder()
+	s.handleDeleteDownload(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("handleDeleteDownload 期望 200, 实际 %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleBatchDownloadActions(t *testing.T) {
+	s := &Server{
+		downloader: &stubDownloader{
+			tasks: []core.DownloadTask{
+				{Hash: "task1", Status: "downloading"},
+				{Hash: "task2", Status: "paused"},
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/downloads/pause-all", nil)
+	w := httptest.NewRecorder()
+	s.handlePauseAllDownloads(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("handlePauseAllDownloads 期望 200, 实际 %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/downloads/resume-all", nil)
+	w = httptest.NewRecorder()
+	s.handleResumeAllDownloads(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("handleResumeAllDownloads 期望 200, 实际 %d", w.Code)
+	}
+}
+
+func TestHandleNotificationLogsAndStats(t *testing.T) {
+	s := &Server{}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/notifications/logs?page=1&pageSize=10", nil)
+	w := httptest.NewRecorder()
+	s.handleListNotificationLogs(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("handleListNotificationLogs 期望 200, 实际 %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/notifications/stats", nil)
+	w = httptest.NewRecorder()
+	s.handleGetNotificationStats(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("handleGetNotificationStats 期望 200, 实际 %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/notifications/logs?days=30", nil)
+	w = httptest.NewRecorder()
+	s.handleClearNotificationLogs(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("handleClearNotificationLogs 期望 200, 实际 %d", w.Code)
+	}
+}
+
+func TestHandleGenerateMCPToken(t *testing.T) {
+	setupTestDB(t)
+	s := &Server{}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/mcp/token/generate", nil)
+	w := httptest.NewRecorder()
+	s.handleGenerateMCPToken(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("handleGenerateMCPToken 期望 200, 实际 %d", w.Code)
+	}
+
+	var res map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	token, ok := res["token"]
+	if !ok || len(token) != 64 {
+		t.Errorf("期望 64 位十六进制 token, 实际: %s", token)
+	}
+
+	// 验证持久化
+	var setting database.Setting
+	if err := database.DB.Where("key = ?", "MCP_TOKEN").First(&setting).Error; err != nil {
+		t.Fatalf("数据库中未查找到持久化的 MCP_TOKEN: %v", err)
+	}
+	if setting.Value != token {
+		t.Errorf("持久化值不一致: 期望 %s, 实际 %s", token, setting.Value)
+	}
+}
+
+func TestHandlePreviewOrganize(t *testing.T) {
+	setupTestDB(t)
+
+	// 1. 测试未提供 organizer 时返回 503
+	sNoOrg := &Server{}
+	req := httptest.NewRequest(http.MethodPost, "/api/organize/preview", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	sNoOrg.handlePreviewOrganize(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("未配置 organizer 时期望 503, 实际 %d", w.Code)
+	}
+
+	// 2. 测试配置 organizer 后的单文件预览
+	tmpDir := t.TempDir()
+	org := organizer.New(
+		"{title_cn}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}",
+		"", "",
+		tmpDir, tmpDir,
+		true,
+		nil,
+	)
+	s := &Server{organizer: org}
+
+	body := organizePreviewRequest{
+		FilePath: "/downloads/dungeon_01.mkv",
+		Anime: core.Anime{
+			TitleCN: "迷宫饭",
+			TitleEN: "Delicious in Dungeon",
+			Type:    "TV",
+		},
+		Episode: core.Episode{
+			Season: 1,
+			Number: 1,
+		},
+	}
+	raw, _ := json.Marshal(body)
+	req = httptest.NewRequest(http.MethodPost, "/api/organize/preview", bytes.NewReader(raw))
+	w = httptest.NewRecorder()
+	s.handlePreviewOrganize(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("单项预览期望 200, 实际 %d, 响应: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Code int                     `json:"code"`
+		Data organizer.PreviewResult `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析预览响应失败: %v", err)
+	}
+	if resp.Code != 0 {
+		t.Errorf("期望 code 0, 实际 %d", resp.Code)
+	}
+	if resp.Data.Action != "hardlink" {
+		t.Errorf("期望 action hardlink, 实际 %s", resp.Data.Action)
+	}
+	if !strings.Contains(resp.Data.FinalPath, "Delicious in Dungeon S01E01.mkv") {
+		t.Errorf("FinalPath 不匹配: %s", resp.Data.FinalPath)
+	}
+
+	// 3. 测试批量预览
+	batchBody := organizePreviewRequest{
+		Items: []organizer.PreviewItem{
+			{
+				FilePath: "/downloads/dungeon_01.mkv",
+				Anime:    core.Anime{TitleCN: "迷宫饭", TitleEN: "Delicious in Dungeon", Type: "TV"},
+				Episode:  core.Episode{Season: 1, Number: 1},
+			},
+			{
+				FilePath: "/downloads/dungeon_02.mkv",
+				Anime:    core.Anime{TitleCN: "迷宫饭", TitleEN: "Delicious in Dungeon", Type: "TV"},
+				Episode:  core.Episode{Season: 1, Number: 2},
+			},
+		},
+	}
+	rawBatch, _ := json.Marshal(batchBody)
+	reqBatch := httptest.NewRequest(http.MethodPost, "/api/organize/preview", bytes.NewReader(rawBatch))
+	wBatch := httptest.NewRecorder()
+	s.handlePreviewOrganize(wBatch, reqBatch)
+
+	if wBatch.Code != http.StatusOK {
+		t.Fatalf("批量预览期望 200, 实际 %d", wBatch.Code)
+	}
+
+	var batchResp struct {
+		Code int                       `json:"code"`
+		Data []organizer.PreviewResult `json:"data"`
+	}
+	if err := json.Unmarshal(wBatch.Body.Bytes(), &batchResp); err != nil {
+		t.Fatalf("解析批量响应失败: %v", err)
+	}
+	if len(batchResp.Data) != 2 {
+		t.Errorf("批量预览结果数量期望 2, 实际 %d", len(batchResp.Data))
+	}
+}
+
+type mockTestDownloader struct {
+	available bool
+	name      string
+}
+
+func (m *mockTestDownloader) Name() string { return m.name }
+func (m *mockTestDownloader) Add(ctx context.Context, item core.TorrentItem, savePath string) error {
+	return nil
+}
+func (m *mockTestDownloader) List(ctx context.Context) ([]core.DownloadTask, error) {
+	return nil, nil
+}
+func (m *mockTestDownloader) GetStatus(ctx context.Context, hash string) (core.DownloadTask, error) {
+	return core.DownloadTask{}, nil
+}
+func (m *mockTestDownloader) Delete(ctx context.Context, hash string, deleteFiles bool) error {
+	return nil
+}
+func (m *mockTestDownloader) Pause(ctx context.Context, hash string) error  { return nil }
+func (m *mockTestDownloader) Resume(ctx context.Context, hash string) error { return nil }
+func (m *mockTestDownloader) IsAvailable(ctx context.Context) bool          { return m.available }
+
+func TestHandleTestDownloader(t *testing.T) {
+	// 1. 测试未配置下载器
+	sNoDL := &Server{downloader: nil}
+	req1 := httptest.NewRequest(http.MethodPost, "/api/downloader/test", strings.NewReader(`{}`))
+	w1 := httptest.NewRecorder()
+	sNoDL.handleTestDownloader(w1, req1)
+	if w1.Code != http.StatusOK || !strings.Contains(w1.Body.String(), `"success":false`) {
+		t.Errorf("未配置下载器测试期望返回 success: false, 实际: %s", w1.Body.String())
+	}
+
+	// 2. 测试健康下载器
+	sOK := &Server{
+		downloader: &mockTestDownloader{available: true, name: "qBittorrent"},
+	}
+	req2 := httptest.NewRequest(http.MethodPost, "/api/downloader/test", strings.NewReader(`{}`))
+	w2 := httptest.NewRecorder()
+	sOK.handleTestDownloader(w2, req2)
+	if w2.Code != http.StatusOK || !strings.Contains(w2.Body.String(), `"success":true`) {
+		t.Errorf("健康下载器测试期望返回 success: true, 实际: %s", w2.Body.String())
+	}
+
+	// 3. 测试断网/不可用下载器
+	sDown := &Server{
+		downloader: &mockTestDownloader{available: false, name: "Transmission"},
+	}
+	req3 := httptest.NewRequest(http.MethodPost, "/api/downloader/test", strings.NewReader(`{}`))
+	w3 := httptest.NewRecorder()
+	sDown.handleTestDownloader(w3, req3)
+	if w3.Code != http.StatusOK || !strings.Contains(w3.Body.String(), `"success":false`) {
+		t.Errorf("断网下载器测试期望返回 success: false, 实际: %s", w3.Body.String())
+	}
+}
+
+
+
+
+

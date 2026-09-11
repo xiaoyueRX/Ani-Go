@@ -78,3 +78,29 @@ type User struct {
 	TokenVersion int    `gorm:"default:1"`
 	AvatarURL    string `gorm:"default:''"`
 }
+
+// NotificationLog 通知投递履历模型
+type NotificationLog struct {
+	gorm.Model
+	EventType  string `gorm:"index;size:64" json:"event_type"`
+	Channel    string `gorm:"index;size:64" json:"channel"`
+	Title      string `gorm:"size:255" json:"title"`
+	Content    string `gorm:"type:text" json:"content"`
+	Status     string `gorm:"index;size:32" json:"status"` // success, failed, dlq
+	ErrorMsg   string `gorm:"type:text" json:"error_msg"`
+	RetryCount int    `gorm:"default:0" json:"retry_count"`
+}
+
+// ParserCache 标题解析持久化缓存
+type ParserCache struct {
+	gorm.Model
+	RawTitle   string  `gorm:"uniqueIndex;not null;type:text"`
+	CleanTitle string  `gorm:"type:text"`
+	Season     int     `gorm:"default:1"`
+	Episode    float32 `gorm:"not null"`
+	Subgroup   string  `gorm:"size:128"`
+	Resolution string  `gorm:"size:32"`
+	Confidence float32 `gorm:"default:1.0"`
+	ResolvedBy string  `gorm:"size:32"` // regex, airdate, ai
+}
+

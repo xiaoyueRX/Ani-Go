@@ -1,4 +1,4 @@
-﻿package plugin
+package plugin
 
 import "github.com/xiaoyueRX/Ani-Go/internal/core"
 
@@ -23,4 +23,5 @@ type PluginInfo struct {
 type BuiltInPlugin interface {
 	GetInfo() PluginInfo
 	Init(bus core.EventBus, ctx core.Context) error
+	Stop(bus core.EventBus) error
 }

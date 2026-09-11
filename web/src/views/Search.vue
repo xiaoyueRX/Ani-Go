@@ -6,7 +6,8 @@ import {
   ChevronLeft, Search, LayoutGrid, Timer, Calendar, 
   AlertTriangle, X, Antenna, Sparkles, Info, 
   Check, Plus, User, Copy, ExternalLink, Trash2, 
-  HardDrive, History, Filter, Clock
+  HardDrive, History, Filter, Clock, Download,
+  CheckSquare, Square, ListChecks
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
@@ -53,6 +54,16 @@ const aiConfigured = ref(false)
 const selectedSource = ref('all')
 const inResultFilter = ref('')
 const sortBy = ref<'default' | 'date' | 'size_desc' | 'size_asc'>('default')
+
+// 字幕组记忆与快速过滤
+const FILTER_PREF_KEY = 'anigo_search_filter_pref'
+const selectedSubgroup = ref(localStorage.getItem(FILTER_PREF_KEY) || 'all')
+
+// 直接下载与批量模式
+const directDownloading = ref<Record<string, boolean>>({})
+const batchMode = ref(false)
+const selectedItems = ref<TorrentItem[]>([])
+const batchProcessing = ref(false)
 
 // 搜索历史与热门标签
 const SEARCH_HISTORY_KEY = 'anigo_search_history'
@@ -206,12 +217,41 @@ const availableSources = computed(() => {
   return map
 })
 
+// 字幕组智能提取与记忆
+function selectSubgroup(group: string) {
+  selectedSubgroup.value = group
+  try {
+    localStorage.setItem(FILTER_PREF_KEY, group)
+  } catch {}
+}
+
+const extractedSubgroups = computed(() => {
+  const map = new Map<string, number>()
+  const regex = /^[\[【]([^\]】]+)[\]】]/
+  for (const item of results.value) {
+    const match = item.title.match(regex)
+    if (match && match[1]) {
+      const g = match[1].trim()
+      if (!/^(1080p|720p|4k|2160p|hevc|x264|x265|bilibili|web-dl)$/i.test(g) && g.length <= 25) {
+        map.set(g, (map.get(g) || 0) + 1)
+      }
+    }
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+})
+
 // 多维度过滤与排序
 const filteredResults = computed(() => {
   let list = results.value
 
   if (selectedSource.value !== 'all') {
     list = list.filter(item => item.source === selectedSource.value)
+  }
+
+  if (selectedSubgroup.value !== 'all') {
+    list = list.filter(item => item.title.includes(selectedSubgroup.value))
   }
 
   const kw = inResultFilter.value.trim().toLowerCase()
@@ -233,6 +273,97 @@ const filteredResults = computed(() => {
 
   return list
 })
+
+function getItemKey(item: TorrentItem): string {
+  return item.info_hash || item.magnet || item.url || item.title
+}
+
+async function directDownload(item: TorrentItem) {
+  const key = getItemKey(item)
+  directDownloading.value[key] = true
+  try {
+    await request.post('/downloads', {
+      title: item.title,
+      url: item.url,
+      magnet: item.magnet,
+      info_hash: item.info_hash,
+    })
+    window.showToast?.(t('search.action.downloadDirectSuccess') || '已添加到下载队列', 'success')
+  } catch (e: any) {
+    window.showToast?.(t('search.action.downloadDirectFailed', { error: e.response?.data?.error || e.message }) || '添加下载失败', 'error')
+  } finally {
+    directDownloading.value[key] = false
+  }
+}
+
+function isItemSelected(item: TorrentItem): boolean {
+  const key = getItemKey(item)
+  return selectedItems.value.some(i => getItemKey(i) === key)
+}
+
+function toggleItemSelection(item: TorrentItem) {
+  const key = getItemKey(item)
+  const idx = selectedItems.value.findIndex(i => getItemKey(i) === key)
+  if (idx >= 0) {
+    selectedItems.value.splice(idx, 1)
+  } else {
+    selectedItems.value.push(item)
+  }
+}
+
+function toggleSelectAll() {
+  if (selectedItems.value.length === filteredResults.value.length) {
+    selectedItems.value = []
+  } else {
+    selectedItems.value = [...filteredResults.value]
+  }
+}
+
+function exitBatchMode() {
+  batchMode.value = false
+  selectedItems.value = []
+}
+
+async function batchDirectDownload() {
+  if (selectedItems.value.length === 0) return
+  batchProcessing.value = true
+  let successCount = 0
+  for (const item of selectedItems.value) {
+    try {
+      await request.post('/downloads', {
+        title: item.title,
+        url: item.url,
+        magnet: item.magnet,
+        info_hash: item.info_hash,
+      })
+      successCount++
+    } catch {}
+  }
+  batchProcessing.value = false
+  window.showToast?.(t('search.action.batchDownloadSuccess', { count: successCount }) || `成功添加 ${successCount} 个下载任务`, 'success')
+  exitBatchMode()
+}
+
+async function batchSubscribe() {
+  if (selectedItems.value.length === 0) return
+  batchProcessing.value = true
+  let successCount = 0
+  for (const item of selectedItems.value) {
+    try {
+      await request.post('/subscriptions', {
+        title_cn: item.title,
+        bangumi_id: item.bangumi_id,
+        filter_json: JSON.stringify({ source_url: item.url }),
+        cover_url: item.cover_url || '',
+      })
+      subscribed.value.add(item.title)
+      successCount++
+    } catch {}
+  }
+  batchProcessing.value = false
+  window.showToast?.(t('search.action.batchSubscribeSuccess', { count: successCount }) || `成功添加 ${successCount} 个订阅`, 'success')
+  exitBatchMode()
+}
 
 async function openSubscribe(item: TorrentItem) {
   if (!item.bangumi_id) {
@@ -453,47 +584,126 @@ function sourceBadge(source: string): string {
     </div>
 
     <!-- Results Filter & Sorting Toolbar (when results > 0) -->
-    <div v-if="results.length > 0" class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-base-100 p-4 rounded-2xl border border-base-200/80 shadow-sm max-w-5xl mx-auto w-full">
-      <!-- Source Filter Chips -->
-      <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 md:pb-0 text-xs">
-        <button 
-          @click="selectedSource = 'all'" 
-          class="btn btn-xs sm:btn-sm rounded-xl font-bold whitespace-nowrap"
-          :class="selectedSource === 'all' ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
-        >
-          {{ $t('search.filterAll') }} ({{ results.length }})
-        </button>
-        <button 
-          v-for="[src, count] in availableSources" 
-          :key="src"
-          @click="selectedSource = src" 
-          class="btn btn-xs sm:btn-sm rounded-xl font-bold whitespace-nowrap"
-          :class="selectedSource === src ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
-        >
-          {{ src }} ({{ count }})
-        </button>
-      </div>
-
-      <!-- Quick Search & Sort -->
-      <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-        <div class="relative flex-1 sm:w-56">
-          <input 
-            v-model="inResultFilter" 
-            type="text" 
-            :placeholder="$t('search.filterKeyword')" 
-            class="input input-bordered input-xs sm:input-sm w-full rounded-xl pl-7 text-xs font-medium"
-          />
-          <Filter :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
+    <div v-if="results.length > 0" class="flex flex-col gap-3 bg-base-100 p-4 rounded-2xl border border-base-200/80 shadow-sm max-w-5xl mx-auto w-full">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <!-- Source Filter Chips -->
+        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 md:pb-0 text-xs">
+          <button 
+            @click="selectedSource = 'all'" 
+            class="btn btn-xs sm:btn-sm rounded-xl font-bold whitespace-nowrap"
+            :class="selectedSource === 'all' ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
+          >
+            {{ $t('search.filterAll') }} ({{ results.length }})
+          </button>
+          <button 
+            v-for="[src, count] in availableSources" 
+            :key="src"
+            @click="selectedSource = src" 
+            class="btn btn-xs sm:btn-sm rounded-xl font-bold whitespace-nowrap"
+            :class="selectedSource === src ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
+          >
+            {{ src }} ({{ count }})
+          </button>
         </div>
 
-        <select v-model="sortBy" class="select select-bordered select-xs sm:select-sm rounded-xl text-xs font-bold">
-          <option value="default">{{ $t('search.sortDefault') }}</option>
-          <option value="date">{{ $t('search.sortDate') }}</option>
-          <option value="size_desc">{{ $t('search.sortSizeDesc') }}</option>
-          <option value="size_asc">{{ $t('search.sortSizeAsc') }}</option>
-        </select>
+        <!-- Quick Search, Sort & Batch Toggle -->
+        <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <div class="relative flex-1 sm:w-52">
+            <input 
+              v-model="inResultFilter" 
+              type="text" 
+              :placeholder="$t('search.filterKeyword')" 
+              class="input input-bordered input-xs sm:input-sm w-full rounded-xl pl-7 text-xs font-medium"
+            />
+            <Filter :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
+          </div>
+
+          <select v-model="sortBy" class="select select-bordered select-xs sm:select-sm rounded-xl text-xs font-bold">
+            <option value="default">{{ $t('search.sortDefault') }}</option>
+            <option value="date">{{ $t('search.sortDate') }}</option>
+            <option value="size_desc">{{ $t('search.sortSizeDesc') }}</option>
+            <option value="size_asc">{{ $t('search.sortSizeAsc') }}</option>
+          </select>
+
+          <button 
+            @click="batchMode = !batchMode" 
+            class="btn btn-xs sm:btn-sm rounded-xl font-bold gap-1.5 whitespace-nowrap"
+            :class="batchMode ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60'"
+          >
+            <ListChecks :size="14" />
+            <span>{{ batchMode ? $t('search.action.batchCancel') : $t('search.action.batchSelect') }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Subgroup Quick Filter Chips -->
+      <div v-if="extractedSubgroups.length > 0" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-base-200/60 text-xs">
+        <span class="text-[10px] font-black uppercase text-base-content/40 shrink-0">字幕组:</span>
+        <button 
+          @click="selectSubgroup('all')" 
+          class="btn btn-xs rounded-lg font-bold whitespace-nowrap"
+          :class="selectedSubgroup === 'all' ? 'btn-neutral' : 'btn-ghost opacity-60 border border-base-200'"
+        >
+          全部
+        </button>
+        <button 
+          v-for="[group, count] in extractedSubgroups" 
+          :key="group"
+          @click="selectSubgroup(group)" 
+          class="btn btn-xs rounded-lg font-bold whitespace-nowrap"
+          :class="selectedSubgroup === group ? 'btn-neutral' : 'btn-ghost opacity-70 border border-base-200'"
+        >
+          {{ group }} ({{ count }})
+        </button>
       </div>
     </div>
+
+    <!-- Batch Action Floating Bar -->
+    <Transition name="fade">
+      <div v-if="batchMode && filteredResults.length > 0" class="sticky top-4 z-40 max-w-5xl mx-auto w-full bg-base-100/95 backdrop-blur-md p-3 sm:p-4 rounded-2xl border border-primary/30 shadow-xl flex flex-wrap items-center justify-between gap-3 animate-in slide-in-from-top-2 duration-200">
+        <div class="flex items-center gap-3">
+          <button 
+            @click="toggleSelectAll" 
+            class="btn btn-ghost btn-xs sm:btn-sm rounded-xl gap-1.5 text-xs font-bold border border-base-300"
+          >
+            <component :is="selectedItems.length === filteredResults.length ? CheckSquare : Square" :size="14" class="text-primary" />
+            <span>{{ selectedItems.length === filteredResults.length ? $t('search.action.deselectAll') : $t('search.action.selectAll') }}</span>
+          </button>
+          <span class="badge badge-primary badge-sm font-bold font-mono">
+            {{ $t('search.action.selectedCount', { count: selectedItems.length }) }}
+          </span>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button 
+            @click="batchDirectDownload" 
+            :disabled="selectedItems.length === 0 || batchProcessing"
+            class="btn btn-primary btn-xs sm:btn-sm rounded-xl gap-1.5 text-xs font-bold shadow-sm"
+          >
+            <span v-if="batchProcessing" class="loading loading-spinner loading-xs"></span>
+            <Download v-else :size="14" />
+            <span>{{ $t('search.action.batchDownload') }}</span>
+          </button>
+
+          <button 
+            @click="batchSubscribe" 
+            :disabled="selectedItems.length === 0 || batchProcessing"
+            class="btn btn-secondary btn-xs sm:btn-sm rounded-xl gap-1.5 text-xs font-bold shadow-sm"
+          >
+            <span v-if="batchProcessing" class="loading loading-spinner loading-xs"></span>
+            <Plus v-else :size="14" />
+            <span>{{ $t('search.action.batchSubscribe') }}</span>
+          </button>
+
+          <button 
+            @click="exitBatchMode" 
+            class="btn btn-ghost btn-xs sm:btn-sm rounded-xl text-xs font-bold"
+          >
+            {{ $t('search.action.batchCancel') }}
+          </button>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Results List -->
     <div v-if="filteredResults.length > 0" class="grid gap-3 sm:gap-4 max-w-5xl mx-auto w-full">
@@ -501,7 +711,18 @@ function sourceBadge(source: string): string {
         v-for="(item, idx) in filteredResults" 
         :key="item.info_hash || idx"
         class="group bg-base-100 rounded-2xl sm:rounded-3xl border border-base-200/80 shadow-sm hover:shadow-xl hover:border-primary/30 transition-all duration-300 overflow-hidden p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+        :class="{ 'ring-2 ring-primary/40': isItemSelected(item) }"
       >
+        <!-- Batch Checkbox -->
+        <div v-if="batchMode" class="shrink-0 flex items-center sm:self-center">
+          <input 
+            type="checkbox" 
+            :checked="isItemSelected(item)" 
+            @change="toggleItemSelection(item)"
+            class="checkbox checkbox-primary checkbox-sm rounded-lg cursor-pointer"
+          />
+        </div>
+
         <!-- Poster & Meta -->
         <div class="flex items-start gap-3.5 sm:gap-5 min-w-0 flex-1 w-full">
           <!-- Poster Thumbnail -->
@@ -545,7 +766,20 @@ function sourceBadge(source: string): string {
         </div>
 
         <!-- Actions -->
-        <div class="flex items-center gap-2 shrink-0 self-end sm:self-center w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-base-200/50">
+        <div class="flex items-center gap-2 shrink-0 self-end sm:self-center w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-base-200/50 flex-wrap">
+          <!-- 立即下载 (无需订阅) -->
+          <button 
+            v-if="item.magnet || item.url"
+            @click="directDownload(item)"
+            :disabled="directDownloading[getItemKey(item)]"
+            class="btn btn-ghost btn-sm rounded-xl gap-1.5 text-xs font-bold hover:bg-base-200 border border-base-200 text-primary"
+            :title="$t('search.action.downloadDirect')"
+          >
+            <span v-if="directDownloading[getItemKey(item)]" class="loading loading-spinner loading-xs"></span>
+            <Download v-else :size="14" />
+            <span class="text-[11px]">{{ $t('search.action.downloadDirect') }}</span>
+          </button>
+
           <button 
             v-if="item.magnet"
             @click="copyMagnet(item)"
@@ -553,7 +787,7 @@ function sourceBadge(source: string): string {
             :title="$t('search.action.copyMagnet')"
           >
             <Copy :size="14" />
-            <span class="text-[11px]">{{ $t('search.action.copyMagnet') }}</span>
+            <span class="text-[11px] hidden sm:inline">{{ $t('search.action.copyMagnet') }}</span>
           </button>
 
           <a 

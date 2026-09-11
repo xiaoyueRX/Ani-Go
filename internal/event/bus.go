@@ -51,6 +51,11 @@ func (b *Bus) Publish(event core.Event) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("⚠️  EventBus 处理器 panic (事件: %s): %v", event.Type, r)
+					}
+				}()
 				s.fn(event)
 			}()
 

@@ -6,6 +6,11 @@
 
 ## 【绝对指令】核心纪律
 
+0. **微内核与插件解耦原则**：
+   - **核心主干（Core）**：仅限「RSS 抓取 ──► 标题消歧 ──► 下载调度 ──► 规范硬链接 ──► Jellyfin 播放」五步主干流水线，直接内置于微内核。
+   - **扩展功能（Plugin）**：除上述五步外的辅助功能（消息推送、AI/MCP、NFO刮削、备份迁移、统计等），均作为独立插件实现。
+   - **资源释放准则**：插件停用时必须完整释放后台协程与网络连接，避免冗余日志与空载开销。
+   - 详细设计规范详见：[docs/00_DESIGN_PHILOSOPHY.md](docs/00_DESIGN_PHILOSOPHY.md)。
 1. **语言强制**：100% 使用简体中文交流。Go 源码注释、Git 提交信息、文档更新必须为纯中文。仅代码标识符（变量名、函数名）使用英文。
 2. **CGO 红线**：绝对禁止引入 CGO 依赖（如 `go-sqlite3`、`mattn/go-sqlite3`），强制使用纯 Go 驱动 `github.com/glebarez/sqlite`。`CGO_ENABLED=0` 必须始终可用。
 3. **记忆持久化**：每次完成 Feature、Bugfix 或 Phase 任务后，必须主动更新本文件的"当前项目状态"章节，并同步更新项目中所有 .md 文件（CLAUDE.md、README、AGENTS、DEVELOPMENT_PLAN、TRANSFER_CONTEXT、PROJECT_CONTEXT 及其中英文副本），确保文档与代码状态绝对一致。

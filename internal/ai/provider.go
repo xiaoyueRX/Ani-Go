@@ -6,6 +6,7 @@ package ai
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // ============================================================
@@ -46,11 +47,22 @@ type MergeSuggestion struct {
 	Reason    string   `json:"reason"`
 }
 
+// DisambiguateResult 复杂标题 AI 消歧结果
+type DisambiguateResult struct {
+	Season      int     `json:"season"`
+	Episode     float32 `json:"episode"`
+	Subgroup    string  `json:"subgroup"`
+	Resolution  string  `json:"resolution"`
+	Confidence  float32 `json:"confidence"`
+	Explanation string  `json:"explanation"`
+}
+
 // Classifier AI 分类器接口
 type Classifier interface {
 	Classify(ctx context.Context, title, description string) (*ClassifyResult, error)
 	SuggestMerge(ctx context.Context, titles []string) ([]MergeSuggestion, error)
 	Chat(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+	DisambiguateTitle(ctx context.Context, rawTitle, animeTitle string, pubDate time.Time) (*DisambiguateResult, error)
 	IsAvailable(ctx context.Context) bool
 }
 

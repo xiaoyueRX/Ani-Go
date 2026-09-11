@@ -56,7 +56,10 @@ func NewAnimeToshoSource(domain string) *AnimeToshoSource {
 func (at *AnimeToshoSource) Name() string { return "AnimeTosho" }
 
 func (at *AnimeToshoSource) IsAvailable(ctx context.Context) bool {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodHead, "https://"+at.domain, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, "https://"+at.domain, nil)
+	if err != nil {
+		return false
+	}
 	req.Header.Set("User-Agent", "Ani-Go/1.0")
 	resp, err := at.httpClient.Do(req)
 	if err != nil {
@@ -88,7 +91,7 @@ func (at *AnimeToshoSource) FetchRSS(ctx context.Context, rssURL string) ([]core
 
 func (at *AnimeToshoSource) SearchAnime(ctx context.Context, title string) ([]core.TorrentItem, error) {
 	query := url.QueryEscape(title)
-	rssURL := fmt.Sprintf("https://%s/rss?q=%s", at.domain, query)
+	rssURL := fmt.Sprintf("https://%s/rss2?q=%s", at.domain, query)
 	return at.FetchRSS(ctx, rssURL)
 }
 
@@ -97,7 +100,7 @@ func (at *AnimeToshoSource) FetchHistory(ctx context.Context, bangumiID string, 
 	if query == "" {
 		query = bangumiID
 	}
-	rssURL := fmt.Sprintf("https://%s/rss?q=%s", at.domain, url.QueryEscape(query))
+	rssURL := fmt.Sprintf("https://%s/rss2?q=%s", at.domain, url.QueryEscape(query))
 	return at.FetchRSS(ctx, rssURL)
 }
 

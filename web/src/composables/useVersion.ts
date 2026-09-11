@@ -1,13 +1,13 @@
 import { ref, onMounted } from 'vue'
 import request from '../utils/request'
 
-export const CURRENT_VERSION = 'v0.5.2'
+export const CURRENT_VERSION = 'v0.6.0'
 const VERSION_KEY = 'ani-go-last-version'
 const AUTO_UPDATE_KEY = 'ani-go-auto-update'
 
 export const currentVersion = ref(CURRENT_VERSION)
 
-export const formatVersion = (v: string) => (v ? (v.startsWith('v') ? v : `v${v}`) : 'v0.5.2')
+export const formatVersion = (v: string) => (v ? (v.startsWith('v') ? v : `v${v}`) : 'v0.6.0')
 
 export interface VersionInfo {
   version: string
@@ -39,9 +39,11 @@ export function useVersion() {
     }
   }
 
-  const checkGitHubUpdate = async () => {
-    const autoUpdate = localStorage.getItem(AUTO_UPDATE_KEY) === 'true'
-    if (!autoUpdate) return
+  const checkGitHubUpdate = async (force: boolean = false) => {
+    if (!force) {
+      const autoUpdate = localStorage.getItem(AUTO_UPDATE_KEY) === 'true'
+      if (!autoUpdate) return { checked: false, hasUpdate: false }
+    }
 
     try {
       // Use GitHub API to check latest release
@@ -52,10 +54,15 @@ export function useVersion() {
         if (latest && latest !== currentVersion.value) {
           latestVersion.value = latest
           hasNewVersion.value = true
+          return { checked: true, hasUpdate: true, latest }
         }
+        hasNewVersion.value = false
+        return { checked: true, hasUpdate: false, latest: currentVersion.value }
       }
-    } catch (e) {
+      return { checked: true, hasUpdate: false, error: `GitHub API HTTP ${res.status}` }
+    } catch (e: any) {
       console.error('Failed to check GitHub update:', e)
+      return { checked: true, hasUpdate: false, error: e?.message || '网络连接超时' }
     }
   }
 

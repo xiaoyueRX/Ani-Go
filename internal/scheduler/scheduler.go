@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -26,6 +27,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/downloader"
 	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
@@ -42,6 +44,13 @@ type Scheduler struct {
 	metadataProvider core.MetadataProvider // 元数据提供者（可选）
 	aiClient         ai.Classifier         // AI 分类器（可选）
 	backupManager    *backup.BackupManager // 备份管理器
+
+	pollRSSRunning         atomic.Bool
+	pollOrganizerRunning   atomic.Bool
+	pollDownloadsRunning   atomic.Bool
+	pollSupplementRunning  atomic.Bool
+	pollSyncBangumiRunning atomic.Bool
+	pollSeedCleanupRunning atomic.Bool
 }
 
 // New 创建调度器实例
@@ -76,6 +85,49 @@ func jitteredTicker(interval time.Duration) *time.Ticker {
 	return time.NewTicker(interval + jitter)
 }
 
+func (s *Scheduler) getInterval(key string, defaultVal time.Duration) time.Duration {
+	if database.DB == nil {
+		return defaultVal
+	}
+	var setting database.Setting
+	if err := database.DB.Where("key = ?", key).First(&setting).Error; err == nil && setting.Value != "" {
+		if d, err := time.ParseDuration(setting.Value); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultVal
+}
+
+func (s *Scheduler) getMikanRSSURL() string {
+	if database.DB != nil {
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", "MIKAN_RSS_URL").First(&setting).Error; err == nil && setting.Value != "" {
+			return setting.Value
+		}
+	}
+	return s.mikanRSSURL
+}
+
+func (s *Scheduler) getTVBasePath() string {
+	if database.DB != nil {
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", "TV_BASE_PATH").First(&setting).Error; err == nil && setting.Value != "" {
+			return setting.Value
+		}
+	}
+	return s.cfg.Organizer.TVBasePath
+}
+
+func (s *Scheduler) getRSSMode() string {
+	if database.DB != nil {
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", "MIKAN_RSS_MODE").First(&setting).Error; err == nil && setting.Value != "" {
+			return setting.Value
+		}
+	}
+	return s.cfg.Mikan.RSSMode
+}
+
 // Start 启动调度器，运行所有定时任务
 func (s *Scheduler) Start(ctx context.Context) {
 	log.Println("⏰ 调度器已启动")
@@ -88,14 +140,14 @@ func (s *Scheduler) Start(ctx context.Context) {
 		defer s.backupManager.Stop()
 	}
 
-	rssTicker := jitteredTicker(s.cfg.Scheduler.RSSInterval)
+	rssTicker := jitteredTicker(s.getInterval("RSS_INTERVAL", s.cfg.Scheduler.RSSInterval))
 	defer rssTicker.Stop()
 
-	orgTicker := jitteredTicker(s.cfg.Scheduler.OrganizerInterval)
+	orgTicker := jitteredTicker(s.getInterval("ORGANIZER_INTERVAL", s.cfg.Scheduler.OrganizerInterval))
 	defer orgTicker.Stop()
 
-	suppTicker := jitteredTicker(s.cfg.Scheduler.SupplementInterval)
-	bgmTicker := jitteredTicker(s.cfg.Scheduler.SyncBangumiInterval)
+	suppTicker := jitteredTicker(s.getInterval("SUPPLEMENT_INTERVAL", s.cfg.Scheduler.SupplementInterval))
+	bgmTicker := jitteredTicker(s.getInterval("BGMTV_SYNC_INTERVAL", s.cfg.Scheduler.SyncBangumiInterval))
 	defer bgmTicker.Stop()
 	defer suppTicker.Stop()
 
@@ -103,11 +155,12 @@ func (s *Scheduler) Start(ctx context.Context) {
 	var seedCleanupTicker *time.Ticker
 	var seedCleanupChan <-chan time.Time
 	if s.cfg.Scheduler.SeedCleanupEnabled {
-		seedCleanupTicker = jitteredTicker(s.cfg.Scheduler.SeedCleanupInterval)
+		cleanupInterval := s.getInterval("SEED_CLEANUP_INTERVAL", s.cfg.Scheduler.SeedCleanupInterval)
+		seedCleanupTicker = jitteredTicker(cleanupInterval)
 		seedCleanupChan = seedCleanupTicker.C
 		defer seedCleanupTicker.Stop()
 		log.Printf("🧹 种子自动清理已启用：间隔=%v, 最小做种时间=%v, 最小比率=%.1f",
-			s.cfg.Scheduler.SeedCleanupInterval, s.cfg.Scheduler.SeedCleanupMinSeedTime, s.cfg.Scheduler.SeedCleanupMinRatio)
+			cleanupInterval, s.cfg.Scheduler.SeedCleanupMinSeedTime, s.cfg.Scheduler.SeedCleanupMinRatio)
 	}
 
 	// 下载状态扫描原为 10s 高频轮询（OPTIMIZE_TASK.md 优化点 1）：
@@ -123,7 +176,11 @@ func (s *Scheduler) Start(ctx context.Context) {
 
 	// 延迟 30 秒后执行首次补全扫描
 	go func() {
-		time.Sleep(30 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
+		}
 		s.pollSupplement(ctx)
 	}()
 	go s.pollSyncBangumi(ctx)
@@ -135,23 +192,23 @@ func (s *Scheduler) Start(ctx context.Context) {
 			return
 		case <-rssTicker.C:
 			// 每次触发后按基础间隔重新抖动，避免抖动量被反复累加或固化
-			resetWithJitter(rssTicker, s.cfg.Scheduler.RSSInterval)
+			resetWithJitter(rssTicker, s.getInterval("RSS_INTERVAL", s.cfg.Scheduler.RSSInterval))
 			go s.pollRSS(ctx)
 		case <-orgTicker.C:
-			resetWithJitter(orgTicker, s.cfg.Scheduler.OrganizerInterval)
+			resetWithJitter(orgTicker, s.getInterval("ORGANIZER_INTERVAL", s.cfg.Scheduler.OrganizerInterval))
 			go s.pollOrganizer(ctx)
-	case <-bgmTicker.C:
-			resetWithJitter(bgmTicker, s.cfg.Scheduler.SyncBangumiInterval)
+		case <-bgmTicker.C:
+			resetWithJitter(bgmTicker, s.getInterval("BGMTV_SYNC_INTERVAL", s.cfg.Scheduler.SyncBangumiInterval))
 			go s.pollSyncBangumi(ctx)
 		case <-suppTicker.C:
-			resetWithJitter(suppTicker, s.cfg.Scheduler.SupplementInterval)
+			resetWithJitter(suppTicker, s.getInterval("SUPPLEMENT_INTERVAL", s.cfg.Scheduler.SupplementInterval))
 			go s.pollSupplement(ctx)
 		case <-downloadTicker.C:
 			resetWithJitter(downloadTicker, downloadInterval)
 			go s.pollDownloads(ctx)
 		case <-seedCleanupChan:
 			if seedCleanupTicker != nil {
-				resetWithJitter(seedCleanupTicker, s.cfg.Scheduler.SeedCleanupInterval)
+				resetWithJitter(seedCleanupTicker, s.getInterval("SEED_CLEANUP_INTERVAL", s.cfg.Scheduler.SeedCleanupInterval))
 				go s.pollSeedCleanup(ctx)
 			}
 		}
@@ -174,14 +231,20 @@ func resetWithJitter(ticker *time.Ticker, base time.Duration) {
 // RSSMode 为 "classic" 时启用自动建番剧（未匹配种子自动创建订阅）
 // RSSMode 为 "personal" 时仅下载已匹配订阅的种子
 func (s *Scheduler) pollRSS(ctx context.Context) {
-	if s.mikanRSSURL == "" {
+	rssURL := s.getMikanRSSURL()
+	if rssURL == "" {
 		log.Println("⚠️  Mikan RSS URL 未配置，跳过 RSS 轮询")
 		return
 	}
+	if !s.pollRSSRunning.CompareAndSwap(false, true) {
+		log.Println("⏳ 上一轮 RSS 轮询尚未完成，跳过本次触发")
+		return
+	}
+	defer s.pollRSSRunning.Store(false)
 
 	log.Println("🔍 开始 RSS 轮询...")
 
-	items, err := s.source.FetchRSS(ctx, s.mikanRSSURL)
+	items, err := s.source.FetchRSS(ctx, rssURL)
 	if err != nil {
 		log.Printf("❌ RSS 轮询失败: %v", err)
 		return
@@ -251,7 +314,7 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 		}
 
 		// 个人 RSS 模式下的二次校验：确保标题解析出的关键部分确实匹配
-		if matchedSub != nil && s.cfg.Mikan.RSSMode == core.RSSModePersonal {
+		if matchedSub != nil && s.getRSSMode() == core.RSSModePersonal {
 			parsed := source.ParseMikanTitle(item.Title)
 			// 如果解析出的标题与订阅标题差异过大，则拒绝匹配（防止误伤）
 			if !strings.Contains(core.NormalizeTitle(parsed.Title), core.NormalizeTitle(matchedSub.TitleCN)) &&
@@ -265,7 +328,7 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 		var targetSubID uint
 		if matchedSub != nil {
 			targetSubID = matchedSub.ID
-			savePath := s.cfg.Organizer.TVBasePath
+			savePath := s.getTVBasePath()
 			if matchedSub.CustomPath != "" {
 				savePath = matchedSub.CustomPath
 			}
@@ -284,7 +347,7 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 			log.Printf("📥 匹配订阅下载: %s (ID=%d)", item.Title, targetSubID)
 		} else {
 			// 未匹配到现有订阅，检查 RSS 模式
-			if s.cfg.Mikan.RSSMode == core.RSSModeClassic {
+			if s.getRSSMode() == core.RSSModeClassic {
 				autoSubID, err := autoCreateSubscription(ctx, s, item)
 				if err != nil {
 					log.Printf("⚠️ 自动创建订阅失败 [%s]: %v", item.Title, err)
@@ -294,7 +357,7 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 				log.Printf("✅ 自动创建订阅 [%s]: ID=%d", item.Title, autoSubID)
 
 				// 自动创建成功后，重新获取路径并下载
-				savePath := s.cfg.Organizer.TVBasePath
+				savePath := s.getTVBasePath()
 				if s.downloader != nil {
 					if err := s.downloader.Add(ctx, item, savePath); err != nil {
 						log.Printf("❌ 添加自动下载失败 [%s]: %v", item.Title, err)
@@ -352,6 +415,10 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 	if s.downloader == nil {
 		return
 	}
+	if !s.pollDownloadsRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.pollDownloadsRunning.Store(false)
 
 	tasks, err := s.downloader.List(ctx)
 	if err != nil {
@@ -362,8 +429,8 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 	// 预先过滤出"已完成"的任务；没有完成任务时直接返回，连 DB 都不查
 	var doneTasks []core.DownloadTask
 	for _, task := range tasks {
-		// 判断是否下载完成：completed(完全做种), stalledUP(做种中但没流量), uploading(正在做种上传)
-		if task.Status == "completed" || task.Status == "stalledUP" || task.Status == "uploading" || task.Progress >= 1.0 {
+		// 判断是否下载完成：completed(完全做种/Aria2已完成), stalledUP(做种中但没流量), uploading/seeding(正在做种上传), complete(Aria2原始状态)
+		if task.Status == "completed" || task.Status == "complete" || task.Status == "stalledUP" || task.Status == "uploading" || task.Status == "seeding" || task.Progress >= 1.0 {
 			doneTasks = append(doneTasks, task)
 		}
 	}
@@ -430,15 +497,25 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 			elapsed = now.Sub(*ep.DownloadStartedAt).Truncate(time.Second).String()
 		}
 
+		var animeTitle string
+		if ep.SubscriptionID > 0 {
+			var sub database.Subscription
+			if err := database.DB.Select("title_cn").First(&sub, ep.SubscriptionID).Error; err == nil && sub.TitleCN != "" {
+				animeTitle = sub.TitleCN
+			}
+		}
+
 		if s.bus != nil {
 			s.bus.Publish(core.Event{
 				Type: core.EventDownloadCompleted,
 				Payload: map[string]any{
-					"episode_id": ep.ID,
-					"title":      ep.Title,
-					"hash":       task.Hash, // 使用 task.Hash，确保即使刚更新也能传正确值
-					"size":       task.Size,  // 文件大小（字节），通知格式化用
-					"duration":   elapsed,    // 下载耗时，通知展示用
+					"episode_id":  ep.ID,
+					"title":       ep.Title,
+					"anime_title": animeTitle,
+					"episode":     ep.Number,
+					"hash":        task.Hash, // 使用 task.Hash，确保即使刚更新也能传正确值
+					"size":        task.Size,  // 文件大小（字节），通知格式化用
+					"duration":    elapsed,    // 下载耗时，通知展示用
 				},
 				Time: now,
 			})
@@ -453,6 +530,12 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 		return
 	default:
 	}
+	if !s.pollOrganizerRunning.CompareAndSwap(false, true) {
+		log.Println("⏳ 上一轮文件整理尚未完成，跳过本次触发")
+		return
+	}
+	defer s.pollOrganizerRunning.Store(false)
+
 	// 查询数据库中的待整理 Episode 记录
 	var episodes []database.Episode
 	if err := database.DB.Where("status IN ? AND final_path = ?", []string{"downloaded", "downloading"}, "").Find(&episodes).Error; err != nil {
@@ -485,6 +568,8 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 	successCount := 0
 	failureCount := 0
 	lastOrganizedPath := ""
+	lastOrganizedAnimeTitle := ""
+	var lastOrganizedEpNum float32
 	for _, ep := range episodes {
 		// 1. 根据 Subscription 获取番剧元数据
 		sub, ok := subMap[ep.SubscriptionID]
@@ -618,6 +703,14 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 		}
 		successCount++
 		lastOrganizedPath = newPath
+		lastOrganizedAnimeTitle = anime.TitleCN
+		if lastOrganizedAnimeTitle == "" {
+			lastOrganizedAnimeTitle = anime.TitleJP
+		}
+		if lastOrganizedAnimeTitle == "" {
+			lastOrganizedAnimeTitle = anime.TitleEN
+		}
+		lastOrganizedEpNum = coreEp.Number
 
 		// 更新订阅进度（统计 organized 状态剧集）
 		var count int64
@@ -631,9 +724,11 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 		s.bus.Publish(core.Event{
 			Type: core.EventFileOrganized,
 			Payload: map[string]any{
-				"success":    successCount,
-				"failed":     failureCount,
-				"final_path": lastOrganizedPath,
+				"success":     successCount,
+				"failed":      failureCount,
+				"final_path":  lastOrganizedPath,
+				"anime_title": lastOrganizedAnimeTitle,
+				"episode":     lastOrganizedEpNum,
 			},
 			Time: time.Now(),
 		})
@@ -652,6 +747,17 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 
 // pollSupplement 执行补全扫描：查找集数不完整的订阅，爬取历史种子补全
 func (s *Scheduler) pollSupplement(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	if !s.pollSupplementRunning.CompareAndSwap(false, true) {
+		log.Println("⏳ 上一轮追番补全检查尚未完成，跳过本次触发")
+		return
+	}
+	defer s.pollSupplementRunning.Store(false)
+
 	log.Println("🔍 开始补全扫描...")
 
 	var subs []database.Subscription
@@ -855,7 +961,7 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 
 		savePath := sub.CustomPath
 		if savePath == "" {
-			savePath = s.cfg.Organizer.TVBasePath
+			savePath = s.getTVBasePath()
 		}
 
 		// 使用订阅的字幕组作为标签（比标题解析更准确）
@@ -898,33 +1004,27 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 	database.DB.Model(&database.Episode{}).
 		Where("subscription_id = ? AND status = ? AND deleted_at IS NULL", sub.ID, "organized").
 		Count(&count)
-		database.DB.Model(&sub).Update("current_episodes", int(count))
+	database.DB.Model(&sub).Update("current_episodes", int(count))
 		
-		if s.bus != nil {
-			s.bus.Publish(core.Event{
-				Type: core.EventSupplementCompleted,
-				Payload: map[string]any{
-					"subscription_id": sub.ID,
-					"title":           sub.TitleCN,
-				},
-				Time: time.Now(),
-			})
-		}
+	// 仅当确实有新增下载时才派发通知事件，避免每轮调度向各渠道滥发重复空消息
+	if newCount > 0 && s.bus != nil {
+		s.bus.Publish(core.Event{
+			Type: core.EventSupplementCompleted,
+			Payload: map[string]any{
+				"subscription_id":  sub.ID,
+				"title":            sub.TitleCN,
+				"new_count":        newCount,
+				"current_episodes": int(count),
+				"total_episodes":   sub.TotalEpisodes,
+			},
+			Time: time.Now(),
+		})
+	}
 
-		if sub.TotalEpisodes > 0 && int(count) >= sub.TotalEpisodes {
+	if sub.TotalEpisodes > 0 && int(count) >= sub.TotalEpisodes {
 		// 如果本地集数已经齐备，确保 Completed 状态为 true
 		if !sub.Completed {
 			database.DB.Model(&sub).Update("completed", true)
-		}
-		if s.bus != nil {
-			s.bus.Publish(core.Event{
-				Type: core.EventSupplementCompleted,
-				Payload: map[string]any{
-					"subscription_id": sub.ID,
-					"title":           sub.TitleCN,
-				},
-				Time: time.Now(),
-			})
 		}
 	} else if sub.Completed && int(count) < sub.TotalEpisodes {
 		// 如果标记为 Completed 但集数不足（如用户删除了文件），则回退为未完结状态，允许后续轮询继续扫描
@@ -1172,7 +1272,7 @@ func autoCreateSubscription(ctx context.Context, s *Scheduler, item core.Torrent
 	}
 
 	// 6. 触发补全扫描（非事务，可失败）
-	if s.metadataProvider != nil && s.mikanRSSURL != "" {
+	if s.metadataProvider != nil {
 		go func(subID uint) {
 			suppCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
@@ -1390,70 +1490,55 @@ func (s *Scheduler) pollSeedCleanup(ctx context.Context) {
 	if s.downloader == nil {
 		return
 	}
+	if !s.pollSeedCleanupRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.pollSeedCleanupRunning.Store(false)
 
 	log.Println("🧹 开始种子自动清理扫描...")
 
-	// 获取 qBittorrent 所有任务
-	tasks, err := s.downloader.List(ctx)
-	if err != nil {
-		log.Printf("❌ 获取种子列表失败: %v", err)
-		return
-	}
-
-	cleaned := 0
-	minSeedTime := s.cfg.Scheduler.SeedCleanupMinSeedTime
+	minSeedTime := s.getInterval("SEED_CLEANUP_MIN_SEED_TIME", s.cfg.Scheduler.SeedCleanupMinSeedTime)
 	minRatio := s.cfg.Scheduler.SeedCleanupMinRatio
+	if database.DB != nil {
+		var ratioSetting database.Setting
+		if err := database.DB.Where("key = ?", "SEED_CLEANUP_MIN_RATIO").First(&ratioSetting).Error; err == nil && ratioSetting.Value != "" {
+			var r float64
+			if _, err := fmt.Sscanf(ratioSetting.Value, "%f", &r); err == nil {
+				minRatio = r
+			}
+		}
+	}
 
 	// 预先获取所有非 organized 状态的剧集 hash，防止误删还没整理的种子
 	var activeHashes []string
-	database.DB.Model(&database.Episode{}).
-		Where("status IN ? AND deleted_at IS NULL", []string{"downloading", "downloaded"}).
-		Pluck("torrent_hash", &activeHashes)
-	activeMap := make(map[string]bool)
+	if database.DB != nil {
+		database.DB.Model(&database.Episode{}).
+			Where("status IN ? AND deleted_at IS NULL", []string{"downloading", "downloaded"}).
+			Pluck("torrent_hash", &activeHashes)
+	}
+	activeMap := make(map[string]bool, len(activeHashes))
 	for _, h := range activeHashes {
 		activeMap[h] = true
 	}
 
-	for _, task := range tasks {
-		// 只处理已完成的任务
-		if task.Progress < 1.0 {
-			continue
-		}
-
+	canDelete := func(task core.DownloadTask) bool {
 		// 保护：如果数据库中该种子还没被标记为已下载/已整理，严禁从下载器删除
 		// 只有 status = 'organized' 或者不在 activeMap 中的（说明已整理或不归本系统管）才允许删
 		if activeMap[task.Hash] {
-			// 进一步检查：如果是 downloaded 状态（已完成下载但未整理），也暂时保留，直到整理器完成工作
 			var ep database.Episode
-			if err := database.DB.Where("torrent_hash = ?", task.Hash).First(&ep).Error; err == nil {
+			if database.DB != nil && database.DB.Where("torrent_hash = ?", task.Hash).First(&ep).Error == nil {
 				if ep.Status != "organized" {
-					continue 
+					return false
 				}
 			}
 		}
+		return true
+	}
 
-		// 检查做种时间（需要 qB 支持 seeding_time 字段，否则跳过时间检查）
-		if minSeedTime > 0 {
-			// TODO: 需要 qB API 返回 seeding_time 字段才能精确判断
-			// 目前跳过时间检查，仅检查比率
-		}
-
-		// 检查做种比率
-		if minRatio > 0 && task.Size > 0 {
-			ratio := float64(task.Done) / float64(task.Size)
-			if ratio < minRatio {
-				continue
-			}
-		}
-
-		// 删除种子（不删文件，因为已硬链接到媒体库）
-		if err := s.downloader.Delete(ctx, task.Hash, false); err != nil {
-			log.Printf("⚠️ 清理种子失败 [%s]: %v", task.Name, err)
-			continue
-		}
-
-		log.Printf("🗑️ 已清理完成种子: %s (进度=%.0f%%, 比率=%.2f)", task.Name, task.Progress*100, float64(task.Done)/float64(task.Size))
-		cleaned++
+	cleaned, err := downloader.CleanSatisfiedSeeds(ctx, s.downloader, minSeedTime, minRatio, canDelete)
+	if err != nil {
+		log.Printf("❌ 种子自动清理执行失败: %v", err)
+		return
 	}
 
 	if cleaned > 0 {

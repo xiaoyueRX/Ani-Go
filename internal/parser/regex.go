@@ -26,6 +26,9 @@ var (
 		regexp.MustCompile(`(?i)-\s*0*(\d+(?:\.\d+)?)`),                 // - 01
 		regexp.MustCompile(`第\s*0*(\d+(?:\.\d+)?)\s*[集话話]`),         // 第01集
 	}
+
+	reSpaces   = regexp.MustCompile(`\s+`)
+	reCleanRes = regexp.MustCompile(`(?i)\b(2160p|1440p|1080p|720p|480p|4[kK])\b`)
 )
 
 var cnNum = map[rune]int{
@@ -140,11 +143,10 @@ func cleanTitle(s string) string {
 	s = strings.TrimFunc(s, func(r rune) bool {
 		return r == ' ' || r == '，' || r == ',' || r == '。' || r == '.'
 	})
-	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
-	reRes := regexp.MustCompile(`(?i)\b(2160p|1440p|1080p|720p|480p|4[kK])\b`)
-	s = reRes.ReplaceAllString(s, "")
+	s = reSpaces.ReplaceAllString(s, " ")
+	s = reCleanRes.ReplaceAllString(s, "")
 	s = strings.TrimSpace(s)
-	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+	s = reSpaces.ReplaceAllString(s, " ")
 	return s
 }
 
