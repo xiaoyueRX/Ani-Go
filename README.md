@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/xiaoyueRX/Ani-Go/releases"><img src="https://img.shields.io/github/v/release/xiaoyueRX/Ani-Go?color=blue&style=flat-square" alt="Release"></a>
-  <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go" alt="Go Version">
+  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square&logo=go" alt="Go Version">
   <img src="https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vue.js" alt="Vue 3">
   <img src="https://img.shields.io/badge/RAM-15~30MB-emerald?style=flat-square" alt="RAM Usage">
   <img src="https://img.shields.io/badge/MCP-Server%20Ready-8A2BE2?style=flat-square" alt="MCP Server">
