@@ -39,8 +39,8 @@ All source files must be UTF-8 without BOM. Avoid PowerShell's default `>` redir
 
 ### Documentation Standard
 - **Go source comments**: Chinese
-- **Summary documents**: Bilingual (CN + EN copies, e.g. `README.md` + `README_EN.md`)
-- **CLAUDE.md**: Chinese, used for Claude Code context
+- **Summary documents**: Bilingual (CN + EN copies, e.g. `README.md` + `README_EN.md`, `AGENTS.md` + `AGENTS_EN.md`)
+- **AGENTS.md / CLAUDE.md**: Used for Codex and AI agent context
 
 ### GFW Network Environment
 GitHub, Go proxy, Mikan and other overseas services may be blocked:

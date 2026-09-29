@@ -54,6 +54,7 @@ __pycache__/
 .omo/
 .taskmaster/
 .codegraph/
+.codex/
 xuexitong_questions/
 
 # 操作系统与 IDE

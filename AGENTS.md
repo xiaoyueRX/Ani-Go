@@ -40,6 +40,10 @@ GOPROXY=https://goproxy.cn,direct go get ./...
 
 ## 关键约定
 
+### 语言与交流规范
+- **中文交流与注释**：100% 使用简体中文交流。Go 源码注释、Git 提交信息、文档更新必须为纯中文。仅代码标识符（变量名、函数名）使用英文。
+- **文档双语规范**：所有总结性文档保持中英文同步（`XXX.md` 与 `XXX_EN.md`）。
+
 ### CGO 红线
 绝对禁止引入 CGO 依赖（`mattn/go-sqlite3` 等）。`CGO_ENABLED=0` 必须始终可用。只用 `github.com/glebarez/sqlite`。
 
