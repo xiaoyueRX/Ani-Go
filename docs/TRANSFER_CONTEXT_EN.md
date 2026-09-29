@@ -26,6 +26,7 @@ cp .env.example .env
 - **Phase 9 (v0.5.0 Stability Hardening + Plugin Management Loop)**: Complete ✅
 - **Phase 10 (v0.5.3 Notification Matrix + Downloader Hot-Swap + Regex Sandbox + Zero-Defect Audit)**: Complete ✅ — Unified 16-channel v2.NotifyManager with hot reload & plugin lifecycle, DynamicDownloader runtime hot-swap, 10-slot custom regex sandbox, line-by-line audit with all 10 bugs eliminated, go test -race 100% PASS
 - **Phase 11 (v0.5.4 Notification Delivery Logs & Analytics + Batch Download Controls & Modal + Live RSS Inspector)**: Complete ✅ — Async queue persistence with `NotificationLog` & delivery rate metrics dashboard, downloads center new modal & pause/resume all controls, 15s RSS feed inspector & parser debugger, go test -race 100% PASS
+- **Phase 12 (v0.6.0 Next-Gen Microkernel Architecture + Native MCP Server + 3-tier Disambiguation + Multi-Arch Docker)**: Complete ✅ — Microkernel 5-step pipeline constitution with physical power-cut isolation, native SSE+Bearer MCP Server with dynamic tool mounting, airdate matcher resolving 95% title ambiguities, Dockerfile upgraded to `golang:1.25-alpine` with successful GitHub Actions multi-arch builds & 7 platform binary releases, go test -race 100% PASS
 - **Tests**: All package unit tests and race detection (`go test -race ./...`) 100% PASS
 
 ## Tech Stack

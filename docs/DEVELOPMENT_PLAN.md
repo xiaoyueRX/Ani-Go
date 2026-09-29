@@ -148,3 +148,15 @@
 - [x] **并发安全修复**：Transmission sync/atomic 竞态、MikanSource RWMutex 保护。
 - [x] **JWT Secret 持久化**：密钥存入 SQLite settings 表，重启不丢失。
 - [x] **13 项代码审查修复**：CORS / EventBus / Transmission / Schedule N+1 / MikanSource RWMutex / JWT 持久化 / MultiNotifier 错误聚合 / Shell 审计日志 / LRU 搜索缓存 / Logger 句柄关闭 / QBittorrent Hash / 空 Hash 唯一约束 / 调度器死循环。
+
+### Phase 10: v0.5.2 ~ v0.5.4 架构优化与全量审计清零 ✅
+- [x] **多下载器动态透明分发**：实现 `DynamicDownloader`，支持 qBittorrent、Transmission、Aria2 运行时免重启无缝热切换与健康探测。
+- [x] **GORM 预编译与数据库批处理优化**：启用 `PrepareStmt: true` 与 WAL 优化，大幅降低高并发查询时数据库 CPU 占用。
+- [x] **配置合并三级优先定律重构**：重写 `MergeFromSettings`，修复默认值强制锁死用户配置的隐患，支持双别名兼容。
+- [x] **全包逐行审计与缺陷清零**：全面修复 qB 并发 Data Race、Aria2 磁盘文件泄漏、TMDB 纯数字 ID 404、整理器路径越界等 10 项缺陷，`go test -race ./...` 100% 通过。
+
+### Phase 11: v0.6.0 次世代微内核架构与全生态加固 ✅
+- [x] **微内核与插件物理断电隔离**：确立五步主干流水线宪法，周边全部插件化，关停即 0 协程、0 网络、0 冗余日志。
+- [x] **原生 MCP Server 协议网关**：内置 SSE + Bearer 鉴权 MCP 服务端，暴露业务/治理工具集，支持插件私有工具动态挂载。
+- [x] **全自动三级消歧引擎**：首创本地正则 ➔ Bangumi 官方单集放送时间戳比对 ➔ AI 上下文兜底三级漏斗，无感化解 95% 歧义，配备 Token 终身唯一缓存与防爆盾。
+- [x] **Go 1.25+ 与多架构 Docker 流水线**：全面升级 Dockerfile 至 `golang:1.25-alpine` 原生交叉编译，GitHub Actions CI/CD 多架构构建（amd64/arm64）全绿通过并推送到 GHCR，发布 7 大架构二进制 GitHub Release。

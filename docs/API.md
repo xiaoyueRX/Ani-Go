@@ -1,8 +1,8 @@
 # Ani-Go API 文档
 
-> **版本**: v0.5.1  
+> **版本**: v0.6.0  
 > **基础路径**: `/api`  
-> **认证方式**: JWT Bearer Token  
+> **认证方式**: JWT Bearer Token / MCP Bearer Token  
 > **内容类型**: `application/json; charset=utf-8`
 
 ---
@@ -11,21 +11,22 @@
 
 1. [快速开始](#快速开始)
 2. [认证与鉴权](#1-认证与鉴权)
-2. [健康检查](#2-健康检查)
-3. [用户信息](#3-用户信息)
-4. [订阅管理](#4-订阅管理)
-5. [剧集管理](#5-剧集管理)
-6. [下载队列](#6-下载队列)
-7. [设置管理](#7-设置管理)
-8. [搜索与发现](#8-搜索与发现)
-9. [Mikan 镜像管理](#9-mikan-镜像管理)
-10. [插件管理](#10-插件管理)
-11. [任务解析](#11-任务解析)
-12. [数据迁移](#12-数据迁移)
-13. [版本信息](#13-版本信息)
-14. [图片代理](#14-图片代理)
-15. [前端 API 调用参考](#15-前端-api-调用参考)
-16. [错误码说明](#16-错误码说明)
+3. [健康检查](#2-健康检查)
+4. [用户信息](#3-用户信息)
+5. [订阅管理](#4-订阅管理)
+6. [剧集管理](#5-剧集管理)
+7. [下载队列](#6-下载队列)
+8. [设置管理](#7-设置管理)
+9. [搜索与发现](#8-搜索与发现)
+10. [Mikan 镜像管理](#9-mikan-镜像管理)
+11. [插件管理](#10-插件管理)
+12. [任务解析](#11-任务解析)
+13. [数据迁移](#12-数据迁移)
+14. [版本信息](#13-版本信息)
+15. [图片代理](#14-图片代理)
+16. [MCP 协议端点](#15-mcp-协议端点)
+17. [前端 API 调用参考](#16-前端-api-调用参考)
+18. [错误码说明](#17-错误码说明)
 
 ---
 
@@ -1451,7 +1452,38 @@ curl -o image.jpg \
 
 ---
 
-## 15. 前端 API 调用参考
+## 15. MCP 协议端点
+
+Ani-Go 内置原生 Model Context Protocol (MCP) Server，用于 Claude Desktop、Cursor、Dify 等外部 AI 智能体直接调用。
+
+### 15.1 MCP SSE 建立连接
+
+- **路径**: `GET /api/mcp/sse` 或 `GET /mcp/sse`
+- **认证**: `Authorization: Bearer <MCP_TOKEN>` (或通过查询参数 `?token=<TOKEN>`)
+- **内容类型**: `text/event-stream`
+- **响应事件**:
+  - `endpoint`: 返回客户端发送 JSON-RPC 消息的目标 POST URL（例如 `/api/mcp/messages?session_id=xxx`）。
+
+### 15.2 MCP 消息通信
+
+- **路径**: `POST /api/mcp/messages?session_id=<SESSION_ID>`
+- **认证**: `Authorization: Bearer <MCP_TOKEN>`
+- **请求体**: 标准 JSON-RPC 2.0 格式（`tools/list`, `tools/call`, `resources/list` 等）。
+- **可用工具集 (Tools)**:
+  - `search_anime`: 搜索番剧资源
+  - `list_subscriptions`: 查询所有订阅与更新状态
+  - `add_subscription`: 添加新的番剧订阅
+  - `remove_subscription`: 取消或删除番剧订阅
+  - `get_downloads`: 获取下载队列与下载进度
+  - `trigger_refresh`: 触发 RSS 检查与全量扫描
+  - `list_plugins`: 查询所有插件状态
+  - `toggle_plugin`: 启用或停用插件
+  - `get_system_status`: 查询系统存储与健康指标
+  - `update_system_config`: 调整系统设置
+
+---
+
+## 16. 前端 API 调用参考
 
 前端使用 `axios` 封装，基础路径 `/api`，自动附加 JWT Token。
 
@@ -1542,7 +1574,7 @@ request.post('/mikan/select-mirror', { domain })
 
 ---
 
-## 16. 错误码说明
+## 17. 错误码说明
 
 ### 通用错误响应格式
 

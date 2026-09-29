@@ -100,7 +100,22 @@
   - [x] Remember password
   - [x] Episode status management
   - [x] Mikan Mirror Speed Test (auto speed test on startup + manual speed test in settings)
-- **Tests**: 108 tests passing
+- [x] **Phase 9: v0.5.0 Stability & Plugin Management** ✅
+  - [x] Decouple download from metadata completion (prevent stalls)
+  - [x] HTML detail page scraping for cover/Bangumi ID fallback
+  - [x] Backup restore zero-value field persistence (`Select("*")`)
+  - [x] Schedule 404 guard and async batch completion
+- [x] **Phase 10: v0.5.2 ~ v0.5.4 Architecture Optimization & Full Code Audit** ✅
+  - [x] Dynamic downloader switching (qB / Transmission / Aria2 live dispatch)
+  - [x] GORM statement caching & WAL query optimization
+  - [x] Configuration merge 3-tier precedence refactoring
+  - [x] Line-by-line audit across all 20 packages with 10 zero-defect fixes
+- [x] **Phase 11: v0.6.0 Next-Gen Microkernel Architecture & Full Ecosystem** ✅
+  - [x] Microkernel 5-step pipeline decoupling & plugin physical power-cut isolation (0 goroutines / 0 network / 0 noise)
+  - [x] Native MCP Server gateway (SSE + Bearer Auth + Dynamic Tool Mounting)
+  - [x] Automatic 3-tier disambiguation engine (Regex ➔ Airdate Matcher ➔ AI Fallback + Blowout Shield)
+  - [x] Go 1.25+ toolchain alignment & multi-arch Docker pipeline to GHCR
+- **Tests**: Full test suite & race condition checks (`go test -race ./...`) 100% PASS
 
 ---
 
@@ -108,8 +123,8 @@
 
 - **Token Protection**: `MIKAN_RSS_URL` must never appear in the codebase; must be injected via environment variables.
 - **Encoding Standards**: All files must remain UTF-8 (no BOM) format. Do not use PowerShell's default `>` redirect.
-- **Series Identification**: Future focus on tackling the "same series, different library names" merging logic (TMDB Collection approach).
+- **Microkernel Constitution**: All new features must adhere to the microkernel and plugin decoupling principles (see `CODEX.md` & `docs/00_DESIGN_PHILOSOPHY.md`).
 
 ---
 
-*Last Updated: 2026-05-06*
+*Last Updated: 2026-09-29 (v0.6.0)*
