@@ -48,7 +48,7 @@ cp .env.example .env
 | `internal/core/interfaces.go` | 7 个核心接口 + 事件常量 + 数据类型 |
 | `internal/config/config.go` | 配置加载（环境变量优先）+ DB 回退（MergeFromSettings） |
 | `internal/database/db.go` | GORM 初始化 + AutoMigrate |
-| `internal/database/models.go` | 5 个 ORM 模型（Subscription, Episode, DownloadRecord, Setting, User） |
+| `internal/database/models.go` | 7 个 ORM 模型（Subscription, Episode, DownloadRecord, Setting, User, NotificationLog, ParserCache） |
 | `internal/source/mikan.go` | Mikan RSS 解析 + HTML 详情页全量爬取 |
 | `internal/source/multi.go` | 多资源站聚合器（Nyaa/ACGRIP/AnimeTosho） |
 | `internal/scheduler/scheduler.go` | 定时任务：RSS 轮询、文件整理、补全扫描 |
@@ -59,10 +59,10 @@ cp .env.example .env
 | `internal/downloader/aria2.go` | Aria2 JSON-RPC 客户端 |
 | `internal/metadata/tmdb.go` | TMDB API v3 元数据提供者 |
 | `internal/metadata/bangumi.go` | BGM.tv 元数据提供者 |
-| `internal/notifier/` | 16 平台通知实现 |
+| `internal/notifier/` | 18 平台通知实现 |
 | `internal/ai/` | AI 4 协议适配（OpenAI/Google/Anthropic/Ollama） |
 | `internal/parser/` | 自然语言任务解析器（正则 + AI 回退） |
-| `internal/plugin/` | 插件系统（Webhook + Shell） |
+| `internal/plugin/` | 插件系统（内建插件生命周期 + 自定义 Webhook；script 类型未实现） |
 | `internal/migrate/` | AutoBangumi 数据迁移 |
 | `AGENTS.md` / `AGENTS_EN.md` | AI 助手指南（中/英） |
 | `CLAUDE.md` | Claude Code 指导文件 |

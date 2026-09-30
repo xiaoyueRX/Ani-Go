@@ -88,27 +88,27 @@
 ### Phase 4: 进阶功能 (V2/V3)
 - [x] **AI 辅助模块**：集成大模型进行分类和系列归并。支持 OpenAI / Gemini / Claude / Ollama 四大协议，自动检测端点。
 - [x] **多下载器**：qBittorrent / Transmission / Aria2 已实现，环境变量切换。
-- [x] **插件系统**：EventBus 驱动的 Webhook + Shell 脚本插件，API 管理端点。
+- [x] **插件系统**：EventBus 驱动的插件机制，内建插件生命周期管理 + 自定义 Webhook 插件与 API 管理端点（`script` 类型与 `ConfigSchema` 自描述为规划项，尚未实现）。
 - [x] **死种超时检测**：批量查询超时剧集，前端卡片警告，阈值可配置。
 - [x] **用户自定义正则**：数据库存储自定义解析规则，优先级高于内置模式，API 重载。
 - [x] **多资源站**：Nyaa / ACG.RIP / AnimeTosho + MultiSource 聚合器，去重合并结果。
 - [x] **数据迁移工具**：支持从原版 AutoBangumi 导入数据。
 
 ### Phase 5: 外部消息平台与 AI 通知系统
-- [x] **多平台消息接入**：统一 `Notifier` 接口，EventBus 驱动自动推送，共 16 个平台 + `MultiNotifier` 聚合广播：
+- [x] **多平台消息接入**：统一 `Notifier` 接口，EventBus 驱动自动推送，共 18 个平台 + `MultiNotifier` 聚合广播：
   - **国内 IM**：
     - [x] **企业微信**：Webhook bot
     - [x] **飞书/Lark**：Webhook bot
     - [x] **钉钉**：Webhook bot
     - [x] **QQ**：OneBot 协议（NapCat/go-cqhttp/Lagrange/LLOneBot）
-    - [ ] **微信公众号**：被动回复 + 客服消息（待实现）
+    - [x] **微信公众号**：客服消息 API（`cgi-bin/message/custom/send`，环境变量 `WECHAT_APP_ID` / `WECHAT_APP_SECRET` / `WECHAT_USER_ID`）
   - **国际 IM**：
     - [x] **Telegram**：Bot API + Markdown
     - [x] **Discord**：Webhook
     - [x] **Slack**：Webhook + Block Kit
     - [x] **LINE**：Messaging API / push message
     - [x] **WhatsApp**：Meta Cloud API（graph.facebook.com）
-    - [ ] **Signal**：Bot API（待实现）
+    - [x] **Signal**：signal-cli REST API（`{SIGNAL_API_URL}/v2/send`，环境变量 `SIGNAL_API_URL` / `SIGNAL_SENDER` / `SIGNAL_RECIPIENTS`）
   - **Push 推送服务**：
     - [x] **邮件**：SMTP 发通知（goroutine + context 超时）
     - [x] **Server酱**：HTTP API（微信推送）
@@ -124,22 +124,28 @@
 - [ ] **通知模板系统**：支持自定义消息模板，按事件类型和平台分别配置。（待实现）
 - [ ] **全平台集成测试**：每个平台逐一验证连通性和通知推送。（部分待验证）
 
-### Phase 9: v0.5.0 稳定性加固 + 插件管理闭环 ✅
-- [x] **下载逻辑解耦**：修复 `pollRSS` 中的下载逻辑，匹配后立即下载，不再等待 BangumiID 补全，解决补全过程中的下载阻塞。
-- [x] **多渠道元数据补偿**：新增 Mikan 详情页爬虫逻辑，在 Bangumi/TMDB API 补全失败时自动抓取 Mikan 的 `data-bangumiid` 和海报封面 URL。
-- [x] **备份恢复零值覆盖**：修复备份恢复时 `Enabled: false` 被跳过的缺陷，使用 `Select("*")` 强制更新所有字段。
-- [x] **时间表交互加固**：增加跳转前的订阅存在性验证 API 检查，处理已删除订阅的跳转异常，提升 UI 稳定性。
-- [x] **类型断言 Panic 修复**：修复通知管理器中对 `data["size"]` 的非安全类型断言导致的崩溃。
-- [x] **死种超时字段补全**：剧集模型新增 `StallTimeoutHours`，支持单部番剧覆盖全局设置。
-- [x] **插件管理 Tab 打通**：设置页新增插件 Tab，打通 `GET /api/plugins` 和 `POST /api/plugins/reload` 热重载功能。
-- [x] **批量补全异步化**：重构 `handleSupplementAll`，采用 goroutine 异步触发补全并预过滤，解决海量数据下的 HTTP 超时与性能瓶颈。
-- [x] **i18n 补完**：补全插件管理、备份恢复等新增页面的中英文翻译。
-### Phase 8: 国际化 + 批量操作 + 代码审查 (v1.3.0) ✅
+### Phase 6: 数据迁移 ✅
+- [x] **AutoBangumi / ani-rss SQLite 导入**：`internal/migrate` 解析历史数据库并导入订阅与剧集，通过 `POST /api/migrate` 对外暴露。
+- [x] **迁移安全加固**：拒绝绝对路径与相对路径穿越，迁移完成后主动关闭源库文件句柄，避免句柄泄漏。
+
+### Phase 7: 前端美化 + 搜索修复 + 新番时间表 + 镜像测速 ✅
+- [x] **Mikan 中文搜索修复**：中文关键词 URL 编码，兼容 Mikan 改版后的 CSS 选择器。
+- [x] **图标系统**：引入 Iconsax Linear 图标组件替换全部 inline SVG 与 emoji（后续在 Phase 8 迁移至 Lucide）。
+- [x] **UI 全面美化**：登录页、侧栏导航、订阅卡片、下载列表、设置页整体重构。
+- [x] **设置页重构**：纵向侧边栏标签、区域分组、配置状态徽标、密码显隐切换。
+- [x] **新番时间表**：接入 yuc.wiki 数据源，按星期分组展示海报，30 分钟自动刷新。
+- [x] **搜索 → 订阅全流程**：字幕组选择弹窗 + RSS URL 自动解析 + 搜索缓存。
+- [x] **PWA 支持**：manifest.json + service worker，可安装为独立应用。
+- [x] **登录页记住密码**：localStorage 保存并在下次访问自动填充。
+- [x] **剧集状态管理**：`PUT /api/episodes/{id}/status` 手动切换状态。
+- [x] **Mikan 镜像测速**：启动自动测速择优 + 设置页手动测速。
+
+### Phase 8: 国际化 + 批量操作 + 代码审查 ✅
 - [x] **国际化 (i18n)**：中英文双语完整支持，`web/src/locales/zh.ts` + `en.ts`，语言切换即时生效，覆盖所有页面。
 - [x] **Lucide 图标迁移**：从 IconSax 迁移到 `lucide-vue-next`，统一图标风格，删除旧组件。
 - [x] **新手引导弹窗**：`OnboardingModal` 首次登录引导，帮助新用户快速上手。
 - [x] **更新日志弹窗**：`ChangelogModal` 内置版本变更查看 + `useVersion` 版本检测与更新提醒。
-- [x] **批量订阅操作**：批量创建（`POST /api/subscriptions/batch`）、批量删除（`DELETE /api/subscriptions/batch`）、批量恢复（`POST /api/subscriptions/batch/restore`）。
+- [x] **批量订阅操作**：批量创建（`POST /api/subscriptions/batch`）、批量删除（`POST /api/subscriptions/batch-delete`）、批量恢复（`POST /api/subscriptions/batch-restore`）。
 - [x] **剧集字幕组名称**：剧集 API 新增 `group_name` 字段，前端显示字幕组归属。
 - [x] **前端全面重构**：Schedule / Subscriptions / Settings / Search / SubscriptionDetail / Layout / Login / Downloads 八大页面重构，新增 SubscriptionCard / SubscriptionEditForm / ScheduleCard 组件。
 - [x] **CORS 安全加固**：Origin 白名单从配置读取，非 Debug 模式禁用通配符。
@@ -149,6 +155,17 @@
 - [x] **JWT Secret 持久化**：密钥存入 SQLite settings 表，重启不丢失。
 - [x] **13 项代码审查修复**：CORS / EventBus / Transmission / Schedule N+1 / MikanSource RWMutex / JWT 持久化 / MultiNotifier 错误聚合 / Shell 审计日志 / LRU 搜索缓存 / Logger 句柄关闭 / QBittorrent Hash / 空 Hash 唯一约束 / 调度器死循环。
 
+### Phase 9: v0.5.0 稳定性加固 + 插件管理闭环 ✅
+- [x] **下载逻辑解耦**：修复 `pollRSS` 中的下载逻辑，匹配后立即下载，不再等待 BangumiID 补全，解决补全过程中的下载阻塞。
+- [x] **多渠道元数据补偿**：新增 Mikan 详情页爬虫逻辑，在 Bangumi/TMDB API 补全失败时自动抓取 Mikan 的 `data-bangumiid` 和海报封面 URL。
+- [x] **备份恢复零值覆盖**：修复备份恢复时 `Enabled: false` 被跳过的缺陷，使用 `Select("*")` 强制更新所有字段。
+- [x] **时间表交互加固**：增加跳转前的订阅存在性验证 API 检查，处理已删除订阅的跳转异常，提升 UI 稳定性。
+- [x] **类型断言 Panic 修复**：修复通知管理器中对 `data["size"]` 的非安全类型断言导致的崩溃。
+- [x] **死种超时字段补全**：剧集模型新增 `StallTimeoutHours`，支持单部番剧覆盖全局设置。
+- [x] **插件管理 Tab 打通**：设置页新增插件 Tab，打通 `GET /api/plugins` 与 `POST /api/plugins/reload` 热重载功能。
+- [x] **批量补全异步化**：重构 `handleSupplementAll`，采用 goroutine 异步触发补全并预过滤，解决海量数据下的 HTTP 超时与性能瓶颈。
+- [x] **i18n 补完**：补全插件管理、备份恢复等新增页面的中英文翻译。
+
 ### Phase 10: v0.5.2 ~ v0.5.4 架构优化与全量审计清零 ✅
 - [x] **多下载器动态透明分发**：实现 `DynamicDownloader`，支持 qBittorrent、Transmission、Aria2 运行时免重启无缝热切换与健康探测。
 - [x] **GORM 预编译与数据库批处理优化**：启用 `PrepareStmt: true` 与 WAL 优化，大幅降低高并发查询时数据库 CPU 占用。
@@ -157,6 +174,6 @@
 
 ### Phase 11: v0.6.0 次世代微内核架构与全生态加固 ✅
 - [x] **微内核与插件物理断电隔离**：确立五步主干流水线宪法，周边全部插件化，关停即 0 协程、0 网络、0 冗余日志。
-- [x] **原生 MCP Server 协议网关**：内置 SSE + Bearer 鉴权 MCP 服务端，暴露业务/治理工具集，支持插件私有工具动态挂载。
+- [x] **原生 MCP Server 协议网关**：内置 SSE + Bearer 鉴权 MCP 服务端，暴露 6 项业务工具与 4 项系统治理工具（插件私有工具动态挂载为规划项，当前尚未实现，详见 `docs/02_PLUGIN_SPEC.md` 第 6 节）。
 - [x] **全自动三级消歧引擎**：首创本地正则 ➔ Bangumi 官方单集放送时间戳比对 ➔ AI 上下文兜底三级漏斗，无感化解 95% 歧义，配备 Token 终身唯一缓存与防爆盾。
 - [x] **Go 1.25+ 与多架构 Docker 流水线**：全面升级 Dockerfile 至 `golang:1.25-alpine` 原生交叉编译，GitHub Actions CI/CD 多架构构建（amd64/arm64）全绿通过并推送到 GHCR，发布 7 大架构二进制 GitHub Release。

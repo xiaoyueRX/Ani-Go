@@ -46,7 +46,7 @@ docker compose up -d
 
 **接口驱动设计**。所有核心模块抽象为 `internal/core/interfaces.go` 中定义的接口：`Source`、`Downloader`、`MetadataProvider`、`Organizer`、`Notifier`、`EventBus`。添加新下载器（如 Transmission）或资源站只需实现对应接口，不得修改现有核心逻辑。
 
-**启动流程**（`main.go`）：配置加载 → JWT 动态密钥（crypto/rand 32B，每次重启重新生成）→ 数据库初始化 + 默认管理员（Bcrypt）→ EventBus → Mikan 资源源 → qBittorrent 下载器 → 整理器 → 调度器（RSS 轮询）→ HTTP 服务（含嵌入式前端 + 优雅关闭）。
+**启动流程**（`main.go`）：配置加载 → JWT 密钥（`crypto/rand` 32B，首启生成后以 hex 持久化于 settings 表 `jwt_secret`，重启复用）→ 数据库初始化 + 默认管理员（Bcrypt）→ EventBus → Mikan 资源源 → qBittorrent 下载器 → 整理器 → 调度器（RSS 轮询）→ HTTP 服务（含嵌入式前端 + 优雅关闭）。
 
 **API 路由**：Go 1.22+ `http.ServeMux` 方法路由（`GET /api/subscriptions`、`POST /api/subscriptions`）。所有 `/api/*` 路径受 JWT AuthMiddleware 保护（`/api/login` 除外）。非 `/api/*` 路径由嵌入的 `web/dist` 静态文件服务接管，SPA 路由回退到 `index.html`。
 
@@ -56,13 +56,13 @@ docker compose up -d
 
 - **Windows 开发 / Linux 部署**：开发者在 Windows (PowerShell) 开发，部署到 PVE LXC 容器 (Debian)。代码必须双平台编译通过。
 - **GFW 网络环境**：Go 模块用 `GOPROXY=https://goproxy.cn,direct`。Mikan、BGM.tv、TMDB API 已内置多域名镜像自动回退（`tryMirrors`）。
-- **JWT 鉴权**：动态密钥由 `crypto/rand` 生成，绝不硬编码。users 表存储 Bcrypt 哈希。`/api/me` 端点在 AuthMiddleware 校验后再次验证 Token（双重保险）。
-- **中间件链**：`ProxyHeadersMiddleware`（Lucky v2.27.2 反向代理 X-Forwarded-* 兼容）→ `CORSMiddleware` → `AuthMiddleware`（放行 `/api/login` 和 `/api/health`，保护其余 `/api/*`）。
+- **JWT 鉴权**：密钥由 `crypto/rand` 生成 32 字节，首启后以 hex 持久化于 settings 表 `jwt_secret`（绝不硬编码，重启复用）；有效期 24 小时，改密后 `token_version` 递增使旧 Token 失效。users 表存储 Bcrypt 哈希。`/api/me` 端点在 AuthMiddleware 校验后再次验证 Token（双重保险）。
+- **中间件链**：`ProxyHeadersMiddleware`（Lucky v2.27.2 反向代理 X-Forwarded-* 兼容）→ `CORSMiddleware` → `AuthMiddleware`（放行 `/api/login`、`/api/health`、`/api/proxy/image`、`GET/HEAD /api/user/avatar` 与 `/api/bangumi/auth/callback`，保护其余 `/api/*`）。
 - **GitHub Push**：GFW 阻断 GitHub 直连，需 VPN（TUN 模式全局代理）方可 push。
 
 ## 通知系统（`internal/notifier/`）
 
-EventBus 驱动，`Notifier` 接口统一。已实现 16 个平台 + `MultiNotifier` 聚合广播：
+EventBus 驱动，`Notifier` 接口统一。已实现 18 个平台 + `MultiNotifier` 聚合广播（其中 Telegram / 钉钉 / 企业微信 / 飞书 / OneBot 在 `internal/notifier/v2` 内有原生适配器，其余经扩展推送插件接入）：
 
 | 平台 | 实现文件 | 方式 | 环境变量 |
 |------|---------|------|---------|
@@ -82,6 +82,8 @@ EventBus 驱动，`Notifier` 接口统一。已实现 16 个平台 + `MultiNotif
 | Gotify | `push.go` | HTTP push | `GOTIFY_URL` / `GOTIFY_TOKEN` |
 | ntfy | `push.go` | HTTP push | `NTFY_URL` |
 | Email | `email.go` | SMTP (context 超时) | `EMAIL_SMTP_HOST` / `EMAIL_USERNAME` / `EMAIL_TO` 等 |
+| Signal | `signal.go` | signal-cli REST API (`/v2/send`) | `SIGNAL_API_URL` / `SIGNAL_SENDER` / `SIGNAL_RECIPIENTS` |
+| 微信公众号 | `wechat.go` | 客服消息 API (`api.weixin.qq.com`) | `WECHAT_APP_ID` / `WECHAT_APP_SECRET` / `WECHAT_USER_ID` |
 
 自动订阅事件：`download.started/completed/failed` + `supplement.completed`。
 
@@ -129,6 +131,8 @@ Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5。前端已通过 `//go:e
 
 ## API 端点
 
+> 下表为高频端点摘录。**全部 69 条路由**的完整清单（含认证要求与用途）见 [docs/API.md](docs/API.md) 的「端点总览」章节。
+
 | 方法 | 路径 | 说明 |
 |--------|------|---------|
 | `POST` | `/api/login` | 登录，返回 JWT Token |
@@ -162,10 +166,10 @@ Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5。前端已通过 `//go:e
 - **Phase 1** ✅ — 核心引擎 MVP（Mikan RSS + qBittorrent + 调度器 + 整理器 + EventBus）
 - **Phase 2** ✅ — 历史补全 + TMDB/BGM.tv 元数据 + GFW 镜像回退 + 补全调度器 + 死种超时告警 + 用户自定义正则
 - **Phase 3** ✅ — Web UI（Vue3 订阅管理/下载队列/设置）+ RESTful API（9 端点）+ go:embed 前端嵌合 + Docker 多阶段构建 + CI/CD（GitHub Actions 多架构镜像）
-- **Phase 4** ✅ — qBittorrent/Transmission/Aria2 多下载器 + AI 多协议辅助（OpenAI/Google/Anthropic/Ollama） + 插件系统（Webhook/脚本）+ 死种超时检测 + 用户自定义正则 + 多资源站（Nyaa/ACG.RIP/AnimeTosho + MultiSource 聚合器）
-- **Phase 5** ✅ — 16 平台消息通知（Telegram/Discord/WeCom/Feishu/DingTalk/QQ/Slack/Matrix/LINE/WhatsApp/ServerChan/Bark/Pushover/Gotify/ntfy/Email + MultiNotifier 聚合广播 + EventBus 自动推送）
+- **Phase 4** ✅ — qBittorrent/Transmission/Aria2 多下载器 + AI 多协议辅助（OpenAI/Google/Anthropic/Ollama） + 插件系统（内建插件 + 自定义 Webhook；`script` 类型尚未实现）+ 死种超时检测 + 用户自定义正则 + 多资源站（Nyaa/ACG.RIP/AnimeTosho + MultiSource 聚合器）
+- **Phase 5** ✅ — 18 平台消息通知（Telegram/Discord/WeCom/Feishu/DingTalk/QQ/Slack/Matrix/LINE/WhatsApp/Signal/微信公众号/ServerChan/Bark/Pushover/Gotify/ntfy/Email + MultiNotifier 聚合广播 + EventBus 自动推送）
 - **Phase 6** ✅ — 数据迁移工具（AutoBangumi SQLite 导入）+ 额外通知平台补全
-- **测试**：108 个测试全通过
+- **测试**：31 个测试文件 / 177 个测试函数，`go test -race ./...` 全通过（`internal/metadata`、`internal/backup`、`internal/migrate`、`internal/httpx` 等包暂无测试）
 
 ### Phase 7: 前端美化 + 搜索修复 + 新番时间表 + 镜像测速 ✅
 - [x] **搜索功能修复**：Mikan 中文搜索 URL 编码（`url.QueryEscape`）+ CSS 选择器兼容
@@ -203,7 +207,7 @@ Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5。前端已通过 `//go:e
 
 ### Phase 11: v0.6.0 次世代微内核架构与全生态加固（2026-09-12）✅
 - [x] **微内核与插件物理断电隔离**：确立五步主干流水线宪法，周边全部插件化，关停即 0 协程、0 网络、0 冗余日志
-- [x] **原生 MCP Server 协议网关**：内置 SSE + Bearer 鉴权 MCP 服务端，暴露业务/治理工具集，支持插件私有工具动态挂载
+- [x] **原生 MCP Server 协议网关**：内置 SSE + Bearer 鉴权 MCP 服务端（`/mcp/sse` + `/mcp/messages`），暴露 6 项业务工具与 4 项系统治理工具（插件私有工具动态挂载为规划项，尚未实现）
 - [x] **全自动三级消歧引擎**：首创本地正则 ➔ Bangumi 官方单集放送时间戳比对 ➔ AI 上下文兜底三级漏斗，无感化解 95% 歧义，配备 Token 终身唯一缓存与防爆盾
 - [x] **Go 1.25+ 与多架构 Docker 流水线**：全面升级 Dockerfile 至 `golang:1.25-alpine` 原生交叉编译，GitHub Actions CI/CD 多架构构建（amd64/arm64）全绿通过并推送到 GHCR，发布 7 大架构二进制 GitHub Release
 

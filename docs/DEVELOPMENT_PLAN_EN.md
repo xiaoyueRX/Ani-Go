@@ -88,17 +88,17 @@
 ### Phase 4: Advanced Features (V2/V3)
 - [x] **AI-Assisted Module**: Integrate LLMs for classification and series merging. Supports 4 protocols: OpenAI / Gemini / Claude / Ollama with auto-detection.
 - [x] **Multiple Downloaders**: qBittorrent / Transmission / Aria2 implemented, switchable via env vars.
-- [x] **Plugin System**: EventBus-driven Webhook + Shell script plugins with API management endpoints.
+- [x] **Plugin System**: EventBus-driven plugin mechanism with built-in plugin lifecycle management plus custom Webhook plugins and API management endpoints (`script` type and `ConfigSchema` self-description are planned, not implemented).
 - [x] **Dead Torrent Detection**: Batch query for stalled episodes, frontend warning badges, configurable threshold.
 - [x] **Custom Regex Patterns**: DB-stored user regex patterns with higher priority than built-in patterns, API reload.
 - [x] **Multiple Source Sites**: Nyaa / ACG.RIP / AnimeTosho + MultiSource aggregator with dedup merge.
 - [x] **Data Migration Tool**: Support importing data from original AutoBangumi.
 
 ### Phase 5: External Messaging Platform & AI Notification System
-- [x] **Multi-Platform Messaging**: Unified `Notifier` interface with EventBus-driven auto-push, 16 platforms + `MultiNotifier` aggregated broadcast:
+- [x] **Multi-Platform Messaging**: Unified `Notifier` interface with EventBus-driven auto-push, 18 platforms + `MultiNotifier` aggregated broadcast:
   - **Chinese IM**:
     - [x] **QQ**: OneBot protocol (NapCat/go-cqhttp/Lagrange/LLOneBot)
-    - [ ] **WeChat Official Account**: Passive reply + customer service messages (pending)
+    - [x] **WeChat Official Account**: Customer service message API (`cgi-bin/message/custom/send`; env `WECHAT_APP_ID` / `WECHAT_APP_SECRET` / `WECHAT_USER_ID`)
     - [x] **WeCom (Enterprise WeChat)**: Webhook bot
     - [x] **Feishu/Lark**: Webhook bot
     - [x] **DingTalk**: Webhook bot
@@ -108,7 +108,7 @@
     - [x] **Slack**: Webhook + Block Kit
     - [x] **LINE**: Messaging API / push message
     - [x] **WhatsApp**: Meta Cloud API (graph.facebook.com)
-    - [ ] **Signal**: Bot API (pending)
+    - [x] **Signal**: signal-cli REST API (`{SIGNAL_API_URL}/v2/send`; env `SIGNAL_API_URL` / `SIGNAL_SENDER` / `SIGNAL_RECIPIENTS`)
   - **Push Notification Services**:
     - [x] **Email**: SMTP send notifications (goroutine + context timeout)
     - [x] **ServerChan**: HTTP API (WeChat push)
@@ -124,6 +124,10 @@
 - [ ] **Notification Template System**: Support custom message templates, configurable per event type and platform. (pending)
 - [ ] **Full Platform Integration Testing**: Verify connectivity and notification push for each platform. (partially pending)
 
+### Phase 6: Data Migration ✅
+- [x] **AutoBangumi / ani-rss SQLite Import**: `internal/migrate` parses the legacy database and imports subscriptions and episodes, exposed via `POST /api/migrate`.
+- [x] **Migration Safety Hardening**: Rejects absolute and relative path traversal, and closes the source database handle after migration to prevent handle leaks.
+
 ### Phase 7: Frontend Polish + Search Fix + Schedule + Mirror Speed Test ✅
 - [x] **Mikan Chinese Search Fix**: URL-encode Chinese keywords (`url.QueryEscape`) to fix Mikan 400 error; fallback CSS selector for Mikan's updated page structure.
 - [x] **IconSax Component System**: Created `web/src/components/IconSax.vue`, 20+ Iconsax Linear icons replacing all inline SVGs and emoji.
@@ -136,12 +140,12 @@
 - [x] **Episode Status Management**: `PUT /api/episodes/{id}/status` manual status toggle.
 - [x] **Mikan Mirror Speed Test**: Auto speed test on startup to select fastest mirror + manual speed test in settings page (show latency but don't auto-select).
 
-### Phase 8: Internationalization + Batch Operations + Code Review (v1.3.0) ✅
+### Phase 8: Internationalization + Batch Operations + Code Review ✅
 - [x] **Internationalization (i18n)**: Full Chinese/English bilingual support with `web/src/locales/zh.ts` + `en.ts`, instant language switching, covering all pages.
 - [x] **Lucide Icon Migration**: Migrated from IconSax to `lucide-vue-next` for unified icon style, removed legacy component.
 - [x] **Onboarding Modal**: First-login guidance modal to help new users get started quickly.
 - [x] **Changelog Modal**: Built-in version change viewer + `useVersion` composable for version detection and update reminders.
-- [x] **Batch Subscription Operations**: Batch create (`POST /api/subscriptions/batch`), batch delete (`DELETE /api/subscriptions/batch`), batch restore (`POST /api/subscriptions/batch/restore`).
+- [x] **Batch Subscription Operations**: Batch create (`POST /api/subscriptions/batch`), batch delete (`POST /api/subscriptions/batch-delete`), batch restore (`POST /api/subscriptions/batch-restore`).
 - [x] **Episode Subgroup Name**: Episode API adds `group_name` field, frontend displays subgroup attribution.
 - [x] **Frontend Full Rewrite**: 8 major pages restructured (Schedule / Subscriptions / Settings / Search / SubscriptionDetail / Layout / Login / Downloads), new SubscriptionCard / SubscriptionEditForm / ScheduleCard components.
 - [x] **CORS Security Hardening**: Origin whitelist from config file, wildcard disabled in non-Debug mode.
@@ -151,6 +155,17 @@
 - [x] **JWT Secret Persistence**: Secret stored in SQLite settings table, survives restarts.
 - [x] **13 Code Review Fixes**: CORS / EventBus / Transmission / Schedule N+1 / MikanSource RWMutex / JWT persistence / MultiNotifier error aggregation / Shell audit logging / LRU search cache / Logger file handle / QBittorrent Hash / empty Hash unique constraint / scheduler infinite loop.
 
+### Phase 9: v0.5.0 Stability Hardening + Plugin Management Loop ✅
+- [x] **Download Decoupling**: Fixed so a matched torrent is dispatched immediately without waiting for BangumiID completion.
+- [x] **Metadata Compensation**: Added the Mikan detail-page crawler to fall back on `data-bangumiid` and cover image when Bangumi/TMDB APIs fail.
+- [x] **Backup Restore Zero-Value Coverage**: Fixed `Enabled: false` being skipped on restore by forcing `Select("*")` updates.
+- [x] **Schedule Navigation Guard**: Added a subscription existence check before navigation to handle soft-deleted subscriptions.
+- [x] **Type Assertion Panic Fix**: Replaced the unsafe `data["size"]` assertion in the notification manager with a safe one.
+- [x] **Stall Timeout Field**: Added `StallTimeoutHours` to the subscription model for per-anime override (global default 24h).
+- [x] **Plugin Management Tab**: Added the plugin tab in Settings, wiring `GET /api/plugins` and `POST /api/plugins/reload`.
+- [x] **Async Batch Supplement**: Rewrote `handleSupplementAll` to trigger asynchronously with pre-filtering, avoiding HTTP timeouts.
+- [x] **i18n Completion**: Completed Chinese/English translations for the new plugin management and backup pages.
+
 ### Phase 10: v0.5.2 ~ v0.5.4 Architecture Optimization & Full Code Audit ✅
 - [x] **Dynamic Downloader Dispatch**: Implemented `DynamicDownloader`, supporting runtime hot-swap of qBittorrent, Transmission, and Aria2 with active health probing.
 - [x] **GORM Statement Caching & Query Optimization**: Enabled `PrepareStmt: true` and WAL mode, significantly decreasing database CPU load during high-concurrency reads.
@@ -159,6 +174,6 @@
 
 ### Phase 11: v0.6.0 Next-Gen Microkernel Architecture & Full Ecosystem ✅
 - [x] **Microkernel 5-Step Pipeline & Physical Power-Cut Isolation**: Formulated the microkernel constitution; peripheral features are pluggable and release 100% of goroutines, network connections, and logs when disabled.
-- [x] **Native MCP Server Protocol Gateway**: Built-in SSE + Bearer Auth MCP server, exposing anime operations and system governance tools with dynamic plugin mounting.
+- [x] **Native MCP Server Protocol Gateway**: Built-in SSE + Bearer Auth MCP server exposing 6 anime-ops tools and 4 governance tools (plugins cannot register private tools yet — that capability is planned, see `docs/02_PLUGIN_SPEC.md` section 6).
 - [x] **Automatic 3-Tier Disambiguation Funnel**: Pioneered Regex ➔ Bangumi Airdate Timestamp Matcher ➔ AI Fallback + Blowout Shield, resolving 95% of Chinese subgroup title ambiguities at 0 token cost.
 - [x] **Go 1.25+ Alignment & Multi-Arch Docker CI/CD**: Upgraded Dockerfile to `golang:1.25-alpine`, automated GitHub Actions multi-arch builds (`amd64`/`arm64`) to GHCR, published 7-platform precompiled release binaries on GitHub Releases.

@@ -67,6 +67,7 @@ Use EventBus for loosely-coupled inter-component communication (e.g., `download.
 - Cascade deletes must be handled manually (e.g., delete episodes when deleting subscription)
 
 ## Current Project Status
+- **Current version**: `v0.6.0` (`var version` in `main.go`)
 - **Phase 0** ✅ — Project Initialization
 - **Phase 1** ✅ — Core Engine MVP
 - **Phase 2** ✅ — Historical Completion + Metadata + Mirror Support + Dead Torrent Timeout Warning + Custom Regex
@@ -74,7 +75,13 @@ Use EventBus for loosely-coupled inter-component communication (e.g., `download.
 - **Phase 4** ✅ — AI Multi-Protocol + qBittorrent/Transmission/Aria2 + Plugin System + Multiple Source Sites
 - **Phase 5** ✅ — 16-Platform Messaging + Natural Language Task Parser
 - **Phase 6** ✅ — Data Migration Tool (AutoBangumi Import)
-- **Tests**: 108 tests passing
+- **Phase 7** ✅ — Frontend Polish + Search Fix + Schedule + Mirror Speed Test
+- **Phase 8** ✅ — i18n + Batch Operations + Code Review
+- **Phase 9** ✅ — v0.5.0 Stability Hardening + Plugin Management Loop
+- **Phase 10** ✅ — v0.5.2 ~ v0.5.4 Architecture Optimization + Zero-Defect Audit
+- **Phase 11** ✅ — v0.6.0 Next-Gen Microkernel + Native MCP Server + 3-Tier Disambiguation
+- **Tests**: 31 test files / 177 test functions, `go test -race ./...` 100% PASS
+- **Docs**: `docs/DEVELOPMENT_PLAN.md` (CN) and `docs/DEVELOPMENT_PLAN_EN.md` (EN) hold the full phase-by-phase roadmap
 
 ## Key File Reference
 
@@ -82,7 +89,7 @@ Use EventBus for loosely-coupled inter-component communication (e.g., `download.
 |------|---------|
 | `internal/core/interfaces.go` | 7 core interfaces + event constants + data types |
 | `internal/config/config.go` | Config structs + env loading + defaults + DB fallback |
-| `internal/database/models.go` | 5 ORM models |
+| `internal/database/models.go` | 7 ORM models |
 | `internal/api/server.go` | HTTP route registration + middleware chain + server lifecycle |
 | `internal/api/handlers.go` | API handlers (subscription CRUD, downloads, settings, parse, migration) |
 | `internal/source/mikan.go` | Mikan RSS parser + HTML detail page crawler + mirror fallback |
@@ -96,5 +103,5 @@ Use EventBus for loosely-coupled inter-component communication (e.g., `download.
 | `internal/notifier/` | 16-platform notification (Telegram/Discord/QQ/LINE/WhatsApp etc.) |
 | `internal/ai/` | AI 4-protocol adapter (OpenAI/Google/Anthropic/Ollama) |
 | `internal/parser/` | Natural language task parser (regex + AI fallback) |
-| `internal/plugin/` | Plugin system (Webhook + Shell scripts) |
+| `internal/plugin/` | Plugin system (built-in lifecycle + custom Webhook; script type not implemented) |
 | `main.go` | Startup flow: Config → JWT → DB → EventBus → Source → Downloader → Organizer → Scheduler → API |

@@ -76,7 +76,7 @@ flowchart TD
     end
 
     subgraph Plugins ["4. Pluggable Ecosystem"]
-        D1["16-Channel Notification Matrix"]
+        D1["18-Channel Notification Matrix"]
         D2["Bangumi Local NFO Scraper"]
         D3["Seeding Lifecycle & Status Tracker"]
         D4["Custom Webhook & Script Hooks"]
@@ -132,8 +132,8 @@ flowchart TD
 - **Comprehensive Ops Tools**: Exposes anime search, subscription management, queue control, plugin toggles, and system config to external AI agents.
 - **Client Ready**: Out-of-the-box configuration templates and prompt guidelines for Claude Desktop, Cursor, Dify, and Open WebUI.
 
-### 🔔 Unified 16-Channel Notification Matrix
-- **Full Coverage Across 16 Platforms**: Telegram, WeChat Work, Feishu, DingTalk, QQ (OneBot), Bark, ServerChan, Pushover, LINE, WhatsApp, Signal, Discord, Slack, Gotify, Ntfy, and SMTP Email.
+### 🔔 Unified 18-Channel Notification Matrix
+- **Full Coverage Across 18 Platforms**: Telegram, WeChat Work, WeChat Official Account, Feishu, DingTalk, QQ (OneBot), Bark, ServerChan, Pushover, LINE, WhatsApp, Signal, Discord, Slack, Gotify, Ntfy, Matrix, and SMTP Email.
 - **Reliable Dispatching**: Priority queue buffering, exponential backoff retries, and delivery rate monitoring.
 
 ---

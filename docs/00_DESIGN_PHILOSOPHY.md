@@ -71,13 +71,13 @@ Go 语言中子协程未捕获的 panic 会导致进程异常退出。
 - 插件自身的异常仅记录为告警日志并自动进入休眠状态，**确保核心下载与整理流水线正常运转**。
 
 ### 原则 3：自描述配置 Schema 与 Agent Skill 指南 (Self-Describing & Skill-Driven)
-- **前端自描述（Schema）**：插件参数使用标准的 `ConfigSchema` 声明，由通用表单组件动态渲染，避免频繁侵入式修改 Vue 路由代码；
-- **智能体指南（Skill）**：复杂插件建议附带 `skill.md` 提示词说明，便于通过 MCP 接入的外部智能体（Claude/Cursor）理解其业务场景与调用参数。
+- **前端自描述（Schema）**〔规划中，尚未实现〕：设计目标是由插件以 `ConfigSchema` 声明参数、通用表单组件动态渲染，避免频繁侵入式修改 Vue 路由代码。当前实现中插件元数据仅为 `PluginInfo`（不含配置 Schema），插件参数统一走 settings 键值表；
+- **智能体指南（Skill）**〔规划中〕：设计目标是复杂插件附带 `skill.md` 提示词说明，便于通过 MCP 接入的外部智能体（Claude/Cursor）理解其业务场景与调用参数。当前插件文档统一收录于 `docs/02_PLUGIN_SPEC.md`。
 
 ### 原则 4：开放性与通用钩子（Open & Escape Hatches）
-- 插件通过订阅系统的全流程事件（`OnTorrentFetched`, `OnDownloadCompleted`, `OnOrganized`）实现业务挂载；
-- 事件上下文传递通用的 `Meta map[string]interface{}`，方便插件存取自定义参数；
-- 保留通用的 Webhook / 本地 Shell 脚本通道，满足用户的个性化定制需求。
+- 插件通过订阅系统事件总线挂载业务逻辑。真实事件常量定义于 `internal/core/interfaces.go`：`subscription.added`、`subscription.removed`、`download.started`、`download.progress`、`download.completed`、`download.failed`、`file.organized`、`episode.identified`、`anime.matched`、`supplement.triggered`、`supplement.completed`、`task.parsed`；
+- 事件负载统一为 `core.Event{ Type string, Payload map[string]interface{}, Time time.Time }`，方便插件存取自定义参数；
+- 已落地的通用通道为 **Webhook**（HTTP POST + `X-AniGo-Secret` 签名头）；本地 Shell 脚本通道为规划项，尚未实现。
 
 ---
 

@@ -76,7 +76,7 @@ flowchart TD
     end
 
     subgraph Plugins ["4. 模块化扩展生态 (Pluggable Ecosystem)"]
-        D1["16 渠道消息推送中心"]
+        D1["18 渠道消息推送中心"]
         D2["Bangumi 本地 NFO 刮削"]
         D3["做种配额管控与清理"]
         D4["自定义 Webhook / 脚本"]
@@ -136,9 +136,9 @@ flowchart TD
 - **全套追番与治理工具**：向外部智能体暴露搜索、订阅管理、下载队列控制、插件启停热重载及系统设置工具。
 - **客户端一键接入**：支持主流客户端（Claude Desktop、Cursor、Dify、Open WebUI），提供开箱即用的配置模版与提示词指南。
 
-### 🔔 全 16 渠道通知中心与热重载 (Unified Notification Matrix)
-- **16 大主流推送渠道全覆盖**：
-  - 💬 **即时通讯**：Telegram、企业微信、飞书、钉钉、QQ (OneBot 协议 / NapCat / Lagrange)
+### 🔔 全 18 渠道通知中心与热重载 (Unified Notification Matrix)
+- **18 大主流推送渠道全覆盖**：
+  - 💬 **即时通讯**：Telegram、企业微信、飞书、钉钉、QQ (OneBot 协议 / NapCat / Lagrange)、微信公众号（客服消息）
   - 📱 **移动端推送**：Bark (iOS)、Server酱、Pushover、LINE、WhatsApp、Signal
   - 🌐 **开放 Webhook 与自建**：Discord、Slack、Gotify (自建)、Ntfy (自建/官方)、Matrix (Element)
   - 📧 **邮件**：标准 SMTP 协议多收件人直发

@@ -19,7 +19,7 @@
 ### 存储路径 (fnOS)
 - **电视剧/番剧根目录**: `/vol2/1000/TV/Media/番剧`
 - **剧场版根目录**: `/vol2/1000/TV/Media/剧场版`
-- **数据库路径**: `d:\pve\Ani-Go\ani-go.db` (Windows) / `/data/ani-go.db` (Docker)
+- **数据库路径**: `D:\project\Ani-Go\ani-go.db`（Windows 开发机，随工作目录生成） / `/data/ani-go.db`（Docker）
 
 ---
 
@@ -81,10 +81,10 @@
 - [x] **Phase 4: AI + 多下载器 + 插件** ✅
   - [x] AI 多协议辅助（OpenAI/Google/Anthropic/Ollama）
   - [x] qBittorrent / Transmission / Aria2 多下载器
-  - [x] 插件系统（Webhook + Shell 脚本）
+  - [x] 插件系统（内建插件生命周期 + 自定义 Webhook；`script` 类型尚未实现）
   - [x] 多资源站（Nyaa/ACG.RIP/AnimeTosho + MultiSource 聚合）
 - [x] **Phase 5: 多平台消息通知** ✅
-  - [x] 16 平台通知（Telegram/Discord/WeCom/Feishu/DingTalk/QQ/Slack/Matrix/LINE/WhatsApp/ServerChan/Bark/Pushover/Gotify/ntfy/Email）
+  - [x] 18 平台通知（Telegram/Discord/WeCom/Feishu/DingTalk/QQ/Slack/Matrix/LINE/WhatsApp/Signal/微信公众号/ServerChan/Bark/Pushover/Gotify/ntfy/Email）
   - [x] 自然语言任务解析器（正则 + AI 回退）
   - [x] EventBus 自动推送 + MultiNotifier 聚合广播
 - [x] **Phase 6: 数据迁移** ✅

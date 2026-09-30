@@ -48,7 +48,7 @@ cp .env.example .env
 | `internal/core/interfaces.go` | 7 core interfaces + event constants + data types |
 | `internal/config/config.go` | Config loading (env vars take priority) + DB fallback (MergeFromSettings) |
 | `internal/database/db.go` | GORM initialization + AutoMigrate |
-| `internal/database/models.go` | 5 ORM models (Subscription, Episode, DownloadRecord, Setting, User) |
+| `internal/database/models.go` | 7 ORM models (Subscription, Episode, DownloadRecord, Setting, User, NotificationLog, ParserCache) |
 | `internal/source/mikan.go` | Mikan RSS parser + HTML detail page crawler |
 | `internal/source/multi.go` | Multi-source aggregator (Nyaa/ACGRIP/AnimeTosho) |
 | `internal/scheduler/scheduler.go` | Scheduled tasks: RSS polling, file organization, supplement scanning |
@@ -59,10 +59,10 @@ cp .env.example .env
 | `internal/downloader/aria2.go` | Aria2 JSON-RPC client |
 | `internal/metadata/tmdb.go` | TMDB API v3 metadata provider |
 | `internal/metadata/bangumi.go` | BGM.tv metadata provider |
-| `internal/notifier/` | 16-platform notification implementations |
+| `internal/notifier/` | 18-platform notification implementations |
 | `internal/ai/` | AI 4-protocol adapter (OpenAI/Google/Anthropic/Ollama) |
 | `internal/parser/` | Natural language task parser (regex + AI fallback) |
-| `internal/plugin/` | Plugin system (Webhook + Shell) |
+| `internal/plugin/` | Plugin system (built-in lifecycle + custom Webhook; script type not implemented) |
 | `internal/migrate/` | AutoBangumi data migration |
 | `AGENTS.md` / `AGENTS_EN.md` | AI assistant guidelines (CN/EN) |
 | `CLAUDE.md` | Claude Code guidance |

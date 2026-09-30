@@ -28,6 +28,160 @@
 17. [前端 API 调用参考](#16-前端-api-调用参考)
 18. [错误码说明](#17-错误码说明)
 
+- [端点总览（全部 69 条路由速查）](#端点总览全部-69-条路由速查)
+
+---
+
+## 端点总览（全部 69 条路由速查）
+
+下表覆盖 `internal/api/server.go` 中注册的**全部路由**。标 📖 的分组在下方有完整字段说明；未标 📖 的为速查索引，字段细节请查阅对应 Handler 源码。
+
+> 除 `GET /mcp/sse` 与 `POST /mcp/messages` 挂载于根路径外，其余端点均以 `/api` 为前缀。
+
+### 📖 认证与用户
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `POST` | `/api/login` | 公开 | 登录获取 JWT Token |
+| `GET` | `/api/me` | JWT | 当前用户信息 |
+| `POST` | `/api/user/change-password` | JWT | 修改当前用户密码 |
+| `POST` | `/api/user/avatar` | JWT | 上传用户头像 |
+| `GET` | `/api/user/avatar` | 公开 | 读取用户头像 |
+
+### 📖 健康检查与版本
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `GET` | `/api/health` | 公开 | 服务健康检查 |
+| `GET` | `/api/version` | JWT | 版本号与内置更新日志 |
+
+### 📖 订阅与剧集
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `GET` | `/api/subscriptions` | JWT | 订阅列表（支持 `enabled` / `completed` 过滤） |
+| `POST` | `/api/subscriptions` | JWT | 创建订阅 |
+| `POST` | `/api/subscriptions/batch` | JWT | 批量创建订阅（最多 20 部） |
+| `GET` | `/api/subgroups` | JWT | 已有字幕组去重列表 |
+| `GET` | `/api/subscriptions/{id}` | JWT | 订阅详情 + 剧集列表 |
+| `PUT` | `/api/subscriptions/{id}` | JWT | 部分更新订阅 |
+| `DELETE` | `/api/subscriptions/{id}` | JWT | 删除订阅（`?delete_files=` 可选） |
+| `POST` | `/api/subscriptions/batch-delete` | JWT | 批量删除（最多 100 部） |
+| `POST` | `/api/subscriptions/batch-restore` | JWT | 批量恢复软删除订阅 |
+| `POST` | `/api/subscriptions/{id}/trigger-supplement` | JWT | 触发单个订阅历史补全 |
+| `POST` | `/api/subscriptions/supplement-all` | JWT | 异步触发全部订阅补全（预过滤后立即返回） |
+| `PUT` | `/api/episodes/{id}/status` | JWT | 手动切换剧集状态 |
+
+### 📖 下载队列
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `GET` | `/api/downloads` | JWT | 下载队列总览 |
+| `POST` | `/api/downloads` | JWT | 手动新建下载任务（磁力链接 / Torrent URL） |
+| `POST` | `/api/downloads/pause-all` | JWT | 全部暂停 |
+| `POST` | `/api/downloads/resume-all` | JWT | 全部继续 |
+| `DELETE` | `/api/downloads/{hash}` | JWT | 删除任务（可选同时删除文件） |
+| `POST` | `/api/downloads/{hash}/pause` | JWT | 暂停单个任务 |
+| `POST` | `/api/downloads/{hash}/resume` | JWT | 继续单个任务 |
+| `POST` | `/api/downloader/test` | JWT | 下载器连通性与时延测试 |
+
+### 📖 设置、日志与自定义正则
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `GET` | `/api/settings` | JWT | 全部设置（敏感键返回空值） |
+| `PUT` | `/api/settings` | JWT | 批量 Upsert 设置 |
+| `GET` | `/api/settings/custom-regex` | JWT | 当前自定义正则规则 |
+| `POST` | `/api/settings/custom-regex/reload` | JWT | 从数据库重载自定义正则 |
+| `POST` | `/api/settings/custom-regex/test` | JWT | 正则匹配沙箱（实时回显解析结果） |
+| `GET` | `/api/logs` | JWT | 系统日志（`?lines=`，默认 100，上限 500） |
+
+### 备份与恢复
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `GET` | `/api/backup/list` | JWT | 备份文件列表 |
+| `POST` | `/api/backup/create` | JWT | 创建数据库备份 |
+| `POST` | `/api/backup/restore` | JWT | 从备份恢复（全字段覆盖写） |
+| `DELETE` | `/api/backup/{name}` | JWT | 删除指定备份 |
+| `GET` | `/api/backup/download/{name}` | JWT | 下载备份文件 |
+
+### 通知投递监控
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `POST` | `/api/notify/test` | JWT | 指定渠道连通性测试 |
+| `GET` | `/api/notifications/logs` | JWT | 投递履历（按渠道/状态/事件筛选 + 分页） |
+| `DELETE` | `/api/notifications/logs` | JWT | 按保留天数清理履历 |
+| `GET` | `/api/notifications/stats` | JWT | 投递总量、成功率、失败数与死信积压 |
+
+### 解析与整理预检
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `POST` | `/api/rss/preview` | JWT | RSS 实时探针：抓取远程源并回显解析结果 |
+| `POST` | `/api/organize/preview` | JWT | 整理 Dry-Run：预测目标路径、操作类型与冲突（零写入） |
+
+### 📖 搜索与发现
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `GET` | `/api/search` | JWT | 聚合搜索番剧资源 |
+| `POST` | `/api/search/smart` | JWT | 智能搜索（搜索词扩展 + 结果分页） |
+| `GET` | `/api/mikan/groups` | JWT | 按 BangumiID 获取字幕组与 RSS 地址 |
+
+### 时间表与 Bangumi 集成
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `GET` | `/api/schedule` | JWT | 季度新番时间表（`source=mikan` / `yuc`） |
+| `GET` | `/api/schedule/bangumi` | JWT | Bangumi 每日放送日历 |
+| `GET` | `/api/bangumi/subject/` | JWT | Bangumi 条目详情 |
+| `GET` | `/api/bangumi/auth/link` | JWT | 生成 Bangumi OAuth 授权链接 |
+| `GET` | `/api/bangumi/auth/callback` | 公开 | Bangumi OAuth 回调 |
+
+### 📖 镜像测速与 AI
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `POST` | `/api/mikan/test-mirrors` | JWT | Mikan 镜像测速 |
+| `POST` | `/api/bgm/test-mirrors` | JWT | Bangumi 镜像测速 |
+| `POST` | `/api/mikan/select-mirror` | JWT | 选定 Mikan 镜像并持久化 |
+| `POST` | `/api/bgm/select-mirror` | JWT | 选定 Bangumi 镜像并持久化 |
+| `POST` | `/api/ai/models` | JWT | 拉取已配置 AI 端点的可用模型列表 |
+
+### 📖 插件管理
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `GET` | `/api/plugins` | JWT | 插件总览（启用状态与关注事件） |
+| `POST` | `/api/plugins/toggle` | JWT | 启用/停用插件 |
+| `POST` | `/api/plugins/save` | JWT | 新增或更新自定义插件 |
+| `DELETE` | `/api/plugins/{id}` | JWT | 删除自定义插件 |
+| `POST` | `/api/plugins/reload` | JWT | 重载插件配置 |
+
+### 📖 任务解析与数据迁移
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `POST` | `/api/parse` | JWT | 自然语言解析订阅任务（正则 + AI 回退） |
+| `POST` | `/api/migrate` | JWT | 从 AutoBangumi / ani-rss 数据库导入数据 |
+
+### 📖 图片代理与实时事件
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `GET` | `/api/proxy/image` | 公开 | 图片代理（域名白名单，绕过防盗链） |
+| `GET` | `/api/events/stream` | JWT（可用 `?token=`） | SSE 实时事件流 |
+
+### 📖 MCP 协议端点
+
+| 方法 | 路径 | 认证 | 用途 |
+|------|------|------|------|
+| `GET` | `/mcp/sse` | MCP Token | MCP SSE 握手 |
+| `POST` | `/mcp/messages` | MCP Token | MCP JSON-RPC 消息通道（`?session_id=`） |
+| `POST` | `/api/mcp/token/generate` | JWT | 生成/重置 MCP Token |
+
 ---
 
 ## 快速开始
@@ -65,7 +219,7 @@ curl -H "Authorization: Bearer $TOKEN" \
   "http://localhost:20001/api/logs?lines=20"
 ```
 
-> **提示**: 将 `localhost:20001` 替换为实际部署地址。Token 重启后失效（动态生成密钥）。
+> **提示**: 将 `localhost:20001` 替换为实际部署地址。JWT 密钥持久化于数据库，重启后旧 Token 在 24 小时有效期内仍然可用；修改密码后旧 Token 立即失效。
 
 ---
 
@@ -84,6 +238,9 @@ curl -H "Authorization: Bearer $TOKEN" \
 | `POST /api/login` | ❌ 无需认证 |
 | `GET /api/health` | ❌ 无需认证 |
 | `GET /api/proxy/image` | ❌ 无需认证 |
+| `GET /api/user/avatar`、`HEAD /api/user/avatar` | ❌ 无需认证（仅读取头像） |
+| `GET /api/bangumi/auth/callback` | ❌ 无需认证（Bangumi OAuth 回调） |
+| `GET /mcp/sse`、`POST /mcp/messages` | 🔑 需 MCP Bearer Token（不走 JWT 中间件） |
 | 其他 `/api/*` | ✅ 需要 JWT Token |
 
 ### Token 使用方式
@@ -94,7 +251,7 @@ Authorization: Bearer <your-jwt-token>
 
 ### Token 获取
 
-通过 `POST /api/login` 登录获取，Token 包含用户名和版本号，密码修改后旧 Token 自动失效。
+通过 `POST /api/login` 登录获取。Token 为 HS256 签名的 JWT，有效期 **24 小时**，载荷包含用户名与 `token_version`；密钥在首次启动时由 `crypto/rand` 生成 32 字节并持久化于 settings 表的 `jwt_secret` 键，因此重启不会使 Token 失效，而修改密码会递增 `token_version` 使旧 Token 立即失效。
 
 ---
 
@@ -1396,16 +1553,19 @@ curl -H "Authorization: Bearer *** http://localhost:20001/api/version
 **响应示例**:
 ```json
 {
-  "version": "v1.3.0",
+  "version": "v0.6.0",
   "changelog": [
-    "新增引导弹窗单次会话逻辑，不再频繁打扰",
-    "新增版本更新日志提示，及时了解新功能",
-    "新增自动检查更新功能，支持检测 GitHub 最新版本",
-    "优化设置页布局，增加自动更新开关",
-    "修复部分 UI 显示问题"
+    "🏛️ 微内核与插件解耦架构：主干专注于五步极速流水线，周边生态全插拔，停用时 0 协程、0 网络、0 错误日志",
+    "🧠 智能消歧与 Token 熔断保护：Bangumi 放送时间对齐（0 Token 化解 95% 歧义）、终身唯一 SQLite 解析缓存与每日限额熔断",
+    "🤖 原生外部 AI 控制 (MCP Server)：标准 SSE + Bearer 强鉴权，暴露 6 项业务运维工具与 4 项系统治理工具",
+    "🛡️ 做种生命周期与磁盘防爆急停：完成做种仅删任务记录永不删物理硬链接，剩余空间 < 5GB 自动熔断阻断新增下载",
+    "👁️ 媒体整理 Dry-Run 预检：提供路径预览与冲突检测 API，无写入安全预测整理结果",
+    "⚡ 下载器高可用与深度加固：Aria2 / Transmission URL 自动清洗、qB 超时防护、下载器连通性一键测试"
   ]
 }
 ```
+
+> 说明：`version` 取自编译期注入的 `main.version`（当前 `v0.6.0`）；`changelog` 为该版本的内置变更摘要，与 `CHANGELOG.md` 详细版本履历互补。
 
 ---
 
@@ -1421,14 +1581,12 @@ curl -H "Authorization: Bearer *** http://localhost:20001/api/version
 |------|------|------|------|
 | `url` | string | ✅ | 图片原始 URL |
 
-**允许的域名白名单**:
-- `i0.hdslb.com` (Bilibili)
-- `lain.bgm.tv` (Bangumi)
-- `img.mikanani.me` (Mikan)
-- `image.tmdb.org` (TMDB)
-- `bilibili.com`
-- `bgm.tv`
-- `mikanime.tv`
+**允许的域名白名单**（与 `internal/api/handlers.go` 中的 `allowedDomains` 一致）:
+- `i0.hdslb.com`、`bilibili.com`（Bilibili）
+- `lain.bgm.tv`、`bgm.tv`（Bangumi）
+- `img.mikanani.me`、`mikanani.me`、`mikanani.kas.pub`、`mikanime.tv`（Mikan 及镜像）
+- `image.tmdb.org`（TMDB）
+- `yuc.wiki`、`yucc.wiki`、`yucwiki.net`（長門番堂）
 
 **请求示例**:
 ```
@@ -1458,28 +1616,32 @@ Ani-Go 内置原生 Model Context Protocol (MCP) Server，用于 Claude Desktop�
 
 ### 15.1 MCP SSE 建立连接
 
-- **路径**: `GET /api/mcp/sse` 或 `GET /mcp/sse`
-- **认证**: `Authorization: Bearer <MCP_TOKEN>` (或通过查询参数 `?token=<TOKEN>`)
+- **路径**: `GET /mcp/sse`（挂载于根路径，**不存在** `/api/mcp/sse`）
+- **认证**: `Authorization: Bearer <MCP_TOKEN>`（或通过查询参数 `?token=<TOKEN>`）
 - **内容类型**: `text/event-stream`
 - **响应事件**:
-  - `endpoint`: 返回客户端发送 JSON-RPC 消息的目标 POST URL（例如 `/api/mcp/messages?session_id=xxx`）。
+  - `endpoint`: 返回客户端发送 JSON-RPC 消息的目标 POST URL（形如 `/mcp/messages?session_id=xxx`）。
 
 ### 15.2 MCP 消息通信
 
-- **路径**: `POST /api/mcp/messages?session_id=<SESSION_ID>`
+- **路径**: `POST /mcp/messages?session_id=<SESSION_ID>`
 - **认证**: `Authorization: Bearer <MCP_TOKEN>`
-- **请求体**: 标准 JSON-RPC 2.0 格式（`tools/list`, `tools/call`, `resources/list` 等）。
-- **可用工具集 (Tools)**:
-  - `search_anime`: 搜索番剧资源
-  - `list_subscriptions`: 查询所有订阅与更新状态
-  - `add_subscription`: 添加新的番剧订阅
-  - `remove_subscription`: 取消或删除番剧订阅
-  - `get_downloads`: 获取下载队列与下载进度
+- **请求体**: 标准 JSON-RPC 2.0 格式（`initialize`, `tools/list`, `tools/call`, `resources/list` 等）。
+- **可用工具集 (Tools，固定 10 项)**:
+  - `search_anime`: 搜索番剧资源（`keyword` 必填，`source` 可选）
+  - `list_subscriptions`: 查询所有订阅与进度（`enabled_only` 可选）
+  - `add_subscription`: 添加新的番剧订阅（`title` 必填，`season` / `rss_url` / `subgroup` 可选）
+  - `remove_subscription`: 取消番剧订阅（`subscription_id` 必填，不删除已硬链接的媒体文件）
+  - `get_downloads`: 获取下载队列与进度（`status` 可选：all / downloading / completed）
   - `trigger_refresh`: 触发 RSS 检查与全量扫描
-  - `list_plugins`: 查询所有插件状态
-  - `toggle_plugin`: 启用或停用插件
-  - `get_system_status`: 查询系统存储与健康指标
-  - `update_system_config`: 调整系统设置
+  - `list_plugins`: 查询所有插件状态与关注事件
+  - `toggle_plugin`: 启用或停用插件（`plugin_id`、`enabled`）
+  - `get_system_status`: 查询内存、Goroutine、下载器连通性、订阅数与版本
+  - `update_system_config`: 写入系统设置项（`key`、`value`）
+
+> 当前版本**不支持插件动态挂载私有 MCP 工具**，工具集恒为上述 10 项，详见 `docs/02_PLUGIN_SPEC.md` 第 6 节。
+>
+> MCP Token 的生成/重置端点为 `POST /api/mcp/token/generate`（JWT 鉴权）。
 
 ---
 
@@ -1604,6 +1766,8 @@ request.post('/mikan/select-mirror', { domain })
 
 ## 附录：数据库模型
 
+> 模型定义见 `internal/database/models.go`，共 7 个实体；所有实体均内嵌 `gorm.Model`（含 `id` / `created_at` / `updated_at` / `deleted_at` 软删除字段）。
+
 ### Subscription（订阅）
 
 | 字段 | 类型 | 说明 |
@@ -1613,57 +1777,101 @@ request.post('/mikan/select-mirror', { domain })
 | title_en | string | 英文标题 |
 | title_jp | string | 日文标题 |
 | year | int | 年份 |
-| season | int | 季度 |
+| season | int | 季度（默认 1） |
+| source_name | string | 来源站点名 |
 | bangumi_id | string | Bangumi ID |
-| subgroup_name | string | 字幕组 |
 | rss_url | string | RSS 地址 |
+| subgroup_name | string | 字幕组 |
+| subgroup_id | string | Mikan 字幕组 ID |
+| excluded_keywords | text | 排除关键词 |
+| allowed_subgroups | text | 允许的字幕组白名单（JSON 数组） |
+| skip_bulk_update | bool | 批量补全时跳过该订阅 |
 | metadata_id | string | 元数据 ID |
 | metadata_provider | string | 元数据提供者 |
 | cover_url | string | 封面 URL |
-| description | string | 描述 |
+| description | text | 描述 |
 | anime_type | string | 动画类型 |
 | total_episodes | int | 总集数 |
 | current_episodes | int | 当前集数 |
-| enabled | bool | 是否启用 |
+| enabled | *bool | 是否启用（指针类型，默认 true） |
 | completed | bool | 是否完成 |
-| filter_json | string | 过滤规则 |
+| filter_json | text | 过滤规则 |
 | custom_path | string | 自定义路径 |
-| created_at | time | 创建时间 |
-| updated_at | time | 更新时间 |
-| deleted_at | time | 软删除时间 |
+| series_id | string | 系列归并 ID |
+| tmdb_id | string | TMDB ID（索引） |
+| imdb_id | string | IMDB ID（索引） |
+| stall_timeout_hours | int | 死种超时阈值（小时，默认 24） |
+| created_at / updated_at / deleted_at | time | 时间戳与软删除 |
 
 ### Episode（剧集）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | uint | 主键 |
-| subscription_id | uint | 订阅 ID |
+| subscription_id | uint | 订阅 ID（索引） |
 | season | int | 季 |
-| number | float32 | 集号 |
+| number | float32 | 集号（支持 .5 半集） |
 | title | string | 标题 |
-| status | string | 状态：pending/downloading/downloaded/completed/failed |
-| torrent_hash | string | 种子哈希 |
+| status | string | 状态：pending / downloading / downloaded / completed / failed |
+| torrent_hash | string | 种子哈希（唯一索引） |
 | torrent_url | string | 种子 URL |
 | original_name | string | 原始文件名 |
 | final_path | string | 最终路径 |
 | file_size | int64 | 文件大小 |
 | group_name | string | 字幕组 |
-| download_started_at | time | 下载开始时间 |
-| created_at | time | 创建时间 |
-| deleted_at | time | 软删除时间 |
+| resolution | string | 分辨率 |
+| download_started_at / download_finished_at / organized_at | *time.Time | 下载与整理时间戳 |
+
+### DownloadRecord（下载去重）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| torrent_hash | string | 种子哈希（唯一索引，用于避免重复下发） |
+| torrent_url | string | 种子 URL |
+| source_name | string | 来源站点 |
+| added_at | time | 记录时间 |
 
 ### Setting（设置）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| key | string | 设置键名 |
-| value | string | 设置值 |
+| key | string | 设置键名（主键） |
+| value | text | 设置值 |
 
 ### User（用户）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | uint | 主键 |
-| username | string | 用户名 |
+| username | string | 用户名（唯一索引） |
 | password_hash | string | Bcrypt 密码哈希 |
 | token_version | int | Token 版本号（修改密码后递增） |
+| avatar_url | string | 头像地址 |
+
+### NotificationLog（通知投递履历）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| event_type | string | 事件类型（索引） |
+| channel | string | 推送渠道（索引） |
+| title | string | 通知标题 |
+| content | text | 通知正文 |
+| status | string | 投递状态：success / failed / dlq（索引） |
+| error_msg | text | 错误信息 |
+| retry_count | int | 重试次数 |
+
+### ParserCache（标题解析缓存）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| raw_title | text | 原始种子标题（唯一索引，缓存主键） |
+| clean_title | text | 清洗后标题 |
+| season | int | 解析出的季号 |
+| episode | float32 | 解析出的集号 |
+| subgroup | string | 字幕组 |
+| resolution | string | 分辨率 |
+| confidence | float32 | 置信度 |
+| resolved_by | string | 解析来源：regex / airdate / ai |

@@ -15,26 +15,27 @@ Ani-Go 本身不内置沉重的大语言模型运行时。**通过将 Ani-Go 作
 
 考虑到 Ani-Go 绝大部分部署在 NAS（fnOS、群晖、Unraid）或云主机 Docker 容器中，Ani-Go 原生支持 **Server-Sent Events (SSE)** 传输层：
 
-- **SSE 握手端点**：`GET /mcp/sse`
+- **SSE 握手端点**：`GET /mcp/sse`（挂载于根路径，**不带** `/api` 前缀）
 - **消息发送端点**：`POST /mcp/messages?session_id=xxx`
-- **安全鉴权**：强制要求请求头包含 `Authorization: Bearer <ANI_GO_MCP_TOKEN>`。未携带有效 Token 的连接将被立即拒绝（401 Unauthorized），杜绝公网扫描风险。
+- **Token 生成端点**：`POST /api/mcp/token/generate`（需 JWT 鉴权，对应 Web 设置页的一键生成/重置 MCP Token）
+- **安全鉴权**：二选一——请求头 `Authorization: Bearer <MCP_AUTH_TOKEN>`，或查询参数 `?token=<MCP_AUTH_TOKEN>`；校验失败一律返回 401 Unauthorized，杜绝公网扫描风险。
 
 ---
 
 ## 3. 标准工具集清单 (Core MCP Tools)
 
-Ani-Go 内置两组核心工具，并支持已启用插件动态注入扩展工具。
+Ani-Go 内置两组共 10 项核心工具。当前版本**不支持插件动态注入私有工具**（见 `docs/02_PLUGIN_SPEC.md` 第 6 节）。
 
 ### 3.1 核心追番与业务工具 (Anime Ops)
 
 | 工具名称 | 描述 | 主要参数 |
 |---------|------|---------|
-| `search_anime` | 全网聚合搜索番剧资源 (Mikan, Bangumi, ACG.RIP) | `keyword` (string), `source` (可选) |
-| `list_subscriptions` | 查询当前所有追番订阅状态及各季度集数更新进度 | `enabled_only` (boolean) |
-| `add_subscription` | 新增一个番剧追番订阅任务，支持自动配置匹配规则 | `title` (string), `rss_url` (可选), `season` (int), `subgroup` (可选) |
-| `remove_subscription` | 取消订阅指定番剧，支持指定是否保留媒体库已有文件 | `subscription_id` (int), `keep_files` (boolean) |
-| `get_downloads` | 实时查看 qBittorrent/Aria2 的下载队列、速度与进度 | `status` (all / downloading / completed) |
-| `trigger_refresh` | 立即触发一次全系统 RSS 检查与历史剧集自动补全扫描 | 无 |
+| `search_anime` | 全网聚合搜索番剧资源 (Mikan, Bangumi, ACG.RIP) | `keyword` (string，必填), `source` (可选) |
+| `list_subscriptions` | 查询当前所有追番订阅状态与集数进度 | `enabled_only` (boolean，可选) |
+| `add_subscription` | 新增一个番剧追番订阅任务 | `title` (string，必填), `season` (int，可选), `rss_url` (可选), `subgroup` (可选) |
+| `remove_subscription` | 取消订阅指定番剧（媒体库中已硬链接的文件不会被删除） | `subscription_id` (int，必填) |
+| `get_downloads` | 实时查看下载器任务队列、速度与进度 | `status` (all / downloading / completed，可选) |
+| `trigger_refresh` | 立即触发一次全系统 RSS 检查与自动下载调度 | 无 |
 
 ### 3.2 系统治理与插件控制工具 (System & Plugin Governance)
 
@@ -42,12 +43,10 @@ Ani-Go 内置两组核心工具，并支持已启用插件动态注入扩展工�
 
 | 工具名称 | 描述 | 主要参数 |
 |---------|------|---------|
-| `list_plugins` | 查看当前系统所有已注册插件、运行状态及其配置 Schema | 无 |
-| `toggle_plugin` | 远程启用或停用指定插件（及时生效与释放资源） | `plugin_id` (string), `enabled` (boolean) |
-| `get_plugin_config` | 获取指定插件的全部当前配置参数值 | `plugin_id` (string) |
-| `set_plugin_config` | 修改插件的指定配置参数并触发热重载 | `plugin_id` (string), `config` (object) |
-| `get_system_status` | 获取系统健康指标（存储余量、下载器连通性、版本信息） | 无 |
-| `update_system_config` | 修改微内核主干设置（如限速、代理端口、媒体库路径） | `key` (string), `value` (string) |
+| `list_plugins` | 查看当前所有已注册插件、运行状态与关注事件 | 无 |
+| `toggle_plugin` | 远程启用或停用指定插件（立即生效并释放资源） | `plugin_id` (string), `enabled` (boolean) |
+| `get_system_status` | 获取系统健康指标（内存占用、Goroutine 数、下载器连通性、订阅数、版本） | 无 |
+| `update_system_config` | 将指定配置项写入 settings 键值表 | `key` (string), `value` (string) |
 
 ---
 
@@ -95,5 +94,5 @@ Ani-Go 内置两组核心工具，并支持已启用插件动态注入扩展工�
 1. 分季识别常识：日本动漫续作经常使用绝对集数（例如《咒术回战》第 25 集实为第二季第 1 集）。在添加订阅或重命名时，请调用工具确认季度对应关系。
 2. 字幕组优先级：优先推荐简日双语、内嵌或内封 ASS 字幕的高清压制组（如 LoliHouse、VCB-Studio、喵萌奶茶屋）。
 3. 谨慎操作原则：在执行删除订阅或清理下载任务前，必须主动向用户确认是否需要保留本地已整理的视频文件。
-4. 插件调度：如果用户抱怨通知频繁，请使用 toggle_plugin 关停 notifier 插件；如果用户需要更新通知凭据，使用 set_plugin_config 精确修改。
+4. 插件调度：如果用户抱怨通知频繁，请使用 `toggle_plugin` 关停 `extended-notifiers` 插件；如需调整系统配置项，使用 `update_system_config(key, value)` 写入 settings 表。
 ```

@@ -16,9 +16,10 @@
 - `install.sh`：Linux / macOS 一键自动化安装脚本。
 
 ## ⚙️ 后端目录 (`internal/`)
-后端采用微内核与高内聚包设计：
+后端采用微内核与高内聚包设计（共 21 个包）：
 - `internal/core/`：核心抽象接口（`Source`, `Downloader`, `Organizer`, `EventBus` 等）。
-- `internal/api/`：RESTful API 路由定义、Handlers 与 WebSocket 控制器。
+- `internal/api/`：RESTful API 路由定义、Handlers 与 SSE 事件流控制器。
+- `internal/app/`：依赖装配层（Composition Root：资源源、元数据、AI 客户端的初始化与组装）。
 - `internal/config/`：配置加载器（三级优先决议律：环境变量 > 数据库设置 > 内置默认值）。
 - `internal/database/`：SQLite GORM 实体定义与数据库迁移（纯 Go 驱动）。
 - `internal/downloader/`：下载器适配层（qBittorrent / Transmission / Aria2 / DynamicDownloader）。
@@ -26,9 +27,10 @@
 - `internal/organizer/`：文件规范化整理器（硬链接/移动、路径防越界安全加固）。
 - `internal/parser/`：种子标题消歧与解析器（本地正则、Bangumi 放送时间戳对齐算法）。
 - `internal/plugin/`：微内核插件管理器与内置插件集（物理断电隔离）。
+- `internal/search/`：多资源站聚合搜索与搜索词扩展器。
 - `internal/source/`：资源站采集驱动（Mikan, Nyaa, ACG.RIP, AnimeTosho）。
 - `internal/metadata/`：番剧元数据客户端（Bangumi, TMDB）。
-- `internal/notifier/`：16 渠道消息聚合推送引擎与投递监控。
+- `internal/notifier/`：18 渠道消息聚合推送引擎与投递监控。
 - `internal/ai/`：外部大模型协议客户端（DeepSeek / OpenAI / Gemini / Ollama）。
 - `internal/event/`：内存高性能发布-订阅事件总线。
 - `internal/httpx/`：统一出站 HTTP 客户端（连接池复用、超时保护）。
@@ -36,6 +38,10 @@
 - `internal/auth/`：JWT 鉴权、Bcrypt 加密与内网免密策略中间件。
 - `internal/backup/`：数据库备份与一键恢复引擎。
 - `internal/migrate/`：AutoBangumi 及历史数据迁移导入器。
+
+## 🧰 命令行工具 (`cmd/`)
+- `cmd/backfill/`：历史剧集批量补全的独立命令行工具。
+- `cmd/bfdebug/`：补全流程调试工具。
 
 ## 🎨 前端目录 (`web/`)
 基于 Vue 3.5 + TypeScript + Vite + TailwindCSS 构建的响应式前端：

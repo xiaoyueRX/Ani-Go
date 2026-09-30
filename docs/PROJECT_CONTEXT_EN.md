@@ -19,7 +19,7 @@
 ### Storage Paths (fnOS)
 - **TV/Anime Root**: `/vol2/1000/TV/Media/番剧`
 - **Movie Root**: `/vol2/1000/TV/Media/剧场版`
-- **Database Path**: `d:\pve\Ani-Go\ani-go.db` (Windows) / `/data/ani-go.db` (Docker)
+- **Database Path**: `D:\project\Ani-Go\ani-go.db` (Windows dev machine, created in the working directory) / `/data/ani-go.db` (Docker)
 
 ---
 
@@ -81,10 +81,10 @@
 - [x] **Phase 4: AI + Multi-Downloader + Plugins** ✅
   - [x] AI multi-protocol (OpenAI/Google/Anthropic/Ollama)
   - [x] qBittorrent / Transmission / Aria2 multiple downloaders
-  - [x] Plugin system (Webhook + Shell scripts)
+  - [x] Plugin system (built-in plugin lifecycle + custom Webhook; `script` type not implemented)
   - [x] Multiple source sites (Nyaa/ACG.RIP/AnimeTosho + MultiSource aggregator)
 - [x] **Phase 5: Multi-Platform Messaging** ✅
-  - [x] 16-platform notification (Telegram/Discord/WeCom/Feishu/DingTalk/QQ/Slack/Matrix/LINE/WhatsApp/ServerChan/Bark/Pushover/Gotify/ntfy/Email)
+  - [x] 18-platform notification (Telegram/Discord/WeCom/Feishu/DingTalk/QQ/Slack/Matrix/LINE/WhatsApp/Signal/WeChat Official Account/ServerChan/Bark/Pushover/Gotify/ntfy/Email)
   - [x] Natural language task parser (regex + AI fallback)
   - [x] EventBus auto-push + MultiNotifier aggregated broadcast
 - [x] **Phase 6: Data Migration** ✅

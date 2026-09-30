@@ -62,7 +62,7 @@
                 ┌──────────────────────────────────────┐
                 │         可插拔插件生态 (Plugins)       │
                 │ ──────────────────────────────────── │
-                │ • 16 渠道聚合通知 (DingTalk/Bark 等) │
+                │ • 18 渠道聚合通知 (DingTalk/Bark 等) │
                 │ • 本地 NFO / TMDB 刮削与海报落盘     │
                 │ • 种子生命周期回收与死种智能换源       │
                 │ • 极客重命名 / 追番历史导入导出      │
@@ -88,10 +88,11 @@
 ## 1.4 目录工程结构图谱
 ```
 Ani-Go/
-├── cmd/                        # 扩展命令行工具集
+├── cmd/                        # 扩展命令行工具（backfill 历史补全、bfdebug 调试）
 ├── internal/                   # 后端核心业务内聚包（外部不可直接引用）
 │   ├── ai/                     # AI 大模型客户端接口（DeepSeek/OpenAI/Gemini/Ollama）
 │   ├── api/                    # RESTful API 路由定义、Handlers 与 WebSocket 控制器
+│   ├── app/                    # 依赖装配层（Composition Root：资源源 / 元数据 / AI 客户端初始化）
 │   ├── auth/                   # JWT 鉴权、Bcrypt 密码加密与免密策略中间件
 │   ├── backup/                 # 数据备份与一键恢复引擎
 │   ├── config/                 # 环境变量与数据库配置加载器（三级优先律）
@@ -138,13 +139,19 @@ Ani-Go/
 ```
 
 ## 1.5 数据模型与数据库设计
-系统基于 SQLite 运行，采用单连接写、多连接并发读的 WAL 模式，核心实体如下：
-- `Subscription`（订阅表）：存储番剧元数据、Mikan/Bangumi ID、季度、期望质量、过滤规则、更新状态。
-- `Torrent`（种子表）：记录抓取到的种子 Hash、标题、链接、发布时间、关联订阅 ID、下载状态、消歧结果。
-- `Setting`（全局键值对设置表）：采用 Key-Value 结构持久化所有 Web 界面可修改的配置项（优先于默认值）。
-- `PluginConfig`（插件配置表）：记录各个插件的启用/禁用状态及其专属 JSON 配置块。
-- `User`（用户表）：存储管理员账号与 Bcrypt 加密哈希（支持内网免密配置）。
-- `NotificationRecord`（通知投递历史表）：记录投递事件、推送渠道、成功/失败状态与错误信息。
+系统基于 SQLite 运行，采用单连接写、多连接并发读的 WAL 模式。`internal/database/models.go` 中的 7 个实体如下：
+
+| 模型 | 对应表 | 说明 |
+|------|--------|------|
+| `Subscription` | 订阅表 | 番剧元数据、Bangumi/TMDB/IMDB ID、季度、字幕组与排除词过滤、总集数/当前集数、`StallTimeoutHours` 死种阈值（默认 24h） |
+| `Episode` | 剧集表 | 单集状态、`TorrentHash`（唯一索引）、原始文件名、最终路径、文件大小、分辨率、下载/整理时间戳 |
+| `DownloadRecord` | 下载去重表 | 以 `TorrentHash` 唯一索引记录已下发过的种子，避免重复下载 |
+| `Setting` | 全局键值设置表 | Key-Value 结构，持久化所有 Web 界面可修改的配置项（优先于内置默认值） |
+| `User` | 用户表 | 管理员账号、Bcrypt 密码哈希、`TokenVersion`（改密后自增使旧 Token 失效）、头像 URL |
+| `NotificationLog` | 通知投递履历表 | 事件类型、推送渠道、标题内容、投递状态（success/failed/dlq）、错误信息与重试次数 |
+| `ParserCache` | 标题解析缓存表 | 以 `RawTitle` 为唯一索引缓存消歧结果（季、集、字幕组、分辨率、置信度、`ResolvedBy`：regex/airdate/ai） |
+
+> 注：插件启用状态并非独立数据表，而是以 `plugin_status`（JSON）键值写入 `settings` 表，详见 `docs/02_PLUGIN_SPEC.md`。
 
 ## 1.6 配置优先级三级定律与热生效机制
 Ani-Go 严格执行以下**三级配置决议律**：
@@ -219,8 +226,8 @@ Level 3: 程序代码内置默认值 (In-memory Defaults)     [最低兜底优�
 ## 2.3 安全防御基线与加固措施
 1. **内网免密体验与安全平衡**：
    - 考虑家庭内网使用场景，支持在控制台开启“内网免密访问”选项。
-   - 针对公网暴露环境，保留 Bcrypt 强哈希（Cost=12）密码校验；每次服务冷重启时由 `crypto/rand` 随机生成 32 字节 JWT 密钥，防止历史 Token 泄露。
-   - 实施登录防暴力破解限制（连续失败 5 次自动锁定 IP 10 分钟）。
+   - 针对公网暴露环境，保留 Bcrypt 密码哈希校验（`bcrypt.DefaultCost`）；JWT 密钥在首次启动时由 `crypto/rand` 生成 32 字节，并以 hex 形式**持久化于 settings 表的 `jwt_secret` 键**，重启后复用，避免重启导致全部客户端掉线；Token 有效期 24 小时，修改密码后 `token_version` 递增使旧 Token 立即失效。
+   - **如实说明**：早期文档曾描述“每次服务冷重启随机重新生成密钥”与“登录失败 5 次锁定 IP 10 分钟”，这两项**当前均未实现**（密钥已持久化；登录失败仅记录告警日志，无限流锁定）。
 2. **反向代理头标标准化**：
    - 接入 `ProxyHeadersMiddleware`，深度兼容 Lucky、Nginx、Caddy、Traefik 等反代服务传递的 `X-Forwarded-For`、`X-Forwarded-Proto` 与 `X-Real-IP`，保证客户端真实 IP 识别准确。
 
@@ -272,47 +279,47 @@ Level 3: 程序代码内置默认值 (In-memory Defaults)     [最低兜底优�
 
 ## 3.2 原生 MCP Server 实现规范与 AI Agent 治理
 Ani-Go 坚决不走“在后端塞进庞大模型 SDK 自己做聊天对话框”的伪 AI 弯路，而是践行 UNIX 哲学——**Ani-Go 只做手和脚，外部智能体（Claude Desktop, Cursor, 私有 Agent）才是大脑**。
-- **协议端点**：`/api/mcp/sse`（支持标准的 Server-Sent Events 流式传输与 JSON-RPC 2.0 规范，附带 Bearer Token 安全认证）。
-- **工具集设计（Tools）**：
-  1. **业务操作类**：
-     - `search_anime(keyword)`：在多资源站聚合搜索番剧及种子；
-     - `add_subscription(mikan_id, title, ...)`：一键添加自动追番订阅；
-     - `delete_subscription(id)`：安全删除订阅或移入回收站；
-     - `list_subscriptions(page, status)`：查询当前订阅状态与更新进度；
-     - `get_downloads()`：实时获取底层 qB / Aria2 下载队列与速度。
-  2. **系统治理类（AI 运维管家）**：
-     - `list_plugins()`：列出全系统已安装插件及其运行态；
+- **协议端点**：`GET /mcp/sse`（SSE 握手，挂载于根路径、**不带** `/api` 前缀）、`POST /mcp/messages?session_id=xxx`（JSON-RPC 2.0 消息通道），鉴权支持 `Authorization: Bearer <MCP_AUTH_TOKEN>` 或 `?token=<MCP_AUTH_TOKEN>`，校验失败返回 401；另有 `POST /api/mcp/token/generate`（JWT 鉴权）用于在 Web 设置页生成/重置 Token。
+- **工具集设计（Tools，共 10 项）**：
+  1. **业务操作类（`internal/mcp/tools.go`）**：
+     - `search_anime(keyword, source?)`：在多资源站聚合搜索番剧及种子（最多回显 10 条）；
+     - `list_subscriptions(enabled_only?)`：查询当前订阅状态与集数进度；
+     - `add_subscription(title, season?, rss_url?, subgroup?)`：一键添加自动追番订阅；
+     - `remove_subscription(subscription_id)`：取消订阅（不删除媒体库已硬链接的文件）；
+     - `get_downloads(status?)`：实时获取底层 qB / Transmission / Aria2 下载队列、速度与进度；
+     - `trigger_refresh()`：立即触发一次全量 RSS 检查与下载调度。
+  2. **系统治理类（`internal/mcp/governance_tools.go`）**：
+     - `list_plugins()`：列出全系统已注册插件、运行态与关注事件；
      - `toggle_plugin(plugin_id, enabled)`：一句话开启或关闭某个插件（如“帮我关掉推送通知”）；
-     - `update_plugin_config(plugin_id, config)`：调整插件私有参数（如“帮我把 Bark Key 换成 xxx”）；
-     - `get_settings()` / `update_settings(key, value)`：查询或调整全局系统配置。
+     - `get_system_status()`：内存占用、Goroutine 数、下载器连通性、订阅总数与版本；
+     - `update_system_config(key, value)`：将配置项写入 settings 键值表。
   3. **动态工具扩展（Dynamic Mounting）**：
-     - 任何插件若实现了 `MCPExtension` 接口，其私有工具将在插件启用时**自动注册**到 MCP 工具列表；在插件关闭时**即刻注销**。外部 AI 永远无法调用已停用插件的工具。
+     - 服务端已提供 `Server.RegisterTool()` 运行时注册能力，但**当前没有任何插件向其注册私有工具**（插件接口中不存在 `RegisterMCPTools`）。外部 AI 能调用的工具恒为上述 10 项。该扩展能力属规划项，详见 `docs/02_PLUGIN_SPEC.md` 第 6 节。
 
 ## 3.3 插件生态系统与物理断电隔离机制
 所有非核心流水线功能统一收归插件生命周期管理器（`internal/plugin/manager.go`）：
-- **标准插件接口**：
+- **标准插件接口**（`internal/plugin/types.go`，以源码为准）：
   ```go
-  type Plugin interface {
-      ID() string
-      Name() string
-      Version() string
-      Description() string
-      Init(ctx context.Context, bus event.Bus, db *gorm.DB) error
-      Start(ctx context.Context) error
-      Stop(ctx context.Context) error
-      ConfigSchema() []ConfigItem
+  // BuiltInPlugin 内建插件生命周期接口
+  type BuiltInPlugin interface {
+      GetInfo() PluginInfo                            // 返回插件元数据（含 ID/Name/Version/Events 等）
+      Init(bus core.EventBus, ctx core.Context) error // 启用：订阅事件、启动协程
+      Stop(bus core.EventBus) error                   // 停用：解除订阅、释放全部资源
   }
   ```
+  启用状态以 JSON 形式持久化于 settings 表的 `plugin_status` 键；自定义插件清单存于 `custom_plugins` 键。
 - **物理断电铁律（Power-cut Isolation）**：
-  - 调用 `Stop(ctx)` 时，必须主动取消传递给后台 Worker 的上下文（`cancel()`）；
-  - 必须断开所有的 HTTP 长轮询与推送重试协程；
+  - 调用 `Stop(bus)` 时必须主动 `bus.Unsubscribe(evType, subID)` 解除全部事件订阅，避免句柄叠加；
+  - 必须断开所有的 HTTP 长轮询与推送重试协程（自定义 Webhook 推送为独立 goroutine + 10 秒超时的 `httpx` 客户端，且带 `defer recover()`）；
   - 必须将内部状态置为 Inactive，停止监听全局 EventBus 事件；
   - 界面设置项与数据统计联动：当插件被关闭时，Web 页面自动灰显或隐藏关联设置卡片，避免“功能已关但界面还在报错”的视觉污染。
-- **核心内置插件阵容**：
-  - `notifier`：16 渠道消息推送聚合（支持 Bark, Server酱, 飞书, 钉钉, Telegram, 企业微信, PushPlus, Gotify, Discord, Webhook 等）；
-  - `yuc_schedule`：长门番堂（yuc.wiki）新番时间表抓取与周历展示；
-  - `geek_naming`：极客文件命名注入与元数据自定义；
-  - `data_migrate`：从 AutoBangumi 或其他工具导入历史追番与规则。
+- **核心内置插件阵容（6 个，ID 以源码为准）**：
+  - `extended-notifiers`：消息通知推送（基于 v2.NotifyManager 统一纳管 18 个渠道）；
+  - `metadata-mapping`：元数据映射器（关联 BangumiID 到 TMDB/IMDB）；
+  - `standard-naming`：媒体库规范重命名（Plex/Emby/Jellyfin 刮削规范）；
+  - `data-migrate`：从 AutoBangumi 或其他工具导入历史追番与规则；
+  - `yuc_schedule`：長門番堂（yuc.wiki）新番时间表抓取与周历展示（**默认停用**）；
+  - `nfo_scraper`：Bangumi NFO 与海报刮削（**默认停用**）。
 
 ## 3.4 多下载器引擎（qB / Transmission / Aria2）动态切换
 - **抽象接口**：`internal/core/interfaces.go` 中的 `Downloader` 接口抽象了所有下载操作。
