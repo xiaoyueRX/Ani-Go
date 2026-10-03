@@ -10,42 +10,66 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
+// NormalizeBaseURL cleans and normalizes OpenAI-compatible base endpoints.
+// If the path does not end with /chat/completions, it appends it or /v1/chat/completions appropriately.
+func NormalizeBaseURL(rawURL string) string {
+	u := strings.TrimSpace(rawURL)
+	if u == "" {
+		return "https://api.openai.com/v1/chat/completions"
+	}
+	u = strings.TrimRight(u, "/")
+	if strings.HasSuffix(u, "/chat/completions") {
+		return u
+	}
+	if strings.HasSuffix(u, "/v1") {
+		return u + "/chat/completions"
+	}
+	return u + "/v1/chat/completions"
+}
+
 // ============================================================
-// OpenAI 兼容后端（支持所有 /v1/chat/completions 端点）
+// OpenAI 兼容后端（支持所有 /v1/chat/completions 端点及自愈降级）
 // ============================================================
 
 type openAIBackend struct {
-	httpClient *http.Client
-	endpoint   string
-	apiKey     string
-	model      string
+	httpClient     *http.Client
+	endpoint       string
+	apiKey         string
+	model          string
+	mu             sync.RWMutex
+	extrasDisabled bool // Aligned with pi-ai _extras_disabled: suppresses reasoning_effort/thinking on 400
 }
 
 type openAIRequest struct {
-	Model       string        `json:"model"`
-	Messages    []chatMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
-	MaxTokens   int           `json:"max_tokens"`
+	Model           string        `json:"model"`
+	Messages        []chatMessage `json:"messages"`
+	Temperature     float64       `json:"temperature"`
+	MaxTokens       int           `json:"max_tokens"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+}
+
+type openAIChoice struct {
+	Message struct {
+		Role             string `json:"role"`
+		Content          string `json:"content"`
+		ReasoningContent string `json:"reasoning_content,omitempty"`
+	} `json:"message"`
 }
 
 type openAIResponse struct {
-	Choices []struct {
-		Message chatMessage `json:"message"`
-	} `json:"choices"`
+	Choices []openAIChoice `json:"choices"`
 }
 
 func newOpenAIBackend(endpoint, apiKey, model string) *openAIBackend {
-	if endpoint == "" {
-		endpoint = "https://api.openai.com/v1/chat/completions"
-	}
 	return &openAIBackend{
-		httpClient: httpx.New(30 * time.Second),
-		endpoint:   endpoint,
+		httpClient: httpx.New(60 * time.Second),
+		endpoint:   NormalizeBaseURL(endpoint),
 		apiKey:     apiKey,
 		model:      model,
 	}
@@ -60,6 +84,17 @@ func (b *openAIBackend) chat(ctx context.Context, systemPrompt, userPrompt strin
 }
 
 func (b *openAIBackend) chatWithModel(ctx context.Context, model, systemPrompt, userPrompt string) (string, error) {
+	spec := DefaultCatalog().Lookup(model)
+
+	b.mu.RLock()
+	extrasOff := b.extrasDisabled
+	b.mu.RUnlock()
+
+	maxTokens := spec.Capabilities.DefaultMaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 2048
+	}
+
 	reqBody := openAIRequest{
 		Model: model,
 		Messages: []chatMessage{
@@ -67,10 +102,37 @@ func (b *openAIBackend) chatWithModel(ctx context.Context, model, systemPrompt, 
 			{Role: "user", Content: userPrompt},
 		},
 		Temperature: 0.3,
-		MaxTokens:   1024,
+		MaxTokens:   maxTokens,
 	}
 
-	bodyBytes, _ := json.Marshal(reqBody)
+	if !extrasOff && spec.Capabilities.SupportsReasoningEffort {
+		reqBody.ReasoningEffort = "low"
+	}
+
+	res, err := b.doPost(ctx, reqBody)
+	if err != nil {
+		// If 400 Bad Request happens and extras are enabled, retry once without extras
+		if !extrasOff && strings.Contains(err.Error(), "400") {
+			log.Printf("⚠️ OpenAI/中转网关返回 400，自动触发 pi-ai extrasDisabled 静默降级并重试...")
+			b.mu.Lock()
+			b.extrasDisabled = true
+			b.mu.Unlock()
+
+			reqBody.ReasoningEffort = ""
+			reqBody.MaxTokens = 2048
+			return b.doPost(ctx, reqBody)
+		}
+		return "", err
+	}
+	return res, nil
+}
+
+func (b *openAIBackend) doPost(ctx context.Context, reqBody openAIRequest) (string, error) {
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("序列化 AI 请求失败: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("创建 AI 请求失败: %w", err)
@@ -78,6 +140,8 @@ func (b *openAIBackend) chatWithModel(ctx context.Context, model, systemPrompt, 
 	req.Header.Set("Content-Type", "application/json")
 	if b.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+b.apiKey)
+		// Dual handshake for NewAPI/relay gateways
+		req.Header.Set("api-key", b.apiKey)
 	}
 
 	resp, err := b.httpClient.Do(req)
@@ -100,9 +164,14 @@ func (b *openAIBackend) chatWithModel(ctx context.Context, model, systemPrompt, 
 		return "", fmt.Errorf("AI 未返回任何内容")
 	}
 
-	content := cr.Choices[0].Message.Content
-	log.Printf("🤖 AI 响应: %s", strings.TrimSpace(content)[:min(200, len(content))])
-	return strings.TrimSpace(content), nil
+	choice := cr.Choices[0]
+	if choice.Message.ReasoningContent != "" {
+		log.Printf("🧠 [Thinking Trace]: %s", strings.TrimSpace(choice.Message.ReasoningContent)[:min(150, len(choice.Message.ReasoningContent))])
+	}
+
+	content := CleanResponseText(choice.Message.Content)
+	log.Printf("🤖 AI 响应: %s", content[:min(200, len(content))])
+	return content, nil
 }
 
 // ============================================================
@@ -139,7 +208,7 @@ func newGoogleBackend(apiKey, model string) *googleBackend {
 		model = "gemini-2.0-flash"
 	}
 	return &googleBackend{
-		httpClient: httpx.New(30 * time.Second),
+		httpClient: httpx.New(45 * time.Second),
 		apiKey:     apiKey,
 		model:      model,
 	}
@@ -193,9 +262,9 @@ func (b *googleBackend) chatWithModel(ctx context.Context, model, systemPrompt, 
 		return "", fmt.Errorf("Google 响应为空")
 	}
 
-	content := parts[0].Text
-	log.Printf("🤖 Google 响应: %s", strings.TrimSpace(content)[:min(200, len(content))])
-	return strings.TrimSpace(content), nil
+	content := CleanResponseText(parts[0].Text)
+	log.Printf("🤖 Google 响应: %s", content[:min(200, len(content))])
+	return content, nil
 }
 
 // ============================================================
@@ -276,13 +345,13 @@ func (b *ollamaBackend) chatWithModel(ctx context.Context, model, systemPrompt, 
 		return "", fmt.Errorf("Ollama 响应解析失败: %w", err)
 	}
 
-	content := or.Message.Content
-	log.Printf("🤖 Ollama 响应: %s", strings.TrimSpace(content)[:min(200, len(content))])
-	return strings.TrimSpace(content), nil
+	content := CleanResponseText(or.Message.Content)
+	log.Printf("🤖 Ollama 响应: %s", content[:min(200, len(content))])
+	return content, nil
 }
 
 // ============================================================
-// Anthropic Claude 后端
+// Anthropic Claude 后端（支持双认证握手与 Thinking 自适应）
 // ============================================================
 
 type anthropicBackend struct {
@@ -296,19 +365,28 @@ type claudeMessage struct {
 	Content string `json:"content"`
 }
 
+type claudeThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
+}
+
 type claudeRequest struct {
 	Model       string          `json:"model"`
 	MaxTokens   int             `json:"max_tokens"`
 	System      string          `json:"system"`
 	Messages    []claudeMessage `json:"messages"`
 	Temperature float64         `json:"temperature,omitempty"`
+	Thinking    *claudeThinking `json:"thinking,omitempty"`
+}
+
+type claudeResponseContent struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
 }
 
 type claudeResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
+	Content []claudeResponseContent `json:"content"`
 }
 
 func newAnthropicBackend(apiKey, model string) *anthropicBackend {
@@ -316,7 +394,7 @@ func newAnthropicBackend(apiKey, model string) *anthropicBackend {
 		model = "claude-haiku-4-5-20251001"
 	}
 	return &anthropicBackend{
-		httpClient: httpx.New(30 * time.Second),
+		httpClient: httpx.New(60 * time.Second),
 		apiKey:     apiKey,
 		model:      model,
 	}
@@ -331,9 +409,15 @@ func (b *anthropicBackend) chat(ctx context.Context, systemPrompt, userPrompt st
 }
 
 func (b *anthropicBackend) chatWithModel(ctx context.Context, model, systemPrompt, userPrompt string) (string, error) {
+	spec := DefaultCatalog().Lookup(model)
+	maxTokens := spec.Capabilities.DefaultMaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 2048
+	}
+
 	reqBody := claudeRequest{
 		Model:     model,
-		MaxTokens: 1024,
+		MaxTokens: maxTokens,
 		System:    systemPrompt,
 		Messages: []claudeMessage{
 			{Role: "user", Content: userPrompt},
@@ -347,7 +431,9 @@ func (b *anthropicBackend) chatWithModel(ctx context.Context, model, systemPromp
 		return "", fmt.Errorf("创建 Anthropic 请求失败: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Dual auth handshake (both x-api-key and Bearer for official & NewAPI proxies)
 	req.Header.Set("x-api-key", b.apiKey)
+	req.Header.Set("Authorization", "Bearer "+b.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := b.httpClient.Do(req)
@@ -366,11 +452,21 @@ func (b *anthropicBackend) chatWithModel(ctx context.Context, model, systemPromp
 		return "", fmt.Errorf("Anthropic 响应解析失败: %w", err)
 	}
 
-	if len(cr.Content) == 0 {
-		return "", fmt.Errorf("Anthropic 未返回任何内容")
+	var resultText string
+	for _, block := range cr.Content {
+		if block.Thinking != "" {
+			log.Printf("🧠 [Claude Thinking]: %s", strings.TrimSpace(block.Thinking)[:min(150, len(block.Thinking))])
+		}
+		if block.Text != "" {
+			resultText += block.Text
+		}
 	}
 
-	content := cr.Content[0].Text
-	log.Printf("🤖 Anthropic 响应: %s", strings.TrimSpace(content)[:min(200, len(content))])
-	return strings.TrimSpace(content), nil
+	if resultText == "" {
+		return "", fmt.Errorf("Anthropic 未返回任何文本内容")
+	}
+
+	content := CleanResponseText(resultText)
+	log.Printf("🤖 Anthropic 响应: %s", content[:min(200, len(content))])
+	return content, nil
 }

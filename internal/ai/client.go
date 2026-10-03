@@ -219,51 +219,30 @@ func (c *Client) DisambiguateTitle(ctx context.Context, rawTitle, animeTitle str
 // ============================================================
 
 func parseClassifyResult(raw string) (*ClassifyResult, error) {
-	var cr ClassifyResult
-	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
-		if start := strings.Index(raw, "{"); start >= 0 {
-			if end := strings.LastIndex(raw, "}"); end > start {
-				if err := json.Unmarshal([]byte(raw[start:end+1]), &cr); err != nil {
-					return nil, fmt.Errorf("AI 分类结果解析失败: %w", err)
-				}
-				return &cr, nil
-			}
-		}
+	cr, err := ParseStructured[ClassifyResult](raw)
+	if err != nil {
 		return nil, fmt.Errorf("AI 分类结果解析失败: %w", err)
 	}
-	return &cr, nil
+	return cr, nil
 }
 
 func parseMergeResult(raw string) ([]MergeSuggestion, error) {
-	var suggestions []MergeSuggestion
-	if err := json.Unmarshal([]byte(raw), &suggestions); err != nil {
-		if start := strings.Index(raw, "["); start >= 0 {
-			if end := strings.LastIndex(raw, "]"); end > start {
-				if err := json.Unmarshal([]byte(raw[start:end+1]), &suggestions); err != nil {
-					return nil, fmt.Errorf("AI 归并建议解析失败: %w", err)
-				}
-				return suggestions, nil
-			}
-		}
+	suggestions, err := ParseStructured[[]MergeSuggestion](raw)
+	if err != nil {
 		return nil, fmt.Errorf("AI 归并建议解析失败: %w", err)
 	}
-	return suggestions, nil
+	if suggestions == nil {
+		return []MergeSuggestion{}, nil
+	}
+	return *suggestions, nil
 }
 
 func parseDisambiguateResult(raw string) (*DisambiguateResult, error) {
-	var dr DisambiguateResult
-	if err := json.Unmarshal([]byte(raw), &dr); err != nil {
-		if start := strings.Index(raw, "{"); start >= 0 {
-			if end := strings.LastIndex(raw, "}"); end > start {
-				if err := json.Unmarshal([]byte(raw[start:end+1]), &dr); err != nil {
-					return nil, fmt.Errorf("AI 消歧结果解析失败: %w", err)
-				}
-				return &dr, nil
-			}
-		}
+	dr, err := ParseStructured[DisambiguateResult](raw)
+	if err != nil {
 		return nil, fmt.Errorf("AI 消歧结果解析失败: %w", err)
 	}
-	return &dr, nil
+	return dr, nil
 }
 
 // ============================================================
