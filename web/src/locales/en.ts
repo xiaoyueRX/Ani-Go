@@ -444,8 +444,14 @@ export default {
     empty: {
       title: 'No Schedule Data Available',
       desc: 'Unable to retrieve broadcast schedule for this season. Check network connection or retry later.',
+      sourceHint: 'Sources like Mikan publish new-season schedules with a delay, so a season may be empty right after it starts.',
+      viewPrevious: 'View Previous Season',
       noMatch: 'No Matching Anime Found',
       noMatchDesc: 'Try adjusting your search terms or uncheck "Today Only"',
+    },
+    fallback: {
+      title: 'The selected season has not been published yet — showing the most recent one',
+      detail: 'No schedule data for {reqYear} {reqSeason} yet. Showing {fbYear} {fbSeason} instead.',
     },
     batch: {
       button: 'Batch Subscribe',
@@ -573,22 +579,68 @@ export default {
     supplement: 'Supplement',
   },
   detail: {
-    back: 'Back to Subscriptions',
+    back: "Back to Subscriptions",
+    status: {
+      finished: "Completed",
+      paused: "Paused",
+      active: "Ongoing"
+    },
+    type: {
+      unknown: "Unknown"
+    },
+    stats: {
+      releaseYear: "Release Year",
+      season: "Season",
+      metadata: "Metadata Source",
+      subgroup: "Target Subgroup"
+    },
+    progress: {
+      title: "Download Progress"
+    },
+    actions: {
+      modify: "Edit Subscription",
+      suspend: "Pause",
+      resume: "Resume"
+    },
+    synopsis: "Synopsis",
     warning: {
-      title: 'Download Stalled Warning',
-      desc: '{count} episodes have stalled, possibly due to lack of torrent seeders.',
+      title: "Download Stalled Warning",
+      desc: "{count} episodes have stalled, possibly due to lack of torrent seeders."
     },
     logs: {
-      title: 'Episode Records',
-      count: '{count} Records',
-      empty: 'No episode records',
-      episodes: 'Eps',
+      title: "Episode Records",
+      count: "{count} Records",
+      empty: "No episode records",
+      episodes: "Eps",
+      ungrouped: "Ungrouped",
+      status: {
+        pending: "Pending",
+        active: "Downloading",
+        finished: "Completed",
+        failed: "Failed"
+      },
+      table: {
+        id: "Ep #",
+        name: "File / Title",
+        status: "Status",
+        integrity: "Integrity",
+        capacity: "Size",
+        timestamp: "Date"
+      },
+      integrity: {
+        stalled: "Stalled",
+        verified: "Verified"
+      }
+    },
+    edit: {
+      title: "Edit Subscription",
+      subtitle: "Update series classification, season, subgroup filter, or blacklist"
     },
     error: {
-      accessDenied: 'Access Denied',
-      load: 'Failed to load subscription details',
-      update: 'Update failed',
-    },
+      accessDenied: "Access Denied",
+      load: "Failed to load subscription details",
+      update: "Update failed"
+    }
   },
   form: {
     title: 'Initialize Anime',
@@ -759,6 +811,81 @@ export default {
     },
     subscribed: 'Subscribed: {title}',
     subscribeFailed: 'Subscribe failed: {error}',
+  },
+  wizard: {
+    title: "Welcome to Ani-Go",
+    subtitle: "First-Run Setup Wizard (Get ready in a few easy steps, skip anytime)",
+    skipBtn: "Skip Wizard",
+    nextBtn: "Next",
+    prevBtn: "Back",
+    finishBtn: "Complete & Start Anime Tracking",
+    saving: "Saving settings...",
+    steps: {
+      security: "Security",
+      storage: "Storage",
+      downloader: "Downloader",
+      source: "Sources",
+      ready: "Ready"
+    },
+    security: {
+      title: "Update Default Password",
+      desc: "Default admin password (admin) detected. We strongly suggest updating it to protect your media server.",
+      newPass: "New Admin Password",
+      newPassPlaceholder: "Enter new password (min 6 characters)",
+      confirmPass: "Confirm New Password",
+      confirmPassPlaceholder: "Re-enter new password",
+      keepDefault: "Keep default password for now (admin)"
+    },
+    storage: {
+      title: "Media Paths & Organizing",
+      desc: "Pick your system preset for instant configuration, or manually customize.",
+      presetLabel: "System Presets:",
+      presets: {
+        fnos: "fnOS Private Cloud",
+        synology: "Synology NAS (DSM)",
+        linux: "Standard Linux / Docker",
+        windows: "Windows Local"
+      },
+      tvPath: "Anime TV Series Root Path",
+      moviePath: "Anime Movies Root Path",
+      modeLabel: "File Organizing Mode",
+      hardlink: "Hardlink (Recommended: keep seeding without duplicating space)",
+      move: "Direct Move (Move directly to media folder)"
+    },
+    downloader: {
+      title: "Download Client Integration",
+      desc: "Ani-Go automatically schedules downloaders for torrent handling and organization.",
+      typeLabel: "Downloader Type",
+      host: "WebUI / RPC Endpoint",
+      user: "Username",
+      pass: "Password",
+      category: "Category",
+      secret: "RPC Secret",
+      testBtn: "Test Connection",
+      testing: "Testing...",
+      testSuccess: "Connected successfully!",
+      testFailed: "Connection failed: "
+    },
+    source: {
+      title: "Feed Sources & Accounts",
+      desc: "Connect Mikan Project and Bangumi for auto-tracking and bidirectional sync.",
+      mikanTokenLabel: "Mikan Personal RSS URL / Token",
+      mikanPlaceholder: "e.g., https://mikanani.me/RSS/MyBangumi?token=...",
+      mikanTip: "Copy the RSS link from your Mikan profile page after signing in.",
+      bgmTokenLabel: "Bangumi Personal Access Token",
+      bgmPlaceholder: "Generate from bgm.tv/dev/app",
+      bgmTip: "Automatically sync collections and show live daily broadcast schedule."
+    },
+    ready: {
+      title: "You Are All Set!",
+      desc: "Ani-Go is now configured. Click below to apply settings and start exploring.",
+      summaryTitle: "Configuration Summary:",
+      summaryStorage: "Media Path: {path}",
+      summaryDownloader: "Downloader: {engine}",
+      summaryMikan: "Mikan Feed: {status}",
+      configured: "Configured",
+      unconfigured: "Not set (can configure later)"
+    }
   },
   footer: {
     copy: 'Ani-Go &copy; 2026 • Crafted with passion',

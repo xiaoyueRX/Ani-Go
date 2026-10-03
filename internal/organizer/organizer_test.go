@@ -134,3 +134,42 @@ func TestSelectTemplate_MediaTypeTemplates(t *testing.T) {
 		}
 	}
 }
+
+
+
+func TestRenderTemplate_SeriesVariable(t *testing.T) {
+	tmpl := "{series}/{title_cn} ({year})/Season {season}/{title_en} S{season:02}E{ep:02}{ext}"
+	
+	// 测试用例 1: 指定了 SeriesID
+	v1 := core.VarValues{
+		Series:   "鬼灭之刃",
+		SeriesID: "鬼灭之刃",
+		TitleCN:  "鬼灭之刃 锻刀村篇",
+		TitleEN:  "Demon Slayer Swordsmith Village Arc",
+		Year:     2023,
+		Season:   3,
+		Ep:       1,
+		Ext:      ".mkv",
+	}
+	res1 := renderTemplate(tmpl, v1)
+	expected1 := "鬼灭之刃/鬼灭之刃 锻刀村篇 (2023)/Season 3/Demon Slayer Swordsmith Village Arc S03E01.mkv"
+	if res1 != expected1 {
+		t.Fatalf("res1 期望 %q, 得到 %q", expected1, res1)
+	}
+
+	// 测试用例 2: 未显式指定 Series，应回退为 TitleCN
+	v2 := core.VarValues{
+		Series:   "葬送的芙莉莲",
+		TitleCN:  "葬送的芙莉莲",
+		TitleEN:  "Frieren",
+		Year:     2023,
+		Season:   1,
+		Ep:       10,
+		Ext:      ".mp4",
+	}
+	res2 := renderTemplate(tmpl, v2)
+	expected2 := "葬送的芙莉莲/葬送的芙莉莲 (2023)/Season 1/Frieren S01E10.mp4"
+	if res2 != expected2 {
+		t.Fatalf("res2 期望 %q, 得到 %q", expected2, res2)
+	}
+}

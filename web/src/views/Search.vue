@@ -312,10 +312,12 @@ function toggleItemSelection(item: TorrentItem) {
 }
 
 function toggleSelectAll() {
-  if (selectedItems.value.length === filteredResults.value.length) {
+  // 排除番剧主词条卡片，只选择真实的下载资源
+  const downloadable = filteredResults.value.filter(item => !(item.url && item.url.includes("/Home/Bangumi/") && !item.magnet && !item.info_hash))
+  if (selectedItems.value.length >= downloadable.length && downloadable.length > 0) {
     selectedItems.value = []
   } else {
-    selectedItems.value = [...filteredResults.value]
+    selectedItems.value = [...downloadable]
   }
 }
 
@@ -714,7 +716,7 @@ function sourceBadge(source: string): string {
         :class="{ 'ring-2 ring-primary/40': isItemSelected(item) }"
       >
         <!-- Batch Checkbox -->
-        <div v-if="batchMode" class="shrink-0 flex items-center sm:self-center">
+        <div v-if="batchMode && !(item.url && item.url.includes('/Home/Bangumi/') && !item.magnet)" class="shrink-0 flex items-center sm:self-center">
           <input 
             type="checkbox" 
             :checked="isItemSelected(item)" 
@@ -747,7 +749,10 @@ function sourceBadge(source: string): string {
             </h3>
             
             <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <span class="text-[10px] font-black uppercase tracking-wider py-0.5 px-2 rounded-md border" :class="sourceBadge(item.source)">
+              <span v-if="item.url && item.url.includes('/Home/Bangumi/') && !item.magnet" class="text-[10px] font-black uppercase tracking-wider py-0.5 px-2.5 rounded-md bg-primary text-primary-content shadow-sm">
+                番剧主词条
+              </span>
+              <span v-else class="text-[10px] font-black uppercase tracking-wider py-0.5 px-2 rounded-md border" :class="sourceBadge(item.source)">
                 {{ item.source }}
               </span>
               <span v-if="item.size > 0" class="text-[10px] font-bold font-mono bg-base-200 text-base-content/60 py-0.5 px-2 rounded-md flex items-center gap-1">

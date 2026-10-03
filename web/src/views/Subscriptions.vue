@@ -5,7 +5,7 @@ import request from '../utils/request'
 import { 
   Search, Plus, AlertTriangle, 
   X, LayoutGrid, RefreshCw,
-  RotateCcw, Trash2, Antenna, Check, Sparkles
+  RotateCcw, Trash2, Play, Check, Sparkles
 } from 'lucide-vue-next'
 import SubscriptionCard from '../components/SubscriptionCard.vue'
 
@@ -622,7 +622,7 @@ onUnmounted(() => {
           <p class="text-xl font-black font-mono text-primary">{{ activeSubsCount }}</p>
         </div>
         <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-          <Antenna :size="20" />
+          <Play :size="20" class="fill-current" />
         </div>
       </div>
 

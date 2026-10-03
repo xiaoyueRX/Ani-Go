@@ -430,13 +430,14 @@ func (m *MikanSource) fetchPath(ctx context.Context, path string, weekLabel map[
 	if err != nil {
 		return nil, err
 	}
-	if len(body) < 2000 {
-		return nil, fmt.Errorf("body too short")
-	}
-
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
+	}
+
+	// 若页面中没有番剧数据（例如选中的是尚未排表或空的未来/历史季度），返回空列表而非报错 500
+	if doc.Find(".sk-bangumi").Length() == 0 {
+		return []WeekDayItem{}, nil
 	}
 
 	var result []WeekDayItem

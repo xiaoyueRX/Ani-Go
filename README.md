@@ -36,6 +36,16 @@
 
 ---
 
+## 🤖 面向 AI 智能体的一键接入与接管 (For AI Agents)
+
+> **给使用 Cursor / Claude Code / Windsurf / Codex 的用户与智能体**：
+> 本仓库已深度集成原生 **Model Context Protocol (MCP)** 服务与 **Agent Skill 技能规范**。
+> 当您或您的智能体接管本项目时，请直接参阅仓库根目录下的：
+> - **[`SKILL.md`](SKILL.md)**：包含全套针对外部 Agent 的「宿主环境主动嗅探 ➔ 主人交互式访谈 ➔ 全自动配置拉起 ➔ MCP 握手写入」闭环指引。
+> - **[`docs/03_MCP_SPEC.md`](docs/03_MCP_SPEC.md)**：包含 10 项核心业务与系统治理工具的调用规范与数据契约。
+
+---
+
 ## 📖 项目简介
 
 **Ani-Go** 是一款专为家庭 NAS 与轻量级服务器设计的一站式番剧自动化管理系统。后端基于 Go 语言构建，前端采用 Vue 3 + TailwindCSS，全量静态资源内置于单文件二进制中（`go:embed`），实现零外部运行时依赖的即装即用体验。

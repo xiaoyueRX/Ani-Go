@@ -235,4 +235,6 @@ type VarValues struct {
 	Provider string
 	TMDBID   string
 	IMDBID   string
+	SeriesID string
+	Series   string
 }

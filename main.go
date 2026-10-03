@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/xiaoyueRX/Ani-Go/internal/api"
@@ -26,6 +27,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 	"github.com/xiaoyueRX/Ani-Go/internal/scheduler"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
+	"github.com/xiaoyueRX/Ani-Go/internal/update"
 )
 
 var version = "v0.6.0"
@@ -102,6 +104,15 @@ func main() {
 	// 初始化事件总线
 	bus := event.New()
 	log.Println("✅ 事件总线已初始化")
+
+	// 初始化系统自更新管理器
+	updateMgr := update.InitManager(version)
+	go func() {
+		time.Sleep(5 * time.Second)
+		if info, err := updateMgr.CheckUpdate(context.Background()); err == nil && info.HasUpdate {
+			log.Printf("✨ [版本检测] 发现云端新版本: %s (当前: %s) | 支持在 Web 界面一键平滑升级", info.LatestVersion, info.CurrentVersion)
+		}
+	}()
 
 	// 从数据库加载用户自定义正则解析规则
 	source.LoadCustomPatternsFromSettings(func(key string) (string, bool) {

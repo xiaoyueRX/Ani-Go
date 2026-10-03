@@ -72,6 +72,10 @@ type tmdbTVDetail struct {
 	NumberOfSeasons  int    `json:"number_of_seasons"`
 	NumberOfEpisodes int    `json:"number_of_episodes"`
 	Type             string `json:"type"`
+	BelongsToCollection *struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"belongs_to_collection"`
 	ExternalIDs      struct {
 		IMDBID string `json:"imdb_id"`
 	} `json:"external_ids"`
@@ -163,6 +167,11 @@ func (p *TMDBProvider) GetAnime(ctx context.Context, id string) (core.Anime, err
 		animeType = "TV"
 	}
 
+	seriesID := ""
+	if detail.BelongsToCollection != nil && detail.BelongsToCollection.Name != "" {
+		seriesID = detail.BelongsToCollection.Name
+	}
+
 	return core.Anime{
 		ID:          strconv.Itoa(detail.ID),
 		Provider:    "TMDB",
@@ -173,6 +182,7 @@ func (p *TMDBProvider) GetAnime(ctx context.Context, id string) (core.Anime, err
 		Type:        animeType,
 		Description: detail.Overview,
 		CoverURL:    coverURL,
+		SeriesID:    seriesID,
 		TMDBID:      strconv.Itoa(detail.ID),
 		IMDBID:      detail.ExternalIDs.IMDBID,
 	}, nil

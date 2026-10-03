@@ -42,3 +42,9 @@
   opacity: 0;
   transform: translateY(10px);
 }
+
+/* 保证徽章组件单行显示，杜绝文字折行或被裁切 */
+.badge {
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}

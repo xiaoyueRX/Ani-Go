@@ -142,11 +142,22 @@ func (p *MetadataMappingPlugin) mapOne(subID uint) {
 	defer cancel()
 	tmdb, imdb := mapper.MapBangumiToExternal(ctx, sub.BangumiID, sub.TitleCN, sub.Year)
 	
-	if tmdb != "" || imdb != "" {
-		database.DB.Model(&sub).Updates(map[string]interface{}{
-			"tmdb_id": tmdb,
-			"imdb_id": imdb,
-		})
-		log.Printf("✅ [插件] 关联成功 [%s]: TMDB=%s, IMDB=%s", sub.TitleCN, tmdb, imdb)
+	updates := map[string]interface{}{}
+	if tmdb != "" {
+		updates["tmdb_id"] = tmdb
+		// 若通过 TMDB 获取到 Collection 系列信息且当前未设置 SeriesID，补充关联
+		if tmdbProvider != nil && sub.SeriesID == "" {
+			tmdbIDClean := strings.TrimPrefix(tmdb, "tv/")
+			if detail, err := tmdbProvider.GetAnime(ctx, tmdbIDClean); err == nil && detail.SeriesID != "" {
+				updates["series_id"] = detail.SeriesID
+			}
+		}
+	}
+	if imdb != "" {
+		updates["imdb_id"] = imdb
+	}
+	if len(updates) > 0 {
+		database.DB.Model(&sub).Updates(updates)
+		log.Printf("✅ [插件] 关联成功 [%s]: %v", sub.TitleCN, updates)
 	}
 }

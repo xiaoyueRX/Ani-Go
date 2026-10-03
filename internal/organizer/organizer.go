@@ -263,6 +263,10 @@ func (o *TVOrganizer) isHardLinkEnabled() bool {
 
 // buildVarValues 从 anime 和 episode 构建模板变量值
 func (o *TVOrganizer) buildVarValues(anime core.Anime, episode core.Episode) core.VarValues {
+	series := anime.SeriesID
+	if series == "" {
+		series = anime.TitleCN
+	}
 	return core.VarValues{
 		TitleCN:  anime.TitleCN,
 		TitleEN:  anime.TitleEN,
@@ -274,6 +278,8 @@ func (o *TVOrganizer) buildVarValues(anime core.Anime, episode core.Episode) cor
 		Provider: anime.Provider,
 		TMDBID:   anime.TMDBID,
 		IMDBID:   anime.IMDBID,
+		SeriesID: anime.SeriesID,
+		Series:   series,
 	}
 }
 
@@ -372,6 +378,10 @@ func resolveVar(name string, v core.VarValues) string {
 		return cleanVarValue(v.TMDBID)
 	case "imdb_id":
 		return cleanVarValue(v.IMDBID)
+	case "series":
+		return cleanVarValue(v.Series)
+	case "series_id":
+		return cleanVarValue(v.SeriesID)
 	default:
 		return "{" + name + "}"
 	}

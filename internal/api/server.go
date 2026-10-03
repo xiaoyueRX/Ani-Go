@@ -314,6 +314,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 版本信息
 	mux.HandleFunc("GET /api/version", s.handleGetVersion)
+	mux.HandleFunc("GET /api/system/update/check", s.handleCheckUpdate)
+	mux.HandleFunc("GET /api/system/update/progress", s.handleGetUpdateProgress)
+	mux.HandleFunc("POST /api/system/update/execute", s.handleExecuteUpdate)
 
 	// 事件流 (SSE)
 	mux.HandleFunc("GET /api/events/stream", s.handleEventStream)

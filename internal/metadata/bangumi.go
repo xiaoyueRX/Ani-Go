@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,6 +146,13 @@ type bgmSubject struct {
 	Type          int    `json:"type"`
 }
 
+type bgmSubjectRelation struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	NameCN   string `json:"name_cn"`
+	Relation string `json:"relation"`
+}
+
 type bgmEpisodeResponse struct {
 	Total int         `json:"total"`
 	Data  []bgmEpisode `json:"data"`
@@ -243,6 +251,22 @@ func (p *BGMTVProvider) GetAnime(ctx context.Context, id string) (core.Anime, er
 		typeName = "Movie"
 	}
 
+	seriesID := ""
+	if relPath := fmt.Sprintf("/v0/subjects/%s/subjects", id); true {
+		if relResp, err := p.tryMirrors(ctx, relPath); err == nil {
+			var relations []bgmSubjectRelation
+			if json.NewDecoder(relResp.Body).Decode(&relations) == nil {
+				for _, rel := range relations {
+					if rel.Relation == "前传" || rel.Relation == "主线故事" {
+						seriesID = strconv.Itoa(rel.ID)
+						break
+					}
+				}
+			}
+			relResp.Body.Close()
+		}
+	}
+
 	return core.Anime{
 		ID:          strconv.Itoa(subject.ID),
 		Provider:    "BGM.tv",
@@ -253,6 +277,7 @@ func (p *BGMTVProvider) GetAnime(ctx context.Context, id string) (core.Anime, er
 		Type:        typeName,
 		Description: subject.Summary,
 		CoverURL:    subject.Images.Large,
+		SeriesID:    seriesID,
 	}, nil
 }
 
@@ -470,7 +495,10 @@ func (p *BGMTVProvider) tryMirrors(ctx context.Context, path string) (*http.Resp
 
 	var lastErr error
 	for _, domain := range domains {
-		fullURL := fmt.Sprintf("https://%s%s", domain, path)
+		fullURL := domain + path
+		if !strings.HasPrefix(fullURL, "http://") && !strings.HasPrefix(fullURL, "https://") {
+			fullURL = "https://" + fullURL
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 		if err != nil {
 			lastErr = err

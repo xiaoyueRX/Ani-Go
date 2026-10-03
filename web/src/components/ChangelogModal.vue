@@ -35,8 +35,8 @@ const close = () => {
       </div>
 
       <!-- Content -->
-      <div class="px-8 pb-8 space-y-4">
-        <div class="space-y-3">
+      <div class="px-8 pb-8 flex flex-col flex-1 min-h-0">
+        <div class="space-y-3 overflow-y-auto max-h-[60vh] pr-2 custom-scrollbar">
           <div v-for="(item, index) in changelog" :key="index" 
             class="flex items-start gap-4 p-4 rounded-2xl bg-base-100/50 border border-base-content/5 group hover:border-primary/20 transition-colors">
             <CheckCircle2 :size="18" class="text-primary shrink-0 mt-0.5" />
@@ -44,7 +44,7 @@ const close = () => {
           </div>
         </div>
 
-        <button class="btn btn-primary w-full rounded-2xl font-black tracking-widest text-xs h-14 shadow-lg shadow-primary/20 mt-4" @click="close">
+        <button class="btn btn-primary w-full rounded-2xl font-black tracking-widest text-xs h-14 shadow-lg shadow-primary/20 mt-4 shrink-0" @click="close">
           我知道了 (GOT IT)
         </button>
       </div>

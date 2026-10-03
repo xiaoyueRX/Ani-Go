@@ -19,7 +19,7 @@ const isDrawerOpen = ref(false)
 const isDefaultPassword = ref(false)
 const dismissDefaultPasswordAlert = ref(false)
 
-const { currentVersion, latestVersion, hasNewVersion, checkGitHubUpdate } = useVersion()
+const { currentVersion, latestVersion, hasNewVersion, checkGitHubUpdate, updating, updateProgress, triggerUpdate, canSelfUpdate } = useVersion()
 
 interface Toast {
   id: number
@@ -110,7 +110,7 @@ function closeDrawer() {
           </div>
           <div class="flex flex-col">
             <div class="flex items-center gap-1.5">
-              <span class="text-xl font-black bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent italic tracking-tight">Ani-Go</span>
+              <span class="text-xl font-black text-primary italic tracking-tight">Ani-Go</span>
               <span class="badge badge-primary badge-xs font-mono font-bold">{{ currentVersion }}</span>
             </div>
             <span class="text-[9px] font-bold text-base-content/40 uppercase tracking-[0.2em]">Anime Sync Engine</span>
@@ -178,7 +178,7 @@ function closeDrawer() {
         </button>
         <div class="flex items-center gap-2 cursor-pointer" @click="router.push('/schedule')">
           <img src="/logo.png" alt="Ani-Go" class="w-7 h-7 rounded-lg object-cover shadow-sm" />
-          <span class="text-lg font-black bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent italic">Ani-Go</span>
+          <span class="text-lg font-black text-primary italic">Ani-Go</span>
           <span class="badge badge-neutral badge-xs font-mono font-bold opacity-60">{{ currentVersion }}</span>
         </div>
         <div class="dropdown dropdown-end">
@@ -295,7 +295,7 @@ function closeDrawer() {
             <div class="px-6 py-6 border-b border-base-200/60 flex items-center justify-between">
               <div class="flex items-center gap-3">
                 <img src="/logo.png" alt="Ani-Go" class="w-9 h-9 rounded-xl object-cover shadow-sm" />
-                <span class="text-xl font-black bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent italic">Ani-Go</span>
+                <span class="text-xl font-black text-primary italic">Ani-Go</span>
               </div>
               <button class="btn btn-ghost btn-circle btn-sm" @click="closeDrawer">
                 <X :size="18" />
@@ -346,23 +346,61 @@ function closeDrawer() {
       </Transition>
     </Teleport>
 
-    <!-- Update Notification Toast -->
+    <!-- Update Notification Toast & Modal -->
     <div v-if="hasNewVersion" class="fixed bottom-6 right-6 z-[100] animate-in fade-in slide-in-from-bottom-10 duration-500">
-      <div class="bg-base-100 border border-primary/20 shadow-2xl rounded-2xl p-4 flex items-center gap-4 max-w-sm">
-        <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
-          <Sparkles :size="20" />
-        </div>
-        <div class="flex-1">
-          <h4 class="text-xs font-black uppercase tracking-widest opacity-40">新版本可用</h4>
-          <p class="text-sm font-bold">{{ latestVersion }} 已发布</p>
-        </div>
-        <div class="flex items-center gap-2">
-          <a href="https://github.com/xiaoyueRX/Ani-Go/releases" target="_blank" class="btn btn-primary btn-sm rounded-xl">
-            <ExternalLink :size="14" />
-          </a>
-          <button @click="hasNewVersion = false" class="btn btn-ghost btn-sm btn-circle rounded-xl">
+      <div class="bg-base-100/95 backdrop-blur-xl border border-primary/30 shadow-2xl rounded-3xl p-5 flex flex-col gap-3.5 max-w-md ring-1 ring-primary/20">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center text-primary-content shadow-md shadow-primary/30 shrink-0">
+              <Sparkles :size="22" />
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-black uppercase tracking-widest text-primary bg-primary/10 px-2 py-0.5 rounded-md">发现云端更新</span>
+                <span class="badge badge-primary badge-xs font-mono font-bold">{{ latestVersion }}</span>
+              </div>
+              <h4 class="text-sm font-black mt-0.5 text-base-content">Ani-Go 新版本已就绪</h4>
+            </div>
+          </div>
+          <button @click="hasNewVersion = false" class="btn btn-ghost btn-xs btn-circle text-base-content/40 hover:text-base-content">
             <X :size="16" />
           </button>
+        </div>
+
+        <!-- 更新状态提示条 -->
+        <div v-if="updating" class="bg-base-200/80 p-3 rounded-2xl space-y-2 border border-base-300/60">
+          <div class="flex items-center justify-between text-xs font-bold">
+            <span class="text-primary flex items-center gap-1.5">
+              <span class="loading loading-spinner loading-xs"></span>
+              {{ updateProgress.message }}
+            </span>
+            <span class="font-mono text-primary">{{ updateProgress.progress }}%</span>
+          </div>
+          <progress class="progress progress-primary w-full h-2 rounded-full" :value="updateProgress.progress" max="100"></progress>
+        </div>
+
+        <div v-else class="text-xs text-base-content/70 leading-relaxed font-medium">
+          检测到系统有可用更新，支持无需登录终端即可在当前网页一键平滑升级与原地自愈重启。
+        </div>
+
+        <div class="flex items-center gap-2 pt-1">
+          <button 
+            v-if="canSelfUpdate"
+            @click="triggerUpdate" 
+            :disabled="updating"
+            class="btn btn-primary btn-sm flex-1 rounded-xl font-bold gap-2 shadow-lg shadow-primary/25 hover:scale-[1.02] active:scale-95 transition-all"
+          >
+            <Download :size="15" />
+            <span>{{ updating ? "正在平滑升级..." : "立即一键升级" }}</span>
+          </button>
+          <a 
+            href="https://github.com/xiaoyueRX/Ani-Go/releases" 
+            target="_blank" 
+            class="btn btn-ghost btn-sm rounded-xl font-bold gap-1.5 text-xs text-base-content/70"
+          >
+            <span>发行日志</span>
+            <ExternalLink :size="13" />
+          </a>
         </div>
       </div>
     </div>

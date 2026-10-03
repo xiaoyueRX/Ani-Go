@@ -427,17 +427,23 @@ func (q *QBittorrent) IsAvailable(ctx context.Context) bool {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	// 1. 确保已登录（若需要凭据，先进行会话握手）
+	if err := q.ensureLogin(timeoutCtx); err != nil {
+		return false
+	}
+
 	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodGet,
 		q.host+"/api/v2/app/version", nil)
 	if err != nil {
 		return false
 	}
+	req.Header.Set("Referer", q.host)
 	resp, err := q.httpClient.Do(req)
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
-	// qBittorrent 可达返回 200，也可能返回 204
+	defer resp.Body.Close()
+
 	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent
 }
 

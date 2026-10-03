@@ -289,6 +289,7 @@ export default {
       goToPlugins: '前往插件管理',
     },
     ai: {
+      notConfiguredTip: '未配置大模型，无法启用',
       fetchModels: '获取模型',
       loadingModels: '获取中...',
       fetchTooltip: '从端点获取可用模型',
@@ -444,8 +445,14 @@ export default {
     empty: {
       title: '暂无时间表数据',
       desc: '系统无法获取当前季度的放送时间表。请检查网络连接或稍后重试。',
+      sourceHint: '蜜柑计划等数据源对新季度时间表的发布存在延迟，季度刚开播时可能暂时没有内容。',
+      viewPrevious: '查看上一季度',
       noMatch: '未找到匹配的番剧',
       noMatchDesc: '请尝试更换搜索关键字或取消「只看今日」筛选',
+    },
+    fallback: {
+      title: '所选季度数据源暂未发布，已自动为你展示最近一期',
+      detail: '{reqYear} 年 {reqSeason} 的时间表在数据源中尚无内容，当前展示的是 {fbYear} 年 {fbSeason}。',
     },
     batch: {
       button: '批量订阅',
@@ -573,22 +580,68 @@ export default {
     supplement: '补全',
   },
   detail: {
-    back: '返回订阅列表',
+    back: "返回订阅列表",
+    status: {
+      finished: "已完结",
+      paused: "已暂停",
+      active: "连载中"
+    },
+    type: {
+      unknown: "未知"
+    },
+    stats: {
+      releaseYear: "放送年份",
+      season: "所属季度",
+      metadata: "数据来源",
+      subgroup: "专属字幕组"
+    },
+    progress: {
+      title: "下载追番进度"
+    },
+    actions: {
+      modify: "编辑订阅",
+      suspend: "暂停追番",
+      resume: "恢复追番"
+    },
+    synopsis: "番剧故事简介",
     warning: {
-      title: '剧集下载停滞警告',
-      desc: '当前有 {count} 个剧集下载超时停滞，可能是种子缺乏做种者。',
+      title: "剧集下载停滞警告",
+      desc: "当前有 {count} 个剧集下载超时停滞，可能是种子缺乏做种者。"
     },
     logs: {
-      title: '剧集记录',
-      count: '共 {count} 条记录',
-      empty: '暂无剧集记录',
-      episodes: '集',
+      title: "剧集记录",
+      count: "共 {count} 条记录",
+      empty: "暂无剧集记录",
+      episodes: "集",
+      ungrouped: "未分组",
+      status: {
+        pending: "待下载",
+        active: "下载中",
+        finished: "已完成",
+        failed: "失败"
+      },
+      table: {
+        id: "集数编号",
+        name: "剧集文件原名",
+        status: "下载状态",
+        integrity: "健康校验",
+        capacity: "文件大小",
+        timestamp: "创建时间"
+      },
+      integrity: {
+        stalled: "下载停滞",
+        verified: "正常"
+      }
+    },
+    edit: {
+      title: "编辑订阅参数",
+      subtitle: "修改番剧分类、季度覆盖、字幕组偏好或过滤黑白名单"
     },
     error: {
-      accessDenied: '访问受限',
-      load: '加载订阅详情失败',
-      update: '更新失败',
-    },
+      accessDenied: "访问受限",
+      load: "加载订阅详情失败",
+      update: "更新失败"
+    }
   },
   form: {
     title: '初始化条目',
@@ -759,6 +812,81 @@ export default {
     },
     subscribed: '成功添加追番: {title}',
     subscribeFailed: '订阅失败: {error}',
+  },
+  wizard: {
+    title: "欢迎使用 Ani-Go",
+    subtitle: "首次运行智能配置向导（只需几步即可准备就绪，随时可跳过并在设置中调整）",
+    skipBtn: "跳过向导",
+    nextBtn: "下一步",
+    prevBtn: "上一步",
+    finishBtn: "完成配置并开始追番",
+    saving: "正在保存配置...",
+    steps: {
+      security: "安全初始化",
+      storage: "媒体目录",
+      downloader: "下载引擎",
+      source: "数据订阅",
+      ready: "准备就绪"
+    },
+    security: {
+      title: "修改默认密码",
+      desc: "检测到您当前使用默认管理员密码 (admin)，为了避免内网穿透或公网扫描风险，建议立即设定新密码。",
+      newPass: "新管理员密码",
+      newPassPlaceholder: "输入新密码（至少 6 位）",
+      confirmPass: "确认新密码",
+      confirmPassPlaceholder: "再次输入新密码",
+      keepDefault: "暂时保持默认密码 (admin)"
+    },
+    storage: {
+      title: "媒体库路径与整理模式",
+      desc: "选择您常用的系统预设以一键自动填入最佳路径，或手动自定义。",
+      presetLabel: "快速选择系统预设：",
+      presets: {
+        fnos: "飞牛私有云 (fnOS)",
+        synology: "群晖 NAS (DSM)",
+        linux: "标准 Linux / Docker",
+        windows: "Windows 本地运行"
+      },
+      tvPath: "动漫/番剧媒体库目录",
+      moviePath: "剧场版/电影媒体库目录",
+      modeLabel: "文件整理模式",
+      hardlink: "规范硬链接 (推荐，做种与刮削媒体库共存，零额外空间占用)",
+      move: "直接移动剪切 (移入媒体库，不保留原种做种)"
+    },
+    downloader: {
+      title: "关联下载客户端",
+      desc: "Ani-Go 将自动调度下载器进行做种下载、优先级分配与文件整理。",
+      typeLabel: "下载器类型",
+      host: "WebUI / RPC 访问地址",
+      user: "用户名",
+      pass: "密码",
+      category: "目标分类 (Category)",
+      secret: "RPC 访问密钥 (Secret)",
+      testBtn: "测试连通性",
+      testing: "正在测试连接...",
+      testSuccess: "连通测试成功！",
+      testFailed: "连接失败: "
+    },
+    source: {
+      title: "数据源与账号绑定",
+      desc: "接入蜜柑计划 (Mikan) 订阅与 Bangumi 番组计划，实现全自动追更与收藏双向同步。",
+      mikanTokenLabel: "Mikan 个人 RSS 订阅地址 / Token",
+      mikanPlaceholder: "例如: https://mikanani.me/RSS/MyBangumi?token=...",
+      mikanTip: "可在 mikanani.me 登录后进入「我的订阅」页面，复制右侧 RSS 订阅地址。",
+      bgmTokenLabel: "Bangumi 访问令牌 (Personal Access Token)",
+      bgmPlaceholder: "从 bgm.tv/dev/app 申请获取",
+      bgmTip: "填入后系统将自动双向同步番组的「想看/在看」清单并呈现每日放送日历。"
+    },
+    ready: {
+      title: "一切准备就绪！",
+      desc: "Ani-Go 已经完成基础环境装配，点击下方按钮将自动应用设置并带您进入新番时间表。",
+      summaryTitle: "当前配置概览：",
+      summaryStorage: "媒体目录: {path}",
+      summaryDownloader: "下载引擎: {engine}",
+      summaryMikan: "Mikan 订阅: {status}",
+      configured: "已填写",
+      unconfigured: "未设置 (可后续补充)"
+    }
   },
   footer: {
     copy: 'Ani-Go &copy; 2026 • 倾心打造',

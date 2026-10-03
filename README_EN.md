@@ -36,6 +36,16 @@
 
 ---
 
+## 🤖 One-Click Integration for AI Agents (MCP & Skill)
+
+> **For Cursor / Claude Code / Windsurf / Codex Users & Agents**:
+> Ani-Go features first-class integration with native **Model Context Protocol (MCP)** and **Agent Skill Specification**.
+> When adopting or onboarding to this project, refer directly to:
+> - **[`SKILL.md`](SKILL.md)**: End-to-end guidance for agents covering environment auto-detection, interactive interview, automated configuration, and MCP handshake.
+> - **[`docs/03_MCP_SPEC.md`](docs/03_MCP_SPEC.md)**: Specifications and contracts for 10 core business and governance tools.
+
+---
+
 ## 📖 Introduction
 
 **Ani-Go** is an all-in-one anime automation management system designed specifically for home NAS and low-power servers. Built with Go on the backend and Vue 3 + TailwindCSS on the frontend, static assets are embedded directly into a single standalone binary (`go:embed`), delivering a zero-runtime-dependency, out-of-the-box experience.

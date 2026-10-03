@@ -25,9 +25,8 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/downloader"
-	"github.com/xiaoyueRX/Ani-Go/internal/metadata"
-	"gorm.io/gorm"
 	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
+	"github.com/xiaoyueRX/Ani-Go/internal/metadata"
 	"github.com/xiaoyueRX/Ani-Go/internal/migrate"
 	"github.com/xiaoyueRX/Ani-Go/internal/notifier"
 	v2 "github.com/xiaoyueRX/Ani-Go/internal/notifier/v2"
@@ -35,6 +34,8 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 	"github.com/xiaoyueRX/Ani-Go/internal/search"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
+	"github.com/xiaoyueRX/Ani-Go/internal/update"
+	"gorm.io/gorm"
 )
 
 // ============================================================
@@ -43,44 +44,46 @@ import (
 
 // subscriptionResponse API 返回的订阅数据结构
 type subscriptionResponse struct {
-	ID               uint   `json:"id"`
-	TitleCN          string `json:"title_cn"`
-	TitleEN          string `json:"title_en"`
-	TitleJP          string `json:"title_jp"`
-	Year             int    `json:"year"`
-	Season           int    `json:"season"`
-	BangumiID        string `json:"bangumi_id"`
-	SubgroupName     string `json:"subgroup_name"`
-	MetadataID       string `json:"metadata_id"`
-	MetadataProvider string `json:"metadata_provider"`
-	CoverURL         string `json:"cover_url"`
-	AvatarURL        string `json:"avatar_url"` // 兼容前端 Layout.vue
-	Description      string `json:"description"`
-	AnimeType        string `json:"anime_type"`
-	TotalEpisodes    int    `json:"total_episodes"`
-	CurrentEpisodes  int    `json:"current_episodes"`
-	Enabled          bool   `json:"enabled"`
-	Completed        bool   `json:"completed"`
-	FilterJSON         string `json:"filter_json"`
-	CustomPath         string `json:"custom_path"`
-	ExcludedKeywords   string `json:"excluded_keywords"`
-	AllowedSubgroups   string `json:"allowed_subgroups"`
-	SkipBulkUpdate     bool   `json:"skip_bulk_update"`
-	StallTimeoutHours  int    `json:"stall_timeout_hours"`
-	StalledEpisodes    int    `json:"stalled_episodes"`
-	CreatedAt          string  `json:"created_at"`
-	UpdatedAt          string  `json:"updated_at"`
-	DeletedAt          *string `json:"deleted_at,omitempty"`
+	ID                uint    `json:"id"`
+	TitleCN           string  `json:"title_cn"`
+	TitleEN           string  `json:"title_en"`
+	TitleJP           string  `json:"title_jp"`
+	Year              int     `json:"year"`
+	Season            int     `json:"season"`
+	BangumiID         string  `json:"bangumi_id"`
+	SubgroupName      string  `json:"subgroup_name"`
+	MetadataID        string  `json:"metadata_id"`
+	MetadataProvider  string  `json:"metadata_provider"`
+	CoverURL          string  `json:"cover_url"`
+	AvatarURL         string  `json:"avatar_url"` // 兼容前端 Layout.vue
+	Description       string  `json:"description"`
+	AnimeType         string  `json:"anime_type"`
+	TotalEpisodes     int     `json:"total_episodes"`
+	CurrentEpisodes   int     `json:"current_episodes"`
+	Enabled           bool    `json:"enabled"`
+	Completed         bool    `json:"completed"`
+	FilterJSON        string  `json:"filter_json"`
+	CustomPath        string  `json:"custom_path"`
+	ExcludedKeywords  string  `json:"excluded_keywords"`
+	AllowedSubgroups  string  `json:"allowed_subgroups"`
+	SkipBulkUpdate    bool    `json:"skip_bulk_update"`
+	StallTimeoutHours int     `json:"stall_timeout_hours"`
+	StalledEpisodes   int     `json:"stalled_episodes"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	DeletedAt         *string `json:"deleted_at,omitempty"`
 }
 
 type createSubscriptionRequest struct {
-	TitleCN      string `json:"title_cn"`
-	BangumiID    string `json:"bangumi_id"`
-	SubgroupName string `json:"subgroup_name"`
-	RSSURL       string `json:"rss_url"`
-	FilterJSON   string `json:"filter_json"`
-	CustomPath   string `json:"custom_path"`
-	CoverURL     string `json:"cover_url"`
+	TitleCN          string   `json:"title_cn"`
+	BangumiID        string   `json:"bangumi_id"`
+	SubgroupName     string   `json:"subgroup_name"`
+	SubgroupNames    []string `json:"subgroup_names"`
+	AllowedSubgroups []string `json:"allowed_subgroups"`
+	RSSURL           string   `json:"rss_url"`
+	FilterJSON       string   `json:"filter_json"`
+	CustomPath       string   `json:"custom_path"`
+	CoverURL         string   `json:"cover_url"`
 }
 
 type batchSubscriptionItem struct {
@@ -108,27 +111,27 @@ type batchSubResult struct {
 }
 
 type updateSubscriptionRequest struct {
-	TitleCN          *string `json:"title_cn"`
-	TitleEN          *string `json:"title_en"`
-	TitleJP          *string `json:"title_jp"`
-	Year             *int    `json:"year"`
-	Season           *int    `json:"season"`
-	BangumiID        *string `json:"bangumi_id"`
-	SubgroupName     *string `json:"subgroup_name"`
-	MetadataID       *string `json:"metadata_id"`
-	MetadataProvider *string `json:"metadata_provider"`
-	CoverURL         *string `json:"cover_url"`
-	Description      *string `json:"description"`
-	AnimeType        *string `json:"anime_type"`
-	TotalEpisodes    *int    `json:"total_episodes"`
-	Enabled          *bool   `json:"enabled"`
-	Completed        *bool   `json:"completed"`
-	FilterJSON         *string `json:"filter_json"`
-	CustomPath         *string `json:"custom_path"`
-	ExcludedKeywords   *string `json:"excluded_keywords"`
-	AllowedSubgroups   *string `json:"allowed_subgroups"`
-	SkipBulkUpdate     *bool   `json:"skip_bulk_update"`
-	StallTimeoutHours  *int    `json:"stall_timeout_hours"`
+	TitleCN           *string `json:"title_cn"`
+	TitleEN           *string `json:"title_en"`
+	TitleJP           *string `json:"title_jp"`
+	Year              *int    `json:"year"`
+	Season            *int    `json:"season"`
+	BangumiID         *string `json:"bangumi_id"`
+	SubgroupName      *string `json:"subgroup_name"`
+	MetadataID        *string `json:"metadata_id"`
+	MetadataProvider  *string `json:"metadata_provider"`
+	CoverURL          *string `json:"cover_url"`
+	Description       *string `json:"description"`
+	AnimeType         *string `json:"anime_type"`
+	TotalEpisodes     *int    `json:"total_episodes"`
+	Enabled           *bool   `json:"enabled"`
+	Completed         *bool   `json:"completed"`
+	FilterJSON        *string `json:"filter_json"`
+	CustomPath        *string `json:"custom_path"`
+	ExcludedKeywords  *string `json:"excluded_keywords"`
+	AllowedSubgroups  *string `json:"allowed_subgroups"`
+	SkipBulkUpdate    *bool   `json:"skip_bulk_update"`
+	StallTimeoutHours *int    `json:"stall_timeout_hours"`
 }
 
 type batchDeleteRequest struct {
@@ -169,24 +172,24 @@ type episodeResponse struct {
 
 func toSubscriptionResponse(sub database.Subscription) subscriptionResponse {
 	return subscriptionResponse{
-		ID:               sub.ID,
-		TitleCN:          sub.TitleCN,
-		TitleEN:          sub.TitleEN,
-		TitleJP:          sub.TitleJP,
-		Year:             sub.Year,
-		Season:           sub.Season,
-		BangumiID:        sub.BangumiID,
-		SubgroupName:     sub.SubgroupName,
-		MetadataID:       sub.MetadataID,
-		MetadataProvider: sub.MetadataProvider,
-		CoverURL:         sub.CoverURL,
-		AvatarURL:        sub.CoverURL, // 暂时兼容前端 Layout.vue 头像显示
-		Description:      sub.Description,
-		AnimeType:        sub.AnimeType,
-		TotalEpisodes:    sub.TotalEpisodes,
-		CurrentEpisodes:  sub.CurrentEpisodes, // 注意：这将在 handleListSubscriptions 中被实时统计值更新
-		Enabled:          sub.Enabled != nil && *sub.Enabled,
-		Completed:        sub.Completed,
+		ID:                sub.ID,
+		TitleCN:           sub.TitleCN,
+		TitleEN:           sub.TitleEN,
+		TitleJP:           sub.TitleJP,
+		Year:              sub.Year,
+		Season:            sub.Season,
+		BangumiID:         sub.BangumiID,
+		SubgroupName:      sub.SubgroupName,
+		MetadataID:        sub.MetadataID,
+		MetadataProvider:  sub.MetadataProvider,
+		CoverURL:          sub.CoverURL,
+		AvatarURL:         sub.CoverURL, // 暂时兼容前端 Layout.vue 头像显示
+		Description:       sub.Description,
+		AnimeType:         sub.AnimeType,
+		TotalEpisodes:     sub.TotalEpisodes,
+		CurrentEpisodes:   sub.CurrentEpisodes, // 注意：这将在 handleListSubscriptions 中被实时统计值更新
+		Enabled:           sub.Enabled != nil && *sub.Enabled,
+		Completed:         sub.Completed,
 		FilterJSON:        sub.FilterJSON,
 		CustomPath:        sub.CustomPath,
 		ExcludedKeywords:  sub.ExcludedKeywords,
@@ -424,15 +427,32 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	subgroupName := req.SubgroupName
+	if len(req.SubgroupNames) > 0 {
+		subgroupName = strings.Join(req.SubgroupNames, ", ")
+	}
+
+	allowedSubgroupsJSON := "[]"
+	if len(req.AllowedSubgroups) > 0 {
+		if b, err := json.Marshal(req.AllowedSubgroups); err == nil {
+			allowedSubgroupsJSON = string(b)
+		}
+	} else if len(req.SubgroupNames) > 1 {
+		if b, err := json.Marshal(req.SubgroupNames); err == nil {
+			allowedSubgroupsJSON = string(b)
+		}
+	}
+
 	sub := database.Subscription{
-		TitleCN:      req.TitleCN,
-		BangumiID:    req.BangumiID,
-		SubgroupName: req.SubgroupName,
-		RSSURL:       req.RSSURL,
-		FilterJSON:   req.FilterJSON,
-		CustomPath:   req.CustomPath,
-		CoverURL:     req.CoverURL,
-		Enabled:      &[]bool{true}[0],
+		TitleCN:          req.TitleCN,
+		BangumiID:        req.BangumiID,
+		SubgroupName:     subgroupName,
+		AllowedSubgroups: allowedSubgroupsJSON,
+		RSSURL:           req.RSSURL,
+		FilterJSON:       req.FilterJSON,
+		CustomPath:       req.CustomPath,
+		CoverURL:         req.CoverURL,
+		Enabled:          &[]bool{true}[0],
 	}
 
 	if err := database.DB.Create(&sub).Error; err != nil {
@@ -737,7 +757,7 @@ func (s *Server) handleSupplementAll(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(subID uint, title string) {
 			defer wg.Done()
-			sem <- struct{}{} // 获取信号量
+			sem <- struct{}{}        // 获取信号量
 			defer func() { <-sem }() // 释放信号量
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -957,7 +977,7 @@ func (s *Server) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 type testDownloaderRequest struct {
-	Type     string `json:"type"`     // "qbittorrent" / "transmission" / "aria2"
+	Type     string `json:"type"` // "qbittorrent" / "transmission" / "aria2"
 	Host     string `json:"host"`
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -1072,6 +1092,46 @@ func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 			"⚡ 下载器高可用与深度加固：Aria2 / Transmission URL 自动清洗、qB 超时防护、下载器连通性一键测试",
 		},
 	})
+}
+
+// handleCheckUpdate 检查云端最新版本
+func (s *Server) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
+	mgr := update.DefaultManager
+	if mgr == nil {
+		mgr = update.InitManager(s.version)
+	}
+	info, err := mgr.CheckUpdate(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"current_version": s.version,
+			"has_update":      false,
+			"error":           err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+// handleGetUpdateProgress 获取更新进度
+func (s *Server) handleGetUpdateProgress(w http.ResponseWriter, r *http.Request) {
+	mgr := update.DefaultManager
+	if mgr == nil {
+		mgr = update.InitManager(s.version)
+	}
+	writeJSON(w, http.StatusOK, mgr.GetProgress())
+}
+
+// handleExecuteUpdate 执行一键平滑更新
+func (s *Server) handleExecuteUpdate(w http.ResponseWriter, r *http.Request) {
+	mgr := update.DefaultManager
+	if mgr == nil {
+		mgr = update.InitManager(s.version)
+	}
+	if err := mgr.ExecuteUpdate(r.Context()); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "已成功下发平滑更新指令"})
 }
 
 // countStalledEpisodes 统计订阅下所有卡住的剧集数
@@ -1731,14 +1791,18 @@ func (s *Server) handleScheduleBangumi(w http.ResponseWriter, r *http.Request) {
 				groups := make(map[int][]core.TorrentItem)
 				for _, item := range items {
 					day, _ := strconv.Atoi(item.EpisodeURL)
-					if day == 0 { day = 7 } // Bangumi 0 可能表示周日
+					if day == 0 {
+						day = 7
+					} // Bangumi 0 可能表示周日
 					item.EpisodeURL = "" // 清除 hack 字段
 					groups[day] = append(groups[day], item)
 				}
 
 				for i := 1; i <= 7; i++ {
 					dayItems := groups[i]
-					if dayItems == nil { dayItems = []core.TorrentItem{} }
+					if dayItems == nil {
+						dayItems = []core.TorrentItem{}
+					}
 					schedule = append(schedule, source.WeekDayItem{
 						DayOfWeek: i,
 						Label:     weekLabel[i],
@@ -1754,14 +1818,32 @@ func (s *Server) handleScheduleBangumi(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 所选季度（含当前季度）在全部数据源均无内容时，回退至最近一个有数据的季度
+	fallbackYear, fallbackSeason := 0, 0
+	if len(schedule) == 0 {
+		targetYear, targetSeason := year, season
+		if targetYear <= 0 || targetSeason <= 0 {
+			targetYear, targetSeason = currYear, currSeason
+		}
+		if candidate, fy, fs := s.fallbackPreviousSeason(r.Context(), targetYear, targetSeason, 3); len(candidate) > 0 {
+			schedule = candidate
+			fallbackYear, fallbackSeason = fy, fs
+			log.Printf("ℹ️  [时间表/Bangumi] %d 年 %d 季度暂无内容，已自动回退至 %d 年 %d 季度", targetYear, targetSeason, fy, fs)
+		}
+	}
+
 	// 同时获取订阅列表，标注已订阅的番剧
 	var subs []database.Subscription
 	database.DB.Find(&subs)
 	subscribed := make(map[string]uint)
 	subStats := make(map[uint]map[string]int)
 	for _, sub := range subs {
-		if sub.BangumiID != "" { subscribed[sub.BangumiID] = sub.ID }
-		if sub.TitleCN != "" { subscribed[sub.TitleCN] = sub.ID }
+		if sub.BangumiID != "" {
+			subscribed[sub.BangumiID] = sub.ID
+		}
+		if sub.TitleCN != "" {
+			subscribed[sub.TitleCN] = sub.ID
+		}
 		subStats[sub.ID] = map[string]int{
 			"downloaded": int(sub.CurrentEpisodes),
 			"total":      sub.TotalEpisodes,
@@ -1777,11 +1859,61 @@ func (s *Server) handleScheduleBangumi(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"days":       schedule,
 		"subscribed": subscribed,
 		"stats":      subStats,
-	})
+	}
+	if fallbackYear > 0 {
+		resp["fallback_year"] = fallbackYear
+		resp["fallback_season"] = fallbackSeason
+		resp["requested_year"] = year
+		resp["requested_season"] = season
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// fallbackPreviousSeason 当所选季度在数据源暂无内容时，向前回溯最近的可用季度
+// 蜜柑计划对新季度时间表存在发布延迟，回退可保证界面始终有内容可看；返回回退到的年月与季度
+func (s *Server) fallbackPreviousSeason(ctx context.Context, year, season, maxBack int) ([]source.WeekDayItem, int, int) {
+	if year <= 0 || season <= 0 || maxBack <= 0 {
+		return nil, 0, 0
+	}
+
+	yucEnabled := s.pluginManager != nil && s.pluginManager.IsPluginEnabled("yuc_schedule")
+	fy, fs := year, season
+
+	// 整体预算 20s，避免多次回退叠加拖垮前端请求（前端超时 30s）
+	budgetCtx, budgetCancel := context.WithTimeout(ctx, 20*time.Second)
+	defer budgetCancel()
+
+	for i := 0; i < maxBack; i++ {
+		if budgetCtx.Err() != nil {
+			break
+		}
+		fs--
+		if fs < 1 {
+			fs, fy = 4, fy-1
+		}
+		if fy < 2000 {
+			break
+		}
+
+		prevCtx, cancel := context.WithTimeout(budgetCtx, 10*time.Second)
+		var candidate []source.WeekDayItem
+		if s.mikanSrc != nil {
+			candidate, _ = s.mikanSrc.FetchWeekSchedule(prevCtx, fy, fs)
+		}
+		if len(candidate) == 0 && yucEnabled && s.yucSrc != nil {
+			candidate, _ = s.yucSrc.FetchWeekSchedule(prevCtx, fy, fs)
+		}
+		cancel()
+
+		if len(candidate) > 0 {
+			return candidate, fy, fs
+		}
+	}
+	return nil, 0, 0
 }
 
 func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
@@ -1821,6 +1953,17 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		schedule = []source.WeekDayItem{}
+	}
+
+	// 3. 所选季度暂无数据时，自动向前回溯最近一个已发布数据的季度（最多回溯 3 个季度）
+	//    蜜柑计划对新季度时间表的发布存在延迟，此处保证界面始终有可用内容，并返回回退标记供前端提示
+	fallbackYear, fallbackSeason := 0, 0
+	if len(schedule) == 0 && year > 0 && season > 0 {
+		if candidate, fy, fs := s.fallbackPreviousSeason(r.Context(), year, season, 3); len(candidate) > 0 {
+			schedule = candidate
+			fallbackYear, fallbackSeason = fy, fs
+			log.Printf("ℹ️  [时间表] %d 年 %d 季度数据源暂无内容，已自动回退至 %d 年 %d 季度", year, season, fy, fs)
+		}
 	}
 
 	// 同时获取订阅列表，标注已订阅的番剧（支持 ID 匹配和标准化标题模糊匹配）
@@ -1880,12 +2023,20 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"days":              schedule,
 		"subscribed":        subscribed,
 		"subscriptionCount": len(subs),
-			"stats":             subStats,
-	})
+		"stats":             subStats,
+	}
+	// 若发生过季度回退，附带标记，前端据此提示用户实际展示的季度
+	if fallbackYear > 0 {
+		resp["fallback_year"] = fallbackYear
+		resp["fallback_season"] = fallbackSeason
+		resp["requested_year"] = year
+		resp["requested_season"] = season
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleTestMirrors 测试所有 Mikan 镜像延迟
@@ -2406,6 +2557,7 @@ func (s *Server) handleSmartSearch(w http.ResponseWriter, r *http.Request) {
 		ExpandedQueries: queries, UsedAI: usedAI, AIError: aiError,
 	})
 }
+
 // queriesCircuitOpen 检查熔断器状态
 func queriesCircuitOpen(expander *search.Expander) bool {
 	return expander == nil || expander.CircuitOpen()
@@ -2672,7 +2824,7 @@ func (s *Server) handleGetAIModels(w http.ResponseWriter, r *http.Request) {
 // fetchModelsFromProvider 根据协议从提供商获取模型列表
 func (s *Server) fetchModelsFromProvider(protocol, endpoint, apiKey string) ([]string, error) {
 	ctx := context.Background()
-	
+
 	switch protocol {
 	case "openai", "":
 		return s.fetchOpenAIModels(ctx, endpoint, apiKey)
@@ -3005,7 +3157,7 @@ func (s *Server) handleBangumiAuthLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	redirectURI := fmt.Sprintf("%s/api/bangumi/auth/callback", s.getPublicBaseURL(r))
-	authURL := fmt.Sprintf("https://bgm.tv/oauth/authorize?client_id=%s&response_type=code&redirect_uri=%s", 
+	authURL := fmt.Sprintf("https://bgm.tv/oauth/authorize?client_id=%s&response_type=code&redirect_uri=%s",
 		clientID, url.QueryEscape(redirectURI))
 	writeJSON(w, http.StatusOK, map[string]string{"url": authURL})
 }
@@ -3489,6 +3641,3 @@ func (s *Server) handlePreviewOrganize(w http.ResponseWriter, r *http.Request) {
 		"data": result,
 	})
 }
-
-
-

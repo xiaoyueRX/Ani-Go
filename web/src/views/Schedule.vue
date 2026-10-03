@@ -7,7 +7,7 @@ import {
   AlertTriangle, X, Calendar, 
   Image, Check, Clock, ChevronDown,
   Search, ChevronLeft,
-  Lock, WifiOff, AlertCircle
+  Lock, WifiOff, AlertCircle, Info, History
 } from 'lucide-vue-next'
 import { ListChecks, CheckCircle, XCircle } from 'lucide-vue-next'
 import OnboardingModal from '../components/OnboardingModal.vue'
@@ -282,6 +282,57 @@ async function toggleSource(source: "yuc" | "bangumi") {
   await fetchSchedule()
 }
 
+// 季度回退提示：数据源尚未发布所选季度时，后端会回退到最近有内容的季度
+const seasonNotice = ref('')
+const seasonNoticeDetail = ref('')
+
+function seasonLabel(season: number): string {
+  const map: Record<number, string> = {
+    1: t('schedule.seasons.winter'),
+    2: t('schedule.seasons.spring'),
+    3: t('schedule.seasons.summer'),
+    4: t('schedule.seasons.autumn'),
+  }
+  return map[Number(season)] || ''
+}
+
+function applyScheduleData(data: any) {
+  weekDays.value = data?.days || []
+  subscribedIds.value = data?.subscribed || {}
+  subStats.value = data?.stats || data?.sub_stats || {}
+
+  const fbYear = Number(data?.fallback_year || 0)
+  const fbSeason = Number(data?.fallback_season || 0)
+  if (fbYear > 0 && (fbYear !== selectedYear.value || fbSeason !== selectedSeason.value)) {
+    const reqYear = Number(data?.requested_year || selectedYear.value)
+    const reqSeason = Number(data?.requested_season || selectedSeason.value)
+    // 同步选择器到实际展示的季度，避免界面内容与选择项不一致
+    selectedYear.value = fbYear
+    selectedSeason.value = fbSeason
+    seasonNoticeDetail.value = t('schedule.fallback.detail', {
+      reqYear,
+      reqSeason: seasonLabel(reqSeason),
+      fbYear,
+      fbSeason: seasonLabel(fbSeason),
+    })
+    seasonNotice.value = t('schedule.fallback.title')
+  } else {
+    seasonNotice.value = ''
+    seasonNoticeDetail.value = ''
+  }
+}
+
+// 空数据时一键回看上一个季度
+function gotoPreviousSeason() {
+  if (selectedSeason.value > 1) {
+    selectedSeason.value -= 1
+  } else {
+    selectedSeason.value = 4
+    selectedYear.value -= 1
+  }
+  fetchSchedule()
+}
+
 async function fetchSchedule() {
   loading.value = true; error.value = ''
   try {
@@ -301,9 +352,7 @@ async function fetchSchedule() {
       params,
       timeout: 30000 
     })
-    weekDays.value = data.days || []
-    subscribedIds.value = data.subscribed || {}
-    subStats.value = data.stats || data.sub_stats || {}
+    applyScheduleData(data)
   } catch (e: any) {
     if (e.response?.status === 401) {
       // Token 过期，触发重新验证
@@ -318,9 +367,7 @@ async function fetchSchedule() {
             },
             timeout: 30000 
           })
-          weekDays.value = data.days || []
-          subscribedIds.value = data.subscribed || {}
-          subStats.value = data.stats || data.sub_stats || {}
+          applyScheduleData(data)
           return
         } catch (retryError: any) {
           error.value = retryError.code === 'ECONNABORTED' ? t('schedule.error.timeout') : t('schedule.error.failed')
@@ -662,6 +709,18 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- 季度自动回退提示 -->
+    <div v-if="seasonNotice && !loading" class="max-w-5xl mx-auto mb-6 alert bg-info/10 border border-info/25 text-info rounded-2xl px-4 py-3 flex items-start gap-3">
+      <Info :size="18" class="shrink-0 mt-0.5" />
+      <div class="flex-1 min-w-0 space-y-0.5">
+        <p class="text-xs font-black tracking-tight">{{ seasonNotice }}</p>
+        <p class="text-[11px] font-bold opacity-80 leading-relaxed">{{ seasonNoticeDetail }}</p>
+      </div>
+      <button class="btn btn-ghost btn-xs btn-circle opacity-60 hover:opacity-100" @click="seasonNotice = ''">
+        <X :size="14" />
+      </button>
+    </div>
+
     <!-- Empty State -->
     <div v-if="!loading && (activeTab === 'schedule' ? filteredDays.length === 0 : Object.keys(subscribedSchedule).length === 0)" class="flex flex-col items-center justify-center py-32 text-center bg-base-100/30 rounded-[3rem] border-2 border-dashed border-base-200 max-w-4xl mx-auto">
       <div class="w-32 h-32 bg-base-200/50 rounded-full flex items-center justify-center mb-8 rotate-12">
@@ -670,9 +729,20 @@ onMounted(async () => {
       <h3 class="text-2xl font-black tracking-tight mb-2">
         {{ scheduleSearch || onlyToday ? $t('schedule.empty.noMatch') : $t('schedule.empty.title') }}
       </h3>
-      <p class="text-sm font-bold text-base-content/40 max-w-xs mx-auto mb-10 leading-relaxed">
+      <p class="text-sm font-bold text-base-content/40 max-w-md mx-auto leading-relaxed">
         {{ scheduleSearch || onlyToday ? $t('schedule.empty.noMatchDesc') : $t('schedule.empty.desc') }}
       </p>
+      <p v-if="!scheduleSearch && !onlyToday" class="text-xs font-bold text-base-content/30 max-w-md mx-auto mt-3 leading-relaxed">
+        {{ $t('schedule.empty.sourceHint') }}
+      </p>
+      <button
+        v-if="!scheduleSearch && !onlyToday"
+        class="btn btn-outline btn-sm rounded-xl mt-8 gap-2 font-bold"
+        @click="gotoPreviousSeason"
+      >
+        <History :size="14" />
+        <span>{{ $t('schedule.empty.viewPrevious') }}</span>
+      </button>
     </div>
 
     <!-- ====== Main Timeline ====== -->
