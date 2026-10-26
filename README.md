@@ -129,4 +129,6 @@ cd web && npm ci && npm run build
 
 欢迎通过 [Issues](https://github.com/xiaoyueRX/Ani-Go/issues) 报告问题或提出建议，也可以通过 Pull Request 提交改进。115 云下载目前尚未内置，相关需求在 [Issue #1](https://github.com/xiaoyueRX/Ani-Go/issues/1) 讨论中。
 
-**许可证说明：** 当前仓库尚未包含 `LICENSE` 文件，因此暂不在 README 中声明特定开源许可证；授权条款需由维护者补充明确。
+## 许可证
+
+本项目以 [MIT License](LICENSE) 发布。第三方依赖及素材遵循各自的许可证。
