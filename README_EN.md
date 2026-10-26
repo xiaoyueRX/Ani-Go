@@ -1,222 +1,132 @@
 # Ani-Go
 
-<div align="center">
+A self-hosted anime tracking and media organization tool.
 
-<p align="center">
-  <img src="web/public/logo.png" alt="Ani-Go Logo" width="72" height="72" style="border-radius: 14px;"><br>
-  <strong>Ultra-lightweight, high-performance automated anime tracking, download, organization & media library system</strong><br>
-  <em>极轻量、高性能的自动化追番、下载、整理与媒体库集成系统</em>
-</p>
+Ani-Go follows anime releases through subscription feeds, sends matching resources to an existing download client, and organizes completed files into a media library. It is designed for home servers and NAS setups.
 
-<p align="center">
-  <a href="https://github.com/xiaoyueRX/Ani-Go/releases"><img src="https://img.shields.io/github/v/release/xiaoyueRX/Ani-Go?color=blue&style=flat-square" alt="Release"></a>
-  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square&logo=go" alt="Go Version">
-  <img src="https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vue.js" alt="Vue 3">
-  <img src="https://img.shields.io/badge/RAM-15~30MB-emerald?style=flat-square" alt="RAM Usage">
-  <img src="https://img.shields.io/badge/MCP-Server%20Ready-8A2BE2?style=flat-square" alt="MCP Server">
-  <img src="https://img.shields.io/badge/Docker-Multiarch-2496ED?style=flat-square&logo=docker" alt="Docker">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License"></a>
-</p>
+[简体中文](README.md) · [Releases](https://github.com/xiaoyueRX/Ani-Go/releases) · [Issues](https://github.com/xiaoyueRX/Ani-Go/issues) · [Deployment guide](docs/05_DEPLOYMENT.md)
 
-<p align="center">
-  <a href="#-system-architecture">Architecture</a> •
-  <a href="#-features">Features</a> •
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="#-configuration">Configuration</a> •
-  <a href="docs/00_DESIGN_PHILOSOPHY.md">Design Philosophy</a> •
-  <a href="docs/01_ARCHITECTURE.md">Architecture Whitepaper</a> •
-  <a href="docs/02_PLUGIN_SPEC.md">Plugin Spec</a> •
-  <a href="docs/03_MCP_SPEC.md">MCP Spec</a> •
-  <a href="docs/04_AUTOPARSER_SPEC.md">Auto-Disambiguation</a> •
-  <a href="docs/05_DEPLOYMENT.md">NAS Deployment</a> •
-  <a href="README.md">中文版本</a>
-</p>
+![CI](https://github.com/xiaoyueRX/Ani-Go/actions/workflows/ci.yml/badge.svg)
 
-</div>
+## Features
 
----
+- **Subscriptions and search:** Follow releases using Mikan RSS feeds; optional sources include Nyaa, ACG.RIP, and AnimeTosho for aggregated search.
+- **Download management:** Connect to qBittorrent, Transmission, or Aria2 to submit tasks and check their status. Switch the active download client through settings.
+- **Episode matching:** Parse release names using local rules and air dates. Optional AI-assisted parsing requires a separately configured provider.
+- **File organization:** Generate folders and file names for anime series, films, and specials. Supports hard links, with a copy fallback when hard linking fails.
+- **Web interface:** Manage subscriptions, downloads, schedules, and settings in a browser; Chinese and English UI translations are available.
+- **Additional tools:** Notifications, built-in plugins, backups, and an MCP interface for selected management operations.
 
-## 🤖 One-Click Integration for AI Agents (MCP & Skill)
+Ani-Go is not a BitTorrent client or a media player. Downloads require an external download client. Organized files can then be used by media servers such as Jellyfin or Emby.
 
-> **For Cursor / Claude Code / Windsurf / Codex Users & Agents**:
-> Ani-Go features first-class integration with native **Model Context Protocol (MCP)** and **Agent Skill Specification**.
-> When adopting or onboarding to this project, refer directly to:
-> - **[`SKILL.md`](SKILL.md)**: End-to-end guidance for agents covering environment auto-detection, interactive interview, automated configuration, and MCP handshake.
-> - **[`docs/03_MCP_SPEC.md`](docs/03_MCP_SPEC.md)**: Specifications and contracts for 10 core business and governance tools.
+## Quick start
 
----
+### Docker Compose
 
-## 📖 Introduction
-
-**Ani-Go** is an all-in-one anime automation management system designed specifically for home NAS and low-power servers. Built with Go on the backend and Vue 3 + TailwindCSS on the frontend, static assets are embedded directly into a single standalone binary (`go:embed`), delivering a zero-runtime-dependency, out-of-the-box experience.
-
-The system adheres strictly to the **Microkernel and Plugin Decoupling** design philosophy: the core pipeline focuses on an efficient and reliable 5-step loop; non-essential features (such as notifications, NFO scraping, and data migration) operate as isolated plugins that can be enabled on demand with complete resource cleanup when disabled. Idle resident memory is kept within **15MB ~ 30MB**, with idle CPU consumption at **0.0%**, ensuring long-term stable operation even on low-spec hardware like J1900, N3450, and Raspberry Pi.
-
----
-
-## 🏗️ System Architecture
-
-```mermaid
-flowchart TD
-    subgraph Clients ["1. Clients / AI Agents"]
-        A1["Claude Desktop (Desktop Ops)"]
-        A2["Cursor / IDE (Developer Control)"]
-        A3["Mobile Agent (Remote Control)"]
-        A4["Vue 3 Web UI (Responsive Console)"]
-    end
-
-    subgraph MCP ["2. Control Protocol Layer (MCP Server Gateway)"]
-        B1["SSE over HTTP / Bearer Auth"]
-        B2["Anime Ops Tools"]
-        B3["Governance Tools"]
-        B4["Dynamic Plugin Tools"]
-    end
-
-    subgraph Core ["3. Microkernel Core Pipeline"]
-        C1["1. RSS Fetch (Mikan / Bangumi)"]
-        C2["2. 3-Tier Disambiguation (Regex + Air Date + AI)"]
-        C3["3. Downloader Dispatch (qB / Aria2 / TR)"]
-        C4["4. Standard Hardlinks (Zero-IO)"]
-        C5["5. Library Playback (Jellyfin / Emby)"]
-
-        C1 --> C2
-        C2 --> C3
-        C3 --> C4
-        C4 --> C5
-    end
-
-    subgraph Plugins ["4. Pluggable Ecosystem"]
-        D1["18-Channel Notification Matrix"]
-        D2["Bangumi Local NFO Scraper"]
-        D3["Seeding Lifecycle & Status Tracker"]
-        D4["Custom Webhook & Script Hooks"]
-    end
-
-    Clients --> MCP
-    MCP --> Core
-    C4 -. "Async Event (file.organized)" .-> Plugins
-```
-
-### Key Architectural Guidelines
-- **Microkernel Core**: Strictly focuses on the 5-step loop: RSS Fetching ──► Disambiguation ──► Downloader Dispatch ──► Zero-IO Hardlinking ──► Playback Delivery.
-- **Pluggable Extensions**: Non-core features are managed as modular plugins. When a plugin is disabled, its background goroutines are destroyed, and network requests drop to zero.
-- **Fault Isolation**: External plugins and script hooks run inside `defer recover()` boundaries, ensuring plugin errors never crash the core pipeline.
-- **Native MCP Server**: Natively implements the Anthropic Model Context Protocol standard (SSE over HTTP + Bearer Token), allowing external Claude/Cursor instances to control anime tracking and system administration.
-
----
-
-## ✨ Features
-
-### ⚡ Ultra-Lightweight Microkernel & Low Resource Footprint
-- **Minimal Resource Footprint**: Resident memory of **15MB ~ 30MB**, idle CPU at **0.0%**.
-- **Single Binary Distribution**: Pure Go compilation with pure Go SQLite (zero CGO), fully embedded web assets.
-- **Low-Power Friendly**: Tailored for J1900, N3450, industrial PCs, Raspberry Pi 4B, and NAS platforms (fnOS, Synology, Unraid).
-
-### 🧠 Three-Tier Auto-Disambiguation Engine
-- **Tier 1 (Local Regex Stripping)**: 0ms extraction removing resolutions (1080p/4K), encoding tags (HEVC/Ma10p), fansub prefixes, and season markers (~90% coverage).
-- **Tier 2 (Air Date Timestamp Grounding)**: For ambiguous episode numbers (e.g. S2 marked as Ep 25), correlates torrent `pubDate` against official Bangumi episode broadcast calendars to resolve ambiguities with **zero token cost**.
-- **Tier 3 (Context-Grounded LLM Fallback)**: For rare special episodes, injects anime context into LLMs with persistent SQLite caching (`parser_cache`) and a daily quota fuse to prevent unexpected API costs.
-
-### ⬇️ Multi-Downloader Matrix & Dynamic Hot Swap
-- **qBittorrent**: Native API integration with category tagging and automatic seeding lifecycle management (ratio & seed time).
-- **Aria2**: High-speed RPC dispatch with cascading task removal and physical disk residue cleanup.
-- **Transmission**: Lightweight torrent client support.
-- **Dynamic Hot Swap**: Switch active downloaders on the fly from the Web Settings UI without restarting the server.
-- **Real-Time Queue Dashboard**: Monitor progress, transfer rates, seeding status, and dead torrent indicators in real time.
-
-### 🗂️ Standard Media Library Organization & Zero-IO Hardlinks
-
-- **Industry-Standard Naming Conventions**: Strictly compliant with **Jellyfin / Plex / Emby / fnOS** guidelines:
-  ```
-  TV/Anime/
-  └── Frieren Beyond Journey's End/
-      └── Season 01/
-          ├── Frieren Beyond Journey's End - S01E01.mp4
-          └── Frieren Beyond Journey's End - S01E02.mp4
-  ```
-- **Zero-IO Hardlink Mode**: Instant file creation with zero duplicate disk space; source files continue seeding in torrent clients without interruption.
-- **Custom Regex 10-Slot Sandbox**: Configure up to 10 customized pattern rules with an interactive live sandbox tester.
-
-### 🤖 Model Context Protocol (MCP) Agent Support
-- **Standard MCP Server**: SSE over HTTP transport with Bearer Token authentication.
-- **Comprehensive Ops Tools**: Exposes anime search, subscription management, queue control, plugin toggles, and system config to external AI agents.
-- **Client Ready**: Out-of-the-box configuration templates and prompt guidelines for Claude Desktop, Cursor, Dify, and Open WebUI.
-
-### 🔔 Unified 18-Channel Notification Matrix
-- **Full Coverage Across 18 Platforms**: Telegram, WeChat Work, WeChat Official Account, Feishu, DingTalk, QQ (OneBot), Bark, ServerChan, Pushover, LINE, WhatsApp, Signal, Discord, Slack, Gotify, Ntfy, Matrix, and SMTP Email.
-- **Reliable Dispatching**: Priority queue buffering, exponential backoff retries, and delivery rate monitoring.
-
----
-
-## 🚀 Quick Start
-
-### Option 1: Docker Compose (Recommended)
+You need Docker, Docker Compose, and at least one working download client.
 
 ```bash
-git clone --depth 1 https://github.com/xiaoyueRX/Ani-Go.git
+git clone https://github.com/xiaoyueRX/Ani-Go.git
 cd Ani-Go
 cp .env.example .env
-# Edit .env with your MIKAN_RSS_URL, downloader settings, and storage paths
-docker compose up -d
 ```
-Access `http://localhost:20001` (Default credentials: `admin` / `admin`).
 
----
+Before starting:
 
-### Option 2: Standalone Binary
-
-Download the pre-compiled binary from [Releases](https://github.com/xiaoyueRX/Ani-Go/releases), or run the one-line install script on Linux/macOS:
+1. Set your feed URL and download client connection details in `.env`.
+2. Replace `/path/to/your/data:/data` in `docker-compose.yml` with an existing directory on your host.
+3. Make sure the download client can access the same files, and the paths visible to Ani-Go match the mounted storage.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xiaoyueRX/Ani-Go/main/install.sh | sh
-anigo
+docker compose up -d
 ```
 
----
+Visit `http://localhost:20001`. The initial credentials are `admin` / `admin`. **Change the password immediately.**
 
-## ⚙️ Configuration
+> The example Compose file maps port `20001` and stores application data under `/data`. Inside a container, `localhost` refers to that container—not your host or another container. Use an address reachable from Ani-Go when configuring a remote download client.
 
-Refer to [`.env.example`](.env.example) for the full configuration guide. Key parameters:
+### Standalone binary
 
-| Variable | Description | Default | Example |
-| :--- | :--- | :--- | :--- |
-| `PORT` | Web & API Listening Port | `20001` | `20001` |
-| `MIKAN_RSS_URL` | Mikan Personal RSS URL | None | `https://mikanani.me/RSS/MyBangumi?token=xxx` |
-| `DEFAULT_DOWNLOADER`| Default Downloader | `qbittorrent`| `qbittorrent` / `transmission` / `aria2` |
-| `QB_HOST` | qBittorrent WebUI Address | `http://localhost:8081` | `http://192.168.1.10:8081` |
-| `TV_BASE_PATH` | TV Media Library Path | `./TV/番剧` | `/data/media/anime` |
-| `USE_HARDLINK` | Enable Hardlinks | `false` | `true` (recommended) |
-| `MCP_ENABLED` | Enable MCP Server | `false` | `true` / `false` |
-| `MCP_AUTH_TOKEN` | Bearer Token for MCP | Empty | Random secure string |
-| `AI_DAILY_QUOTA_LIMIT` | Daily LLM Parsing Limit | `30` | Prevents runaway API bills |
+Download the archive for your platform from [Releases](https://github.com/xiaoyueRX/Ani-Go/releases), extract it, configure `.env` if needed, and start the application:
 
----
+```bash
+./anigo
+```
 
-## 🔒 Deployment & Security
+Run `anigo.exe` on Windows. Ensure the process has permission to read and write its database, download, and media directories.
 
-1. **Single-Volume Mount Rule (Prevent Hardlink Failures)**:
-   Hardlinks cannot cross different Docker volume mount points or physical partitions. **Always mount downloads and media libraries under a unified root volume**:
-   ```yaml
-   volumes:
-     - /volume1/data:/data  # Single unified mount
-   ```
-   Set download path to `/data/downloads` and library to `/data/media/anime`. See [docs/05_DEPLOYMENT.md](docs/05_DEPLOYMENT.md).
+### Build from source
 
-2. **Security Baseline**:
-   - Do not expose port `20001` directly to the public internet via DMZ or UPnP.
-   - Use internal networks (Tailscale, WireGuard) or secure reverse proxies (Nginx / Caddy + HTTPS).
-   - Change the default password (`admin` / `admin`) immediately after first login.
+Requires **Go 1.25+** and **Node.js 24 with npm**. Build the frontend first; the Go binary embeds the built web assets.
 
----
+```bash
+cd web
+npm ci
+npm run build
+cd ..
 
-## ⚠️ Disclaimer
+go build -o anigo .
+./anigo
+```
 
-1. **Personal Use Only**: Ani-Go is an open-source technical research and media automation tool intended solely for personal study, technical research, and self-hosted media management. Commercial use or public distribution of copyrighted media is strictly prohibited.
-2. **No Content Stored**: Ani-Go does not host, store, stream, or distribute any media content or torrent files. It acts purely as a local scheduler and file organizer.
-3. **Data Sources**: Metadata, schedules, and RSS feeds are retrieved from third-party public platforms (Mikan Project, Bangumi, TMDB, Nyaa, yuc.wiki). All rights belong to their respective copyright holders.
+## Configuration
 
----
+See [`.env.example`](.env.example) for a starting point.
 
-## 📄 License
+| Variable | Purpose |
+| --- | --- |
+| `PORT` | Web/API port; defaults to `20001` |
+| `MIKAN_RSS_URL` | Personal Mikan RSS feed |
+| `DEFAULT_DOWNLOADER` | Active client: `qbittorrent`, `transmission`, or `aria2` |
+| `QB_HOST` / `QB_USER` / `QB_PASS` | qBittorrent Web API endpoint and credentials |
+| `TR_HOST` / `TR_USER` / `TR_PASS` | Transmission RPC endpoint and credentials |
+| `ARIA2_HOST` / `ARIA2_SECRET` | Aria2 RPC endpoint and secret |
+| `TV_BASE_PATH` | TV anime library directory |
+| `MOVIE_BASE_PATH` / `OVA_BASE_PATH` | Movie and special-episode directories |
+| `USE_HARDLINK` | Prefer hard links during organization |
+| `DB_PATH` | SQLite database path |
 
-Released under the [MIT License](LICENSE). Contributions, issues, and PRs are welcome!
+Settings can come from environment variables, stored database settings, or built-in defaults. **Environment variables take precedence.** Values defined in a Compose `environment` block also override variables with the same names from `.env`. Review [docker-compose.yml](docker-compose.yml) before changing paths.
+
+### Storage and hard links
+
+A hard link can only be created when the source and destination are on the same filesystem. For Docker deployments, mount a common parent directory:
+
+```yaml
+volumes:
+  - /volume1/data:/data
+```
+
+For example, use `/data/downloads` and `/data/media` and ensure both Ani-Go and your download client can access the required files. If hard linking fails because of mount boundaries or permissions, a copy may be created instead, using additional disk space.
+
+See the [NAS deployment guide](docs/05_DEPLOYMENT.md) for further details.
+
+## Security and limitations
+
+- Change the default administrator password on first login.
+- Do not expose port `20001` directly to the public internet. For remote access, prefer a VPN or an HTTPS reverse proxy with additional access controls.
+- Keep passwords, RSS tokens, API keys, application databases, and backups out of public repositories.
+- The MCP interface provides management operations; protect any remotely accessible endpoint with strong, separate credentials.
+- You are responsible for configuring external download clients, feeds, and media services. Ani-Go cannot guarantee resource availability or download speed. Follow applicable laws and service terms.
+
+## Development and documentation
+
+The backend uses Go, GORM, and SQLite. The frontend uses Vue 3, TypeScript, Vite, and Tailwind CSS.
+
+```bash
+go test ./...
+go test -race ./...
+cd web && npm ci && npm run build
+```
+
+Related documentation:
+
+- [Architecture](docs/01_ARCHITECTURE.md)
+- [API reference](docs/API.md)
+- [Plugin specification](docs/02_PLUGIN_SPEC.md)
+- [MCP documentation](docs/03_MCP_SPEC.md)
+- [Development plan](docs/DEVELOPMENT_PLAN_EN.md)
+
+Please use [Issues](https://github.com/xiaoyueRX/Ani-Go/issues) for bugs and feature requests, or submit a pull request with improvements. Support for 115 cloud downloads is not currently built in; it is being discussed in [Issue #1](https://github.com/xiaoyueRX/Ani-Go/issues/1).
+
+**License:** This repository currently has no `LICENSE` file. The README therefore makes no claim of a specific open-source license until the maintainer adds and clarifies the licensing terms.
