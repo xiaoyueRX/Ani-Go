@@ -129,4 +129,6 @@ Related documentation:
 
 Please use [Issues](https://github.com/xiaoyueRX/Ani-Go/issues) for bugs and feature requests, or submit a pull request with improvements. Support for 115 cloud downloads is not currently built in; it is being discussed in [Issue #1](https://github.com/xiaoyueRX/Ani-Go/issues/1).
 
-**License:** This repository currently has no `LICENSE` file. The README therefore makes no claim of a specific open-source license until the maintainer adds and clarifies the licensing terms.
+## License
+
+Ani-Go is distributed under the [MIT License](LICENSE). Third-party dependencies and assets remain subject to their respective licenses.
