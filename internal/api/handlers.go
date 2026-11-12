@@ -2775,6 +2775,15 @@ func (s *Server) testExtendedNotifier(ctx context.Context, channel, title, messa
 			}
 		}
 		target = notifier.NewSignalNotifierWithParams(url, sender, rList)
+	case "wechat", "weixin", "mp_wechat":
+		appID := getSetting("WECHAT_APP_ID")
+		appSecret := getSetting("WECHAT_APP_SECRET")
+		userID := getSetting("WECHAT_USER_ID")
+		templateID := getSetting("WECHAT_TEMPLATE_ID")
+		if appID == "" || appSecret == "" || userID == "" {
+			return fmt.Errorf("微信公众号 AppID、AppSecret 或 OpenID/UserID 未配置")
+		}
+		target = notifier.NewWeChatNotifierWithParams(appID, appSecret, userID, templateID)
 	default:
 		return fmt.Errorf("未找到通知渠道: %s", channel)
 	}
@@ -3639,5 +3648,274 @@ func (s *Server) handlePreviewOrganize(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"code": 0,
 		"data": result,
+	})
+}
+
+// ============================================================
+// TMDB Collection 系列自动归并
+// ============================================================
+
+type mergeCollectionsRequest struct {
+	SubscriptionIDs []uint `json:"subscription_ids"`
+	Apply           bool   `json:"apply"`
+	Overwrite       bool   `json:"overwrite"`
+}
+
+// handleMergeCollections 批量同系列 TMDB Collection 自动归并（支持 Dry-Run 预测与落地应用）
+// POST /api/subscriptions/merge-collections
+func (s *Server) handleMergeCollections(w http.ResponseWriter, r *http.Request) {
+	if database.DB == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "数据库未就绪"})
+		return
+	}
+
+	var req mergeCollectionsRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	ctx := r.Context()
+
+	var subs []database.Subscription
+	query := database.DB.WithContext(ctx)
+	if len(req.SubscriptionIDs) > 0 {
+		query = query.Where("id IN ?", req.SubscriptionIDs)
+	}
+	if err := query.Find(&subs).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "查询订阅列表失败: " + err.Error()})
+		return
+	}
+
+	var tmdbProvider *metadata.TMDBProvider
+	if p, ok := s.md.(*metadata.TMDBProvider); ok {
+		tmdbProvider = p
+	} else {
+		apiKey := ""
+		lang := "zh-CN"
+		var mirrorDomains []string
+		var apiKeySetting, langSetting, mirrorSetting database.Setting
+		if err := database.DB.Where("key = ?", "TMDB_API_KEY").First(&apiKeySetting).Error; err == nil && apiKeySetting.Value != "" {
+			apiKey = strings.TrimSpace(apiKeySetting.Value)
+		}
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(os.Getenv("TMDB_API_KEY"))
+		}
+		if err := database.DB.Where("key = ?", "TMDB_LANGUAGE").First(&langSetting).Error; err == nil && langSetting.Value != "" {
+			lang = strings.TrimSpace(langSetting.Value)
+		}
+		if err := database.DB.Where("key = ?", "TMDB_MIRROR_DOMAINS").First(&mirrorSetting).Error; err == nil && mirrorSetting.Value != "" {
+			for _, d := range strings.Split(mirrorSetting.Value, ",") {
+				if trimmed := strings.TrimSpace(d); trimmed != "" {
+					mirrorDomains = append(mirrorDomains, trimmed)
+				}
+			}
+		}
+		if apiKey != "" {
+			tmdbProvider = metadata.NewTMDBProvider(apiKey, lang, mirrorDomains)
+		}
+	}
+
+	merger := metadata.NewCollectionMerger(database.DB, tmdbProvider)
+
+	summary, err := merger.GenerateMergePlans(ctx, subs, req.Overwrite)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "生成系列归并计划失败: " + err.Error()})
+		return
+	}
+
+	if req.Apply {
+		applied, err := merger.ApplyMergePlans(ctx, summary.Plans)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "应用系列归并失败: " + err.Error()})
+			return
+		}
+		summary.TotalApplied = applied
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"code": 0,
+		"data": summary,
+	})
+}
+
+// handleResolveSubscriptionCollection 单部订阅解析系列归并建议
+// POST /api/subscriptions/{id}/resolve-collection
+func (s *Server) handleResolveSubscriptionCollection(w http.ResponseWriter, r *http.Request) {
+	if database.DB == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "数据库未就绪"})
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的订阅 ID"})
+		return
+	}
+
+	ctx := r.Context()
+	var sub database.Subscription
+	if err := database.DB.WithContext(ctx).First(&sub, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "订阅不存在"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "查询订阅失败: " + err.Error()})
+		return
+	}
+
+	var tmdbProvider *metadata.TMDBProvider
+	if p, ok := s.md.(*metadata.TMDBProvider); ok {
+		tmdbProvider = p
+	}
+
+	merger := metadata.NewCollectionMerger(database.DB, tmdbProvider)
+	info, err := merger.ResolveSingleSubscription(ctx, &sub)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "解析系列归并失败: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"code": 0,
+		"data": info,
+	})
+}
+
+// ============================================================
+// 通知模板系统 (Notification Templates)
+// ============================================================
+
+func (s *Server) getTemplateManager() *v2.TemplateManager {
+	if s.notifyMgr != nil {
+		return s.notifyMgr.GetTemplateManager()
+	}
+	return v2.NewTemplateManagerWithDB(database.DB)
+}
+
+// handleListNotificationTemplates 获取全部通知模板配置（内置与自定义合并）
+// GET /api/notifications/templates
+func (s *Server) handleListNotificationTemplates(w http.ResponseWriter, r *http.Request) {
+	tm := s.getTemplateManager()
+	catalog := tm.ListTemplates()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"code": 0,
+		"data": catalog,
+	})
+}
+
+type updateTemplateRequest struct {
+	EventType string `json:"event_type"`
+	Channel   string `json:"channel"`
+	Template  string `json:"template"`
+}
+
+// handleUpdateNotificationTemplate 更新指定事件/渠道的通知模板
+// PUT /api/notifications/templates
+func (s *Server) handleUpdateNotificationTemplate(w http.ResponseWriter, r *http.Request) {
+	var req updateTemplateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的请求体: " + err.Error()})
+		return
+	}
+
+	req.EventType = strings.TrimSpace(req.EventType)
+	req.Channel = strings.TrimSpace(req.Channel)
+	if req.EventType == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "event_type 不能为空"})
+		return
+	}
+
+	tm := s.getTemplateManager()
+	if err := tm.SetTemplate(req.EventType, req.Channel, req.Template); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "模板语法错误: " + err.Error()})
+		return
+	}
+
+	if err := tm.SaveToDB(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存模板到数据库失败: " + err.Error()})
+		return
+	}
+
+	if s.notifyMgr != nil {
+		_ = s.notifyMgr.ReloadTemplates()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"code":    0,
+		"message": "模板已成功更新并生效",
+	})
+}
+
+type previewTemplateRequest struct {
+	EventType  string         `json:"event_type"`
+	Channel    string         `json:"channel"`
+	Template   string         `json:"template"`
+	SampleData map[string]any `json:"sample_data"`
+}
+
+// handlePreviewNotificationTemplate 预览模板渲染效果
+// POST /api/notifications/templates/preview
+func (s *Server) handlePreviewNotificationTemplate(w http.ResponseWriter, r *http.Request) {
+	var req previewTemplateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的请求体: " + err.Error()})
+		return
+	}
+
+	req.EventType = strings.TrimSpace(req.EventType)
+	if req.EventType == "" {
+		req.EventType = core.EventDownloadCompleted
+	}
+
+	tm := s.getTemplateManager()
+	rendered, err := tm.PreviewTemplate(req.EventType, req.Channel, req.Template, req.SampleData)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "模板渲染失败: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"code": 0,
+		"data": map[string]string{
+			"rendered": rendered,
+		},
+	})
+}
+
+type resetTemplateRequest struct {
+	EventType string `json:"event_type"`
+	Channel   string `json:"channel"`
+}
+
+// handleResetNotificationTemplate 重置指定或全部模板为内置默认
+// POST /api/notifications/templates/reset
+func (s *Server) handleResetNotificationTemplate(w http.ResponseWriter, r *http.Request) {
+	var req resetTemplateRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	req.EventType = strings.TrimSpace(req.EventType)
+	req.Channel = strings.TrimSpace(req.Channel)
+
+	tm := s.getTemplateManager()
+	if err := tm.DeleteTemplate(req.EventType, req.Channel); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "重置模板失败: " + err.Error()})
+		return
+	}
+
+	if err := tm.SaveToDB(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "持久化重置状态失败: " + err.Error()})
+		return
+	}
+
+	if s.notifyMgr != nil {
+		_ = s.notifyMgr.ReloadTemplates()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"code":    0,
+		"message": "通知模板已成功重置为内置默认值",
 	})
 }

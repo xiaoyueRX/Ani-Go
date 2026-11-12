@@ -267,6 +267,16 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/notifications/logs", s.handleClearNotificationLogs)
 	mux.HandleFunc("GET /api/notifications/stats", s.handleGetNotificationStats)
 
+	// 通知模板系统 (Notification Templates)
+	mux.HandleFunc("GET /api/notifications/templates", s.handleListNotificationTemplates)
+	mux.HandleFunc("PUT /api/notifications/templates", s.handleUpdateNotificationTemplate)
+	mux.HandleFunc("POST /api/notifications/templates/preview", s.handlePreviewNotificationTemplate)
+	mux.HandleFunc("POST /api/notifications/templates/reset", s.handleResetNotificationTemplate)
+
+	// 系列归并（TMDB Collection Auto-Merge）
+	mux.HandleFunc("POST /api/subscriptions/merge-collections", s.handleMergeCollections)
+	mux.HandleFunc("POST /api/subscriptions/{id}/resolve-collection", s.handleResolveSubscriptionCollection)
+
 	// RSS 探针
 	mux.HandleFunc("POST /api/rss/preview", s.handlePreviewRSS)
 

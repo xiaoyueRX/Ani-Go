@@ -150,6 +150,8 @@ func (t *Transmission) callWithRetry(ctx context.Context, method string, args ma
 	// 409 Conflict → 服务端返回新 Session ID，需要重试
 	if resp.StatusCode == http.StatusConflict {
 		newSID := resp.Header.Get("X-Transmission-Session-Id")
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
 		if newSID != "" {
 			t.mu.Lock()
 			t.sessionID = newSID
@@ -161,6 +163,8 @@ func (t *Transmission) callWithRetry(ctx context.Context, method string, args ma
 
 	// 502/503/504 等临时网关异常退避重试
 	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
 		if ctx.Err() == nil && attempt < 2 {
 			select {
 			case <-ctx.Done():
@@ -188,6 +192,11 @@ func (t *Transmission) callWithRetry(ctx context.Context, method string, args ma
 
 // Add 添加种子（支持 magnet URL 和 torrent URL）
 func (t *Transmission) Add(ctx context.Context, item core.TorrentItem, savePath string) error {
+	// 磁盘空间熔断保护：在向下载器投递前执行熔断检查
+	if err := CheckDiskSpaceGuard(savePath); err != nil {
+		return err
+	}
+
 	args := map[string]interface{}{
 		"paused": false,
 	}
@@ -252,13 +261,22 @@ func (t *Transmission) List(ctx context.Context) ([]core.DownloadTask, error) {
 
 // GetStatus 获取单个种子状态
 func (t *Transmission) GetStatus(ctx context.Context, hash string) (core.DownloadTask, error) {
+	cleanHash := strings.TrimSpace(hash)
+	if cleanHash == "" {
+		return core.DownloadTask{}, fmt.Errorf("Transmission 查询目标不能为空")
+	}
+
 	tasks, err := t.List(ctx)
 	if err != nil {
 		return core.DownloadTask{}, err
 	}
-	cleanHash := strings.TrimSpace(hash)
+
 	for _, task := range tasks {
 		if strings.EqualFold(task.Hash, cleanHash) || strings.EqualFold(task.Name, cleanHash) {
+			return task, nil
+		}
+		// 支持 Hash 前缀匹配（针对 16~40 位哈希截断场景）
+		if len(cleanHash) >= 16 && (strings.HasPrefix(strings.ToLower(task.Hash), strings.ToLower(cleanHash)) || strings.HasPrefix(strings.ToLower(cleanHash), strings.ToLower(task.Hash))) {
 			return task, nil
 		}
 	}
@@ -267,46 +285,65 @@ func (t *Transmission) GetStatus(ctx context.Context, hash string) (core.Downloa
 
 // Delete 删除下载任务
 func (t *Transmission) Delete(ctx context.Context, hash string, deleteFiles bool) error {
+	cleanHash := strings.TrimSpace(hash)
+	if cleanHash == "" {
+		return fmt.Errorf("Transmission 删除目标不能为空")
+	}
+
 	args := map[string]interface{}{
-		"ids":               []string{strings.TrimSpace(hash)},
+		"ids":               []string{cleanHash},
 		"delete-local-data": deleteFiles,
 	}
 	_, err := t.call(ctx, "torrent-remove", args)
 	if err != nil {
 		return fmt.Errorf("Transmission 删除种子失败: %w", err)
 	}
-	log.Printf("🗑️  [Transmission] 已删除下载任务: %s", hash)
+	log.Printf("🗑️  [Transmission] 已删除下载任务: %s", cleanHash)
 	return nil
 }
 
 // Pause 暂停下载任务
 func (t *Transmission) Pause(ctx context.Context, hash string) error {
+	cleanHash := strings.TrimSpace(hash)
+	if cleanHash == "" {
+		return fmt.Errorf("Transmission 暂停目标不能为空")
+	}
+
 	args := map[string]interface{}{
-		"ids": []string{strings.TrimSpace(hash)},
+		"ids": []string{cleanHash},
 	}
 	_, err := t.call(ctx, "torrent-stop", args)
 	if err != nil {
 		return fmt.Errorf("Transmission 暂停任务失败: %w", err)
 	}
-	log.Printf("⏸️  [Transmission] 已暂停任务: %s", hash)
+	log.Printf("⏸️  [Transmission] 已暂停任务: %s", cleanHash)
 	return nil
 }
 
 // Resume 恢复下载任务
 func (t *Transmission) Resume(ctx context.Context, hash string) error {
+	cleanHash := strings.TrimSpace(hash)
+	if cleanHash == "" {
+		return fmt.Errorf("Transmission 恢复目标不能为空")
+	}
+
 	args := map[string]interface{}{
-		"ids": []string{strings.TrimSpace(hash)},
+		"ids": []string{cleanHash},
 	}
 	_, err := t.call(ctx, "torrent-start", args)
 	if err != nil {
 		return fmt.Errorf("Transmission 恢复任务失败: %w", err)
 	}
-	log.Printf("▶️  [Transmission] 已恢复任务: %s", hash)
+	log.Printf("▶️  [Transmission] 已恢复任务: %s", cleanHash)
 	return nil
 }
 
 // IsAvailable 检测 Transmission 是否可用（含 5s 超时保护）
 func (t *Transmission) IsAvailable(ctx context.Context) bool {
+	if strings.TrimSpace(t.host) == "" {
+		return false
+	}
+
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	args := map[string]interface{}{}

@@ -13,9 +13,9 @@ Ani-Go 根据订阅源跟踪番剧更新，将资源交给已有下载器，并�
 - **追番与检索**：使用蜜柑计划 RSS 跟踪更新；可启用 Nyaa、ACG.RIP、AnimeTosho 等资源源进行聚合搜索。
 - **下载管理**：连接 qBittorrent、Transmission 或 Aria2，提交任务、查看状态，并在设置中切换当前下载器。
 - **季集识别**：结合标题规则、放送时间等信息识别剧集；AI 辅助解析为可选能力，需要自行配置服务。
-- **媒体整理**：按模板生成番剧、电影和特别篇目录；支持硬链接，并在无法硬链接时回退为复制。
+- **媒体整理与系列归并**：按模板生成番剧、电影和特别篇目录；支持硬链接（失败自动安全回退复制）；支持基于 TMDB Collection 自动识别并归并同系列跨季度/剧场版合集，统一分配 `SeriesID`。
 - **管理界面**：通过 Web 页面管理订阅、下载、放送日历和系统设置，支持中英文界面。
-- **其他功能**：通知推送、内置插件、备份以及通过 MCP 接口进行部分远程管理。
+- **通知与扩展**：支持多事件、多渠道自定义通知模板（支持 Telegram、微信公众号、企业微信、飞书、钉钉、QQ、Signal、Bark 等 18+ 渠道）、内置插件、备份以及通过 MCP 接口进行远程管理。
 
 Ani-Go 本身不是 BT 客户端，也不是媒体播放器。实际下载依赖外部下载器；整理后的文件可交给 Jellyfin、Emby 等媒体服务器使用。
 
@@ -85,6 +85,9 @@ go build -o anigo .
 | `MOVIE_BASE_PATH` / `OVA_BASE_PATH` | 电影与特别篇整理目录 |
 | `USE_HARDLINK` | 是否优先使用硬链接 |
 | `DB_PATH` | SQLite 数据库文件路径 |
+| `TMDB_API_KEY` | TMDB API 密钥（用于元数据刮削与系列合集自动归并） |
+| `WECHAT_APP_ID` / `WECHAT_APP_SECRET` / `WECHAT_USER_ID` | 微信公众号通知凭证（可选 `WECHAT_TEMPLATE_ID` 切换模板消息） |
+| `SIGNAL_API_URL` / `SIGNAL_SENDER` / `SIGNAL_RECIPIENTS` | Signal 通知网关地址、发送号码与接收者列表（逗号分隔） |
 
 配置值可能来自环境变量、数据库中的设置或程序默认值。**环境变量优先级最高**；Compose 文件中直接写入的 `environment` 也会覆盖 `.env` 中的同名变量。修改前建议先核对 [Compose 示例](docker-compose.yml)。
 

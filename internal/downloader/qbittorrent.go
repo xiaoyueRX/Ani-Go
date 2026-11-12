@@ -58,6 +58,11 @@ func (q *QBittorrent) login(ctx context.Context) error {
 	q.loginMu.Lock()
 	defer q.loginMu.Unlock()
 
+	// 双重检查锁定：若已有并发协程刚刚成功完成登录且尚未过期，直接复用已建立的会话
+	if q.loggedIn && time.Since(q.lastLogin) < 30*time.Minute {
+		return nil
+	}
+
 	data := url.Values{}
 	data.Set("username", q.username)
 	data.Set("password", q.password)
@@ -91,6 +96,10 @@ func (q *QBittorrent) login(ctx context.Context) error {
 
 // Add 添加种子到 qBittorrent
 func (q *QBittorrent) Add(ctx context.Context, item core.TorrentItem, savePath string) error {
+	// 磁盘空间熔断保护：在向下载器投递前执行熔断检查
+	if err := CheckDiskSpaceGuard(savePath); err != nil {
+		return err
+	}
 	return q.addWithRetry(ctx, item, savePath, 0)
 }
 
@@ -242,12 +251,17 @@ func (q *QBittorrent) List(ctx context.Context) ([]core.DownloadTask, error) {
 
 // GetStatus 获取指定种子状态
 func (q *QBittorrent) GetStatus(ctx context.Context, hash string) (core.DownloadTask, error) {
+	cleanHash := strings.TrimSpace(hash)
+	if cleanHash == "" {
+		return core.DownloadTask{}, fmt.Errorf("种子 hash 不能为空")
+	}
+
 	if err := q.ensureLogin(ctx); err != nil {
 		return core.DownloadTask{}, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		q.host+"/api/v2/torrents/info?hashes="+hash, nil)
+		q.host+"/api/v2/torrents/info?hashes="+cleanHash, nil)
 	if err != nil {
 		return core.DownloadTask{}, fmt.Errorf("创建查询请求失败: %w", err)
 	}
@@ -281,12 +295,17 @@ func (q *QBittorrent) GetStatus(ctx context.Context, hash string) (core.Download
 
 // Delete 删除下载任务
 func (q *QBittorrent) Delete(ctx context.Context, hash string, deleteFiles bool) error {
+	cleanHash := strings.TrimSpace(hash)
+	if cleanHash == "" {
+		return fmt.Errorf("种子 hash 不能为空")
+	}
+
 	if err := q.ensureLogin(ctx); err != nil {
 		return err
 	}
 
 	data := url.Values{}
-	data.Set("hashes", hash)
+	data.Set("hashes", cleanHash)
 	data.Set("deleteFiles", strconv.FormatBool(deleteFiles))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -314,12 +333,17 @@ func (q *QBittorrent) Delete(ctx context.Context, hash string, deleteFiles bool)
 
 // Pause 暂停下载/做种任务
 func (q *QBittorrent) Pause(ctx context.Context, hash string) error {
+	cleanHash := strings.TrimSpace(hash)
+	if cleanHash == "" {
+		return fmt.Errorf("种子 hash 不能为空")
+	}
+
 	if err := q.ensureLogin(ctx); err != nil {
 		return err
 	}
 
 	data := url.Values{}
-	data.Set("hashes", hash)
+	data.Set("hashes", cleanHash)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		q.host+"/api/v2/torrents/pause", strings.NewReader(data.Encode()))
@@ -340,18 +364,23 @@ func (q *QBittorrent) Pause(ctx context.Context, hash string) error {
 		return fmt.Errorf("暂停种子失败 (状态码 %d): %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("⏸️ [qBittorrent] 已暂停任务: %s", hash)
+	log.Printf("⏸️ [qBittorrent] 已暂停任务: %s", cleanHash)
 	return nil
 }
 
 // Resume 恢复下载/做种任务
 func (q *QBittorrent) Resume(ctx context.Context, hash string) error {
+	cleanHash := strings.TrimSpace(hash)
+	if cleanHash == "" {
+		return fmt.Errorf("种子 hash 不能为空")
+	}
+
 	if err := q.ensureLogin(ctx); err != nil {
 		return err
 	}
 
 	data := url.Values{}
-	data.Set("hashes", hash)
+	data.Set("hashes", cleanHash)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		q.host+"/api/v2/torrents/resume", strings.NewReader(data.Encode()))
@@ -372,17 +401,22 @@ func (q *QBittorrent) Resume(ctx context.Context, hash string) error {
 		return fmt.Errorf("恢复种子失败 (状态码 %d): %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("▶️ [qBittorrent] 已恢复任务: %s", hash)
+	log.Printf("▶️ [qBittorrent] 已恢复任务: %s", cleanHash)
 	return nil
 }
 
 // AddTags 给指定种子添加标签（参考 ani-rss 的 addTags 方法）
 func (q *QBittorrent) AddTags(ctx context.Context, hash string, tags string) error {
+	cleanHash := strings.TrimSpace(hash)
+	if cleanHash == "" {
+		return fmt.Errorf("种子 hash 不能为空")
+	}
+
 	if err := q.ensureLogin(ctx); err != nil {
 		return err
 	}
 	data := url.Values{}
-	data.Set("hashes", hash)
+	data.Set("hashes", cleanHash)
 	data.Set("tags", tags)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -424,6 +458,10 @@ func (q *QBittorrent) GetTorrentHashByURL(ctx context.Context, torrentURL string
 
 // IsAvailable 检测 qBittorrent 是否可用
 func (q *QBittorrent) IsAvailable(ctx context.Context) bool {
+	if strings.TrimSpace(q.host) == "" {
+		return false
+	}
+
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 

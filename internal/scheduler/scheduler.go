@@ -115,7 +115,10 @@ func (s *Scheduler) getTVBasePath() string {
 			return setting.Value
 		}
 	}
-	return s.cfg.Organizer.TVBasePath
+	if s.cfg != nil {
+		return s.cfg.Organizer.TVBasePath
+	}
+	return ""
 }
 
 func (s *Scheduler) getRSSMode() string {
@@ -125,7 +128,23 @@ func (s *Scheduler) getRSSMode() string {
 			return setting.Value
 		}
 	}
-	return s.cfg.Mikan.RSSMode
+	if s.cfg != nil {
+		return s.cfg.Mikan.RSSMode
+	}
+	return core.RSSModePersonal
+}
+
+func (s *Scheduler) isSeedCleanupEnabled() bool {
+	if database.DB != nil {
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", "SEED_CLEANUP_ENABLED").First(&setting).Error; err == nil && setting.Value != "" {
+			return strings.ToLower(strings.TrimSpace(setting.Value)) == "true" || setting.Value == "1"
+		}
+	}
+	if s.cfg != nil {
+		return s.cfg.Scheduler.SeedCleanupEnabled
+	}
+	return false
 }
 
 // Start 启动调度器，运行所有定时任务
@@ -151,14 +170,11 @@ func (s *Scheduler) Start(ctx context.Context) {
 	defer bgmTicker.Stop()
 	defer suppTicker.Stop()
 
-	// 种子自动清理定时器
-	var seedCleanupTicker *time.Ticker
-	var seedCleanupChan <-chan time.Time
-	if s.cfg.Scheduler.SeedCleanupEnabled {
-		cleanupInterval := s.getInterval("SEED_CLEANUP_INTERVAL", s.cfg.Scheduler.SeedCleanupInterval)
-		seedCleanupTicker = jitteredTicker(cleanupInterval)
-		seedCleanupChan = seedCleanupTicker.C
-		defer seedCleanupTicker.Stop()
+	// 种子自动清理定时器（常驻检查，动态响应设置变化）
+	cleanupInterval := s.getInterval("SEED_CLEANUP_INTERVAL", s.cfg.Scheduler.SeedCleanupInterval)
+	seedCleanupTicker := jitteredTicker(cleanupInterval)
+	defer seedCleanupTicker.Stop()
+	if s.isSeedCleanupEnabled() {
 		log.Printf("🧹 种子自动清理已启用：间隔=%v, 最小做种时间=%v, 最小比率=%.1f",
 			cleanupInterval, s.cfg.Scheduler.SeedCleanupMinSeedTime, s.cfg.Scheduler.SeedCleanupMinRatio)
 	}
@@ -206,9 +222,9 @@ func (s *Scheduler) Start(ctx context.Context) {
 		case <-downloadTicker.C:
 			resetWithJitter(downloadTicker, downloadInterval)
 			go s.pollDownloads(ctx)
-		case <-seedCleanupChan:
-			if seedCleanupTicker != nil {
-				resetWithJitter(seedCleanupTicker, s.getInterval("SEED_CLEANUP_INTERVAL", s.cfg.Scheduler.SeedCleanupInterval))
+		case <-seedCleanupTicker.C:
+			resetWithJitter(seedCleanupTicker, s.getInterval("SEED_CLEANUP_INTERVAL", s.cfg.Scheduler.SeedCleanupInterval))
+			if s.isSeedCleanupEnabled() {
 				go s.pollSeedCleanup(ctx)
 			}
 		}
@@ -326,8 +342,34 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 
 		// 如果匹配到了订阅，或者在 Classic 模式下成功自动创建了订阅，才下发下载任务
 		var targetSubID uint
+		var targetSeason int
+		var targetEpNum float32
+
 		if matchedSub != nil {
 			targetSubID = matchedSub.ID
+
+			// 校验订阅过滤器（包含词、排除词、分辨率、允许字幕组）
+			subFilter := buildFilter(*matchedSub)
+			if !matchSubscriptionFilter(item, subFilter) {
+				log.Printf("⏭️ [过滤器拦截] 种子 [%s] 未满足订阅 [%s] 过滤规则", item.Title, matchedSub.TitleCN)
+				continue
+			}
+
+			// 集数消歧与季数继承：若标题中未显式指明季数（默认第一季），继承订阅所指定的季数
+			parsedSeason, parsedEp := parser.ExtractEpisode(item.Title)
+			if matchedSub.Season > 1 && parsedSeason == 1 {
+				parsedSeason = matchedSub.Season
+			}
+			targetSeason = parsedSeason
+			targetEpNum = parsedEp
+
+			// 集数级防重校验：同一订阅下该季该集已有记录则跳过，杜绝多字幕组重复投递
+			if targetEpNum > 0 && episodeNumberExists(targetSubID, targetSeason, targetEpNum) {
+				log.Printf("⏭️ [集数防重] 种子 [%s] S%02dE%.1f 已在订阅 [%s] 中存在，跳过重复下载",
+					item.Title, targetSeason, targetEpNum, matchedSub.TitleCN)
+				continue
+			}
+
 			savePath := s.getTVBasePath()
 			if matchedSub.CustomPath != "" {
 				savePath = matchedSub.CustomPath
@@ -344,7 +386,7 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 					continue
 				}
 			}
-			log.Printf("📥 匹配订阅下载: %s (ID=%d)", item.Title, targetSubID)
+			log.Printf("📥 匹配订阅下载: %s (ID=%d, S%02dE%.1f)", item.Title, targetSubID, targetSeason, targetEpNum)
 		} else {
 			// 未匹配到现有订阅，检查 RSS 模式
 			if s.getRSSMode() == core.RSSModeClassic {
@@ -355,6 +397,10 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 				}
 				targetSubID = autoSubID
 				log.Printf("✅ 自动创建订阅 [%s]: ID=%d", item.Title, autoSubID)
+
+				parsedSeason, parsedEp := parser.ExtractEpisode(item.Title)
+				targetSeason = parsedSeason
+				targetEpNum = parsedEp
 
 				// 自动创建成功后，重新获取路径并下载
 				savePath := s.getTVBasePath()
@@ -373,8 +419,7 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 		// 记录到数据库并创建剧集记录
 		recordDownload(item)
 		existingURLs[item.URL] = true
-		season, epNum := parser.ExtractEpisode(item.Title)
-		createEpisodeRecordWithParsed(targetSubID, item, season, epNum)
+		createEpisodeRecordWithParsed(targetSubID, item, targetSeason, targetEpNum)
 		newCount++
 
 		// 更新订阅进度
@@ -974,6 +1019,10 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 			continue
 		}
 
+		// 记录已下载种子并创建对应的剧集状态记录
+		recordDownload(item)
+		createEpisodeRecordWithParsed(sub.ID, item, season, epNum)
+
 		if s.bus != nil {
 			s.bus.Publish(core.Event{
 				Type: "supplement.progress",
@@ -985,13 +1034,13 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 				Time: time.Now(),
 			})
 		}
-	{
-		var count int64
-		database.DB.Model(&database.Episode{}).
-			Where("subscription_id = ? AND status IN (?, ?) AND deleted_at IS NULL", sub.ID, "organized", "downloading").
-			Count(&count)
-		database.DB.Model(&sub).Update("current_episodes", int(count))
-	}
+		{
+			var count int64
+			database.DB.Model(&database.Episode{}).
+				Where("subscription_id = ? AND status IN (?, ?) AND deleted_at IS NULL", sub.ID, "organized", "downloading").
+				Count(&count)
+			database.DB.Model(&sub).Update("current_episodes", int(count))
+		}
 
 		newCount++
 	}
@@ -1075,8 +1124,65 @@ func buildFilter(sub database.Subscription) core.Filter {
 	return filter
 }
 
+// matchSubscriptionFilter 校验种子条目是否匹配订阅的过滤规则（包含词、排除词、分辨率、允许字幕组）
+func matchSubscriptionFilter(item core.TorrentItem, filter core.Filter) bool {
+	title := item.Title
+	titleLower := strings.ToLower(title)
+
+	// 1. 排除关键词：一旦命中任意一个排除词，立即拒绝
+	for _, kw := range filter.ExcludeKeywords {
+		trimmed := strings.TrimSpace(kw)
+		if trimmed != "" && strings.Contains(titleLower, strings.ToLower(trimmed)) {
+			return false
+		}
+	}
+
+	// 2. 包含关键词：若配置了包含词列表，则必须至少包含其中一个
+	if len(filter.IncludeKeywords) > 0 {
+		matched := false
+		for _, kw := range filter.IncludeKeywords {
+			trimmed := strings.TrimSpace(kw)
+			if trimmed != "" && strings.Contains(titleLower, strings.ToLower(trimmed)) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	// 3. 分辨率过滤
+	if filter.Resolution != "" {
+		res := strings.ToLower(strings.TrimSpace(filter.Resolution))
+		if !strings.Contains(titleLower, res) && !strings.EqualFold(item.Resolution, res) {
+			return false
+		}
+	}
+
+	// 4. 允许的字幕组列表
+	if len(filter.AllowedSubgroups) > 0 {
+		matched := false
+		for _, allowed := range filter.AllowedSubgroups {
+			trimmed := strings.TrimSpace(allowed)
+			if trimmed != "" && (strings.Contains(title, trimmed) || strings.EqualFold(item.GroupName, trimmed)) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	return true
+}
+
 // createEpisodeRecordWithParsed 使用解析好的季数和集数创建或更新 Episode 记录
 func createEpisodeRecordWithParsed(subID uint, item core.TorrentItem, season int, number float32) {
+	if database.DB == nil {
+		return
+	}
 	now := time.Now()
 	hash := item.InfoHash
 	if hash == "" {
@@ -1108,6 +1214,9 @@ func createEpisodeRecordWithParsed(subID uint, item core.TorrentItem, season int
 
 // createEpisodeRecord 创建或更新 Episode 记录 (旧版本兼容)
 func createEpisodeRecord(subID uint, item core.TorrentItem) {
+	if database.DB == nil {
+		return
+	}
 	now := time.Now()
 	ep := database.Episode{
 		SubscriptionID:    subID,
@@ -1160,6 +1269,9 @@ func findLargestVideoFile(dirPath string) string {
 
 // isDuplicate 检查种子 URL 是否已存在下载记录
 func isDuplicate(torrentURL string) bool {
+	if database.DB == nil {
+		return false
+	}
 	var count int64
 	database.DB.Model(&database.DownloadRecord{}).
 		Where("torrent_url = ?", torrentURL).
@@ -1169,6 +1281,9 @@ func isDuplicate(torrentURL string) bool {
 
 // episodeNumberExists 检查同一订阅下该季该集是否已有 Episode 记录（集数级防重）
 func episodeNumberExists(subscriptionID uint, season int, number float32) bool {
+	if database.DB == nil {
+		return false
+	}
 	var count int64
 	database.DB.Model(&database.Episode{}).
 		Where("subscription_id = ? AND season = ? AND number = ? AND deleted_at IS NULL", subscriptionID, season, number).
@@ -1178,6 +1293,9 @@ func episodeNumberExists(subscriptionID uint, season int, number float32) bool {
 
 // isEpisodeExists 检查通过 InfoHash 是否已存在 Episode 记录
 func isEpisodeExists(infoHash string) bool {
+	if database.DB == nil {
+		return false
+	}
 	var count int64
 	database.DB.Model(&database.Episode{}).
 		Where("torrent_hash = ?", infoHash).
@@ -1187,6 +1305,9 @@ func isEpisodeExists(infoHash string) bool {
 
 // recordDownload 记录已下载的种子
 func recordDownload(item core.TorrentItem) {
+	if database.DB == nil {
+		return
+	}
 	hash := item.InfoHash
 	if hash == "" {
 		hash = fmt.Sprintf("url:%x", md5.Sum([]byte(item.URL)))
@@ -1497,8 +1618,15 @@ func (s *Scheduler) pollSeedCleanup(ctx context.Context) {
 
 	log.Println("🧹 开始种子自动清理扫描...")
 
-	minSeedTime := s.getInterval("SEED_CLEANUP_MIN_SEED_TIME", s.cfg.Scheduler.SeedCleanupMinSeedTime)
-	minRatio := s.cfg.Scheduler.SeedCleanupMinRatio
+	var defaultMinSeedTime time.Duration = 48 * time.Hour
+	var defaultMinRatio float64 = 1.0
+	if s.cfg != nil {
+		defaultMinSeedTime = s.cfg.Scheduler.SeedCleanupMinSeedTime
+		defaultMinRatio = s.cfg.Scheduler.SeedCleanupMinRatio
+	}
+
+	minSeedTime := s.getInterval("SEED_CLEANUP_MIN_SEED_TIME", defaultMinSeedTime)
+	minRatio := defaultMinRatio
 	if database.DB != nil {
 		var ratioSetting database.Setting
 		if err := database.DB.Where("key = ?", "SEED_CLEANUP_MIN_RATIO").First(&ratioSetting).Error; err == nil && ratioSetting.Value != "" {
@@ -1509,27 +1637,26 @@ func (s *Scheduler) pollSeedCleanup(ctx context.Context) {
 		}
 	}
 
-	// 预先获取所有非 organized 状态的剧集 hash，防止误删还没整理的种子
-	var activeHashes []string
-	if database.DB != nil {
-		database.DB.Model(&database.Episode{}).
-			Where("status IN ? AND deleted_at IS NULL", []string{"downloading", "downloaded"}).
-			Pluck("torrent_hash", &activeHashes)
-	}
-	activeMap := make(map[string]bool, len(activeHashes))
-	for _, h := range activeHashes {
-		activeMap[h] = true
-	}
-
 	canDelete := func(task core.DownloadTask) bool {
-		// 保护：如果数据库中该种子还没被标记为已下载/已整理，严禁从下载器删除
-		// 只有 status = 'organized' 或者不在 activeMap 中的（说明已整理或不归本系统管）才允许删
-		if activeMap[task.Hash] {
-			var ep database.Episode
-			if database.DB != nil && database.DB.Where("torrent_hash = ?", task.Hash).First(&ep).Error == nil {
-				if ep.Status != "organized" {
-					return false
-				}
+		// 严密保护：如果数据库未就绪或未在本地剧集库找到对应记录，坚决拒绝清理（防止误伤用户私人种子）
+		if database.DB == nil {
+			return false
+		}
+		cleanHash := strings.TrimSpace(task.Hash)
+		if cleanHash == "" {
+			return false
+		}
+
+		var eps []database.Episode
+		if err := database.DB.Where("(LOWER(torrent_hash) = LOWER(?) OR torrent_hash = ?) AND deleted_at IS NULL", cleanHash, cleanHash).Find(&eps).Error; err != nil || len(eps) == 0 {
+			// 未在本地剧集库中找到对应记录（非本系统管理或尚未关联），为安全起见绝不删除未受管种子
+			return false
+		}
+
+		// 检查关联的所有剧集：必须严格满足状态为 organized，且 FinalPath 非空且 OrganizedAt != nil
+		for _, ep := range eps {
+			if ep.Status != "organized" || strings.TrimSpace(ep.FinalPath) == "" || ep.OrganizedAt == nil {
+				return false
 			}
 		}
 		return true
@@ -1548,6 +1675,9 @@ func (s *Scheduler) pollSeedCleanup(ctx context.Context) {
 
 // episodeGroupExists 检查同一订阅下该季该集该组是否已有记录（多组共存核心逻辑）
 func episodeGroupExists(subscriptionID uint, season int, number float32, groupName string) bool {
+	if database.DB == nil {
+		return false
+	}
 	var count int64
 	database.DB.Model(&database.Episode{}).
 		Where("subscription_id = ? AND season = ? AND number = ? AND group_name = ? AND deleted_at IS NULL",

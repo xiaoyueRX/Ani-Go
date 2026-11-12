@@ -1,61 +1,37 @@
 package notifier
 
 import (
-	"bytes"
-	"fmt"
-	"text/template"
+	"gorm.io/gorm"
 
-	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	v2 "github.com/xiaoyueRX/Ani-Go/internal/notifier/v2"
 )
 
-// TemplateManager 管理通知模板
-type TemplateManager struct {
-	templates map[string]*template.Template
-}
+// NotifyTemplatesSettingKey 保存在 database.Setting 表中的通知模板配置键名
+const NotifyTemplatesSettingKey = v2.NotifyTemplatesSettingKey
 
-// NewTemplateManager 初始化并预装默认模板
+// TemplateManager 复用 v2.TemplateManager，提供线程安全、无 panic 的多事件/多渠道模板管理能力
+type TemplateManager = v2.TemplateManager
+
+// TemplateContext 结构化通知模板上下文数据
+type TemplateContext = v2.TemplateContext
+
+// TemplateInfo 单个通知模板条目
+type TemplateInfo = v2.TemplateInfo
+
+// TemplateCatalog 通知模板全量目录
+type TemplateCatalog = v2.TemplateCatalog
+
+// NewTemplateManager 初始化并预装内置默认通知模板
 func NewTemplateManager() *TemplateManager {
-	tm := &TemplateManager{
-		templates: make(map[string]*template.Template),
-	}
-
-	// 注册默认事件模板
-	tm.registerDefaultTemplates()
-
-	return tm
+	return v2.NewTemplateManager()
 }
 
-func (tm *TemplateManager) registerDefaultTemplates() {
-	// 下载完成模板
-	tm.Add(core.EventDownloadCompleted, "🎉 下载完成：{{.Name}}\n💾 大小：{{.Size}}\n📂 路径：{{.SavePath}}")
-	
-	// 下载失败模板
-	tm.Add(core.EventDownloadFailed, "❌ 下载失败：{{.Name}}\n🚨 错误：{{.Error}}")
-	
-	// 文件整理完成
-	tm.Add(core.EventFileOrganized, "📂 番剧归档完成：{{.AnimeTitle}}\n🎞️ 剧集：第 {{.Episode}} 集\n📍 新路径：{{.NewPath}}")
-	
-	// 新增订阅
-	tm.Add(core.EventSubscriptionAdded, "➕ 新增订阅：{{.Title}}\n🔍 来源：{{.Source}}")
+// NewTemplateManagerWithDB 使用指定数据库初始化模板管理器并自动加载自定义模板
+func NewTemplateManagerWithDB(db *gorm.DB) *TemplateManager {
+	return v2.NewTemplateManagerWithDB(db)
 }
 
-// Add 添加或更新模板
-func (tm *TemplateManager) Add(id string, text string) {
-	tmpl := template.Must(template.New(id).Parse(text))
-	tm.templates[id] = tmpl
-}
-
-// Render 渲染指定模板
-func (tm *TemplateManager) Render(templateID string, data interface{}) (string, error) {
-	tmpl, ok := tm.templates[templateID]
-	if !ok {
-		return "", fmt.Errorf("未找到模板: %s", templateID)
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("模板渲染错误: %w", err)
-	}
-
-	return buf.String(), nil
+// ValidateTemplate 校验 Go 模板语法是否合法
+func ValidateTemplate(tmpl string) error {
+	return v2.ValidateTemplate(tmpl)
 }

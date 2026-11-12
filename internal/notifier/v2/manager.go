@@ -22,9 +22,10 @@ type NotifyMessage struct {
 	ID        string
 	Title     string
 	Content   string
-	EventType string // 事件类型：download.started, download.completed, file.organized, episode.missing, error
-	Target    string // 指定渠道，为空则全渠道推送
-	Priority  int    // 优先级：0=普通，1=高，2=紧急
+	EventType string         // 事件类型：download.started, download.completed, file.organized, episode.missing, error
+	Target    string         // 指定渠道，为空则全渠道推送
+	Priority  int            // 优先级：0=普通，1=高，2=紧急
+	Data      map[string]any // 结构化事件上下文数据，供按渠道模板渲染
 
 	RetryCount int
 	MaxRetries int
@@ -39,9 +40,10 @@ type NotifyMessage struct {
 type NotifyManager struct {
 	notifiers []Notifier
 	bus       *event.Bus
+	tmplMgr   *TemplateManager
 	queue     chan *NotifyMessage
 	retryChan chan *NotifyMessage
-	dlq       chan *NotifyMessage // 死信队列
+	dlq       chan *NotifyMessage             // 死信队列
 	logQueue  chan *database.NotificationLog // 日志持久化队列
 
 	workerCount int
@@ -67,9 +69,14 @@ type eventSubRef struct {
 
 func NewNotifyManager(notifiers []Notifier, bus *event.Bus) *NotifyManager {
 	ctx, cancel := context.WithCancel(context.Background())
+	tmplMgr := NewTemplateManager()
+	if err := tmplMgr.LoadFromDB(); err != nil {
+		log.Printf("⚠️ 初始化加载自定义通知模板失败: %v", err)
+	}
 	return &NotifyManager{
 		notifiers:   notifiers,
 		bus:         bus,
+		tmplMgr:     tmplMgr,
 		queue:       make(chan *NotifyMessage, 5000),
 		retryChan:   make(chan *NotifyMessage, 1000),
 		dlq:         make(chan *NotifyMessage, 1000),
@@ -87,6 +94,29 @@ func NewNotifyManager(notifiers []Notifier, bus *event.Bus) *NotifyManager {
 			"error":              {}, // 全渠道
 		},
 	}
+}
+
+// GetTemplateManager 返回通知管理器关联的模板管理器（若尚未初始化则惰性创建）
+func (m *NotifyManager) GetTemplateManager() *TemplateManager {
+	m.mu.RLock()
+	tm := m.tmplMgr
+	m.mu.RUnlock()
+	if tm != nil {
+		return tm
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.tmplMgr == nil {
+		m.tmplMgr = NewTemplateManager()
+		_ = m.tmplMgr.LoadFromDB()
+	}
+	return m.tmplMgr
+}
+
+// ReloadTemplates 从数据库重新加载自定义通知模板
+func (m *NotifyManager) ReloadTemplates() error {
+	return m.GetTemplateManager().LoadFromDB()
 }
 
 // SetReloader 设置通知器加载函数
@@ -161,8 +191,6 @@ func (m *NotifyManager) Stop() {
 		m.cancel()
 	}
 	m.unsubscribeEvents()
-	close(m.queue)
-	close(m.logQueue)
 	m.mu.Unlock()
 
 	m.wg.Wait()
@@ -185,13 +213,36 @@ func (m *NotifyManager) subscribeEvents() {
 	// 下载开始
 	sub(core.EventDownloadStarted, func(e core.Event) {
 		title := "📥 开始下载"
-		msg := fmt.Sprintf("%v", e.Payload["title"])
+		itemTitle := payloadString(e.Payload, "title")
+		animeTitle := payloadString(e.Payload, "anime_title")
+		if animeTitle == "" {
+			animeTitle = itemTitle
+		}
+		rawSize := payloadInt64(e.Payload, "size")
+		sizeStr := ""
+		if rawSize > 0 {
+			sizeStr = formatBytes(rawSize)
+		}
+		structured := clonePayloadWithDefaults(e.Payload, map[string]any{
+			"Title":      title,
+			"Name":       itemTitle,
+			"AnimeTitle": animeTitle,
+			"URL":        payloadString(e.Payload, "url"),
+			"Size":       sizeStr,
+			"RawSize":    rawSize,
+			"Source":     payloadString(e.Payload, "source"),
+			"SavePath":   payloadString(e.Payload, "save_path"),
+			"Season":     payloadInt(e.Payload, "season"),
+			"Episode":    payloadValue(e.Payload, "episode"),
+			"Timestamp":  eventTimestamp(e.Time),
+		})
 		m.Publish(&NotifyMessage{
 			Title:      title,
-			Content:    msg,
+			Content:    itemTitle,
 			EventType:  "download.started",
 			Priority:   0,
 			MaxRetries: 3,
+			Data:       structured,
 		})
 	})
 
@@ -200,41 +251,66 @@ func (m *NotifyManager) subscribeEvents() {
 		title := "✅ 下载完成"
 		data := e.Payload
 
-		var sizeStr string
-		if s, ok := data["size"].(int64); ok {
-			sizeStr = formatBytes(s)
-		} else if s, ok := data["size"].(int); ok {
-			sizeStr = formatBytes(int64(s))
-		} else if s, ok := data["size"].(float64); ok {
-			sizeStr = formatBytes(int64(s))
-		} else {
-			sizeStr = "未知"
+		rawSize := payloadInt64(data, "size")
+		sizeStr := "未知"
+		if rawSize > 0 {
+			sizeStr = formatBytes(rawSize)
+		} else if hasPayloadKey(data, "size") && (isNumeric(data["size"])) {
+			sizeStr = formatBytes(0)
 		}
 
-		animeTitle, _ := data["anime_title"].(string)
+		itemTitle := payloadString(data, "title")
+		animeTitle := payloadString(data, "anime_title")
 		if animeTitle == "" {
-			animeTitle = fmt.Sprintf("%v", data["title"])
+			animeTitle = itemTitle
 		}
-		epVal := data["episode"]
+		nameVal := itemTitle
+		if nameVal == "" {
+			nameVal = animeTitle
+		}
+
+		epVal := payloadValue(data, "episode")
 		var epText string
 		if epVal != nil {
 			epText = fmt.Sprintf(" 第 %v 集", epVal)
 		}
+		durStr := payloadString(data, "duration")
 
 		msg := fmt.Sprintf("番剧: 《%s》%s\n文件大小: %s\n下载耗时: %s",
-			animeTitle, epText, sizeStr, data["duration"])
+			animeTitle, epText, sizeStr, durStr)
+		structured := clonePayloadWithDefaults(data, map[string]any{
+			"Title":      title,
+			"Name":       nameVal,
+			"AnimeTitle": animeTitle,
+			"Episode":    epVal,
+			"Season":     payloadInt(data, "season"),
+			"Size":       sizeStr,
+			"RawSize":    rawSize,
+			"Duration":   durStr,
+			"Hash":       payloadString(data, "hash"),
+			"SavePath":   payloadString(data, "save_path"),
+			"Source":     payloadString(data, "source"),
+			"Timestamp":  eventTimestamp(e.Time),
+		})
 		m.Publish(&NotifyMessage{
 			Title:      title,
 			Content:    msg,
 			EventType:  "download.completed",
 			Priority:   1,
 			MaxRetries: 3,
+			Data:       structured,
 		})
 	})
 
 	// 文件整理结果（每个整理批次发送一次）
 	sub(core.EventFileOrganized, func(e core.Event) {
-		m.Publish(organizedNotification(e.Payload))
+		msg := organizedNotification(e.Payload)
+		if msg != nil && msg.Data != nil {
+			if _, ok := msg.Data["Timestamp"]; !ok {
+				msg.Data["Timestamp"] = eventTimestamp(e.Time)
+			}
+		}
+		m.Publish(msg)
 	})
 
 	// 补全缺失集数
@@ -243,32 +319,65 @@ func (m *NotifyManager) subscribeEvents() {
 		if data == nil {
 			return
 		}
-		newCount, _ := data["new_count"].(int)
+		newCount := intValue(data["new_count"])
 		if newCount <= 0 {
 			// 没有实际新增的补全任务，不打扰用户
 			return
 		}
 		title := "📥 历史剧集补全"
-		msg := fmt.Sprintf("番剧: %v\n已自动识别并添加 %d 个缺失集数下载任务", data["title"], newCount)
+		animeTitle := payloadString(data, "title")
+		msg := fmt.Sprintf("番剧: %s\n已自动识别并添加 %d 个缺失集数下载任务", animeTitle, newCount)
+		structured := clonePayloadWithDefaults(data, map[string]any{
+			"Title":           title,
+			"Name":            animeTitle,
+			"AnimeTitle":      animeTitle,
+			"NewCount":        newCount,
+			"CurrentEpisodes": payloadInt(data, "current_episodes"),
+			"TotalEpisodes":   payloadInt(data, "total_episodes"),
+			"Timestamp":       eventTimestamp(e.Time),
+		})
 		m.Publish(&NotifyMessage{
 			Title:      title,
 			Content:    msg,
 			EventType:  "episode.missing",
 			Priority:   1,
 			MaxRetries: 3,
+			Data:       structured,
 		})
 	})
 
 	// 错误事件（通用）
 	sub(core.EventDownloadFailed, func(e core.Event) {
 		title := "🚨 系统错误"
-		msg := fmt.Sprintf("%v", e.Payload["message"])
+		errText := payloadString(e.Payload, "error")
+		if errText == "" {
+			errText = payloadString(e.Payload, "message")
+		}
+		nameVal := payloadString(e.Payload, "name")
+		if nameVal == "" {
+			nameVal = payloadString(e.Payload, "title")
+		}
+		animeTitle := payloadString(e.Payload, "anime_title")
+		if nameVal == "" {
+			nameVal = animeTitle
+		}
+		structured := clonePayloadWithDefaults(e.Payload, map[string]any{
+			"Title":      title,
+			"Name":       nameVal,
+			"AnimeTitle": animeTitle,
+			"Error":      errText,
+			"Source":     payloadString(e.Payload, "source"),
+			"Season":     payloadInt(e.Payload, "season"),
+			"Episode":    payloadValue(e.Payload, "episode"),
+			"Timestamp":  eventTimestamp(e.Time),
+		})
 		m.Publish(&NotifyMessage{
 			Title:      title,
-			Content:    msg,
+			Content:    errText,
 			EventType:  "error",
 			Priority:   2,
 			MaxRetries: 5,
+			Data:       structured,
 		})
 	})
 
@@ -303,6 +412,7 @@ func organizedNotification(data map[string]interface{}) *NotifyMessage {
 
 	animeTitle, _ := data["anime_title"].(string)
 	epVal := data["episode"]
+	finalPath := payloadString(data, "final_path")
 
 	if success == 0 && failed > 0 {
 		msg.Title = "🚨 文件整理失败"
@@ -312,31 +422,40 @@ func organizedNotification(data map[string]interface{}) *NotifyMessage {
 			msg.Content = fmt.Sprintf("失败: %d 个 (全部整理失败)", failed)
 		}
 		msg.Priority = 2
-		return msg
-	}
-
-	if failed > 0 {
+	} else if failed > 0 {
 		msg.Title = "📁 文件整理结果"
 		if animeTitle != "" {
-			msg.Content = fmt.Sprintf("番剧: 《%s》\n成功: %d 个, 失败: %d 个\n最新路径: %s", animeTitle, success, failed, data["final_path"])
+			msg.Content = fmt.Sprintf("番剧: 《%s》\n成功: %d 个, 失败: %d 个\n最新路径: %s", animeTitle, success, failed, finalPath)
 		} else {
-			msg.Content = fmt.Sprintf("成功: %d 个, 失败: %d 个\n最新路径: %s", success, failed, data["final_path"])
+			msg.Content = fmt.Sprintf("成功: %d 个, 失败: %d 个\n最新路径: %s", success, failed, finalPath)
 		}
 		msg.Priority = 1
-		return msg
+	} else {
+		msg.Title = "📁 媒体已整理入库"
+		if success == 1 && animeTitle != "" {
+			if epVal != nil && fmt.Sprintf("%v", epVal) != "0" {
+				msg.Content = fmt.Sprintf("番剧: 《%s》 第 %v 集已成功归档入库！\n最终路径: %s", animeTitle, epVal, finalPath)
+			} else {
+				msg.Content = fmt.Sprintf("番剧: 《%s》 已成功归档入库！\n最终路径: %s", animeTitle, finalPath)
+			}
+		} else {
+			msg.Content = fmt.Sprintf("成功: %d 个剧集文件已整理入库\n最新路径: %s", success, finalPath)
+		}
+		msg.Priority = 1
 	}
 
-	msg.Title = "📁 媒体已整理入库"
-	if success == 1 && animeTitle != "" {
-		if epVal != nil && fmt.Sprintf("%v", epVal) != "0" {
-			msg.Content = fmt.Sprintf("番剧: 《%s》 第 %v 集已成功归档入库！\n最终路径: %s", animeTitle, epVal, data["final_path"])
-		} else {
-			msg.Content = fmt.Sprintf("番剧: 《%s》 已成功归档入库！\n最终路径: %s", animeTitle, data["final_path"])
-		}
-	} else {
-		msg.Content = fmt.Sprintf("成功: %d 个剧集文件已整理入库\n最新路径: %s", success, data["final_path"])
-	}
-	msg.Priority = 1
+	msg.Data = clonePayloadWithDefaults(data, map[string]any{
+		"Title":      msg.Title,
+		"Name":       animeTitle,
+		"AnimeTitle": animeTitle,
+		"Episode":    epVal,
+		"Season":     payloadInt(data, "season"),
+		"NewPath":    finalPath,
+		"SavePath":   payloadString(data, "save_path"),
+		"Success":    success,
+		"Failed":     failed,
+		"Error":      payloadString(data, "error"),
+	})
 	return msg
 }
 
@@ -350,7 +469,18 @@ func intValue(value interface{}) int {
 
 // Publish 发布通知消息（非阻塞）
 func (m *NotifyManager) Publish(msg *NotifyMessage) {
-	if msg == nil || !m.IsEnabled() {
+	if msg == nil {
+		return
+	}
+
+	m.mu.RLock()
+	enabled := m.enabled && m.running
+	queue := m.queue
+	ctx := m.ctx
+	targets := m.routeRules[msg.EventType]
+	m.mu.RUnlock()
+
+	if !enabled || queue == nil || ctx == nil {
 		return
 	}
 
@@ -362,12 +492,14 @@ func (m *NotifyManager) Publish(msg *NotifyMessage) {
 	}
 
 	// 根据事件类型确定目标渠道
-	if targets, ok := m.routeRules[msg.EventType]; ok && len(targets) > 0 {
+	if msg.Target == "" && len(targets) > 0 {
 		msg.Target = targets[0] // 简化：取第一个，实际可扩展为多目标
 	}
 
 	select {
-	case m.queue <- msg:
+	case <-ctx.Done():
+		return
+	case queue <- msg:
 	case <-time.After(50 * time.Millisecond):
 		log.Printf("⚠️ 通知队列繁忙，丢弃消息: %s", msg.Title)
 	}
@@ -403,13 +535,16 @@ func (m *NotifyManager) SendTest(ctx context.Context, channel, title, message st
 	}
 
 	var errs []string
+	var errMu sync.Mutex
 	var wg sync.WaitGroup
 	for _, n := range targets {
 		wg.Add(1)
 		go func(notifier Notifier) {
 			defer wg.Done()
 			if err := notifier.Send(ctx, title, message); err != nil {
+				errMu.Lock()
 				errs = append(errs, fmt.Sprintf("[%s] %v", notifier.Name(), err))
+				errMu.Unlock()
 			}
 		}(n)
 	}
@@ -437,7 +572,7 @@ func (m *NotifyManager) worker() {
 	}
 }
 
-// process 执行分发
+// process 执行按渠道模板渲染与并行分发
 func (m *NotifyManager) process(msg *NotifyMessage) {
 	if msg == nil {
 		return
@@ -458,32 +593,100 @@ func (m *NotifyManager) process(msg *NotifyMessage) {
 		return
 	}
 
-	// 并行推送
+	// 并行按渠道渲染并推送
 	var innerWg sync.WaitGroup
 	for _, n := range targets {
 		innerWg.Add(1)
 		go func(notifier Notifier) {
 			defer innerWg.Done()
-			err := notifier.Send(m.ctx, msg.Title, msg.Content)
+			renderedTitle, renderedContent := m.renderMessageForChannel(msg, notifier.Name())
+			err := notifier.Send(m.ctx, renderedTitle, renderedContent)
 			if err != nil {
-				m.handleFailure(notifier, msg, err)
+				m.handleFailure(notifier, msg, renderedContent, err)
 			} else {
 				m.incStat(notifier.Name() + ".success")
-				m.recordLog(msg.EventType, notifier.Name(), msg.Title, msg.Content, "success", "", msg.RetryCount)
+				m.recordLog(msg.EventType, notifier.Name(), renderedTitle, renderedContent, "success", "", msg.RetryCount)
 			}
 		}(n)
 	}
 	innerWg.Wait()
 }
 
+// renderMessageForChannel 根据事件类型与目标渠道渲染消息内容；自定义模板失败时安全回退
+func (m *NotifyManager) renderMessageForChannel(msg *NotifyMessage, channel string) (string, string) {
+	if msg == nil {
+		return "", ""
+	}
+	tm := m.GetTemplateManager()
+	if tm == nil || msg.EventType == "" {
+		return msg.Title, msg.Content
+	}
+
+	renderData := m.buildRenderData(msg, channel)
+
+	// 1. 优先尝试按 (eventType, channel) -> (eventType, "") 渲染自定义模板
+	if rendered, usedCustom, err := tm.RenderCustomForChannel(msg.EventType, channel, renderData); usedCustom {
+		if err == nil {
+			return msg.Title, rendered
+		}
+		log.Printf("⚠️ [%s] 自定义模板渲染失败 (%s)，安全回退默认内容: %v", channel, msg.EventType, err)
+		if msg.Content != "" {
+			return msg.Title, msg.Content
+		}
+	}
+
+	// 2. 若无自定义模板且已有默认文本内容，直接沿用原内容
+	if msg.Content != "" {
+		return msg.Title, msg.Content
+	}
+
+	// 3. 当 Content 为空时回退内置默认模板渲染
+	if rendered, err := tm.RenderForChannel(msg.EventType, channel, renderData); err == nil {
+		return msg.Title, rendered
+	}
+	return msg.Title, msg.Content
+}
+
+func (m *NotifyManager) buildRenderData(msg *NotifyMessage, channel string) map[string]any {
+	ts := msg.CreatedAt
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	out := make(map[string]any, len(msg.Data)+6)
+	for k, v := range msg.Data {
+		out[k] = v
+	}
+	if _, ok := out["Title"]; !ok || isEmptyValue(out["Title"]) {
+		out["Title"] = msg.Title
+	}
+	if _, ok := out["Content"]; !ok || isEmptyValue(out["Content"]) {
+		out["Content"] = msg.Content
+	}
+	out["EventType"] = msg.EventType
+	out["Channel"] = channel
+	if _, ok := out["Timestamp"]; !ok || isEmptyValue(out["Timestamp"]) {
+		out["Timestamp"] = ts.Format("2006-01-02 15:04:05")
+	}
+	return out
+}
+
 // handleFailure 处理发送失败，指数退避重试
-func (m *NotifyManager) handleFailure(n Notifier, msg *NotifyMessage, err error) {
+func (m *NotifyManager) handleFailure(n Notifier, msg *NotifyMessage, renderedContent string, err error) {
 	log.Printf("⚠️ [%s] 发送失败: %v (重试 %d/%d)", n.Name(), err, msg.RetryCount, msg.MaxRetries)
 	m.incStat(n.Name() + ".failure")
-	m.recordLog(msg.EventType, n.Name(), msg.Title, msg.Content, "failed", err.Error(), msg.RetryCount)
+	m.recordLog(msg.EventType, n.Name(), msg.Title, renderedContent, "failed", err.Error(), msg.RetryCount)
 
 	if msg.RetryCount >= msg.MaxRetries {
-		m.dlq <- msg
+		dlqMsg := *msg
+		dlqMsg.Target = n.Name()
+		dlqMsg.LastError = err.Error()
+		if dlqMsg.Content == "" {
+			dlqMsg.Content = renderedContent
+		}
+		select {
+		case m.dlq <- &dlqMsg:
+		case <-m.ctx.Done():
+		}
 		return
 	}
 
@@ -494,7 +697,10 @@ func (m *NotifyManager) handleFailure(n Notifier, msg *NotifyMessage, err error)
 	delay := time.Duration(1<<uint(retryMsg.RetryCount)) * 10 * time.Second
 	retryMsg.NextRunAt = time.Now().Add(delay)
 
-	m.retryChan <- &retryMsg
+	select {
+	case m.retryChan <- &retryMsg:
+	case <-m.ctx.Done():
+	}
 }
 
 // retryScheduler 重试调度器
@@ -505,8 +711,12 @@ func (m *NotifyManager) retryScheduler() {
 
 	var retryList []*NotifyMessage
 	var mu sync.Mutex
+	var innerWg sync.WaitGroup
+	defer innerWg.Wait()
 
+	innerWg.Add(1)
 	go func() {
+		defer innerWg.Done()
 		for {
 			select {
 			case <-m.ctx.Done():
@@ -529,7 +739,12 @@ func (m *NotifyManager) retryScheduler() {
 			remaining := retryList[:0]
 			for _, msg := range retryList {
 				if now.After(msg.NextRunAt) {
-					m.queue <- msg
+					select {
+					case m.queue <- msg:
+					case <-m.ctx.Done():
+						mu.Unlock()
+						return
+					}
 				} else {
 					remaining = append(remaining, msg)
 				}
@@ -585,8 +800,20 @@ func (m *NotifyManager) recordLog(eventType, channel, title, content, status, er
 		ErrorMsg:   errorMsg,
 		RetryCount: retryCount,
 	}
+
+	m.mu.RLock()
+	logQueue := m.logQueue
+	ctx := m.ctx
+	m.mu.RUnlock()
+
+	if logQueue == nil {
+		return
+	}
+
 	select {
-	case m.logQueue <- entry:
+	case <-ctx.Done():
+		return
+	case logQueue <- entry:
 	default:
 		go func() {
 			if database.DB != nil {
@@ -599,6 +826,91 @@ func (m *NotifyManager) recordLog(eventType, channel, title, content, status, er
 // RecordManualLog 记录手动测试等外部通知事件
 func (m *NotifyManager) RecordManualLog(eventType, channel, title, content, status, errorMsg string) {
 	m.recordLog(eventType, channel, title, content, status, errorMsg, 0)
+}
+
+func clonePayloadWithDefaults(payload map[string]any, defaults map[string]any) map[string]any {
+	out := make(map[string]any, len(payload)+len(defaults))
+	for k, v := range payload {
+		out[k] = v
+	}
+	for k, v := range defaults {
+		out[k] = v
+	}
+	return out
+}
+
+func eventTimestamp(t time.Time) string {
+	if t.IsZero() {
+		t = time.Now()
+	}
+	return t.Format("2006-01-02 15:04:05")
+}
+
+func hasPayloadKey(payload map[string]any, key string) bool {
+	if payload == nil {
+		return false
+	}
+	_, ok := payload[key]
+	return ok
+}
+
+func payloadValue(payload map[string]any, key string) any {
+	if payload == nil {
+		return nil
+	}
+	return payload[key]
+}
+
+func payloadString(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	v, ok := payload[key]
+	if !ok || v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+func payloadInt(payload map[string]any, key string) int {
+	if payload == nil {
+		return 0
+	}
+	switch v := payload[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func payloadInt64(payload map[string]any, key string) int64 {
+	if payload == nil {
+		return 0
+	}
+	switch v := payload[key].(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case float64:
+		return int64(v)
+	default:
+		return 0
+	}
+}
+
+func isNumeric(val any) bool {
+	switch val.(type) {
+	case int, int64, float32, float64:
+		return true
+	default:
+		return false
+	}
 }
 
 // ============================================================

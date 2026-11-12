@@ -65,6 +65,25 @@ func TestCheckDiskSpaceGuard(t *testing.T) {
 	if err := CheckDiskSpaceGuard(tmpDir); err != nil {
 		t.Fatalf("设置为 0 时应关闭熔断，但返回错误: %v", err)
 	}
+
+	// 4. 将阈值设置为负数（如 -1），同样关闭急停熔断
+	database.DB.Model(&database.Setting{}).Where("key = ?", "DISK_MIN_FREE_GB").Update("value", "-1.5")
+	if err := CheckDiskSpaceGuard(tmpDir); err != nil {
+		t.Fatalf("设置为负数时应关闭熔断，但返回错误: %v", err)
+	}
+
+	// 5. 空路径不应误触发熔断
+	if err := CheckDiskSpaceGuard(""); err != nil {
+		t.Fatalf("空路径应静默返回 nil，但返回: %v", err)
+	}
+
+	// 6. 环境变量优先于数据库配置
+	database.DB.Model(&database.Setting{}).Where("key = ?", "DISK_MIN_FREE_GB").Update("value", "0") // DB 为 0
+	os.Setenv("DISK_MIN_FREE_GB", "999999")                                                           // ENV 为超大
+	defer os.Unsetenv("DISK_MIN_FREE_GB")
+	if err := CheckDiskSpaceGuard(tmpDir); err == nil {
+		t.Fatalf("环境变量 DISK_MIN_FREE_GB=999999 应覆盖数据库配置并触发熔断")
+	}
 }
 
 func TestFindExistingAncestor(t *testing.T) {

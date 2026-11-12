@@ -4,6 +4,43 @@ Ani-Go 的更新日志。所有版本遵循 [语义化版本](https://semver.org
 
 ---
 
+## v0.6.1 — 2026-11-13 (Notification Template System, WeChat & Signal Channels, TMDB Collection Auto-Merge & Full-Stack Hardening)
+
+### 核心新特性 (Major Features)
+- **通知模板系统与多渠道分发矩阵 (Notification Template Matrix & Per-Channel Rendering)**:
+  - 彻底废除 `template.Must`，实现无 panic、线程安全（`sync.RWMutex`）的模板解析与动态渲染引擎；
+  - 支持三级继承回退：`(eventType, channel) ➔ (eventType, "") ➔ 内置系统默认模板`，支持中英文渠道别名；
+  - 注入丰富结构化上下文：`Title`, `Name`, `Content`, `EventType`, `Channel`, `AnimeTitle`, `Episode`, `Season`, `Size`, `SavePath`, `NewPath`, `Error`, `Source`, `Timestamp`, `Duration` 等；
+  - 内置安全模板函数：`default`（空值兜底）、`upper`、`lower`、`truncate`（按字符安全截断）；
+  - 持久化至 `database.Setting` (`NOTIFY_TEMPLATES_JSON`)，支持全生命周期 CRUD、实时语法校验与预览；
+  - `v2.NotifyManager` 事件订阅全量注入结构化上下文，分发流程执行按渠道个性化渲染，自定义模板失败时安全降级回退。
+- **微信公众号与 Signal 深度加固与优先级对齐 (WeChat & Signal Channel Hardening)**:
+  - **微信公众号渠道接入**：实现 `WeChatNotifier`，支持客服文本消息与模板消息（`TemplateID`）双模式发送；
+  - **Token 自愈与短有效期保护**：遇到 40001/42001/40014 时自动清除缓存、重新获取并重试一次；`ExpiresIn <= 60` 安全窗口防护，杜绝负过期时间；URL 参数严格 `QueryEscape`；
+  - **Signal 协议深度校验**：严格验证 HTTP/HTTPS 协议与主机合法性，去重并过滤空接收人，HTTP 4xx 时提取返回正文错误摘要；
+  - **配置优先级对齐**：严格实现 `AGENTS.md` 规定的「环境变量 (`os.Getenv`) > 数据库 (`database.Setting`)」三级优先级。
+- **TMDB Collection 同系列智能自动归并服务 (TMDB Collection Auto-Merge)**:
+  - 基于并查集 (Union-Find) 算法与 TMDB 影视元数据，自动发现属于同一 TMDB Collection / 相同系列的跨季度、剧场版或衍生作品；
+  - 自动计算并分配统一番剧系列标识 `SeriesID`，归档时统一收敛入库至同一父目录（如 `/media/Anime/进击的巨人/` 下分设各季）；
+  - 尊重用户自定义个性化设定，非空已有 `SeriesID` 默认安全保护不覆盖（除非显式开启覆盖）。
+
+### 缺陷修复与深度加固 (Hardening & Bug Fixes)
+- **MCP 生产级安全审计与会话治理 (Native MCP Server Hardening)**:
+  - SSE 会话空闲超时自动淘汰 (`EvictStaleSessions`)，并发会话上限保护 (503) 与 1MB 请求体限制 (413)；
+  - 鉴权改用 `crypto/subtle.ConstantTimeCompare` 恒定时间比较，消除时序侧信道风险；
+  - 治理工具 `update_system_config` 设立敏感键强拦截白名单，严禁读写 `jwt_secret`、密码、Token 等机密项；
+  - 10 项工具全链路 nil 服务与 nil DB 防护，JSON-RPC 2.0 协议规范对齐。
+- **三级消歧漏斗防毒与边缘覆盖 (3-Tier Disambiguation Anti-Poisoning & Edge Coverage)**:
+  - 深度清洗年份、分辨率与 CRC32 混淆，支持 `v2/v3`、小数集（如 `01.5`）与 `[12 END]` 标记；
+  - 时区容差窗口对齐：支持东八区、本地时间与 RFC3339 混合解析，设置 `-6h ~ +72h` 容差与 12h 压制延时决胜；
+  - AI 配额熔断与缓存防毒：线程安全 `DailyQuotaGuard`（30次/天熔断与跨天重置），严禁低置信度（< 0.2）或失败结果持久化至缓存表。
+- **做种生命周期回收与磁盘急停 (Seeding Lifecycle & Disk Killswitch)**:
+  - 做种达标回收安全校验剧集入库状态，硬链接 `SameFile` 零 I/O 校验；
+  - 跨平台剩余空间熔断监控，保障物理磁盘安全。
+- **全量 `-race` 测试全绿通过**：全仓库所有包 100% 通过 `go test -race ./...` 严苛检测。
+
+---
+
 ## v0.6.0 — 2026-09-12 (Next-Gen Microkernel Architecture, Native MCP Server, Smart Disambiguation & Downloader Hardening)
 
 ### 核心新特性 (Major Features)

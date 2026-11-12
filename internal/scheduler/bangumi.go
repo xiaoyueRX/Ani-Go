@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -13,12 +14,17 @@ import (
 
 // pollSyncBangumi 同步 Bangumi 收藏到本地订阅
 func (s *Scheduler) pollSyncBangumi(ctx context.Context) {
-	username := s.cfg.Metadata.BGMTV.Username
-	if database.DB != nil {
-		var setting database.Setting
-		if err := database.DB.Where("key = ?", "BGMTV_USERNAME").First(&setting).Error; err == nil && setting.Value != "" {
-			username = setting.Value
-		}
+	if database.DB == nil {
+		return
+	}
+
+	username := ""
+	if s.cfg != nil {
+		username = s.cfg.Metadata.BGMTV.Username
+	}
+	var setting database.Setting
+	if err := database.DB.Where("key = ?", "BGMTV_USERNAME").First(&setting).Error; err == nil && setting.Value != "" {
+		username = setting.Value
 	}
 	if username == "" || s.metadataProvider == nil || s.metadataProvider.Name() != "BGM.tv" {
 		return
@@ -39,6 +45,9 @@ func (s *Scheduler) pollSyncBangumi(ctx context.Context) {
 
 	addedCount := 0
 	for _, anime := range animes {
+		if ctx.Err() != nil {
+			return
+		}
 		// 检查是否已订阅
 		var count int64
 		database.DB.Model(&database.Subscription{}).Where("bangumi_id = ?", anime.ID).Count(&count)
@@ -64,6 +73,10 @@ func (s *Scheduler) pollSyncBangumi(ctx context.Context) {
 
 // autoSubscribe 根据元数据自动创建订阅记录
 func (s *Scheduler) autoSubscribe(ctx context.Context, anime core.Anime) (uint, error) {
+	if database.DB == nil {
+		return 0, fmt.Errorf("数据库未就绪")
+	}
+
 	// 1. 在事务外部获取 Mikan RSS URL，避免网络 I/O 阻塞数据库事务
 	var rssURL string
 	mikanSrc, ok := s.source.(*source.MikanSource)

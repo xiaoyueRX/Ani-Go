@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
@@ -11,9 +12,11 @@ import (
 )
 
 var (
+	// DefaultGeekNamingPlugin 媒体库规范重命名插件共享单例
 	DefaultGeekNamingPlugin = &GeekNamingPlugin{enabled: true}
 )
 
+// GeekNamingPlugin 媒体库规范重命名插件
 type GeekNamingPlugin struct {
 	mu      sync.RWMutex
 	enabled bool
@@ -50,10 +53,17 @@ func (p *GeekNamingPlugin) Stop(bus core.EventBus) error {
 	return nil
 }
 
-// InitGeekNaming 注册规范命名插件
+// InitGeekNaming 注册规范命名钩子（重复调用时先清理同名旧钩子以保证幂等）
 func InitGeekNaming(mgr *core.WaterfallHookManager) {
+	if mgr == nil {
+		return
+	}
+	mgr.UnregisterHooksByName("StandardNaming")
 	mgr.RegisterNamingHook(core.PriorityHigh, "StandardNaming", func(ctx context.Context, input interface{}) (interface{}, error) {
-		in := input.(core.NamingHookInput)
+		in, ok := input.(core.NamingHookInput)
+		if !ok {
+			return nil, fmt.Errorf("规范命名钩子收到无效输入类型: %T", input)
+		}
 		DefaultGeekNamingPlugin.mu.RLock()
 		active := DefaultGeekNamingPlugin.enabled
 		DefaultGeekNamingPlugin.mu.RUnlock()
@@ -72,36 +82,65 @@ func InitGeekNaming(mgr *core.WaterfallHookManager) {
 	})
 }
 
-// sanitizePathForMediaServer 清洗整理路径中的跨平台非法字符与多余空格，遵循 Plex/Emby/Jellyfin 刮削规范
+var mediaServerReplacer = strings.NewReplacer(
+	":", " - ",
+	"?", "？",
+	"*", " ",
+	"\"", "'",
+	"<", "（",
+	">", "）",
+	"|", " - ",
+)
+
+// sanitizePathForMediaServer 清洗整理路径中的跨平台非法字符与多余空格，并保留绝对路径根前缀
 func sanitizePathForMediaServer(p string) string {
+	if strings.TrimSpace(p) == "" {
+		return p
+	}
 	clean := filepath.Clean(p)
-	parts := strings.Split(clean, string(filepath.Separator))
-	for i, seg := range parts {
-		if i == 0 && (strings.Contains(seg, ":") && len(seg) == 2) {
-			// Windows 盘符如 C: 保留
+	if clean == "." || clean == string(filepath.Separator) {
+		return clean
+	}
+
+	vol := filepath.VolumeName(clean)
+	rest := strings.TrimPrefix(clean, vol)
+	hasRootSep := strings.HasPrefix(rest, string(filepath.Separator))
+	trimmed := strings.TrimPrefix(rest, string(filepath.Separator))
+	if trimmed == "" {
+		return clean
+	}
+
+	rawParts := strings.Split(trimmed, string(filepath.Separator))
+	cleanedParts := make([]string, 0, len(rawParts))
+	for _, seg := range rawParts {
+		if seg == "" || seg == "." {
 			continue
 		}
-		// 替换文件系统非法字符
-		r := strings.NewReplacer(
-			":", " - ",
-			"?", "？",
-			"*", " ",
-			"\"", "'",
-			"<", "（",
-			">", "）",
-			"|", " - ",
-		)
-		s := r.Replace(seg)
-		// 合并多余空格
+		if seg == ".." {
+			cleanedParts = append(cleanedParts, seg)
+			continue
+		}
+		s := mediaServerReplacer.Replace(seg)
 		fields := strings.Fields(s)
 		if len(fields) > 0 {
 			s = strings.Join(fields, " ")
+		} else {
+			s = ""
 		}
 		// 移除文件名或目录末尾的空格与句点（Windows 规范）
 		s = strings.TrimRight(s, " .")
-		if s != "" {
-			parts[i] = s
+		if s == "" {
+			s = "_"
 		}
+		cleanedParts = append(cleanedParts, s)
 	}
-	return filepath.Join(parts...)
+
+	joined := filepath.Join(cleanedParts...)
+	if hasRootSep {
+		return vol + string(filepath.Separator) + joined
+	}
+	if vol != "" {
+		return vol + joined
+	}
+	return joined
 }

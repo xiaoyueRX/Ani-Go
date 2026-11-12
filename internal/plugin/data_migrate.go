@@ -17,6 +17,7 @@ type DataMigratePlugin struct {
 	migratedEpisodes  int
 	migratedDownloads int
 	subID             core.SubscriptionID
+	subBus            core.EventBus
 }
 
 func (p *DataMigratePlugin) GetInfo() PluginInfo {
@@ -42,15 +43,34 @@ func (p *DataMigratePlugin) GetInfo() PluginInfo {
 	}
 }
 
+// Init 启用数据迁移插件（幂等支持重复调用与 nil 总线保护）
 func (p *DataMigratePlugin) Init(bus core.EventBus, ctx core.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if bus != nil {
-		if p.subID != 0 {
-			bus.Unsubscribe("data.migrate", p.subID)
+	if p.subID != 0 {
+		unsubBus := p.subBus
+		if unsubBus == nil {
+			unsubBus = bus
 		}
+		if unsubBus != nil {
+			unsubBus.Unsubscribe("data.migrate", p.subID)
+		}
+		p.subID = 0
+		p.subBus = nil
+	}
+
+	if bus != nil {
+		p.subBus = bus
 		p.subID = bus.Subscribe("data.migrate", func(ev core.Event) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("⚠️ [数据迁移插件] 处理事件异常崩溃捕获: %v", r)
+				}
+			}()
+			if ev.Payload == nil {
+				return
+			}
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			if !p.enabled {
@@ -58,17 +78,14 @@ func (p *DataMigratePlugin) Init(bus core.EventBus, ctx core.Context) error {
 			}
 			now := time.Now()
 			p.lastMigratedAt = &now
-			if subs, ok := ev.Payload["subscriptions"].(int); ok {
-				p.migratedSubs += subs
-			}
-			if eps, ok := ev.Payload["episodes"].(int); ok {
-				p.migratedEpisodes += eps
-			}
-			if dls, ok := ev.Payload["downloads"].(int); ok {
-				p.migratedDownloads += dls
-			}
-			log.Printf("🔌 [数据迁移插件] 记录迁移事件: +%d 订阅, +%d 剧集, +%d 下载",
-				p.migratedSubs, p.migratedEpisodes, p.migratedDownloads)
+			subs := extractPayloadInt(ev.Payload["subscriptions"])
+			eps := extractPayloadInt(ev.Payload["episodes"])
+			dls := extractPayloadInt(ev.Payload["downloads"])
+			p.migratedSubs += subs
+			p.migratedEpisodes += eps
+			p.migratedDownloads += dls
+			log.Printf("🔌 [数据迁移插件] 记录迁移事件: +%d 订阅, +%d 剧集, +%d 下载 (累计: %d/%d/%d)",
+				subs, eps, dls, p.migratedSubs, p.migratedEpisodes, p.migratedDownloads)
 		})
 	}
 
@@ -77,26 +94,54 @@ func (p *DataMigratePlugin) Init(bus core.EventBus, ctx core.Context) error {
 	return nil
 }
 
+// Stop 停用数据迁移插件并注销事件监听（幂等安全）
 func (p *DataMigratePlugin) Stop(bus core.EventBus) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if bus != nil && p.subID != 0 {
-		bus.Unsubscribe("data.migrate", p.subID)
-		p.subID = 0
+	wasEnabled := p.enabled
+	unsubBus := bus
+	if unsubBus == nil {
+		unsubBus = p.subBus
 	}
+	if unsubBus != nil && p.subID != 0 {
+		unsubBus.Unsubscribe("data.migrate", p.subID)
+	}
+	p.subID = 0
+	p.subBus = nil
 	p.enabled = false
-	log.Println("🔌 [插件] 数据导入与迁移插件已停用")
+	if wasEnabled {
+		log.Println("🔌 [插件] 数据导入与迁移插件已停用")
+	}
 	return nil
 }
 
+// GetStats 返回迁移统计快照
 func (p *DataMigratePlugin) GetStats() map[string]interface{} {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	var lastCopy *time.Time
+	if p.lastMigratedAt != nil {
+		t := *p.lastMigratedAt
+		lastCopy = &t
+	}
 	return map[string]interface{}{
-		"last_migrated_at":   p.lastMigratedAt,
+		"last_migrated_at":   lastCopy,
 		"migrated_subs":      p.migratedSubs,
 		"migrated_episodes":  p.migratedEpisodes,
 		"migrated_downloads": p.migratedDownloads,
+	}
+}
+
+func extractPayloadInt(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	default:
+		return 0
 	}
 }

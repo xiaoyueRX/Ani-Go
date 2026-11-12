@@ -21,6 +21,7 @@ import (
 // BGMTVProvider 实现 core.MetadataProvider 接口
 // 使用 BGM.tv API 获取番剧元数据
 type BGMTVProvider struct {
+	mu            sync.RWMutex // 保护认证令牌、镜像列表和当前活跃域名
 	httpClient    *http.Client
 	userToken     string
 	mirrorDomains []string // API 域名列表: api.bgm.tv, api.bangumi.tv, api.chii.in
@@ -32,28 +33,43 @@ type BGMTVProvider struct {
 
 // NewBGMTVProvider 创建 BGM.tv 元数据提供者
 func NewBGMTVProvider(userToken string, mirrorDomains []string) *BGMTVProvider {
-	active := "api.bgm.tv"
-	if len(mirrorDomains) > 0 {
-		active = mirrorDomains[0]
+	cleaned := cleanDomains(mirrorDomains)
+	if len(cleaned) == 0 {
+		cleaned = []string{"api.bgm.tv", "api.bangumi.tv", "api.chii.in"}
 	}
 	return &BGMTVProvider{
 		httpClient:    httpx.New(30 * time.Second),
-		userToken:     userToken,
-		mirrorDomains: mirrorDomains,
-		activeDomain:  active,
+		userToken:     strings.TrimSpace(userToken),
+		mirrorDomains: cleaned,
+		activeDomain:  cleaned[0],
 	}
+}
+
+func cleanDomains(domains []string) []string {
+	out := make([]string, 0, len(domains))
+	seen := make(map[string]struct{}, len(domains))
+	for _, d := range domains {
+		d = strings.TrimRight(strings.TrimSpace(d), "/")
+		if d == "" {
+			continue
+		}
+		if _, ok := seen[d]; ok {
+			continue
+		}
+		seen[d] = struct{}{}
+		out = append(out, d)
+	}
+	return out
 }
 
 func (p *BGMTVProvider) Name() string { return "BGM.tv" }
 
 // SetUserToken 更新认证令牌
 func (p *BGMTVProvider) SetUserToken(token string) {
-	p.userToken = token
+	p.mu.Lock()
+	p.userToken = strings.TrimSpace(token)
+	p.mu.Unlock()
 }
-
-
-
-
 
 // LatencyResult 镜像延迟结果
 type LatencyResult struct {
@@ -62,12 +78,27 @@ type LatencyResult struct {
 	OK        bool   `json:"ok"`
 }
 
+func buildMirrorURL(domain, path string) string {
+	base := strings.TrimRight(strings.TrimSpace(domain), "/")
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		base = "https://" + base
+	}
+	return base + path
+}
+
 // TestLatency 测试所有 BGM 镜像延迟
 func (p *BGMTVProvider) TestLatency(ctx context.Context) []LatencyResult {
-	results := make([]LatencyResult, 0, len(p.mirrorDomains))
-	for _, domain := range p.mirrorDomains {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	p.mu.RLock()
+	domains := append([]string(nil), p.mirrorDomains...)
+	p.mu.RUnlock()
+
+	results := make([]LatencyResult, 0, len(domains))
+	for _, domain := range domains {
 		start := time.Now()
-		fullURL := fmt.Sprintf("https://%s/v0/subjects/1", domain)
+		fullURL := buildMirrorURL(domain, "/v0/subjects/1")
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 		if err != nil {
 			results = append(results, LatencyResult{
@@ -78,15 +109,15 @@ func (p *BGMTVProvider) TestLatency(ctx context.Context) []LatencyResult {
 			continue
 		}
 		req.Header.Set("User-Agent", "Ani-Go/1.0")
-		
+
 		resp, err := p.httpClient.Do(req)
 		latency := time.Since(start).Milliseconds()
-		
+
 		ok := err == nil && resp != nil && resp.StatusCode == http.StatusOK
 		if resp != nil {
 			resp.Body.Close()
 		}
-			
+
 		results = append(results, LatencyResult{
 			Domain:    domain,
 			LatencyMS: latency,
@@ -174,14 +205,21 @@ type bgmEpisode struct {
 
 // SearchAnime 搜索番剧（使用旧版搜索接口，响应更简洁）
 func (p *BGMTVProvider) SearchAnime(ctx context.Context, title string) ([]core.Anime, error) {
+	if strings.TrimSpace(title) == "" {
+		return []core.Anime{}, nil
+	}
 	path := fmt.Sprintf("/search/subject/%s?type=2&responseGroup=small",
-		url.QueryEscape(title))
+		url.PathEscape(strings.TrimSpace(title)))
 
 	resp, err := p.tryMirrors(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("BGM 搜索失败: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("BGM 搜索返回异常状态码: HTTP %d", resp.StatusCode)
+	}
 
 	var result bgmSearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -213,7 +251,12 @@ func (p *BGMTVProvider) SearchAnime(ctx context.Context, title string) ([]core.A
 
 // GetAnime 获取番剧详情
 func (p *BGMTVProvider) GetAnime(ctx context.Context, id string) (core.Anime, error) {
-	path := fmt.Sprintf("/v0/subjects/%s", id)
+	cleanID := strings.TrimSpace(id)
+	if cleanID == "" {
+		return core.Anime{}, fmt.Errorf("BGM: 番剧 ID 不能为空")
+	}
+	escapedID := url.PathEscape(cleanID)
+	path := fmt.Sprintf("/v0/subjects/%s", escapedID)
 
 	resp, err := p.tryMirrors(ctx, path)
 	if err != nil {
@@ -222,7 +265,10 @@ func (p *BGMTVProvider) GetAnime(ctx context.Context, id string) (core.Anime, er
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return core.Anime{}, fmt.Errorf("BGM: 条目未找到 (ID: %s)", id)
+		return core.Anime{}, fmt.Errorf("BGM: 条目未找到 (ID: %s)", cleanID)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return core.Anime{}, fmt.Errorf("BGM 获取详情失败: HTTP %d", resp.StatusCode)
 	}
 
 	var subject bgmSubject
@@ -252,8 +298,9 @@ func (p *BGMTVProvider) GetAnime(ctx context.Context, id string) (core.Anime, er
 	}
 
 	seriesID := ""
-	if relPath := fmt.Sprintf("/v0/subjects/%s/subjects", id); true {
-		if relResp, err := p.tryMirrors(ctx, relPath); err == nil {
+	relPath := fmt.Sprintf("/v0/subjects/%s/subjects", escapedID)
+	if relResp, err := p.tryMirrors(ctx, relPath); err == nil {
+		if relResp.StatusCode == http.StatusOK {
 			var relations []bgmSubjectRelation
 			if json.NewDecoder(relResp.Body).Decode(&relations) == nil {
 				for _, rel := range relations {
@@ -263,8 +310,8 @@ func (p *BGMTVProvider) GetAnime(ctx context.Context, id string) (core.Anime, er
 					}
 				}
 			}
-			relResp.Body.Close()
 		}
+		relResp.Body.Close()
 	}
 
 	return core.Anime{
@@ -284,17 +331,31 @@ func (p *BGMTVProvider) GetAnime(ctx context.Context, id string) (core.Anime, er
 // GetEpisodes 获取番剧集数列表
 // 注意：BGM.tv 没有多季概念，每季是独立 subject
 func (p *BGMTVProvider) GetEpisodes(ctx context.Context, animeID string, season int) ([]core.Episode, error) {
+	cleanID := strings.TrimSpace(animeID)
+	if cleanID == "" {
+		return nil, fmt.Errorf("BGM: 番剧 ID 不能为空")
+	}
+
 	var allEpisodes []core.Episode
 	offset := 0
 	limit := 100
 
 	for {
 		path := fmt.Sprintf("/v0/episodes?subject_id=%s&type=0&limit=%d&offset=%d",
-			animeID, limit, offset)
+			url.QueryEscape(cleanID), limit, offset)
 
 		resp, err := p.tryMirrors(ctx, path)
 		if err != nil {
 			return nil, fmt.Errorf("BGM 获取剧集失败: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			return nil, fmt.Errorf("BGM: 剧集条目未找到 (ID: %s)", cleanID)
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("BGM 获取剧集失败: HTTP %d", resp.StatusCode)
 		}
 
 		var epResp bgmEpisodeResponse
@@ -314,7 +375,7 @@ func (p *BGMTVProvider) GetEpisodes(ctx context.Context, animeID string, season 
 				epTitle = ep.Name
 			}
 			allEpisodes = append(allEpisodes, core.Episode{
-				AnimeID: animeID,
+				AnimeID: cleanID,
 				Season:  season,
 				Number:  float32(ep.Ep),
 				Title:   epTitle,
@@ -322,7 +383,7 @@ func (p *BGMTVProvider) GetEpisodes(ctx context.Context, animeID string, season 
 			})
 		}
 
-		if offset+limit >= epResp.Total {
+		if offset+limit >= epResp.Total || len(epResp.Data) == 0 {
 			break
 		}
 		offset += limit
@@ -348,24 +409,31 @@ func (p *BGMTVProvider) GetCalendar(ctx context.Context) ([]core.TorrentItem, er
 	}
 	p.calMu.RUnlock()
 
-	resp, err := p.tryMirrors(ctx, "/calendar")
-	if err != nil {
+	fallbackCache := func(cause error) ([]core.TorrentItem, error) {
 		p.calMu.RLock()
+		defer p.calMu.RUnlock()
 		if len(p.calCache) > 0 {
-			log.Printf("⚠️ 获取 Bangumi 每日放送失败 (%v)，回退至过往缓存数据", err)
+			log.Printf("⚠️ 获取 Bangumi 每日放送失败 (%v)，回退至过往缓存数据", cause)
 			cached := make([]core.TorrentItem, len(p.calCache))
 			copy(cached, p.calCache)
-			p.calMu.RUnlock()
 			return cached, nil
 		}
-		p.calMu.RUnlock()
-		return nil, err
+		return nil, cause
+	}
+
+	resp, err := p.tryMirrors(ctx, "/calendar")
+	if err != nil {
+		return fallbackCache(err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return fallbackCache(fmt.Errorf("BGM 日历接口返回异常状态码: HTTP %d", resp.StatusCode))
+	}
+
 	var calendar []bgmCalendarItem
 	if err := json.NewDecoder(resp.Body).Decode(&calendar); err != nil {
-		return nil, err
+		return fallbackCache(err)
 	}
 
 	var results []core.TorrentItem
@@ -388,7 +456,8 @@ func (p *BGMTVProvider) GetCalendar(ctx context.Context) ([]core.TorrentItem, er
 	}
 
 	p.calMu.Lock()
-	p.calCache = results
+	p.calCache = make([]core.TorrentItem, len(results))
+	copy(p.calCache, results)
 	p.calTime = time.Now()
 	p.calMu.Unlock()
 
@@ -397,9 +466,11 @@ func (p *BGMTVProvider) GetCalendar(ctx context.Context) ([]core.TorrentItem, er
 
 // GetCollections 获取用户的 Bangumi 收藏（想看/在看）
 func (p *BGMTVProvider) GetCollections(ctx context.Context, username string) ([]core.Anime, error) {
-	if username == "" {
+	cleanUser := strings.TrimSpace(username)
+	if cleanUser == "" {
 		return nil, fmt.Errorf("用户名不能为空")
 	}
+	escapedUser := url.PathEscape(cleanUser)
 
 	// 状态码：1 = 想看, 3 = 在看
 	statuses := []int{1, 3}
@@ -410,11 +481,20 @@ func (p *BGMTVProvider) GetCollections(ctx context.Context, username string) ([]
 		limit := 30
 		for {
 			path := fmt.Sprintf("/v0/users/%s/collections?type=%d&limit=%d&offset=%d",
-				username, status, limit, offset)
+				escapedUser, status, limit, offset)
 
 			resp, err := p.tryMirrors(ctx, path)
 			if err != nil {
 				return nil, fmt.Errorf("获取收藏失败 (status=%d): %w", status, err)
+			}
+
+			if resp.StatusCode == http.StatusNotFound {
+				resp.Body.Close()
+				return nil, fmt.Errorf("BGM: 用户不存在或无权访问 (user=%s)", cleanUser)
+			}
+			if resp.StatusCode != http.StatusOK {
+				resp.Body.Close()
+				return nil, fmt.Errorf("获取收藏失败 (status=%d): HTTP %d", status, resp.StatusCode)
 			}
 
 			var collResp struct {
@@ -442,6 +522,7 @@ func (p *BGMTVProvider) GetCollections(ctx context.Context, username string) ([]
 				resp.Body.Close()
 				return nil, fmt.Errorf("解析收藏失败: %w", err)
 			}
+			resp.Body.Close()
 
 			for _, item := range collResp.Data {
 				s := item.Subject
@@ -469,7 +550,6 @@ func (p *BGMTVProvider) GetCollections(ctx context.Context, username string) ([]
 					CoverURL:    s.Images.Large,
 				})
 			}
-			resp.Body.Close()
 
 			if offset+limit >= collResp.Total || len(collResp.Data) == 0 {
 				break
@@ -481,32 +561,42 @@ func (p *BGMTVProvider) GetCollections(ctx context.Context, username string) ([]
 	return allAnime, nil
 }
 
-
+// tryMirrors 依次尝试镜像域名发起 GET 请求，返回首个成功或 404 的响应
 func (p *BGMTVProvider) tryMirrors(ctx context.Context, path string) (*http.Response, error) {
-	domains := make([]string, 0, 1+len(p.mirrorDomains))
-	if p.activeDomain != "" {
-		domains = append(domains, p.activeDomain)
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	for _, d := range p.mirrorDomains {
-		if d != p.activeDomain {
+
+	p.mu.RLock()
+	active := p.activeDomain
+	mirrors := append([]string(nil), p.mirrorDomains...)
+	userToken := p.userToken
+	p.mu.RUnlock()
+
+	domains := make([]string, 0, 1+len(mirrors))
+	if active != "" {
+		domains = append(domains, active)
+	}
+	for _, d := range mirrors {
+		if d != active {
 			domains = append(domains, d)
 		}
+	}
+	if len(domains) == 0 {
+		return nil, fmt.Errorf("未配置可用的 BGM 镜像域名")
 	}
 
 	var lastErr error
 	for _, domain := range domains {
-		fullURL := domain + path
-		if !strings.HasPrefix(fullURL, "http://") && !strings.HasPrefix(fullURL, "https://") {
-			fullURL = "https://" + fullURL
-		}
+		fullURL := buildMirrorURL(domain, path)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 		if err != nil {
 			lastErr = err
 			continue
 		}
 		req.Header.Set("User-Agent", "Ani-Go/1.0")
-		if p.userToken != "" {
-			req.Header.Set("Authorization", "Bearer "+p.userToken)
+		if userToken != "" {
+			req.Header.Set("Authorization", "Bearer "+userToken)
 		}
 
 		resp, err := p.httpClient.Do(req)
@@ -516,6 +606,11 @@ func (p *BGMTVProvider) tryMirrors(ctx context.Context, path string) (*http.Resp
 			continue
 		}
 		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
+			if resp.StatusCode == http.StatusOK && domain != active {
+				p.mu.Lock()
+				p.activeDomain = domain
+				p.mu.Unlock()
+			}
 			return resp, nil
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
@@ -524,6 +619,9 @@ func (p *BGMTVProvider) tryMirrors(ctx context.Context, path string) (*http.Resp
 		}
 		resp.Body.Close()
 		lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("无可用响应")
 	}
 	return nil, fmt.Errorf("所有 BGM 镜像均不可达: %w", lastErr)
 }

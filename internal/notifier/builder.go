@@ -119,7 +119,9 @@ func BuildAllNotifiers(get func(key string) string) []v2.Notifier {
 				toList = append(toList, trimmed)
 			}
 		}
-		list = append(list, NewEmailNotifier(smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, toList))
+		if len(toList) > 0 {
+			list = append(list, NewEmailNotifier(smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, toList))
+		}
 	}
 
 	// 14. Matrix
@@ -150,29 +152,41 @@ func BuildAllNotifiers(get func(key string) string) []v2.Notifier {
 	signalSender := get("SIGNAL_SENDER")
 	signalRecipients := get("SIGNAL_RECIPIENTS")
 	if signalURL != "" && signalSender != "" && signalRecipients != "" {
-		var rList []string
-		for _, r := range strings.Split(signalRecipients, ",") {
-			if trimmed := strings.TrimSpace(r); trimmed != "" {
-				rList = append(rList, trimmed)
-			}
+		rList := splitAndTrimRecipients(signalRecipients)
+		if len(rList) > 0 {
+			list = append(list, NewSignalNotifierWithParams(signalURL, signalSender, rList))
 		}
-		list = append(list, NewSignalNotifierWithParams(signalURL, signalSender, rList))
+	}
+
+	// 18. 微信公众号 (WeChat)
+	wechatAppID := get("WECHAT_APP_ID")
+	wechatAppSecret := get("WECHAT_APP_SECRET")
+	wechatUserID := get("WECHAT_USER_ID")
+	wechatTemplateID := get("WECHAT_TEMPLATE_ID")
+	if wechatAppID != "" && wechatAppSecret != "" && wechatUserID != "" {
+		list = append(list, NewWeChatNotifierWithParams(wechatAppID, wechatAppSecret, wechatUserID, wechatTemplateID))
 	}
 
 	return list
 }
 
-// BuildAllNotifiersFromSettingsAndEnv 从数据库设置与环境变量构建全部已配置的通知器
+// BuildAllNotifiersFromSettingsAndEnv 从环境变量与数据库设置构建全部已配置的通知器
+// 遵循 AGENTS.md 三级优先律：环境变量 (os.Getenv) > 数据库 (database.Setting)
 func BuildAllNotifiersFromSettingsAndEnv() []v2.Notifier {
 	notifiers := BuildAllNotifiers(func(key string) string {
+		if envVal := strings.TrimSpace(os.Getenv(key)); envVal != "" {
+			return envVal
+		}
 		if database.DB != nil {
 			var s database.Setting
-			if err := database.DB.Where("key = ?", key).First(&s).Error; err == nil && s.Value != "" {
-				return strings.TrimSpace(s.Value)
+			if err := database.DB.Where("key = ?", key).First(&s).Error; err == nil {
+				if dbVal := strings.TrimSpace(s.Value); dbVal != "" {
+					return dbVal
+				}
 			}
 		}
-		return strings.TrimSpace(os.Getenv(key))
+		return ""
 	})
-	log.Printf("🔔 [通知中心] 已根据数据库与环境变量加载 %d 个通知渠道", len(notifiers))
+	log.Printf("🔔 [通知中心] 已根据环境变量与数据库加载 %d 个通知渠道", len(notifiers))
 	return notifiers
 }

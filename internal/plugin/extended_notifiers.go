@@ -26,13 +26,15 @@ type ExtendedNotifiersPlugin struct {
 // DefaultExtendedNotifiersPlugin 共享单例
 var DefaultExtendedNotifiersPlugin = &ExtendedNotifiersPlugin{}
 
-// SetController 绑定底层 NotifyManager 控制接口
+// SetController 绑定底层 NotifyManager 控制接口（在锁外同步状态，避免锁顺序反转）
 func (p *ExtendedNotifiersPlugin) SetController(c NotifyController) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.controller = c
+	enabled := p.enabled
+	p.mu.Unlock()
+
 	if c != nil {
-		c.SetEnabled(p.enabled)
+		c.SetEnabled(enabled)
 	}
 }
 
@@ -57,29 +59,40 @@ func (p *ExtendedNotifiersPlugin) GetInfo() PluginInfo {
 	}
 }
 
-// Init 启动通知插件
+// Init 启动通知插件（幂等支持重复调用，仅在状态恢复或控制器未就绪时触发重载）
 func (p *ExtendedNotifiersPlugin) Init(bus core.EventBus, ctx core.Context) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
+	wasEnabled := p.enabled
 	p.enabled = true
-	if p.controller != nil {
-		p.controller.SetEnabled(true)
-		p.controller.Reload()
+	ctrl := p.controller
+	p.mu.Unlock()
+
+	if ctrl != nil {
+		needReload := !wasEnabled || !ctrl.IsEnabled()
+		ctrl.SetEnabled(true)
+		if needReload {
+			ctrl.Reload()
+		}
 	}
-	log.Println("🔌 [插件] 消息通知推送插件已启用，已激活 v2.NotifyManager 全渠道通知中心")
+	if !wasEnabled {
+		log.Println("🔌 [插件] 消息通知推送插件已启用，已激活 v2.NotifyManager 全渠道通知中心")
+	}
 	return nil
 }
 
-// Stop 停用通知插件
+// Stop 停用通知插件（幂等释放通知中心后台协程）
 func (p *ExtendedNotifiersPlugin) Stop(bus core.EventBus) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
+	wasEnabled := p.enabled
 	p.enabled = false
-	if p.controller != nil {
-		p.controller.SetEnabled(false)
+	ctrl := p.controller
+	p.mu.Unlock()
+
+	if ctrl != nil {
+		ctrl.SetEnabled(false)
 	}
-	log.Println("🔌 [插件] 消息通知推送插件已停用，已休眠通知中心（所有渠道消息推送已暂停）")
+	if wasEnabled {
+		log.Println("🔌 [插件] 消息通知推送插件已停用，已休眠通知中心（所有渠道消息推送已暂停）")
+	}
 	return nil
 }

@@ -13,9 +13,9 @@ Ani-Go follows anime releases through subscription feeds, sends matching resourc
 - **Subscriptions and search:** Follow releases using Mikan RSS feeds; optional sources include Nyaa, ACG.RIP, and AnimeTosho for aggregated search.
 - **Download management:** Connect to qBittorrent, Transmission, or Aria2 to submit tasks and check their status. Switch the active download client through settings.
 - **Episode matching:** Parse release names using local rules and air dates. Optional AI-assisted parsing requires a separately configured provider.
-- **File organization:** Generate folders and file names for anime series, films, and specials. Supports hard links, with a copy fallback when hard linking fails.
+- **File organization & Series Auto-Merge:** Generate folders and file names for anime series, films, and specials. Supports hard links (safe copy fallback); automatically identifies and groups same-franchise anime across seasons/movies via TMDB Collections to assign unified `SeriesID`.
 - **Web interface:** Manage subscriptions, downloads, schedules, and settings in a browser; Chinese and English UI translations are available.
-- **Additional tools:** Notifications, built-in plugins, backups, and an MCP interface for selected management operations.
+- **Notifications & Extensions:** Multi-event, per-channel customizable notification templates across 18+ channels (Telegram, WeChat Official Account, WeCom, Feishu, DingTalk, QQ, Signal, Bark, etc.), built-in plugins, backups, and native MCP interface.
 
 Ani-Go is not a BitTorrent client or a media player. Downloads require an external download client. Organized files can then be used by media servers such as Jellyfin or Emby.
 
@@ -85,6 +85,9 @@ See [`.env.example`](.env.example) for a starting point.
 | `MOVIE_BASE_PATH` / `OVA_BASE_PATH` | Movie and special-episode directories |
 | `USE_HARDLINK` | Prefer hard links during organization |
 | `DB_PATH` | SQLite database path |
+| `TMDB_API_KEY` | TMDB API Key (for metadata scraping and franchise auto-merge) |
+| `WECHAT_APP_ID` / `WECHAT_APP_SECRET` / `WECHAT_USER_ID` | WeChat Official Account credentials (optional `WECHAT_TEMPLATE_ID` for template messages) |
+| `SIGNAL_API_URL` / `SIGNAL_SENDER` / `SIGNAL_RECIPIENTS` | Signal REST API endpoint, sender number, and comma-separated recipients |
 
 Settings can come from environment variables, stored database settings, or built-in defaults. **Environment variables take precedence.** Values defined in a Compose `environment` block also override variables with the same names from `.env`. Review [docker-compose.yml](docker-compose.yml) before changing paths.
 

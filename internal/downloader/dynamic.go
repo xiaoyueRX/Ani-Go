@@ -37,12 +37,11 @@ func (d *DynamicDownloader) GetCurrent() core.Downloader {
 }
 
 func (d *DynamicDownloader) Name() string {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if d.current == nil {
+	dl := d.GetCurrent()
+	if dl == nil {
 		return "none"
 	}
-	return d.current.Name()
+	return dl.Name()
 }
 
 func (d *DynamicDownloader) Add(ctx context.Context, item core.TorrentItem, savePath string) error {
@@ -51,64 +50,57 @@ func (d *DynamicDownloader) Add(ctx context.Context, item core.TorrentItem, save
 		return err
 	}
 
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if d.current == nil {
+	dl := d.GetCurrent()
+	if dl == nil {
 		return fmt.Errorf("下载器未就绪")
 	}
-	return d.current.Add(ctx, item, savePath)
+	return dl.Add(ctx, item, savePath)
 }
 
 func (d *DynamicDownloader) List(ctx context.Context) ([]core.DownloadTask, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if d.current == nil {
+	dl := d.GetCurrent()
+	if dl == nil {
 		return nil, fmt.Errorf("下载器未就绪")
 	}
-	return d.current.List(ctx)
+	return dl.List(ctx)
 }
 
 func (d *DynamicDownloader) GetStatus(ctx context.Context, hash string) (core.DownloadTask, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if d.current == nil {
+	dl := d.GetCurrent()
+	if dl == nil {
 		return core.DownloadTask{}, fmt.Errorf("下载器未就绪")
 	}
-	return d.current.GetStatus(ctx, hash)
+	return dl.GetStatus(ctx, hash)
 }
 
 func (d *DynamicDownloader) Delete(ctx context.Context, hash string, deleteFiles bool) error {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if d.current == nil {
+	dl := d.GetCurrent()
+	if dl == nil {
 		return fmt.Errorf("下载器未就绪")
 	}
-	return d.current.Delete(ctx, hash, deleteFiles)
+	return dl.Delete(ctx, hash, deleteFiles)
 }
 
 func (d *DynamicDownloader) Pause(ctx context.Context, hash string) error {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if d.current == nil {
+	dl := d.GetCurrent()
+	if dl == nil {
 		return fmt.Errorf("下载器未就绪")
 	}
-	return d.current.Pause(ctx, hash)
+	return dl.Pause(ctx, hash)
 }
 
 func (d *DynamicDownloader) Resume(ctx context.Context, hash string) error {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if d.current == nil {
+	dl := d.GetCurrent()
+	if dl == nil {
 		return fmt.Errorf("下载器未就绪")
 	}
-	return d.current.Resume(ctx, hash)
+	return dl.Resume(ctx, hash)
 }
 
 func (d *DynamicDownloader) IsAvailable(ctx context.Context) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if d.current == nil {
+	dl := d.GetCurrent()
+	if dl == nil {
 		return false
 	}
-	return d.current.IsAvailable(ctx)
+	return dl.IsAvailable(ctx)
 }

@@ -98,7 +98,7 @@
 - [x] **Multi-Platform Messaging**: Unified `Notifier` interface with EventBus-driven auto-push, 18 platforms + `MultiNotifier` aggregated broadcast:
   - **Chinese IM**:
     - [x] **QQ**: OneBot protocol (NapCat/go-cqhttp/Lagrange/LLOneBot)
-    - [x] **WeChat Official Account**: Customer service message API (`cgi-bin/message/custom/send`; env `WECHAT_APP_ID` / `WECHAT_APP_SECRET` / `WECHAT_USER_ID`)
+    - [x] **WeChat Official Account**: Customer service message API (`cgi-bin/message/custom/send`) and template message API (`cgi-bin/message/template/send`), with token auto-refresh and short expiry protection (`WECHAT_APP_ID`, `WECHAT_APP_SECRET`, `WECHAT_USER_ID`, `WECHAT_TEMPLATE_ID`)
     - [x] **WeCom (Enterprise WeChat)**: Webhook bot
     - [x] **Feishu/Lark**: Webhook bot
     - [x] **DingTalk**: Webhook bot
@@ -108,7 +108,7 @@
     - [x] **Slack**: Webhook + Block Kit
     - [x] **LINE**: Messaging API / push message
     - [x] **WhatsApp**: Meta Cloud API (graph.facebook.com)
-    - [x] **Signal**: signal-cli REST API (`{SIGNAL_API_URL}/v2/send`; env `SIGNAL_API_URL` / `SIGNAL_SENDER` / `SIGNAL_RECIPIENTS`)
+    - [x] **Signal**: signal-cli REST API (`{SIGNAL_API_URL}/v2/send`, URL validation, recipient normalization/deduplication, and HTTP 4xx error snippet extraction; `SIGNAL_API_URL`, `SIGNAL_SENDER`, `SIGNAL_RECIPIENTS`)
   - **Push Notification Services**:
     - [x] **Email**: SMTP send notifications (goroutine + context timeout)
     - [x] **ServerChan**: HTTP API (WeChat push)
@@ -121,8 +121,8 @@
   - [x] **Rule Engine (Default)**: Based on regex + keyword matching, zero dependencies, works without AI. Built-in patterns for subscribe/search/status commands.
   - [x] **AI Enhancement (Optional)**: Integrates OpenAI/Gemini/Ollama for higher accuracy (fuzzy expressions, synonym correction), auto-fallbacks to rule engine when AI is disabled.
 - [x] **Notification Manager**: Listen to EventBus events (download complete/failed/supplement done, etc.), push notifications through all above platforms.
-- [ ] **Notification Template System**: Support custom message templates, configurable per event type and platform. (pending)
-- [ ] **Full Platform Integration Testing**: Verify connectivity and notification push for each platform. (partially pending)
+- [x] **Notification Template System**: Safe template engine (no panics), 3-tier inheritance fallback (`(eventType, channel)` -> `(eventType, "")` -> system defaults), structured context, safe functions (`default`/`upper`/`lower`/`truncate`), database persistence (`NOTIFY_TEMPLATES_JSON`), and API preview/CRUD.
+- [x] **Full Platform Integration Testing & Channel Hardening**: 18-channel mock and integration test coverage, strict precedence alignment (environment variables > database), multi-channel parallel dispatch with graceful fallback.
 
 ### Phase 6: Data Migration ✅
 - [x] **AutoBangumi / ani-rss SQLite Import**: `internal/migrate` parses the legacy database and imports subscriptions and episodes, exposed via `POST /api/migrate`.
@@ -177,3 +177,10 @@
 - [x] **Native MCP Server Protocol Gateway**: Built-in SSE + Bearer Auth MCP server exposing 6 anime-ops tools and 4 governance tools (plugins cannot register private tools yet — that capability is planned, see `docs/02_PLUGIN_SPEC.md` section 6).
 - [x] **Automatic 3-Tier Disambiguation Funnel**: Pioneered Regex ➔ Bangumi Airdate Timestamp Matcher ➔ AI Fallback + Blowout Shield, resolving 95% of Chinese subgroup title ambiguities at 0 token cost.
 - [x] **Go 1.25+ Alignment & Multi-Arch Docker CI/CD**: Upgraded Dockerfile to `golang:1.25-alpine`, automated GitHub Actions multi-arch builds (`amd64`/`arm64`) to GHCR, published 7-platform precompiled release binaries on GitHub Releases.
+
+### Phase 12: v0.6.1 Series Auto-Merge, Notification Templates & Full-Stack Hardening ✅
+- [x] **TMDB Collection Auto-Merge Service**: Automatically detects entries belonging to the same franchise via Union-Find disjoint sets and TMDB metadata, assigning a unified `SeriesID` for cross-season and movie/special collection grouping without overwriting custom IDs.
+- [x] **Notification Template Engine & WeChat/Signal Hardening**: Panic-free template engine, 3-tier channel alias inheritance, WeChat dual-mode (customer service + template messages) with self-healing token refresh, Signal protocol validation, and structured data injection.
+- [x] **Seeding Lifecycle & Disk Killswitch Hardening**: Safe seeding task reclamation, hardlink `SameFile` zero-I/O validation, and cross-platform free space circuit breaker protection.
+- [x] **Native MCP Server Production Audit**: SSE idle session eviction (`EvictStaleSessions`), constant-time token comparison, strict sensitive config key interception, and comprehensive nil-service guards.
+- [x] **3-Tier Disambiguation Anti-Poisoning & Edge Coverage**: Deep filtering of year/resolution vs episode confusion, v2/v3 and decimal episode parsing, airdate window tolerance alignment, and thread-safe AI daily quota guard.

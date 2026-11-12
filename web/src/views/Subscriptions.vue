@@ -5,7 +5,7 @@ import request from '../utils/request'
 import { 
   Search, Plus, AlertTriangle, 
   X, LayoutGrid, RefreshCw,
-  RotateCcw, Trash2, Play, Check, Sparkles
+  RotateCcw, Trash2, Play, Check, Sparkles, Layers
 } from 'lucide-vue-next'
 import SubscriptionCard from '../components/SubscriptionCard.vue'
 
@@ -372,6 +372,27 @@ async function triggerSupplementAll() {
   }
 }
 
+const mergingCollections = ref(false)
+
+async function triggerMergeCollections() {
+  mergingCollections.value = true
+  try {
+    const { data } = await request.post('/subscriptions/merge-collections')
+    const count = data?.applied_count ?? 0
+    if (count > 0) {
+      window.showToast(t('subs.mergeCollectionsSuccess', { count }), 'success')
+      await fetchSubscriptions()
+    } else {
+      window.showToast(data?.message || t('subs.mergeCollectionsNoChanges'), 'info')
+    }
+  } catch (e: any) {
+    const msg = e.response?.data?.error || t('subs.error.op')
+    window.showToast(msg, 'error')
+  } finally {
+    mergingCollections.value = false
+  }
+}
+
 let refreshTimer: ReturnType<typeof setInterval>
 // 任务中心状态
 const taskCenter = ref({
@@ -498,6 +519,15 @@ onUnmounted(() => {
         >
           <RotateCcw :size="16" class="opacity-50" />
           <span class="text-[10px] font-black uppercase tracking-widest">{{ $t('subs.supplementAll') }}</span>
+        </button>
+        <button 
+          class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap" 
+          @click="triggerMergeCollections"
+          :disabled="loading || mergingCollections"
+          :title="$t('subs.mergeCollectionsDesc')"
+        >
+          <Layers :size="16" class="opacity-50" :class="{ 'animate-spin': mergingCollections }" />
+          <span class="text-[10px] font-black uppercase tracking-widest">{{ $t('subs.mergeCollections') }}</span>
         </button>
         <button 
           class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap" 

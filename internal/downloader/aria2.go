@@ -61,6 +61,9 @@ type aria2Status struct {
 	} `json:"files"`
 	Bittorrent      *struct {
 		InfoHash string `json:"infoHash"`
+		Info     *struct {
+			Name string `json:"name"`
+		} `json:"info"`
 	} `json:"bittorrent"`
 }
 
@@ -127,6 +130,8 @@ func (a *Aria2) callWithRetry(ctx context.Context, method string, params []inter
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
 		if ctx.Err() == nil && attempt < 2 {
 			select {
 			case <-ctx.Done():
@@ -154,6 +159,11 @@ func (a *Aria2) callWithRetry(ctx context.Context, method string, params []inter
 
 // Add 添加下载任务
 func (a *Aria2) Add(ctx context.Context, item core.TorrentItem, savePath string) error {
+	// 磁盘空间熔断保护：在向下载器投递前执行熔断检查
+	if err := CheckDiskSpaceGuard(savePath); err != nil {
+		return err
+	}
+
 	uri := item.MagnetURL
 	if uri == "" {
 		uri = item.URL
@@ -177,6 +187,9 @@ func (a *Aria2) listAll(ctx context.Context) ([]aria2Status, error) {
 	successCount := 0
 
 	for _, method := range []string{"aria2.tellActive", "aria2.tellWaiting", "aria2.tellStopped"} {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		var params []interface{}
 		if method != "aria2.tellActive" {
 			params = []interface{}{0, 1000}
@@ -217,9 +230,11 @@ func convertAria2Status(t aria2Status) core.DownloadTask {
 		status = "completed"
 	}
 
-	// 任务名称解析：优先提取实际下载文件/文件夹名
+	// 任务名称解析：优先提取种子元数据名称，其次提取实际下载文件/文件夹名
 	name := t.GID
-	if len(t.Files) > 0 && t.Files[0].Path != "" {
+	if t.Bittorrent != nil && t.Bittorrent.Info != nil && strings.TrimSpace(t.Bittorrent.Info.Name) != "" {
+		name = strings.TrimSpace(t.Bittorrent.Info.Name)
+	} else if len(t.Files) > 0 && t.Files[0].Path != "" {
 		rel, err := filepath.Rel(t.Dir, t.Files[0].Path)
 		if err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
 			segs := strings.Split(filepath.ToSlash(rel), "/")
@@ -318,7 +333,12 @@ func (a *Aria2) GetStatus(ctx context.Context, hashOrGID string) (core.DownloadT
 
 // Delete 删除下载任务（支持 GID 或 Torrent Hash）
 func (a *Aria2) Delete(ctx context.Context, hashOrGID string, deleteFiles bool) error {
-	gid := a.resolveGID(ctx, hashOrGID)
+	target := strings.TrimSpace(hashOrGID)
+	if target == "" {
+		return fmt.Errorf("Aria2 删除目标不能为空")
+	}
+
+	gid := a.resolveGID(ctx, target)
 	var filesToDelete []string
 	if deleteFiles {
 		if raw, err := a.call(ctx, "aria2.tellStatus", []interface{}{gid}); err == nil {
@@ -353,34 +373,48 @@ func (a *Aria2) Delete(ctx context.Context, hashOrGID string, deleteFiles bool) 
 		}
 	}
 
-	log.Printf("🗑️  [Aria2] 已删除下载任务: %s (GID=%s, deleteFiles=%v)", hashOrGID, gid, deleteFiles)
+	log.Printf("🗑️  [Aria2] 已删除下载任务: %s (GID=%s, deleteFiles=%v)", target, gid, deleteFiles)
 	return nil
 }
 
 // Pause 暂停下载任务（支持 GID 或 Torrent Hash）
 func (a *Aria2) Pause(ctx context.Context, hashOrGID string) error {
-	gid := a.resolveGID(ctx, hashOrGID)
+	target := strings.TrimSpace(hashOrGID)
+	if target == "" {
+		return fmt.Errorf("Aria2 暂停目标不能为空")
+	}
+
+	gid := a.resolveGID(ctx, target)
 	_, err := a.call(ctx, "aria2.pause", []interface{}{gid})
 	if err != nil {
 		return fmt.Errorf("Aria2 暂停任务失败: %w", err)
 	}
-	log.Printf("⏸️  [Aria2] 已暂停任务: %s (GID=%s)", hashOrGID, gid)
+	log.Printf("⏸️  [Aria2] 已暂停任务: %s (GID=%s)", target, gid)
 	return nil
 }
 
 // Resume 恢复下载任务（支持 GID 或 Torrent Hash）
 func (a *Aria2) Resume(ctx context.Context, hashOrGID string) error {
-	gid := a.resolveGID(ctx, hashOrGID)
+	target := strings.TrimSpace(hashOrGID)
+	if target == "" {
+		return fmt.Errorf("Aria2 恢复目标不能为空")
+	}
+
+	gid := a.resolveGID(ctx, target)
 	_, err := a.call(ctx, "aria2.unpause", []interface{}{gid})
 	if err != nil {
 		return fmt.Errorf("Aria2 恢复任务失败: %w", err)
 	}
-	log.Printf("▶️  [Aria2] 已恢复任务: %s (GID=%s)", hashOrGID, gid)
+	log.Printf("▶️  [Aria2] 已恢复任务: %s (GID=%s)", target, gid)
 	return nil
 }
 
 // IsAvailable 检测 Aria2 是否可用（含 5s 超时保护）
 func (a *Aria2) IsAvailable(ctx context.Context) bool {
+	if strings.TrimSpace(a.host) == "" {
+		return false
+	}
+
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_, err := a.call(checkCtx, "aria2.getVersion", nil)

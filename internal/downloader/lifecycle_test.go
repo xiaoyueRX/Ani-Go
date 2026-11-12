@@ -103,3 +103,82 @@ func TestCleanSatisfiedSeeds(t *testing.T) {
 		t.Errorf("deleteFiles 期望 false, 实际 %v", mock.deleteFiles)
 	}
 }
+
+func TestCleanSatisfiedSeeds_NilDownloader(t *testing.T) {
+	_, err := CleanSatisfiedSeeds(context.Background(), nil, time.Hour, 1.0, nil)
+	if err == nil {
+		t.Fatal("期望 nil downloader 报错，但返回 nil")
+	}
+}
+
+func TestCleanSatisfiedSeeds_DisabledThresholds(t *testing.T) {
+	mock := &mockDownloader{
+		tasks: []core.DownloadTask{
+			{Hash: "h1", Progress: 1.0, Ratio: 5.0, SeedingTime: 99999},
+		},
+	}
+	// 当 minSeedTime <= 0 且 minRatio <= 0 时，自动跳过清理以防全量误删
+	cleaned, err := CleanSatisfiedSeeds(context.Background(), mock, 0, 0, nil)
+	if err != nil {
+		t.Fatalf("意外报错: %v", err)
+	}
+	if cleaned != 0 || len(mock.deleted) != 0 {
+		t.Errorf("阈值均 <= 0 时不应清理任何任务，实际清理了 %d 个", cleaned)
+	}
+}
+
+func TestCleanSatisfiedSeeds_ZeroSeedingTimeProtection(t *testing.T) {
+	// 刚完成的种子（SeedingTime = 0）在设置了 minSeedTime 时决不能被删除
+	mock := &mockDownloader{
+		tasks: []core.DownloadTask{
+			{
+				Hash:        "just-finished",
+				Name:        "just-finished-task",
+				Progress:    1.0,
+				Ratio:       0.0,
+				SeedingTime: 0,
+			},
+		},
+	}
+
+	cleaned, err := CleanSatisfiedSeeds(context.Background(), mock, 24*time.Hour, 0, nil)
+	if err != nil {
+		t.Fatalf("CleanSatisfiedSeeds 失败: %v", err)
+	}
+	if cleaned != 0 {
+		t.Errorf("刚完成做种时间为 0 的任务不应被清理，实际清理了 %d 个", cleaned)
+	}
+}
+
+func TestIsTaskReadyForSeedCleanup(t *testing.T) {
+	cases := []struct {
+		name     string
+		progress float32
+		status   string
+		expected bool
+	}{
+		{"未完成 50%", 0.5, "downloading", false},
+		{"未完成 99%", 0.99, "downloading", false},
+		{"完成但正在校验", 1.0, "checking", false},
+		{"完成但下载异常", 1.0, "error", false},
+		{"完成但文件丢失", 1.0, "missingFiles", false},
+		{"做种上传中", 1.0, "uploading", true},
+		{"做种无流量", 1.0, "stalledUP", true},
+		{"做种暂停", 1.0, "pausedUP", true},
+		{"Transmission 做种中", 1.0, "seeding", true},
+		{"Transmission 已停止", 1.0, "stopped", true},
+		{"Aria2 complete 规范化", 1.0, "completed", true},
+		{"单测空状态放行", 1.0, "", true},
+	}
+
+	for _, tc := range cases {
+		task := core.DownloadTask{
+			Progress: tc.progress,
+			Status:   tc.status,
+		}
+		got := isTaskReadyForSeedCleanup(task)
+		if got != tc.expected {
+			t.Errorf("[%s] 期望 %v, 得到 %v", tc.name, tc.expected, got)
+		}
+	}
+}

@@ -110,8 +110,21 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 	useHardLink := o.isHardLinkEnabled()
 
 	if useHardLink {
+		// 检查目标路径是否已存在文件（冲突或重整场景）
+		if dstInfo, err := os.Stat(fullPath); err == nil {
+			if srcInfo, sErr := os.Stat(filePath); sErr == nil && os.SameFile(srcInfo, dstInfo) {
+				// 源文件与目标文件已是同一物理硬链接，跳过重复链接与截断风险
+				log.Printf("ℹ️ 目标文件与源文件已是同一物理硬链接，跳过重复处理: %s", fullPath)
+				o.publishOrganizedEvent(filePath, fullPath, anime, episode)
+				return fullPath, nil
+			}
+			// 目标已存在但非同一文件，先清理旧目标文件再重建硬链接（Zero IO 且避免 EEXIST 报错）
+			log.Printf("⚠️ 目标路径已存在旧文件，先清理旧目标以重建硬链接: %s", fullPath)
+			_ = os.Remove(fullPath)
+		}
+
 		if linkErr := os.Link(filePath, fullPath); linkErr != nil {
-			// 任何硬链接失败都回退到复制（跨设备、权限、目录不存在等）
+			// 任何硬链接失败都回退到复制（跨设备、权限、文件系统不支持等）
 			log.Printf("⚠️ 硬链接创建失败 (%v)，正在降级为文件复制...", linkErr)
 			if err := copyFile(filePath, fullPath); err != nil {
 				return "", fmt.Errorf("硬链接失败且复制降级失败: %w", err)
@@ -119,6 +132,16 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 			log.Printf("📋 已复制完成（保留原做种文件）: %s -> %s", filePath, fullPath)
 		}
 	} else {
+		// 移动模式：若目标已存在且不是同一文件，先清理旧目标文件（兼容 Windows Rename 冲突）
+		if dstInfo, err := os.Stat(fullPath); err == nil {
+			if srcInfo, sErr := os.Stat(filePath); sErr == nil && os.SameFile(srcInfo, dstInfo) {
+				log.Printf("ℹ️ 目标文件与源文件完全相同，跳过移动: %s", fullPath)
+				o.publishOrganizedEvent(filePath, fullPath, anime, episode)
+				return fullPath, nil
+			}
+			_ = os.Remove(fullPath)
+		}
+
 		if err := os.Rename(filePath, fullPath); err != nil {
 			// 跨设备移动降级：复制后删除原文件 (解决跨卷 EXDEV 报错)
 			log.Printf("⚠️ 移动文件失败 (%v)，正在尝试跨设备复制并删除...", err)
@@ -130,7 +153,12 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 		}
 	}
 
-	// 触发插件 Hook：文件整理完成
+	o.publishOrganizedEvent(filePath, fullPath, anime, episode)
+
+	return fullPath, nil
+}
+
+func (o *TVOrganizer) publishOrganizedEvent(filePath, fullPath string, anime core.Anime, episode core.Episode) {
 	if o.pluginManager != nil {
 		o.pluginManager.GetBus().Publish(core.Event{
 			Type: core.EventFileOrganized,
@@ -144,8 +172,6 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 			Time: time.Now(),
 		})
 	}
-
-	return fullPath, nil
 }
 
 // normalizeAnimeType 规范化番剧分类类型（大小写无关，支持常见别名）
@@ -267,6 +293,12 @@ func (o *TVOrganizer) buildVarValues(anime core.Anime, episode core.Episode) cor
 	if series == "" {
 		series = anime.TitleCN
 	}
+	if series == "" {
+		series = anime.TitleJP
+	}
+	if series == "" {
+		series = anime.TitleEN
+	}
 	return core.VarValues{
 		TitleCN:  anime.TitleCN,
 		TitleEN:  anime.TitleEN,
@@ -375,7 +407,8 @@ func resolveVar(name string, v core.VarValues) string {
 	case "ext":
 		return cleanVarValue(v.Ext)
 	case "tmdb_id":
-		return cleanVarValue(v.TMDBID)
+		id := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(v.TMDBID), "tv/"), "movie/")
+		return cleanVarValue(id)
 	case "imdb_id":
 		return cleanVarValue(v.IMDBID)
 	case "series":

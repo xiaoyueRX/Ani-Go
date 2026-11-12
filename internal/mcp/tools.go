@@ -2,11 +2,17 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
+	"math"
+	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"gorm.io/gorm"
 )
 
 // AnimeOpsDeps 核心业务工具所需的依赖
@@ -32,15 +38,37 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 				},
 				"source": {
 					Type:        "string",
-					Description: "数据源名称（可选，如 mikan, bangumi, animetosho）",
+					Description: "数据源名称（可选，如 mikan, bangumi, nyaa, acgrip, animetosho）",
+				},
+				"limit": {
+					Type:        "integer",
+					Description: "最大返回条数（默认 10，最大 50）",
 				},
 			},
 			Required: []string{"keyword"},
 		},
 	}, func(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
-		kw, _ := args["keyword"].(string)
-		if strings.TrimSpace(kw) == "" {
+		kw, hasKW, err := parseStringArg(args, "keyword")
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		kw = strings.TrimSpace(kw)
+		if !hasKW || kw == "" {
 			return ErrorResult("关键词不能为空"), nil
+		}
+		if utf8.RuneCountInString(kw) > 200 {
+			return ErrorResult("关键词长度不能超过 200 个字符"), nil
+		}
+
+		sourceFilter, _, err := parseStringArg(args, "source")
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		sourceFilter = strings.TrimSpace(sourceFilter)
+
+		limit, _, err := parseBoundedIntArg(args, "limit", 10, 1, 50, true)
+		if err != nil {
+			return ErrorResult(err.Error()), nil
 		}
 
 		if deps.MultiSource == nil {
@@ -52,21 +80,30 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 			return ErrorResult(fmt.Sprintf("搜索失败: %v", err)), nil
 		}
 
+		if sourceFilter != "" {
+			items = filterItemsBySource(items, sourceFilter)
+		}
+
 		if len(items) == 0 {
+			if sourceFilter != "" {
+				return TextResult(fmt.Sprintf("未在数据源 %q 中找到关键词 %q 的相关番剧资源", sourceFilter, kw)), nil
+			}
 			return TextResult(fmt.Sprintf("未找到关键词 %q 的相关番剧资源", kw)), nil
 		}
 
-		// 限制返回最多 10 条，避免 Token 爆炸
-		limit := 10
-		if len(items) < limit {
-			limit = len(items)
+		displayCount := limit
+		if len(items) < displayCount {
+			displayCount = len(items)
 		}
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("共找到 %d 条关于 %q 的资源（展示前 %d 条）：\n\n", len(items), kw, limit))
-		for i := 0; i < limit; i++ {
+		sb.WriteString(fmt.Sprintf("共找到 %d 条关于 %q 的资源（展示前 %d 条）：\n\n", len(items), kw, displayCount))
+		for i := 0; i < displayCount; i++ {
 			item := items[i]
 			sb.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, item.Title))
+			if item.SourceName != "" {
+				sb.WriteString(fmt.Sprintf("   - 来源: %s\n", item.SourceName))
+			}
 			if item.GroupName != "" {
 				sb.WriteString(fmt.Sprintf("   - 字幕组: %s\n", item.GroupName))
 			}
@@ -94,6 +131,14 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 					Type:        "boolean",
 					Description: "是否仅列出已启用的订阅（默认为 false，列出全部）",
 				},
+				"limit": {
+					Type:        "integer",
+					Description: "每页返回数量（默认 50，最大 100）",
+				},
+				"offset": {
+					Type:        "integer",
+					Description: "分页偏移量（默认 0）",
+				},
 			},
 		},
 	}, func(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
@@ -101,24 +146,42 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 			return ErrorResult("数据库未就绪"), nil
 		}
 
-		enabledOnly, _ := args["enabled_only"].(bool)
-		var subs []database.Subscription
+		enabledOnly, err := parseBoolArg(args, "enabled_only", false)
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		limit, _, err := parseBoundedIntArg(args, "limit", 50, 1, 100, true)
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		offset, _, err := parseBoundedIntArg(args, "offset", 0, 0, math.MaxInt32, false)
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
 
-		query := database.DB.Model(&database.Subscription{})
+		query := database.DB.WithContext(ctx).Model(&database.Subscription{})
 		if enabledOnly {
 			query = query.Where("enabled = ? OR enabled IS NULL", true)
 		}
 
-		if err := query.Order("id desc").Find(&subs).Error; err != nil {
-			return ErrorResult(fmt.Sprintf("查询订阅失败: %v", err)), nil
+		var total int64
+		if err := query.Count(&total).Error; err != nil {
+			return ErrorResult(fmt.Sprintf("查询订阅总数失败: %v", err)), nil
 		}
-
-		if len(subs) == 0 {
+		if total == 0 {
 			return TextResult("当前没有任何追番订阅"), nil
 		}
 
+		var subs []database.Subscription
+		if err := query.Order("id desc").Limit(limit).Offset(offset).Find(&subs).Error; err != nil {
+			return ErrorResult(fmt.Sprintf("查询订阅失败: %v", err)), nil
+		}
+		if len(subs) == 0 {
+			return TextResult(fmt.Sprintf("当前共有 %d 部订阅，偏移量 %d 超出范围", total, offset)), nil
+		}
+
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("📋 当前订阅列表 (共 %d 部)：\n\n", len(subs)))
+		sb.WriteString(fmt.Sprintf("📋 当前订阅列表 (共 %d 部，本次展示 %d-%d)：\n\n", total, offset+1, offset+len(subs)))
 		for _, sub := range subs {
 			status := "🟢 追番中"
 			if sub.Completed {
@@ -151,11 +214,11 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 				},
 				"season": {
 					Type:        "integer",
-					Description: "季号（默认为 1）",
+					Description: "季号（默认为 1，范围 1-100）",
 				},
 				"rss_url": {
 					Type:        "string",
-					Description: "Mikan 或其他站点的 RSS 订阅链接（可选）",
+					Description: "Mikan 或其他站点的 RSS 订阅链接（可选，需为 http/https 链接）",
 				},
 				"subgroup": {
 					Type:        "string",
@@ -169,29 +232,57 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 			return ErrorResult("数据库未就绪"), nil
 		}
 
-		title, _ := args["title"].(string)
+		title, hasTitle, err := parseStringArg(args, "title")
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
 		title = strings.TrimSpace(title)
-		if title == "" {
+		if !hasTitle || title == "" {
 			return ErrorResult("番剧标题不能为空"), nil
 		}
-
-		season := 1
-		if sVal, ok := args["season"].(float64); ok && int(sVal) > 0 {
-			season = int(sVal)
+		if utf8.RuneCountInString(title) > 255 {
+			return ErrorResult("番剧标题长度不能超过 255 个字符"), nil
 		}
-		rssURL, _ := args["rss_url"].(string)
-		subgroup, _ := args["subgroup"].(string)
+
+		season, _, err := parseBoundedIntArg(args, "season", 1, 1, 100, false)
+		if err != nil {
+			return ErrorResult("季号必须是 1~100 之间的整数"), nil
+		}
+
+		rssURL, _, err := parseStringArg(args, "rss_url")
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		rssURL = strings.TrimSpace(rssURL)
+		if rssURL != "" {
+			if len(rssURL) > 2048 {
+				return ErrorResult("RSS 链接长度不能超过 2048 个字符"), nil
+			}
+			u, parseErr := url.ParseRequestURI(rssURL)
+			if parseErr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				return ErrorResult("rss_url 格式无效，仅支持 http/https 协议的完整链接"), nil
+			}
+		}
+
+		subgroup, _, err := parseStringArg(args, "subgroup")
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		subgroup = strings.TrimSpace(subgroup)
+		if utf8.RuneCountInString(subgroup) > 128 {
+			return ErrorResult("字幕组名称不能超过 128 个字符"), nil
+		}
 
 		enabled := true
 		sub := database.Subscription{
 			TitleCN:      title,
 			Season:       season,
-			RSSURL:       strings.TrimSpace(rssURL),
-			SubgroupName: strings.TrimSpace(subgroup),
+			RSSURL:       rssURL,
+			SubgroupName: subgroup,
 			Enabled:      &enabled,
 		}
 
-		if err := database.DB.Create(&sub).Error; err != nil {
+		if err := database.DB.WithContext(ctx).Create(&sub).Error; err != nil {
 			return ErrorResult(fmt.Sprintf("创建订阅失败: %v", err)), nil
 		}
 
@@ -217,18 +308,31 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 			return ErrorResult("数据库未就绪"), nil
 		}
 
-		idVal, ok := args["subscription_id"].(float64)
-		if !ok || idVal <= 0 {
-			return ErrorResult("请提供有效的 subscription_id"), nil
+		id, err := parseRequiredPositiveUint(args, "subscription_id")
+		if err != nil {
+			return ErrorResult("请提供有效的正整数 subscription_id"), nil
 		}
-		id := uint(idVal)
 
 		var sub database.Subscription
-		if err := database.DB.First(&sub, id).Error; err != nil {
-			return ErrorResult(fmt.Sprintf("未找到 ID 为 %d 的订阅", id)), nil
+		if err := database.DB.WithContext(ctx).First(&sub, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrorResult(fmt.Sprintf("未找到 ID 为 %d 的订阅", id)), nil
+			}
+			return ErrorResult(fmt.Sprintf("查询订阅失败: %v", err)), nil
 		}
 
-		if err := database.DB.Delete(&sub).Error; err != nil {
+		// 手动在事务中级联删除关联剧集记录，避免软删除后留下孤立剧集数据
+		if err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Delete(&sub).Error; err != nil {
+				return err
+			}
+			if tx.Migrator().HasTable(&database.Episode{}) {
+				if err := tx.Where("subscription_id = ?", id).Delete(&database.Episode{}).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
 			return ErrorResult(fmt.Sprintf("删除订阅失败: %v", err)), nil
 		}
 
@@ -247,6 +351,14 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 					Description: "筛选状态: all(全部), downloading(下载中), completed(已完成)",
 					Enum:        []string{"all", "downloading", "completed"},
 				},
+				"limit": {
+					Type:        "integer",
+					Description: "最大返回条数（默认 20，最大 100）",
+				},
+				"offset": {
+					Type:        "integer",
+					Description: "分页偏移量（默认 0）",
+				},
 			},
 		},
 	}, func(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
@@ -254,14 +366,32 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 			return ErrorResult("下载器未配置或未连接"), nil
 		}
 
+		statusFilter, _, err := parseStringArg(args, "status")
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		statusFilter = strings.TrimSpace(statusFilter)
+		if statusFilter == "" {
+			statusFilter = "all"
+		}
+		switch statusFilter {
+		case "all", "downloading", "completed":
+		default:
+			return ErrorResult(fmt.Sprintf("不支持的下载状态筛选值 %q，仅支持 all, downloading, completed", statusFilter)), nil
+		}
+
+		limit, _, err := parseBoundedIntArg(args, "limit", 20, 1, 100, true)
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		offset, _, err := parseBoundedIntArg(args, "offset", 0, 0, math.MaxInt32, false)
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+
 		tasks, err := deps.Downloader.List(ctx)
 		if err != nil {
 			return ErrorResult(fmt.Sprintf("获取下载列表失败: %v", err)), nil
-		}
-
-		statusFilter, _ := args["status"].(string)
-		if statusFilter == "" {
-			statusFilter = "all"
 		}
 
 		var filtered []core.DownloadTask
@@ -279,14 +409,24 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 			return TextResult(fmt.Sprintf("当前没有符合条件 (%s) 的下载任务", statusFilter)), nil
 		}
 
+		if offset >= len(filtered) {
+			return TextResult(fmt.Sprintf("当前共有 %d 条符合条件 (%s) 的下载任务，偏移量 %d 超出范围", len(filtered), statusFilter, offset)), nil
+		}
+
+		end := offset + limit
+		if end > len(filtered) {
+			end = len(filtered)
+		}
+		page := filtered[offset:end]
+
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("📥 当前任务列表 (共 %d 条)：\n\n", len(filtered)))
-		for i, t := range filtered {
+		sb.WriteString(fmt.Sprintf("📥 当前任务列表 (共 %d 条，本次展示 %d-%d)：\n\n", len(filtered), offset+1, end))
+		for i, t := range page {
 			speedStr := ""
 			if t.SpeedDown > 0 {
 				speedStr = fmt.Sprintf(" | 速度: %.1f KB/s", float64(t.SpeedDown)/1024)
 			}
-			sb.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, t.Name))
+			sb.WriteString(fmt.Sprintf("%d. **%s**\n", offset+i+1, t.Name))
 			sb.WriteString(fmt.Sprintf("   进度: %.1f%%%s | 状态: %s\n", t.Progress*100, speedStr, t.Status))
 		}
 
@@ -302,10 +442,149 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 			Properties: map[string]Property{},
 		},
 	}, func(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
-		if deps.TriggerRefresh != nil {
-			go deps.TriggerRefresh()
-			return TextResult("🚀 已触发全量 RSS 检查任务，后台正在更新中..."), nil
+		if deps.TriggerRefresh == nil {
+			return ErrorResult("刷新触发器未配置"), nil
 		}
-		return TextResult("ℹ️ 系统当前处于轮询状态"), nil
+		// 后台异步触发全量刷新，并挂载 recover 防止回调 panic 影响主进程
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("❌ [MCP] trigger_refresh 后台执行 panic: %v", r)
+				}
+			}()
+			deps.TriggerRefresh()
+		}()
+		return TextResult("🚀 已触发全量 RSS 检查任务，后台正在更新中..."), nil
 	})
+}
+
+func filterItemsBySource(items []core.TorrentItem, sourceFilter string) []core.TorrentItem {
+	normFilter := normalizeSourceName(sourceFilter)
+	if normFilter == "" {
+		return items
+	}
+	filtered := make([]core.TorrentItem, 0, len(items))
+	for _, item := range items {
+		normSource := normalizeSourceName(item.SourceName)
+		if normSource != "" && (normSource == normFilter || strings.Contains(normSource, normFilter)) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func normalizeSourceName(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = strings.ReplaceAll(s, ".", "")
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, "_", "")
+	s = strings.ReplaceAll(s, " ", "")
+	return s
+}
+
+func parseStringArg(args map[string]interface{}, key string) (string, bool, error) {
+	if args == nil {
+		return "", false, nil
+	}
+	raw, exists := args[key]
+	if !exists || raw == nil {
+		return "", false, nil
+	}
+	val, ok := raw.(string)
+	if !ok {
+		return "", true, fmt.Errorf("参数 %s 必须是字符串", key)
+	}
+	return val, true, nil
+}
+
+func parseBoolArg(args map[string]interface{}, key string, defaultVal bool) (bool, error) {
+	if args == nil {
+		return defaultVal, nil
+	}
+	raw, exists := args[key]
+	if !exists || raw == nil {
+		return defaultVal, nil
+	}
+	val, ok := raw.(bool)
+	if !ok {
+		return false, fmt.Errorf("参数 %s 必须是布尔值", key)
+	}
+	return val, nil
+}
+
+func parseBoundedIntArg(args map[string]interface{}, key string, defaultVal, minVal, maxVal int, clampMax bool) (int, bool, error) {
+	if args == nil {
+		return defaultVal, false, nil
+	}
+	raw, exists := args[key]
+	if !exists || raw == nil {
+		return defaultVal, false, nil
+	}
+
+	var intVal int
+	switch v := raw.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) || v != math.Trunc(v) {
+			return 0, true, fmt.Errorf("参数 %s 必须是有效整数", key)
+		}
+		if v < float64(math.MinInt) || v > float64(math.MaxInt) {
+			return 0, true, fmt.Errorf("参数 %s 超出整数范围", key)
+		}
+		intVal = int(v)
+	case int:
+		intVal = v
+	case int64:
+		if v < int64(math.MinInt) || v > int64(math.MaxInt) {
+			return 0, true, fmt.Errorf("参数 %s 超出整数范围", key)
+		}
+		intVal = int(v)
+	default:
+		return 0, true, fmt.Errorf("参数 %s 必须是整数", key)
+	}
+
+	if intVal < minVal {
+		return 0, true, fmt.Errorf("参数 %s 不能小于 %d", key, minVal)
+	}
+	if intVal > maxVal {
+		if clampMax {
+			return maxVal, true, nil
+		}
+		return 0, true, fmt.Errorf("参数 %s 不能大于 %d", key, maxVal)
+	}
+	return intVal, true, nil
+}
+
+func parseRequiredPositiveUint(args map[string]interface{}, key string) (uint, error) {
+	if args == nil {
+		return 0, fmt.Errorf("缺少参数 %s", key)
+	}
+	raw, exists := args[key]
+	if !exists || raw == nil {
+		return 0, fmt.Errorf("缺少参数 %s", key)
+	}
+
+	switch v := raw.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 || v > float64(math.MaxUint32) || v != math.Trunc(v) {
+			return 0, fmt.Errorf("参数 %s 无效", key)
+		}
+		return uint(v), nil
+	case int:
+		if v <= 0 {
+			return 0, fmt.Errorf("参数 %s 无效", key)
+		}
+		return uint(v), nil
+	case int64:
+		if v <= 0 || v > math.MaxUint32 {
+			return 0, fmt.Errorf("参数 %s 无效", key)
+		}
+		return uint(v), nil
+	case uint:
+		if v == 0 {
+			return 0, fmt.Errorf("参数 %s 无效", key)
+		}
+		return v, nil
+	default:
+		return 0, fmt.Errorf("参数 %s 必须是正整数", key)
+	}
 }

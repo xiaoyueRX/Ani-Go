@@ -437,6 +437,12 @@ const tabs = computed(() => [
       { label: t('settings.fields.signalSender'), key: 'SIGNAL_SENDER', placeholder: '+8613800138000' },
       { label: t('settings.fields.signalRecipients'), key: 'SIGNAL_RECIPIENTS', placeholder: '+8613800138000' },
     ]},
+    { title: t('settings.sections.notifyWechat'), desc: t('settings.sections.notifyWechatDesc'), fields: [
+      { label: t('settings.fields.wechatAppId'), key: 'WECHAT_APP_ID', placeholder: 'wx1234567890abcdef', testChannel: 'WeChat' },
+      { label: t('settings.fields.wechatAppSecret'), key: 'WECHAT_APP_SECRET', placeholder: 'abcdef1234567890...', type: 'password' },
+      { label: t('settings.fields.wechatUserId'), key: 'WECHAT_USER_ID', placeholder: 'oAbc123_xyz...' },
+      { label: t('settings.fields.wechatTemplateId'), key: 'WECHAT_TEMPLATE_ID', placeholder: 'ngqIpbwh8bUfcSsXYZ...' },
+    ]},
   ]},
   { key: 'customRegex', label: t('settings.sections.customRegex'), icon: FileText, sections: [] },
   { key: 'plugins', label: t('settings.tabs.plugins'), icon: Sparkles, sections: [] },

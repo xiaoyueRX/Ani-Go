@@ -101,14 +101,14 @@
     - [x] **飞书/Lark**：Webhook bot
     - [x] **钉钉**：Webhook bot
     - [x] **QQ**：OneBot 协议（NapCat/go-cqhttp/Lagrange/LLOneBot）
-    - [x] **微信公众号**：客服消息 API（`cgi-bin/message/custom/send`，环境变量 `WECHAT_APP_ID` / `WECHAT_APP_SECRET` / `WECHAT_USER_ID`）
+    - [x] **微信公众号**：客服消息 API（`cgi-bin/message/custom/send`）与模板消息 API（`cgi-bin/message/template/send`），支持 Token 失效自动刷新重试与短有效期保护（环境变量 `WECHAT_APP_ID` / `WECHAT_APP_SECRET` / `WECHAT_USER_ID` / `WECHAT_TEMPLATE_ID`）。
   - **国际 IM**：
     - [x] **Telegram**：Bot API + Markdown
     - [x] **Discord**：Webhook
     - [x] **Slack**：Webhook + Block Kit
     - [x] **LINE**：Messaging API / push message
     - [x] **WhatsApp**：Meta Cloud API（graph.facebook.com）
-    - [x] **Signal**：signal-cli REST API（`{SIGNAL_API_URL}/v2/send`，环境变量 `SIGNAL_API_URL` / `SIGNAL_SENDER` / `SIGNAL_RECIPIENTS`）
+    - [x] **Signal**：signal-cli REST API（`{SIGNAL_API_URL}/v2/send`，URL 协议验证、接收人清洗去重与 4xx 错误详情提取，环境变量 `SIGNAL_API_URL` / `SIGNAL_SENDER` / `SIGNAL_RECIPIENTS`）。
   - **Push 推送服务**：
     - [x] **邮件**：SMTP 发通知（goroutine + context 超时）
     - [x] **Server酱**：HTTP API（微信推送）
@@ -121,8 +121,8 @@
   - [x] **规则引擎（默认）**：基于正则 + 关键词匹配，零依赖，无 AI 也能正常工作。内置订阅/搜索/状态等常见命令模式。
   - [x] **AI 增强（可选）**：接入 OpenAI/Gemini/Ollama 大模型，准确率更高（理解模糊表达、纠错同义词），关闭 AI 后自动回退规则引擎。
 - [x] **通知管理器**：监听 EventBus 事件（下载完成/失败/补番完成等），通过上述所有平台推送通知。
-- [ ] **通知模板系统**：支持自定义消息模板，按事件类型和平台分别配置。（待实现）
-- [ ] **全平台集成测试**：每个平台逐一验证连通性和通知推送。（部分待验证）
+- [x] **通知模板系统**：安全模板引擎（杜绝 panic）、三级继承覆盖（事件+渠道 -> 事件默认 -> 系统默认）、结构化上下文、内置模板函数（`default`/`upper`/`lower`/`truncate`）、数据库持久化（`NOTIFY_TEMPLATES_JSON`）与 API 实时预览/CRUD。
+- [x] **全平台集成测试与渠道加固**：全 18 渠道 mock 与集成测试覆盖，配置优先级严格对齐（环境变量 > 数据库），多渠道并行分发与安全降级。
 
 ### Phase 6: 数据迁移 ✅
 - [x] **AutoBangumi / ani-rss SQLite 导入**：`internal/migrate` 解析历史数据库并导入订阅与剧集，通过 `POST /api/migrate` 对外暴露。
@@ -177,3 +177,10 @@
 - [x] **原生 MCP Server 协议网关**：内置 SSE + Bearer 鉴权 MCP 服务端，暴露 6 项业务工具与 4 项系统治理工具（插件私有工具动态挂载为规划项，当前尚未实现，详见 `docs/02_PLUGIN_SPEC.md` 第 6 节）。
 - [x] **全自动三级消歧引擎**：首创本地正则 ➔ Bangumi 官方单集放送时间戳比对 ➔ AI 上下文兜底三级漏斗，无感化解 95% 歧义，配备 Token 终身唯一缓存与防爆盾。
 - [x] **Go 1.25+ 与多架构 Docker 流水线**：全面升级 Dockerfile 至 `golang:1.25-alpine` 原生交叉编译，GitHub Actions CI/CD 多架构构建（amd64/arm64）全绿通过并推送到 GHCR，发布 7 大架构二进制 GitHub Release。
+
+### Phase 12: v0.6.1 系列智能归并、通知模板矩阵与全栈深度加固 ✅
+- [x] **TMDB Collection 自动归并服务**：同系列自动识别并分配统一 `SeriesID`，基于 Union-Find 并查集算法与 TMDB 影视元数据，支持多季/剧场版跨季度合集聚合，保留用户自定义 `SeriesID`。
+- [x] **通知模板系统与微信/Signal深度加固**：无 panic 模板引擎、渠道别名继承、微信双模式消息与 Token 自愈、Signal 协议严格校验、结构化 Data 注入。
+- [x] **做种生命周期回收与磁盘急停深度加固**：做种达标安全回收任务，硬链接 SameFile 零 I/O 校验，跨平台剩余空间熔断保护。
+- [x] **原生 MCP Server 生产级安全审计**：SSE 会话超时清理淘汰 (`EvictStaleSessions`)、常数时间 Token 鉴权、敏感系统配置强拦截、nil 服务全方位防护。
+- [x] **三级消歧漏斗深度防毒与边缘覆盖**：年份与技术标签混淆集数深度清洗、v2/v3及小数集解析、时区容差窗口对齐、AI 每日配额与防投毒缓存。

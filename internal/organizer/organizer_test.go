@@ -1,6 +1,8 @@
 package organizer
 
 import (
+	"context"
+	"os"
 	"testing"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
@@ -171,5 +173,92 @@ func TestRenderTemplate_SeriesVariable(t *testing.T) {
 	expected2 := "葬送的芙莉莲/葬送的芙莉莲 (2023)/Season 1/Frieren S01E10.mp4"
 	if res2 != expected2 {
 		t.Fatalf("res2 期望 %q, 得到 %q", expected2, res2)
+	}
+}
+
+func TestRenderTemplate_TMDBIDPrefixStripping(t *testing.T) {
+	tmpl := "{title_cn}/Season {season}/{title_en} [tmdbid={tmdb_id}] S{season:02}E{ep:02}{ext}"
+	v := core.VarValues{
+		TitleCN: "鬼灭之刃",
+		TitleEN: "Kimetsu",
+		Season:  1,
+		Ep:      1,
+		Ext:     ".mkv",
+		TMDBID:  "tv/85937",
+	}
+	result := renderTemplate(tmpl, v)
+	expected := "鬼灭之刃/Season 1/Kimetsu [tmdbid=85937] S01E01.mkv"
+	if result != expected {
+		t.Errorf("tmdb_id 剥离前缀失败: 得到 %q, 期望 %q", result, expected)
+	}
+}
+
+func TestOrganizer_SameFileAndConflictHandling(t *testing.T) {
+	tmpDir := t.TempDir()
+	tvBase := tmpDir + "/TV"
+	movieBase := tmpDir + "/Movie"
+	org := New(
+		"{title_cn}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}",
+		"{title_cn} ({year})/{title_en}{ext}",
+		"",
+		tvBase,
+		movieBase,
+		true, // 硬链接模式
+		nil,
+	)
+
+	srcFile := tmpDir + "/download_01.mkv"
+	initialContent := []byte("original video stream data")
+	if err := os.WriteFile(srcFile, initialContent, 0644); err != nil {
+		t.Fatalf("创建源文件失败: %v", err)
+	}
+
+	anime := core.Anime{
+		TitleCN: "迷宫饭",
+		TitleEN: "Dungeon Meshi",
+		Type:    "TV",
+	}
+	ep := core.Episode{
+		Season: 1,
+		Number: 1,
+	}
+
+	ctx := context.Background()
+
+	// 1. 首次正常整理建立硬链接
+	path1, err := org.Organize(ctx, srcFile, anime, ep)
+	if err != nil {
+		t.Fatalf("首次整理失败: %v", err)
+	}
+	content1, _ := os.ReadFile(path1)
+	if string(content1) != string(initialContent) {
+		t.Fatalf("文件内容不匹配")
+	}
+
+	// 2. 第二次整理（SameFile 场景）：目标路径与源文件已指向同一物理硬链接
+	path2, err := org.Organize(ctx, srcFile, anime, ep)
+	if err != nil {
+		t.Fatalf("同一文件重复整理失败: %v", err)
+	}
+	if path1 != path2 {
+		t.Errorf("路径应一致: %s vs %s", path1, path2)
+	}
+	content2, _ := os.ReadFile(path2)
+	if len(content2) == 0 {
+		t.Fatalf("严重漏洞：文件已被截断为 0 字节！")
+	}
+
+	// 3. 冲突场景：目标路径已被另一个旧文件占据，整理时应安全清理并重建新链接
+	conflictContent := []byte("old obsolete file version")
+	_ = os.Remove(path2)
+	_ = os.WriteFile(path2, conflictContent, 0644)
+
+	path3, err := org.Organize(ctx, srcFile, anime, ep)
+	if err != nil {
+		t.Fatalf("覆盖旧冲突文件失败: %v", err)
+	}
+	content3, _ := os.ReadFile(path3)
+	if string(content3) != string(initialContent) {
+		t.Errorf("冲突覆盖后内容不匹配，得到: %s", string(content3))
 	}
 }

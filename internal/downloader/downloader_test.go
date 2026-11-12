@@ -164,3 +164,89 @@ func TestAria2_DeleteWithFiles(t *testing.T) {
 		t.Errorf("expected aria2Meta to be removed")
 	}
 }
+
+func TestDownloader_InputValidationAndEmptyGuards(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. QBittorrent 空 host 与空 hash 校验
+	qbEmpty := NewQBittorrent("", "admin", "admin", "anime")
+	if qbEmpty.IsAvailable(ctx) {
+		t.Error("空 host 的 QBittorrent.IsAvailable 应返回 false")
+	}
+	if _, err := qbEmpty.GetStatus(ctx, ""); err == nil {
+		t.Error("空 hash 的 QBittorrent.GetStatus 应报错")
+	}
+	if err := qbEmpty.Delete(ctx, "", false); err == nil {
+		t.Error("空 hash 的 QBittorrent.Delete 应报错")
+	}
+	if err := qbEmpty.Pause(ctx, ""); err == nil {
+		t.Error("空 hash 的 QBittorrent.Pause 应报错")
+	}
+	if err := qbEmpty.Resume(ctx, ""); err == nil {
+		t.Error("空 hash 的 QBittorrent.Resume 应报错")
+	}
+
+	// 2. Transmission 空 host 与空 target 校验
+	trEmpty := NewTransmission("", "user", "pass")
+	if trEmpty.IsAvailable(ctx) {
+		t.Error("空 host 的 Transmission.IsAvailable 应返回 false")
+	}
+	if _, err := trEmpty.GetStatus(ctx, ""); err == nil {
+		t.Error("空 hash 的 Transmission.GetStatus 应报错")
+	}
+	if err := trEmpty.Delete(ctx, "", false); err == nil {
+		t.Error("空 hash 的 Transmission.Delete 应报错")
+	}
+	if err := trEmpty.Pause(ctx, ""); err == nil {
+		t.Error("空 hash 的 Transmission.Pause 应报错")
+	}
+	if err := trEmpty.Resume(ctx, ""); err == nil {
+		t.Error("空 hash 的 Transmission.Resume 应报错")
+	}
+
+	// 3. Aria2 空 host 与空 target 校验
+	arEmpty := NewAria2("", "token")
+	if arEmpty.IsAvailable(ctx) {
+		t.Error("空 host 的 Aria2.IsAvailable 应返回 false")
+	}
+	if _, err := arEmpty.GetStatus(ctx, ""); err == nil {
+		t.Error("空 target 的 Aria2.GetStatus 应报错")
+	}
+	if err := arEmpty.Delete(ctx, "", false); err == nil {
+		t.Error("空 target 的 Aria2.Delete 应报错")
+	}
+	if err := arEmpty.Pause(ctx, ""); err == nil {
+		t.Error("空 target 的 Aria2.Pause 应报错")
+	}
+	if err := arEmpty.Resume(ctx, ""); err == nil {
+		t.Error("空 target 的 Aria2.Resume 应报错")
+	}
+}
+
+func TestConvertAria2Status_BittorrentInfoName(t *testing.T) {
+	st := aria2Status{
+		GID:    "1234567890abcdef",
+		Status: "active",
+		Bittorrent: &struct {
+			InfoHash string `json:"infoHash"`
+			Info     *struct {
+				Name string `json:"name"`
+			} `json:"info"`
+		}{
+			InfoHash: "abc123hash",
+			Info: &struct {
+				Name string `json:"name"`
+			}{
+				Name: "[SubGroup] Anime Title S01E01 [1080p]",
+			},
+		},
+	}
+
+	task := convertAria2Status(st)
+	if task.Name != "[SubGroup] Anime Title S01E01 [1080p]" {
+		t.Errorf("期望从 Bittorrent.Info.Name 提取任务名, 实际得到: %q", task.Name)
+	}
+	if task.Hash != "abc123hash" {
+		t.Errorf("期望 Hash 为 'abc123hash', 实际得到: %q", task.Hash)
+	}
+}

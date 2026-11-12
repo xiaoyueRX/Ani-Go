@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
@@ -80,13 +83,17 @@ func (s *Server) RegisterGovernanceTools(deps GovernanceDeps) {
 			return ErrorResult("插件管理器未启用"), nil
 		}
 
-		pluginID, _ := args["plugin_id"].(string)
-		enabled, ok := args["enabled"].(bool)
-		if strings.TrimSpace(pluginID) == "" || !ok {
-			return ErrorResult("参数不合法: 需要提供 plugin_id 和 enabled"), nil
+		pluginID, hasID, err := parseStringArg(args, "plugin_id")
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		pluginID = strings.TrimSpace(pluginID)
+		rawEnabled, hasEnabled := args["enabled"]
+		enabled, ok := rawEnabled.(bool)
+		if !hasID || pluginID == "" || !hasEnabled || !ok {
+			return ErrorResult("参数不合法: 需要提供有效的 plugin_id 和布尔型 enabled"), nil
 		}
 
-		var err error
 		if enabled {
 			err = deps.PluginManager.Enable(pluginID)
 		} else {
@@ -118,21 +125,28 @@ func (s *Server) RegisterGovernanceTools(deps GovernanceDeps) {
 
 		dlStatus := "未配置"
 		if deps.Downloader != nil {
-			if _, err := deps.Downloader.List(ctx); err == nil {
+			dlCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			if _, err := deps.Downloader.List(dlCtx); err == nil {
 				dlStatus = "🟢 连接正常"
 			} else {
 				dlStatus = fmt.Sprintf("🔴 异常 (%v)", err)
 			}
+			cancel()
 		}
 
-		ver := deps.Version
+		ver := strings.TrimPrefix(strings.TrimSpace(deps.Version), "v")
 		if ver == "" {
-			ver = "0.5.4"
+			ver = defaultServerVersion
 		}
 
-		var subCount int64
+		subSummary := "数据库未就绪"
 		if database.DB != nil {
-			database.DB.Model(&database.Subscription{}).Count(&subCount)
+			var subCount int64
+			if err := database.DB.WithContext(ctx).Model(&database.Subscription{}).Count(&subCount).Error; err != nil {
+				subSummary = fmt.Sprintf("查询失败 (%v)", err)
+			} else {
+				subSummary = fmt.Sprintf("%d 部", subCount)
+			}
 		}
 
 		var sb strings.Builder
@@ -142,7 +156,7 @@ func (s *Server) RegisterGovernanceTools(deps GovernanceDeps) {
 		sb.WriteString(fmt.Sprintf("- **系统堆内存 (Sys)**: %.2f MB\n", float64(m.Sys)/(1024*1024)))
 		sb.WriteString(fmt.Sprintf("- **活跃 Goroutines**: %d\n", runtime.NumGoroutine()))
 		sb.WriteString(fmt.Sprintf("- **下载器状态**: %s\n", dlStatus))
-		sb.WriteString(fmt.Sprintf("- **当前总订阅数**: %d 部\n", subCount))
+		sb.WriteString(fmt.Sprintf("- **当前总订阅数**: %s\n", subSummary))
 
 		return TextResult(sb.String()), nil
 	})
@@ -150,13 +164,13 @@ func (s *Server) RegisterGovernanceTools(deps GovernanceDeps) {
 	// 4. update_system_config
 	s.RegisterTool(Tool{
 		Name:        "update_system_config",
-		Description: "更新系统配置参数（保存至 settings 键值表）",
+		Description: "更新非敏感系统配置参数（保存至 settings 键值表）",
 		InputSchema: InputSchema{
 			Type: "object",
 			Properties: map[string]Property{
 				"key": {
 					Type:        "string",
-					Description: "配置项名称，如 TV_BASE_PATH, DOWNLOADER_TYPE 等",
+					Description: "配置项名称，如 TV_BASE_PATH, DOWNLOADER_TYPE 等（禁止修改密钥与密码）",
 				},
 				"value": {
 					Type:        "string",
@@ -170,18 +184,96 @@ func (s *Server) RegisterGovernanceTools(deps GovernanceDeps) {
 			return ErrorResult("数据库未就绪"), nil
 		}
 
-		key, _ := args["key"].(string)
-		val, _ := args["value"].(string)
+		key, hasKey, err := parseStringArg(args, "key")
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
 		key = strings.TrimSpace(key)
-		if key == "" {
+		if !hasKey || key == "" {
 			return ErrorResult("配置项 key 不能为空"), nil
+		}
+		if utf8.RuneCountInString(key) > 128 {
+			return ErrorResult("配置项 key 长度不能超过 128 个字符"), nil
+		}
+		if hasInvalidKeyChars(key) {
+			return ErrorResult("配置项 key 包含非法空白或控制字符"), nil
+		}
+
+		// 安全隔离：禁止通过 MCP 读取或篡改内部鉴权密钥、凭证、密码与插件运行态
+		if isProtectedConfigKey(key) {
+			return ErrorResult(fmt.Sprintf("安全限制：禁止通过 MCP 修改受保护或敏感配置项 %q", key)), nil
+		}
+
+		val, hasVal, err := parseStringArg(args, "value")
+		if err != nil || !hasVal {
+			return ErrorResult("配置项 value 必须是字符串"), nil
+		}
+		if utf8.RuneCountInString(val) > 4096 {
+			return ErrorResult("配置项 value 长度不能超过 4096 个字符"), nil
 		}
 
 		setting := database.Setting{Key: key, Value: val}
-		if err := database.DB.Save(&setting).Error; err != nil {
+		if err := database.DB.WithContext(ctx).Save(&setting).Error; err != nil {
 			return ErrorResult(fmt.Sprintf("保存配置失败: %v", err)), nil
 		}
 
 		return TextResult(fmt.Sprintf("✅ 已更新配置项: %s = %q", key, val)), nil
 	})
+}
+
+func hasInvalidKeyChars(key string) bool {
+	for _, r := range key {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// isProtectedConfigKey 判断配置键是否属于敏感凭证或受保护的内部系统状态
+func isProtectedConfigKey(key string) bool {
+	canon := strings.ToUpper(strings.TrimSpace(key))
+	canon = strings.ReplaceAll(canon, "-", "_")
+	if canon == "" {
+		return true
+	}
+
+	switch canon {
+	case "JWT_SECRET",
+		"TOKEN_SECRET",
+		"MCP_TOKEN",
+		"SESSION_SECRET",
+		"AUTH_SECRET",
+		"PLUGIN_STATUS",
+		"CUSTOM_PLUGINS",
+		"PASSWORD_HASH",
+		"SERVERCHAN_KEY",
+		"BARK_KEY",
+		"BARK_DEVICE_KEY",
+		"PUSHDEER_KEY":
+		return true
+	}
+
+	sensitiveFragments := []string{
+		"SECRET",
+		"PASS",
+		"PWD",
+		"TOKEN",
+		"API_KEY",
+		"APIKEY",
+		"PRIVATE_KEY",
+		"ACCESS_KEY",
+		"DEVICE_KEY",
+		"SIGNING_KEY",
+		"ENCRYPTION_KEY",
+		"AUTH_KEY",
+		"CREDENTIAL",
+	}
+	for _, frag := range sensitiveFragments {
+		if strings.Contains(canon, frag) {
+			return true
+		}
+	}
+
+	return false
 }
