@@ -7,6 +7,7 @@ import (
 	"sync"
 )
 
+// HookType 钩子类型
 type HookType string
 
 const (
@@ -14,6 +15,8 @@ const (
 	HookNaming HookType = "naming"
 	// HookFilter 过滤钩子 - 允许插件动态干预 RSS 过滤逻辑
 	HookFilter HookType = "filter"
+	// HookParse 解析钩子 - 允许插件动态介入任务或标题解析
+	HookParse HookType = "parse"
 )
 
 // HookPriority 钩子优先级，数值越小优先级越高
@@ -66,10 +69,18 @@ type HookRegistration struct {
 	Name      string // 插件名称，用于调试
 }
 
-// WaterfallHookManager 瀑布流钩子管理器
+// ParseHookRegistration 解析拦截器注册条目
+type ParseHookRegistration struct {
+	Priority    HookPriority
+	Interceptor ParseInterceptor
+	Name        string
+}
+
+// WaterfallHookManager 瀑布流钩子与流水线拦截器管理器
 type WaterfallHookManager struct {
 	namingHooks []HookRegistration
 	filterHooks []HookRegistration
+	parseHooks  []ParseHookRegistration
 	mu          sync.RWMutex
 }
 
@@ -78,11 +89,15 @@ func NewWaterfallHookManager() *WaterfallHookManager {
 	return &WaterfallHookManager{
 		namingHooks: make([]HookRegistration, 0),
 		filterHooks: make([]HookRegistration, 0),
+		parseHooks:  make([]ParseHookRegistration, 0),
 	}
 }
 
-// RegisterNamingHook 注册命名钩子
+// RegisterNamingHook 注册命名钩子（函数模式，兼容已有插件）
 func (m *WaterfallHookManager) RegisterNamingHook(priority HookPriority, name string, handler HookFunc) {
+	if m == nil || handler == nil {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.namingHooks = append(m.namingHooks, HookRegistration{
@@ -91,13 +106,45 @@ func (m *WaterfallHookManager) RegisterNamingHook(priority HookPriority, name st
 		Handler:  handler,
 		Name:     name,
 	})
-	// 按优先级排序
 	sortHooks(m.namingHooks)
 	log.Printf("🪝 注册命名钩子: %s (优先级: %d)", name, priority)
 }
 
-// RegisterFilterHook 注册过滤钩子
+// RegisterOrganizeInterceptor 注册强类型整理阶段流水线拦截器
+func (m *WaterfallHookManager) RegisterOrganizeInterceptor(priority HookPriority, interceptor OrganizeInterceptor) {
+	if m == nil || interceptor == nil {
+		return
+	}
+	name := interceptor.Name()
+	m.RegisterNamingHook(priority, name, func(ctx context.Context, input interface{}) (interface{}, error) {
+		in, ok := input.(NamingHookInput)
+		if !ok {
+			return nil, nil
+		}
+		orgInput := OrganizeInput{
+			Anime:        in.Anime,
+			Episode:      in.Episode,
+			Template:     in.Template,
+			VarValues:    in.VarValues,
+			ProposedPath: in.RenderedPath,
+		}
+		out, err := interceptor.InterceptOrganize(ctx, orgInput)
+		if err != nil {
+			return nil, err
+		}
+		return NamingHookOutput{
+			RenderedPath: out.FinalPath,
+			Cancel:       out.Cancel,
+			Reason:       out.Reason,
+		}, nil
+	})
+}
+
+// RegisterFilterHook 注册过滤钩子（函数模式，兼容已有插件）
 func (m *WaterfallHookManager) RegisterFilterHook(priority HookPriority, name string, handler HookFunc) {
+	if m == nil || handler == nil {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.filterHooks = append(m.filterHooks, HookRegistration{
@@ -110,9 +157,58 @@ func (m *WaterfallHookManager) RegisterFilterHook(priority HookPriority, name st
 	log.Printf("🪝 注册过滤钩子: %s (优先级: %d)", name, priority)
 }
 
+// RegisterFilterInterceptor 注册强类型过滤流水线拦截器
+func (m *WaterfallHookManager) RegisterFilterInterceptor(priority HookPriority, interceptor FilterInterceptor) {
+	if m == nil || interceptor == nil {
+		return
+	}
+	name := interceptor.Name()
+	m.RegisterFilterHook(priority, name, func(ctx context.Context, input interface{}) (interface{}, error) {
+		in, ok := input.(FilterHookInput)
+		if !ok {
+			return nil, nil
+		}
+		out, err := interceptor.InterceptFilter(ctx, FilterInput{
+			Item:   in.Item,
+			Filter: in.Filter,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return FilterHookOutput{
+			Allow:  out.Allow,
+			Reason: out.Reason,
+		}, nil
+	})
+}
+
+// RegisterParseInterceptor 注册任务与标题解析流水线拦截器
+func (m *WaterfallHookManager) RegisterParseInterceptor(priority HookPriority, interceptor ParseInterceptor) {
+	if m == nil || interceptor == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.parseHooks = append(m.parseHooks, ParseHookRegistration{
+		Priority:    priority,
+		Interceptor: interceptor,
+		Name:        interceptor.Name(),
+	})
+	// 排序
+	for i := 1; i < len(m.parseHooks); i++ {
+		key := m.parseHooks[i]
+		j := i - 1
+		for j >= 0 && m.parseHooks[j].Priority > key.Priority {
+			m.parseHooks[j+1] = m.parseHooks[j]
+			j--
+		}
+		m.parseHooks[j+1] = key
+	}
+	log.Printf("🪝 注册解析拦截器: %s (优先级: %d)", interceptor.Name(), priority)
+}
+
 // sortHooks 按优先级排序钩子（升序，优先级数值小的在前）
 func sortHooks(hooks []HookRegistration) {
-	// 简单插入排序，钩子数量通常很少
 	for i := 1; i < len(hooks); i++ {
 		key := hooks[i]
 		j := i - 1
@@ -127,7 +223,15 @@ func sortHooks(hooks []HookRegistration) {
 // ExecuteNamingHooks 执行命名钩子链（瀑布流模式）
 // 返回最终路径，是否取消，取消原因
 func (m *WaterfallHookManager) ExecuteNamingHooks(ctx context.Context, input NamingHookInput) (string, bool, string) {
+	if m == nil {
+		return input.RenderedPath, false, ""
+	}
+
 	m.mu.RLock()
+	if len(m.namingHooks) == 0 {
+		m.mu.RUnlock()
+		return input.RenderedPath, false, ""
+	}
 	hooks := make([]HookRegistration, len(m.namingHooks))
 	copy(hooks, m.namingHooks)
 	m.mu.RUnlock()
@@ -135,14 +239,28 @@ func (m *WaterfallHookManager) ExecuteNamingHooks(ctx context.Context, input Nam
 	currentPath := input.RenderedPath
 	for _, hook := range hooks {
 		hookInput := NamingHookInput{
-			Anime:       input.Anime,
-			Episode:     input.Episode,
-			Template:    input.Template,
-			VarValues:   input.VarValues,
+			Anime:        input.Anime,
+			Episode:      input.Episode,
+			Template:     input.Template,
+			VarValues:    input.VarValues,
 			RenderedPath: currentPath,
 		}
 
-		output, err := hook.Handler(ctx, hookInput)
+		// 异常隔离：单个钩子 panic 不崩溃主进程
+		var (
+			output interface{}
+			err    error
+		)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("⚠️ 命名钩子 [%s] 发生 panic 恢复: %v", hook.Name, r)
+					output = nil
+				}
+			}()
+			output, err = hook.Handler(ctx, hookInput)
+		}()
+
 		if err != nil {
 			log.Printf("⚠️ 命名钩子 [%s] 执行错误: %v", hook.Name, err)
 			continue
@@ -164,7 +282,15 @@ func (m *WaterfallHookManager) ExecuteNamingHooks(ctx context.Context, input Nam
 // ExecuteFilterHooks 执行过滤钩子链（瀑布流模式）
 // 返回是否允许通过，拒绝原因
 func (m *WaterfallHookManager) ExecuteFilterHooks(ctx context.Context, input FilterHookInput) (bool, string) {
+	if m == nil {
+		return true, ""
+	}
+
 	m.mu.RLock()
+	if len(m.filterHooks) == 0 {
+		m.mu.RUnlock()
+		return true, ""
+	}
 	hooks := make([]HookRegistration, len(m.filterHooks))
 	copy(hooks, m.filterHooks)
 	m.mu.RUnlock()
@@ -178,7 +304,20 @@ func (m *WaterfallHookManager) ExecuteFilterHooks(ctx context.Context, input Fil
 			Filter: input.Filter,
 		}
 
-		output, err := hook.Handler(ctx, hookInput)
+		var (
+			output interface{}
+			err    error
+		)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("⚠️ 过滤钩子 [%s] 发生 panic 恢复: %v", hook.Name, r)
+					output = nil
+				}
+			}()
+			output, err = hook.Handler(ctx, hookInput)
+		}()
+
 		if err != nil {
 			log.Printf("⚠️ 过滤钩子 [%s] 执行错误: %v", hook.Name, err)
 			continue
@@ -188,7 +327,6 @@ func (m *WaterfallHookManager) ExecuteFilterHooks(ctx context.Context, input Fil
 			if !out.Allow {
 				return false, out.Reason
 			}
-			// 如果通过，更新 reason（最后一个通过的钩子的原因）
 			if out.Reason != "" {
 				reason = out.Reason
 			}
@@ -198,8 +336,57 @@ func (m *WaterfallHookManager) ExecuteFilterHooks(ctx context.Context, input Fil
 	return allowed, reason
 }
 
-// UnregisterHooksByName 根据名称注销钩子（支持热插拔）
+// ExecuteParseInterceptors 执行解析流水线拦截器链
+// 返回最终解析结果与可能发生的错误
+func (m *WaterfallHookManager) ExecuteParseInterceptors(ctx context.Context, rawInput string, initial ParseResult) (ParseResult, error) {
+	if m == nil {
+		return initial, nil
+	}
+
+	m.mu.RLock()
+	if len(m.parseHooks) == 0 {
+		m.mu.RUnlock()
+		return initial, nil
+	}
+	hooks := make([]ParseHookRegistration, len(m.parseHooks))
+	copy(hooks, m.parseHooks)
+	m.mu.RUnlock()
+
+	currentResult := initial
+	for _, hook := range hooks {
+		var (
+			nextResult ParseResult
+			err        error
+		)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("⚠️ 解析拦截器 [%s] 发生 panic 恢复: %v", hook.Name, r)
+					nextResult = currentResult
+				}
+			}()
+			nextResult, err = hook.Interceptor.InterceptParse(ctx, rawInput, currentResult)
+		}()
+
+		if err != nil {
+			log.Printf("⚠️ 解析拦截器 [%s] 执行错误: %v", hook.Name, err)
+			continue
+		}
+
+		// 若拦截器返回了更高置信度或有效更新，则采纳
+		if nextResult.Confidence >= currentResult.Confidence || nextResult.Title != "" {
+			currentResult = nextResult
+		}
+	}
+
+	return currentResult, nil
+}
+
+// UnregisterHooksByName 根据名称注销所有类型的钩子与拦截器（支持热插拔）
 func (m *WaterfallHookManager) UnregisterHooksByName(name string) {
+	if m == nil {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -221,7 +408,16 @@ func (m *WaterfallHookManager) UnregisterHooksByName(name string) {
 	}
 	m.filterHooks = newFilter
 
-	log.Printf("🪝 已注销插件 [%s] 的所有钩子", name)
+	// 过滤解析拦截器
+	newParse := make([]ParseHookRegistration, 0, len(m.parseHooks))
+	for _, h := range m.parseHooks {
+		if h.Name != name {
+			newParse = append(newParse, h)
+		}
+	}
+	m.parseHooks = newParse
+
+	log.Printf("🪝 已注销插件 [%s] 的所有钩子与拦截器", name)
 }
 
 type VarValues struct {

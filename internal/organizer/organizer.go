@@ -16,7 +16,6 @@ import (
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
-	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 )
 
 
@@ -33,18 +32,29 @@ type TVOrganizer struct {
 	movieBasePath string
 	ovaBasePath   string
 	useHardLink   bool
-	pluginManager *plugin.Manager             // 插件管理器，用于触发整理完成事件
+	eventBus      core.EventBus               // 事件总线，用于触发整理完成事件（松耦合）
 	hookManager   *core.WaterfallHookManager // Waterfall 钩子管理器
 }
 
 var _ core.Organizer = (*TVOrganizer)(nil)
 
 // New 创建文件整理器实例
-func New(tvTemplate, movieTemplate, otherTemplate, tvBasePath, movieBasePath string, useHardLink bool, pluginManager *plugin.Manager, opts ...string) *TVOrganizer {
+// busOrProvider 允许传入 core.EventBus，或实现了 GetBus() core.EventBus 的管理器，或 nil
+func New(tvTemplate, movieTemplate, otherTemplate, tvBasePath, movieBasePath string, useHardLink bool, busOrProvider any, opts ...string) *TVOrganizer {
 	ovaPath := "./TV/OVA"
 	if len(opts) > 0 && opts[0] != "" {
 		ovaPath = opts[0]
 	}
+
+	var bus core.EventBus
+	if busOrProvider != nil {
+		if b, ok := busOrProvider.(core.EventBus); ok {
+			bus = b
+		} else if bp, ok := busOrProvider.(interface{ GetBus() core.EventBus }); ok {
+			bus = bp.GetBus()
+		}
+	}
+
 	return &TVOrganizer{
 		tvTemplate:    tvTemplate,
 		movieTemplate: movieTemplate,
@@ -53,7 +63,7 @@ func New(tvTemplate, movieTemplate, otherTemplate, tvBasePath, movieBasePath str
 		movieBasePath: movieBasePath,
 		ovaBasePath:   ovaPath,
 		useHardLink:   useHardLink,
-		pluginManager: pluginManager,
+		eventBus:      bus,
 		hookManager:   core.NewWaterfallHookManager(),
 	}
 }
@@ -159,8 +169,8 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 }
 
 func (o *TVOrganizer) publishOrganizedEvent(filePath, fullPath string, anime core.Anime, episode core.Episode) {
-	if o.pluginManager != nil {
-		o.pluginManager.GetBus().Publish(core.Event{
+	if o.eventBus != nil {
+		o.eventBus.Publish(core.Event{
 			Type: core.EventFileOrganized,
 			Payload: map[string]any{
 				"anime":      anime,

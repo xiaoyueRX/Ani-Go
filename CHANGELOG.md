@@ -4,6 +4,27 @@ Ani-Go 的更新日志。所有版本遵循 [语义化版本](https://semver.org
 
 ---
 
+## v0.6.2 — 2026-11-13 (DSH/Cordis Modern Plugin Architecture & Full-Stack Audit)
+
+### 核心新特性 (Major Features)
+- **DSH/Cordis 现代插件架构演进 (DSH / Cordis Modern Plugin Architecture)**:
+  - 引入可逆副作用与自动销毁机制 (`PluginContext.OnDispose(fn)` 闭包栈)，插件停用或热重载时以 LIFO 逆序自动销毁事件监听与挂载资源，彻底根除协程与监听泄漏；
+  - 引入受监管的协程池 (`ctx.Go(fn)`) 与 `sync.WaitGroup` 追踪，携带专属生命周期 Context，实现优雅停机与自动 Panic 恢复；
+  - 引入六状态生命周期状态机 (`Inactive`, `Loading`, `Active`, `Suspended`, `Error`, `Disposing`)，全链路细粒度追踪健康状态与 Panic 异常；
+  - 全量 6 大内建插件 (`MetadataMapping`, `GeekNaming`, `YucSchedule`, `DataMigrate`, `ExtendedNotifiers`, `NFOScraper`) 迁移至 `PluginContext` 声明式风格。
+- **微内核流水线拦截器双轨架构 (Pipeline Interceptors vs EventBus Pub/Sub)**:
+  - 在 `internal/core/interfaces.go` 与 `hooks.go` 引入强类型流水线拦截器 (`OrganizeInterceptor`, `FilterInterceptor`, `ParseInterceptor`)，实现主干关键流程的可插拔同步修改与短路否决；
+  - 彻底剥除 `internal/organizer/organizer.go` 对 `internal/plugin` 的反向依赖，微内核整理器回归纯粹独立；
+  - `CompositeParser` 引入流水线拦截器链支持，支持插件在正则与 AI 之间无缝接入。
+- **EventBus 稳定性与高并发加固 (EventBus Hardening)**:
+  - 修复 `time.After` 导致的 Go 运行时最小堆计时器泄漏，改用 `time.NewTimer` 配合主动 Stop 与通道排空；
+  - 修复 `Unsubscribe` 原地切片导致的共享底层数组切片脏读截断与数据竞态；
+  - 引入 128 并发信号量池与弹性溢出派发机制，在防止协程风暴的同时 100% 保证零丢事件。
+- **插件管理 API / MCP / 前端全景呈现 (Plugin Management API, MCP & UI Matrix)**:
+  - 完善 `/api/plugins/{id}/toggle` 与 `/api/plugins/custom` 路由，增加 API 层并发重载锁 (`pluginReloadMu`) 防抖；
+  - MCP `list_plugins` 与 `toggle_plugin` 工具透明输出状态机状态、健康度与监听事件清单；
+  - 前端 `SettingsPage.vue` 升级支持响应式健康徽章（Active/Error/Inactive）、高亮错误告警卡片与 Disposable 事件绑定数指标呈现，补齐中英文双语。
+
 ## v0.6.1 — 2026-11-13 (Notification Template System, WeChat & Signal Channels, TMDB Collection Auto-Merge & Full-Stack Hardening)
 
 ### 核心新特性 (Major Features)

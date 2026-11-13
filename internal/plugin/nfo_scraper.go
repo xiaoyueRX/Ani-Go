@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
@@ -77,13 +78,9 @@ type MovieNFO struct {
 
 // NFOScraperPlugin Bangumi NFO 媒体刮削器插件
 type NFOScraperPlugin struct {
-	mu                  sync.RWMutex
-	enabled             bool
-	subID               core.SubscriptionID
-	subBus              core.EventBus
-	runCtx              context.Context
-	cancel              context.CancelFunc
-	wg                  sync.WaitGroup
+	mu                  sync.Mutex
+	enabled             atomic.Bool
+	activePctx          PluginContext
 	fileMu              sync.Mutex
 	posterMu            sync.Mutex
 	posterInFlight      map[string]struct{}
@@ -112,64 +109,52 @@ func (p *NFOScraperPlugin) GetInfo() PluginInfo {
 	}
 }
 
-// Init 启用插件：幂等订阅文件整理完成事件
+// Init 启用插件（基于 PluginContext 与 OnDispose 模式，自动注销事件监听与销毁）
 func (p *NFOScraperPlugin) Init(bus core.EventBus, ctx core.Context) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	oldCtx := p.activePctx
+	p.activePctx = nil
+	p.mu.Unlock()
 
-	// 防止重复调用 Init 造成重复订阅或旧上下文泄漏
-	if p.subID != 0 {
-		unsubBus := p.subBus
-		if unsubBus == nil {
-			unsubBus = bus
-		}
-		if unsubBus != nil {
-			unsubBus.Unsubscribe(core.EventFileOrganized, p.subID)
-		}
-		p.subID = 0
-		p.subBus = nil
-	}
-	if p.cancel != nil {
-		p.cancel()
-		p.cancel = nil
+	if oldCtx != nil {
+		oldCtx.Dispose()
 	}
 
-	p.runCtx, p.cancel = context.WithCancel(context.Background())
-	p.enabled = true
-	p.subBus = bus
+	pctx, ok := ctx.(PluginContext)
+	if !ok {
+		pctx = NewPluginContext("nfo_scraper", bus, ctx)
+	}
+
+	p.mu.Lock()
+	p.activePctx = pctx
+	p.enabled.Store(true)
+	p.mu.Unlock()
+
+	pctx.OnDispose(func() {
+		p.enabled.Store(false)
+	})
+
 	if bus != nil {
-		p.subID = bus.Subscribe(core.EventFileOrganized, func(ev core.Event) {
-			p.handleFileOrganized(ev)
+		pctx.Subscribe(core.EventFileOrganized, func(ev core.Event) {
+			p.handleFileOrganized(ev, pctx)
 		})
 	}
-	log.Println("🔌 [插件] Bangumi NFO 刮削器已启用，将在剧集整理入库时自动生成媒体元数据")
+
+	pctx.Logf("Bangumi NFO 刮削器已启用，将在剧集整理入库时自动生成媒体元数据")
 	return nil
 }
 
 // Stop 停用插件：注销事件监听并等待在途任务退出，保证 0 协程、0 网络、0 文件写入
 func (p *NFOScraperPlugin) Stop(bus core.EventBus) error {
 	p.mu.Lock()
-	wasEnabled := p.enabled
-	p.enabled = false
-	if p.cancel != nil {
-		p.cancel()
-		p.cancel = nil
-	}
-	p.runCtx = nil
-
-	unsubBus := bus
-	if unsubBus == nil {
-		unsubBus = p.subBus
-	}
-	if unsubBus != nil && p.subID != 0 {
-		unsubBus.Unsubscribe(core.EventFileOrganized, p.subID)
-	}
-	p.subID = 0
-	p.subBus = nil
+	wasEnabled := p.enabled.Swap(false)
+	pctx := p.activePctx
+	p.activePctx = nil
 	p.mu.Unlock()
 
-	// 在锁外等待所有在途处理完成（因 runCtx 已取消，网络请求会立即中断）
-	p.wg.Wait()
+	if pctx != nil {
+		pctx.Dispose()
+	}
 
 	if wasEnabled {
 		log.Println("🔌 [插件] Bangumi NFO 刮削器已停用")
@@ -181,28 +166,19 @@ func (p *NFOScraperPlugin) isActive(ctx context.Context) bool {
 	if ctx != nil && ctx.Err() != nil {
 		return false
 	}
-	p.mu.RLock()
-	active := p.enabled
-	p.mu.RUnlock()
-	return active
+	return p.enabled.Load()
 }
 
-func (p *NFOScraperPlugin) handleFileOrganized(ev core.Event) {
+func (p *NFOScraperPlugin) handleFileOrganized(ev core.Event, pctx PluginContext) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("⚠️ [NFO刮削] 异常崩溃捕获: %v", r)
 		}
 	}()
 
-	p.mu.RLock()
-	if !p.enabled || p.runCtx == nil || p.runCtx.Err() != nil {
-		p.mu.RUnlock()
+	if !p.enabled.Load() || pctx == nil || pctx.Context().Err() != nil {
 		return
 	}
-	runCtx := p.runCtx
-	p.wg.Add(1)
-	p.mu.RUnlock()
-	defer p.wg.Done()
 
 	payload := ev.Payload
 	if payload == nil {
@@ -217,6 +193,7 @@ func (p *NFOScraperPlugin) handleFileOrganized(ev core.Event) {
 
 	anime := extractAnimeFromPayload(payload)
 	episode := extractEpisodeFromPayload(payload)
+	runCtx := pctx.Context()
 
 	if isMovieAnime(anime, payload) {
 		movieDir := filepath.Dir(newPath)

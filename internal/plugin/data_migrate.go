@@ -3,6 +3,7 @@ package plugin
 import (
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
@@ -11,13 +12,12 @@ import (
 // DataMigratePlugin 实现 BuiltInPlugin 接口，提供 AutoBangumi / ani-rss 历史数据迁移与导入能力
 type DataMigratePlugin struct {
 	mu                sync.RWMutex
-	enabled           bool
+	enabled           atomic.Bool
 	lastMigratedAt    *time.Time
 	migratedSubs      int
 	migratedEpisodes  int
 	migratedDownloads int
-	subID             core.SubscriptionID
-	subBus            core.EventBus
+	activePctx        PluginContext
 }
 
 func (p *DataMigratePlugin) GetInfo() PluginInfo {
@@ -43,73 +43,79 @@ func (p *DataMigratePlugin) GetInfo() PluginInfo {
 	}
 }
 
-// Init 启用数据迁移插件（幂等支持重复调用与 nil 总线保护）
+// Init 启用数据迁移插件（基于 PluginContext 与 OnDispose 模式，自动注销事件监听）
 func (p *DataMigratePlugin) Init(bus core.EventBus, ctx core.Context) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	oldCtx := p.activePctx
+	p.activePctx = nil
+	p.mu.Unlock()
 
-	if p.subID != 0 {
-		unsubBus := p.subBus
-		if unsubBus == nil {
-			unsubBus = bus
-		}
-		if unsubBus != nil {
-			unsubBus.Unsubscribe("data.migrate", p.subID)
-		}
-		p.subID = 0
-		p.subBus = nil
+	if oldCtx != nil {
+		oldCtx.Dispose()
 	}
 
+	pctx, ok := ctx.(PluginContext)
+	if !ok {
+		pctx = NewPluginContext("data-migrate", bus, ctx)
+	}
+
+	p.mu.Lock()
+	p.activePctx = pctx
+	p.enabled.Store(true)
+	p.mu.Unlock()
+
+	pctx.OnDispose(func() {
+		p.enabled.Store(false)
+	})
+
 	if bus != nil {
-		p.subBus = bus
-		p.subID = bus.Subscribe("data.migrate", func(ev core.Event) {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("⚠️ [数据迁移插件] 处理事件异常崩溃捕获: %v", r)
-				}
-			}()
-			if ev.Payload == nil {
-				return
-			}
-			p.mu.Lock()
-			defer p.mu.Unlock()
-			if !p.enabled {
-				return
-			}
-			now := time.Now()
-			p.lastMigratedAt = &now
-			subs := extractPayloadInt(ev.Payload["subscriptions"])
-			eps := extractPayloadInt(ev.Payload["episodes"])
-			dls := extractPayloadInt(ev.Payload["downloads"])
-			p.migratedSubs += subs
-			p.migratedEpisodes += eps
-			p.migratedDownloads += dls
-			log.Printf("🔌 [数据迁移插件] 记录迁移事件: +%d 订阅, +%d 剧集, +%d 下载 (累计: %d/%d/%d)",
-				subs, eps, dls, p.migratedSubs, p.migratedEpisodes, p.migratedDownloads)
+		pctx.Subscribe("data.migrate", func(ev core.Event) {
+			p.handleMigrateEvent(ev)
 		})
 	}
 
-	p.enabled = true
-	log.Println("🔌 [插件] 数据导入与迁移插件已启用 (支持 AutoBangumi / ani-rss SQLite 迁移)")
+	pctx.Logf("数据导入与迁移插件已启用 (支持 AutoBangumi / ani-rss SQLite 迁移)")
 	return nil
+}
+
+func (p *DataMigratePlugin) handleMigrateEvent(ev core.Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("⚠️ [数据迁移插件] 处理事件异常崩溃捕获: %v", r)
+		}
+	}()
+	if ev.Payload == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.enabled.Load() {
+		return
+	}
+	now := time.Now()
+	p.lastMigratedAt = &now
+	subs := extractPayloadInt(ev.Payload["subscriptions"])
+	eps := extractPayloadInt(ev.Payload["episodes"])
+	dls := extractPayloadInt(ev.Payload["downloads"])
+	p.migratedSubs += subs
+	p.migratedEpisodes += eps
+	p.migratedDownloads += dls
+	log.Printf("🔌 [数据迁移插件] 记录迁移事件: +%d 订阅, +%d 剧集, +%d 下载 (累计: %d/%d/%d)",
+		subs, eps, dls, p.migratedSubs, p.migratedEpisodes, p.migratedDownloads)
 }
 
 // Stop 停用数据迁移插件并注销事件监听（幂等安全）
 func (p *DataMigratePlugin) Stop(bus core.EventBus) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	wasEnabled := p.enabled.Swap(false)
+	pctx := p.activePctx
+	p.activePctx = nil
+	p.mu.Unlock()
 
-	wasEnabled := p.enabled
-	unsubBus := bus
-	if unsubBus == nil {
-		unsubBus = p.subBus
+	if pctx != nil {
+		pctx.Dispose()
 	}
-	if unsubBus != nil && p.subID != 0 {
-		unsubBus.Unsubscribe("data.migrate", p.subID)
-	}
-	p.subID = 0
-	p.subBus = nil
-	p.enabled = false
+
 	if wasEnabled {
 		log.Println("🔌 [插件] 数据导入与迁移插件已停用")
 	}

@@ -13,7 +13,7 @@ import {
   Shield, Sparkles, Plus, 
   Copy, Search, Camera, X,
   Zap, ExternalLink, Play,
-  Activity, CheckCircle, AlertCircle, Filter, Clock
+  Activity, CheckCircle, AlertCircle, Filter, Clock, Calendar
 } from 'lucide-vue-next'
 import { CURRENT_VERSION, currentVersion, useVersion } from '../composables/useVersion'
 
@@ -969,33 +969,35 @@ async function reloadPlugins() {
     saved.value = true
     setTimeout(() => { saved.value = false }, 2500)
   } catch (e: any) {
-    error.value = '重新加载插件失败'
+    error.value = e.response?.data?.error || t('settings.plugins.reloadFailed')
   } finally {
     pluginLoading.value = false
   }
 }
 
 async function togglePlugin(p: any) {
-  const targetState = !p.enabled
+  const previousState = p.enabled
+  const targetState = !previousState
+  p.enabled = targetState
   try {
     await request.post('/plugins/toggle', { id: p.id, enabled: targetState })
-    p.enabled = targetState
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
   } catch (e: any) {
-    error.value = e.response?.data?.error || '切换插件状态失败'
+    p.enabled = previousState
+    error.value = e.response?.data?.error || t('settings.plugins.toggleFailed')
   }
 }
 
 async function deletePlugin(id: string) {
-  if (!confirm('确定要删除此自定义插件吗？')) return
+  if (!confirm(t('settings.plugins.deleteConfirm'))) return
   try {
     await request.delete(`/plugins/${id}`)
     await fetchPlugins()
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
   } catch (e: any) {
-    error.value = e.response?.data?.error || '删除插件失败'
+    error.value = e.response?.data?.error || t('settings.plugins.deleteFailed')
   }
 }
 
@@ -1029,16 +1031,16 @@ async function submitPluginForm() {
   pluginJsonError.value = ''
   try {
     if (pluginModalTab.value === 'webhook') {
-      if (!pluginForm.value.name.trim()) throw new Error('插件名称不能为空')
-      if (!pluginForm.value.url.trim()) throw new Error('Webhook URL 不能为空')
-      if (pluginForm.value.events.length === 0) throw new Error('请至少选择一个监听事件')
+      if (!pluginForm.value.name.trim()) throw new Error(t('settings.plugins.nameRequired'))
+      if (!pluginForm.value.url.trim()) throw new Error(t('settings.plugins.urlRequired'))
+      if (pluginForm.value.events.length === 0) throw new Error(t('settings.plugins.eventsRequired'))
       await request.post('/plugins/save', pluginForm.value)
     } else {
       let parsed: any
       try {
         parsed = JSON.parse(pluginJsonText.value)
       } catch (err: any) {
-        throw new Error('JSON 格式错误: ' + err.message)
+        throw new Error('JSON: ' + err.message)
       }
       if (Array.isArray(parsed)) {
         for (const item of parsed) await request.post('/plugins/save', item)
@@ -1051,7 +1053,7 @@ async function submitPluginForm() {
     saved.value = true
     setTimeout(() => { saved.value = false }, 2500)
   } catch (e: any) {
-    pluginJsonError.value = e.message || e.response?.data?.error || '保存插件失败'
+    pluginJsonError.value = e.message || e.response?.data?.error || t('settings.plugins.saveFailed')
   } finally {
     pluginSaving.value = false
   }
@@ -2307,10 +2309,23 @@ onUnmounted(() => {
                         <span class="badge badge-xs text-[9px]" :class="plugin.is_builtin ? 'badge-primary' : 'badge-secondary'">
                           {{ plugin.is_builtin ? $t('settings.plugins.builtin') : $t('settings.plugins.webhookType') }}
                         </span>
-                        <span class="badge badge-xs text-[9px] font-bold" :class="plugin.enabled ? 'badge-success text-success-content' : 'badge-ghost opacity-60'">
-                          {{ plugin.enabled ? '运行中' : '已停用' }}
+                        <!-- 插件生命周期六状态健康指示 -->
+                        <span v-if="plugin.status === 'error' || (plugin.enabled && plugin.error)" class="badge badge-xs text-[9px] font-bold badge-error gap-1">
+                          <AlertCircle :size="10" /> {{ $t('settings.plugins.statusError') }}
                         </span>
-                        <span v-if="plugin.author" class="text-[10px] opacity-40">by {{ plugin.author }}</span>
+                        <span v-else-if="plugin.status === 'loading'" class="badge badge-xs text-[9px] font-bold badge-warning gap-1">
+                          <span class="loading loading-spinner loading-[8px]"></span> {{ $t('settings.plugins.statusLoading') }}
+                        </span>
+                        <span v-else-if="plugin.status === 'disposing'" class="badge badge-xs text-[9px] font-bold badge-warning">
+                          {{ $t('settings.plugins.statusDisposing') }}
+                        </span>
+                        <span v-else-if="plugin.enabled || plugin.status === 'active'" class="badge badge-xs text-[9px] font-bold badge-success text-success-content gap-1">
+                          <span class="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span> {{ $t('settings.plugins.statusRunning') }}
+                        </span>
+                        <span v-else class="badge badge-xs text-[9px] font-bold badge-ghost opacity-60">
+                          {{ $t('settings.plugins.statusStopped') }}
+                        </span>
+                        <span v-if="plugin.author" class="text-[10px] opacity-40">{{ $t('settings.plugins.byAuthor', { author: plugin.author }) }}</span>
                       </div>
                     </div>
                   </div>
@@ -2337,6 +2352,15 @@ onUnmounted(() => {
                 <p class="text-xs text-base-content/70 leading-relaxed font-medium">
                   {{ plugin.description || $t('settings.plugins.noDesc') }}
                 </p>
+
+                <!-- 异常报错报警展示 -->
+                <div v-if="plugin.status === 'error' || plugin.error" class="mt-2.5 p-2.5 rounded-xl bg-error/10 border border-error/20 text-error text-xs flex items-start gap-2">
+                  <AlertCircle :size="14" class="shrink-0 mt-0.5" />
+                  <div class="space-y-0.5 overflow-hidden">
+                    <div class="font-bold text-[11px]">{{ $t('settings.plugins.healthErrorTitle') }}</div>
+                    <div class="text-[10px] font-mono opacity-90 break-all leading-tight">{{ plugin.error || $t('settings.plugins.statusError') }}</div>
+                  </div>
+                </div>
               </div>
 
               <!-- 底部事件与目标 URL -->
@@ -2349,7 +2373,12 @@ onUnmounted(() => {
                 </div>
 
                 <div v-if="plugin.events && plugin.events.length" class="space-y-1">
-                  <span class="text-[9px] font-black uppercase tracking-wider opacity-40">{{ $t('settings.plugins.listenEvents') }}</span>
+                  <div class="flex items-center justify-between">
+                    <span class="text-[9px] font-black uppercase tracking-wider opacity-40">{{ $t('settings.plugins.listenEvents') }}</span>
+                    <span class="text-[9px] font-mono opacity-50" :class="plugin.enabled ? 'text-success' : 'text-base-content/40'">
+                      {{ plugin.enabled ? $t('settings.plugins.eventsBound', { count: plugin.events.length }) : $t('settings.plugins.eventsDisposed') }}
+                    </span>
+                  </div>
                   <div class="flex flex-wrap gap-1">
                     <span v-for="ev in plugin.events" :key="ev" class="px-2 py-0.5 rounded-md bg-base-300 text-[10px] font-mono font-bold opacity-75">
                       {{ ev }}
@@ -2359,7 +2388,7 @@ onUnmounted(() => {
                 <!-- 插件专属操作入口 (仅在启用时呈现对应操作，停用时明确标识休眠) -->
                 <div v-if="plugin.enabled">
                   <div v-if="plugin.id === 'data-migrate'" class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5">
-                    <span class="text-[10px] opacity-60">从 AutoBangumi 或 ani-rss 迁移现有数据</span>
+                    <span class="text-[10px] opacity-60">{{ $t('settings.plugins.dataMigrateDesc') }}</span>
                     <button class="btn btn-primary btn-xs rounded-xl gap-1 font-bold shadow-sm" @click="openMigrateModal">
                       <Upload :size="12" />
                       <span>{{ $t('settings.plugins.migrateBtn') }}</span>
@@ -2367,43 +2396,55 @@ onUnmounted(() => {
                   </div>
                   <div v-else-if="plugin.id === 'extended-notifiers'" class="pt-2.5 space-y-2 border-t border-base-content/5">
                     <div class="flex items-center justify-between gap-2 flex-wrap text-[11px]">
-                      <span class="opacity-70 font-medium">驱动全系统 16 种推送渠道及队列监控</span>
+                      <span class="opacity-70 font-medium">{{ $t('settings.plugins.extendedNotifiersDesc') }}</span>
                       <div class="flex items-center gap-1.5 text-[10px] font-mono">
-                        <span class="badge badge-ghost badge-sm">累计: {{ notifyStats.total }}</span>
+                        <span class="badge badge-ghost badge-sm">{{ $t('settings.plugins.totalNotified') }}: {{ notifyStats.total }}</span>
                         <span class="badge badge-sm" :class="notifyStats.failed > 0 ? 'badge-warning' : 'badge-success'">
-                          送达率: {{ notifyStats.total > 0 ? ((notifyStats.success / notifyStats.total) * 100).toFixed(1) : '100' }}%
+                          {{ $t('settings.plugins.deliveryRate') }}: {{ notifyStats.total > 0 ? ((notifyStats.success / notifyStats.total) * 100).toFixed(1) : '100' }}%
                         </span>
                       </div>
                     </div>
                     <div class="flex items-center justify-end gap-2">
                       <button class="btn btn-outline btn-xs rounded-xl gap-1 font-bold" @click="activeTab = 'notify'">
                         <Activity :size="12" />
-                        <span>投递监控与履历</span>
+                        <span>{{ $t('settings.plugins.notifyDeliveryMonitoring') }}</span>
                       </button>
                       <button class="btn btn-primary btn-xs rounded-xl gap-1 font-bold shadow-sm" @click="activeTab = 'notify'">
                         <Bell :size="12" />
-                        <span>通道详细设置</span>
+                        <span>{{ $t('settings.plugins.notifyChannelSettings') }}</span>
                       </button>
                     </div>
                   </div>
                   <div v-else-if="plugin.id === 'yuc_schedule'" class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5">
-                    <span class="text-[10px] opacity-60">長門番堂新番时间表已激活</span>
+                    <span class="text-[10px] opacity-60">{{ $t('settings.plugins.yucScheduleDesc') }}</span>
                     <router-link to="/schedule" class="btn btn-ghost btn-xs rounded-xl gap-1 border border-base-300 font-bold">
                       <Calendar :size="12" />
-                      <span>查看时间表</span>
+                      <span>{{ $t('settings.plugins.viewSchedule') }}</span>
                     </router-link>
+                  </div>
+                  <div v-else-if="plugin.id === 'metadata_mapping'" class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5">
+                    <span class="text-[10px] opacity-60">{{ $t('settings.plugins.metaMappingDesc') }}</span>
+                    <span class="badge badge-success badge-outline badge-xs text-[9px] font-bold">{{ $t('settings.plugins.statusRunning') }}</span>
+                  </div>
+                  <div v-else-if="plugin.id === 'geek_naming'" class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5">
+                    <span class="text-[10px] opacity-60">{{ $t('settings.plugins.geekNamingDesc') }}</span>
+                    <span class="badge badge-success badge-outline badge-xs text-[9px] font-bold">{{ $t('settings.plugins.statusRunning') }}</span>
+                  </div>
+                  <div v-else-if="plugin.id === 'nfo_scraper'" class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5">
+                    <span class="text-[10px] opacity-60">{{ $t('settings.plugins.nfoScraperDesc') }}</span>
+                    <span class="badge badge-success badge-outline badge-xs text-[9px] font-bold">{{ $t('settings.plugins.statusRunning') }}</span>
                   </div>
                   <div v-else class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5">
                     <span class="text-[10px] opacity-60 flex items-center gap-1.5 font-medium">
                       <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
-                      <span>后台服务运行中</span>
+                      <span>{{ $t('settings.plugins.serviceRunning') }}</span>
                     </span>
-                    <span class="badge badge-success badge-outline badge-xs text-[9px] font-bold">已启用</span>
+                    <span class="badge badge-success badge-outline badge-xs text-[9px] font-bold">{{ $t('settings.plugins.statusRunning') }}</span>
                   </div>
                 </div>
                 <div v-else class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5 opacity-50">
-                  <span class="text-[10px] opacity-60 italic">插件已停用，设置项已收起，后台推送已休眠</span>
-                  <span class="badge badge-ghost badge-xs text-[9px]">已停用</span>
+                  <span class="text-[10px] opacity-60 italic">{{ $t('settings.plugins.serviceDormant') }}</span>
+                  <span class="badge badge-ghost badge-xs text-[9px]">{{ $t('settings.plugins.statusStopped') }}</span>
                 </div>
               </div>
             </div>
@@ -2805,40 +2846,40 @@ onUnmounted(() => {
           <button class="flex-1 py-1.5 rounded-xl text-xs font-black transition-all"
             :class="pluginModalTab === 'webhook' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
             @click="pluginModalTab = 'webhook'">
-            快捷创建 Webhook
+            {{ $t('settings.plugins.tabWebhook') }}
           </button>
           <button class="flex-1 py-1.5 rounded-xl text-xs font-black transition-all"
             :class="pluginModalTab === 'json' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
             @click="pluginModalTab = 'json'">
-            JSON 规则导入
+            {{ $t('settings.plugins.tabJson') }}
           </button>
         </div>
 
         <!-- Tab 1: Webhook 表单 -->
         <div v-if="pluginModalTab === 'webhook'" class="space-y-3.5">
           <div class="space-y-1">
-            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">插件名称 *</label>
-            <input v-model="pluginForm.name" type="text" placeholder="例如：Discord 频道推送 / n8n 自动化" class="input input-bordered w-full rounded-xl text-xs" />
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">{{ $t('settings.plugins.nameLabel') }}</label>
+            <input v-model="pluginForm.name" type="text" :placeholder="$t('settings.plugins.namePlaceholder')" class="input input-bordered w-full rounded-xl text-xs" />
           </div>
 
           <div class="space-y-1">
-            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">目标 Webhook URL *</label>
-            <input v-model="pluginForm.url" type="url" placeholder="https://discord.com/api/webhooks/... 或 http://localhost:5678/webhook/..." class="input input-bordered w-full rounded-xl font-mono text-xs" />
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">{{ $t('settings.plugins.urlLabel') }}</label>
+            <input v-model="pluginForm.url" type="url" :placeholder="$t('settings.plugins.urlPlaceholder')" class="input input-bordered w-full rounded-xl font-mono text-xs" />
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="space-y-1">
-              <label class="text-[11px] font-black uppercase tracking-wider opacity-60">签名密钥 Secret (可选)</label>
-              <input v-model="pluginForm.secret" type="password" placeholder="请求头 X-AniGo-Secret" class="input input-bordered w-full rounded-xl text-xs font-mono" />
+              <label class="text-[11px] font-black uppercase tracking-wider opacity-60">{{ $t('settings.plugins.secretLabel') }}</label>
+              <input v-model="pluginForm.secret" type="password" :placeholder="$t('settings.plugins.secretPlaceholder')" class="input input-bordered w-full rounded-xl text-xs font-mono" />
             </div>
             <div class="space-y-1">
-              <label class="text-[11px] font-black uppercase tracking-wider opacity-60">功能简述 (可选)</label>
-              <input v-model="pluginForm.description" type="text" placeholder="简要说明此插件功能" class="input input-bordered w-full rounded-xl text-xs" />
+              <label class="text-[11px] font-black uppercase tracking-wider opacity-60">{{ $t('settings.plugins.descLabel') }}</label>
+              <input v-model="pluginForm.description" type="text" :placeholder="$t('settings.plugins.descPlaceholder')" class="input input-bordered w-full rounded-xl text-xs" />
             </div>
           </div>
 
           <div class="space-y-1.5">
-            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">监听触发事件 * (多选)</label>
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">{{ $t('settings.plugins.eventsLabel') }}</label>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-base-200/50 p-3.5 rounded-2xl border border-base-300/40">
               <label v-for="ev in availablePluginEvents" :key="ev.id" class="flex items-center gap-2 cursor-pointer hover:opacity-100 opacity-80 py-0.5">
                 <input type="checkbox" :value="ev.id" v-model="pluginForm.events" class="checkbox checkbox-primary checkbox-xs rounded" />
@@ -2851,10 +2892,10 @@ onUnmounted(() => {
         <!-- Tab 2: JSON 导入 -->
         <div v-else class="space-y-3">
           <div class="flex items-center justify-between">
-            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">粘贴 JSON 规则或上传文件</label>
+            <label class="text-[11px] font-black uppercase tracking-wider opacity-60">{{ $t('settings.plugins.jsonLabel') }}</label>
             <label class="btn btn-xs btn-outline rounded-xl gap-1 cursor-pointer">
               <Upload :size="12" />
-              <span>选择 .json 文件</span>
+              <span>{{ $t('settings.plugins.selectFile') }}</span>
               <input type="file" accept=".json,application/json" class="hidden" @change="handlePluginFileImport" />
             </label>
           </div>
@@ -2864,10 +2905,10 @@ onUnmounted(() => {
         <p v-if="pluginJsonError" class="text-xs text-error font-bold bg-error/10 p-3 rounded-xl border border-error/20">{{ pluginJsonError }}</p>
 
         <div class="modal-action flex justify-end gap-2.5 pt-2">
-          <button @click="showPluginModal = false" class="btn btn-ghost btn-sm rounded-xl px-5">取消</button>
+          <button @click="showPluginModal = false" class="btn btn-ghost btn-sm rounded-xl px-5">{{ $t('settings.plugins.cancel') }}</button>
           <button @click="submitPluginForm" :disabled="pluginSaving" class="btn btn-primary btn-sm rounded-xl px-7 shadow-md">
             <span v-if="pluginSaving" class="loading loading-spinner loading-xs"></span>
-            <span v-else>确认导入</span>
+            <span v-else>{{ $t('settings.plugins.confirmImport') }}</span>
           </button>
         </div>
       </div>

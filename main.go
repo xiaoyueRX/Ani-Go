@@ -30,7 +30,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/update"
 )
 
-var version = "v0.6.0"
+var version = "v0.6.2"
 
 func main() {
 	printBanner()

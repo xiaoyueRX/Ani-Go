@@ -184,3 +184,9 @@
 - [x] **做种生命周期回收与磁盘急停深度加固**：做种达标安全回收任务，硬链接 SameFile 零 I/O 校验，跨平台剩余空间熔断保护。
 - [x] **原生 MCP Server 生产级安全审计**：SSE 会话超时清理淘汰 (`EvictStaleSessions`)、常数时间 Token 鉴权、敏感系统配置强拦截、nil 服务全方位防护。
 - [x] **三级消歧漏斗深度防毒与边缘覆盖**：年份与技术标签混淆集数深度清洗、v2/v3及小数集解析、时区容差窗口对齐、AI 每日配额与防投毒缓存。
+
+### Phase 13: v0.6.2 DSH/Cordis 现代插件架构演进与全仓库深度重审 ✅
+- [x] **DSH / Cordis 可逆副作用引擎**：引入 `PluginContext` 闭包栈与 `OnDispose(fn)` 机制，插件停用与重载时以 LIFO 逆序自动销毁事件监听与挂载资源，彻底消除协程泄漏与悬挂监听。
+- [x] **微内核流水线拦截器双轨架构**：在 `internal/core/interfaces.go` 与 `hooks.go` 引入强类型流水线拦截器（`OrganizeInterceptor`、`FilterInterceptor`、`ParseInterceptor`），彻底剥除 `TVOrganizer` 对 `internal/plugin` 的反向依赖。
+- [x] **EventBus 稳定性与高并发加固**：消除 `time.After` 引起的运行时计时器泄漏（改用 `time.NewTimer` + Stop/Drain），修复 `Unsubscribe` 切片竞态，引入 128 并发信号量池与弹性溢出派发机制，100% 保障零丢事件。
+- [x] **插件健康状态机与多渠道管理体验**：引入六状态机（`Inactive`, `Loading`, `Active`, `Suspended`, `Error`, `Disposing`），升级 REST API 与 MCP 治理工具，前端 `SettingsPage.vue` 响应式展示健康度徽章、错误堆栈与 Disposable 绑定数。

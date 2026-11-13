@@ -7,19 +7,25 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 )
 
 var (
 	// DefaultGeekNamingPlugin 媒体库规范重命名插件共享单例
-	DefaultGeekNamingPlugin = &GeekNamingPlugin{enabled: true}
+	DefaultGeekNamingPlugin = &GeekNamingPlugin{}
 )
+
+func init() {
+	DefaultGeekNamingPlugin.enabled.Store(true)
+}
 
 // GeekNamingPlugin 媒体库规范重命名插件
 type GeekNamingPlugin struct {
-	mu      sync.RWMutex
-	enabled bool
+	mu         sync.Mutex
+	enabled    atomic.Bool
+	activePctx PluginContext
 }
 
 func (p *GeekNamingPlugin) GetInfo() PluginInfo {
@@ -37,18 +43,46 @@ func (p *GeekNamingPlugin) GetInfo() PluginInfo {
 	}
 }
 
+// Init 启用媒体库规范命名插件（集成 PluginContext 与 OnDispose 销毁监听）
 func (p *GeekNamingPlugin) Init(bus core.EventBus, ctx core.Context) error {
 	p.mu.Lock()
-	p.enabled = true
+	oldCtx := p.activePctx
+	p.activePctx = nil
 	p.mu.Unlock()
-	log.Println("🔌 [插件] 媒体库规范重命名插件已启用")
+
+	if oldCtx != nil {
+		oldCtx.Dispose()
+	}
+
+	pctx, ok := ctx.(PluginContext)
+	if !ok {
+		pctx = NewPluginContext("standard-naming", bus, ctx)
+	}
+
+	p.mu.Lock()
+	p.activePctx = pctx
+	p.enabled.Store(true)
+	p.mu.Unlock()
+
+	pctx.OnDispose(func() {
+		p.enabled.Store(false)
+	})
+
+	pctx.Logf("媒体库规范重命名插件已启用")
 	return nil
 }
 
+// Stop 停用媒体库规范命名插件，触发上下文 Dispose
 func (p *GeekNamingPlugin) Stop(bus core.EventBus) error {
 	p.mu.Lock()
-	p.enabled = false
+	p.enabled.Store(false)
+	pctx := p.activePctx
+	p.activePctx = nil
 	p.mu.Unlock()
+
+	if pctx != nil {
+		pctx.Dispose()
+	}
 	log.Println("🔌 [插件] 媒体库规范重命名插件已停用，钩子将跳过规范化处理")
 	return nil
 }
@@ -64,10 +98,7 @@ func InitGeekNaming(mgr *core.WaterfallHookManager) {
 		if !ok {
 			return nil, fmt.Errorf("规范命名钩子收到无效输入类型: %T", input)
 		}
-		DefaultGeekNamingPlugin.mu.RLock()
-		active := DefaultGeekNamingPlugin.enabled
-		DefaultGeekNamingPlugin.mu.RUnlock()
-		if !active {
+		if !DefaultGeekNamingPlugin.enabled.Load() {
 			return core.NamingHookOutput{
 				RenderedPath: in.RenderedPath,
 			}, nil

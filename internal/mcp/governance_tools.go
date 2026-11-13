@@ -44,16 +44,38 @@ func (s *Server) RegisterGovernanceTools(deps GovernanceDeps) {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("🧩 插件列表 (共 %d 个)：\n\n", len(plugins)))
 		for _, p := range plugins {
-			status := "🟢 已启用"
-			if !p.Enabled {
+			var status string
+			if p.Status == plugin.StateError || (p.Enabled && p.Error != "") {
+				status = fmt.Sprintf("🔴 异常隔离 (Error: %s)", p.Error)
+			} else if p.Status == plugin.StateLoading {
+				status = "🟡 加载中 (Loading)"
+			} else if p.Status == plugin.StateDisposing {
+				status = "🟠 正在销毁 (Disposing)"
+			} else if p.Enabled || p.Status == plugin.StateActive {
+				status = "🟢 已启用"
+			} else {
 				status = "⚪ 已停用 (零协程/零资源消耗)"
 			}
-			sb.WriteString(fmt.Sprintf("• **%s** (%s) - %s\n", p.Name, p.ID, status))
+
+			pluginType := "内建功能"
+			if !p.IsBuiltIn {
+				pluginType = "Webhook 联动"
+			}
+			sb.WriteString(fmt.Sprintf("• **%s** (`%s`) - %s [%s]\n", p.Name, p.ID, status, pluginType))
 			if p.Description != "" {
 				sb.WriteString(fmt.Sprintf("  描述: %s\n", p.Description))
 			}
 			if p.Version != "" {
-				sb.WriteString(fmt.Sprintf("  版本: %s\n", p.Version))
+				sb.WriteString(fmt.Sprintf("  版本: v%s\n", p.Version))
+			}
+			if len(p.Events) > 0 {
+				sb.WriteString(fmt.Sprintf("  监听事件: %s\n", strings.Join(p.Events, ", ")))
+			}
+			if p.URL != "" {
+				sb.WriteString(fmt.Sprintf("  目标 Webhook: %s\n", p.URL))
+			}
+			if p.Error != "" && p.Status != plugin.StateError {
+				sb.WriteString(fmt.Sprintf("  最近错误: %s\n", p.Error))
 			}
 		}
 
@@ -108,7 +130,11 @@ func (s *Server) RegisterGovernanceTools(deps GovernanceDeps) {
 		if !enabled {
 			action = "停用"
 		}
-		return TextResult(fmt.Sprintf("✅ 已成功%s插件: %s", action, pluginID)), nil
+		st, lastErr := deps.PluginManager.GetPluginStatus(pluginID)
+		if enabled && (st == plugin.StateError || lastErr != "") {
+			return TextResult(fmt.Sprintf("⚠️ 已标记启用插件 %s，但遇到初始化异常: %s (状态: %s)", pluginID, lastErr, st)), nil
+		}
+		return TextResult(fmt.Sprintf("✅ 已成功%s插件: %s (当前状态: %s)", action, pluginID, st)), nil
 	})
 
 	// 3. get_system_status

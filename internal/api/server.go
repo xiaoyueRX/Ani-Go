@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/ai"
@@ -44,6 +45,7 @@ type Server struct {
 	md                core.MetadataProvider
 	mcpServer         *mcp.Server           // MCP 服务端
 	organizer         *organizer.TVOrganizer // 文件整理器（用于 Dry-Run 预览）
+	pluginReloadMu    sync.Mutex            // 保护插件并发重载与状态切换
 }
 
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
@@ -301,6 +303,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/plugins/save", s.handleSavePlugin)
 	mux.HandleFunc("DELETE /api/plugins/{id}", s.handleDeletePlugin)
 	mux.HandleFunc("POST /api/plugins/toggle", s.handleTogglePlugin)
+	mux.HandleFunc("POST /api/plugins/{id}/toggle", s.handleTogglePlugin)
+	mux.HandleFunc("GET /api/plugins/custom", s.handleGetCustomPlugins)
+	mux.HandleFunc("POST /api/plugins/custom", s.handleSavePlugin)
 	mux.HandleFunc("POST /api/plugins/reload", s.handleReloadPlugins)
 
 	// 新番时间表（使用 yuc.wiki 数据源）

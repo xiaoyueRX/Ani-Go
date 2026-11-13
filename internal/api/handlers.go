@@ -1604,33 +1604,10 @@ func (s *Server) handleTestCustomRegex(w http.ResponseWriter, r *http.Request) {
 // 插件管理
 // ============================================================
 
-// handleGetPlugins 获取当前已加载的插件列表
+// handleGetPlugins 获取当前已加载的插件列表（兼容接口）
 // GET /api/plugins
 func (s *Server) handleGetPlugins(w http.ResponseWriter, r *http.Request) {
-	if s.pluginManager == nil {
-		writeJSON(w, http.StatusOK, []interface{}{})
-		return
-	}
-	plugins := s.pluginManager.GetPluginList()
-	writeJSON(w, http.StatusOK, plugins)
-}
-
-// handleReloadPlugins 重新加载插件配置
-// POST /api/plugins/reload
-func (s *Server) handleReloadPlugins(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 POST"})
-		return
-	}
-	if s.pluginManager == nil {
-		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "插件管理器未初始化"})
-		return
-	}
-	s.pluginManager.Load()
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message": "插件已重新加载",
-		"count":   len(s.pluginManager.GetPluginList()),
-	})
+	s.handleListPlugins(w, r)
 }
 
 // ============================================================
@@ -3093,61 +3070,170 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleListPlugins 获取标准化插件列表
+// handleListPlugins 获取标准化插件列表（含健康状态、错误摘要与订阅事件）
 func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
+	if s.pluginManager == nil {
+		writeJSON(w, http.StatusOK, []plugin.PluginInfo{})
+		return
+	}
 	writeJSON(w, http.StatusOK, s.pluginManager.GetPluginList())
 }
 
-// handleTogglePlugin 界面化切换插件状态
-func (s *Server) handleTogglePlugin(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ID      string `json:"id"`
-		Enabled bool   `json:"enabled"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效请求"})
+// handleGetCustomPlugins 获取所有自定义 Webhook 插件列表
+func (s *Server) handleGetCustomPlugins(w http.ResponseWriter, r *http.Request) {
+	if s.pluginManager == nil {
+		writeJSON(w, http.StatusOK, []plugin.PluginInfo{})
 		return
 	}
-	if err := s.pluginManager.TogglePlugin(req.ID, req.Enabled); err != nil {
+	all := s.pluginManager.GetPluginList()
+	custom := make([]plugin.PluginInfo, 0, len(all))
+	for _, p := range all {
+		if !p.IsBuiltIn {
+			custom = append(custom, p)
+		}
+	}
+	writeJSON(w, http.StatusOK, custom)
+}
+
+// handleTogglePlugin 界面化切换插件状态（支持 POST /api/plugins/toggle 与 POST /api/plugins/{id}/toggle）
+func (s *Server) handleTogglePlugin(w http.ResponseWriter, r *http.Request) {
+	if s.pluginManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "插件管理器未初始化"})
+		return
+	}
+
+	var req struct {
+		ID      string `json:"id"`
+		Enabled *bool  `json:"enabled"`
+	}
+
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	// 兼容支持路径变量: POST /api/plugins/{id}/toggle
+	pathID := strings.TrimSpace(r.PathValue("id"))
+	if pathID != "" {
+		req.ID = pathID
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	if req.ID == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "插件 ID 不能为空"})
+		return
+	}
+	if req.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "缺少 enabled 参数"})
+		return
+	}
+
+	s.pluginReloadMu.Lock()
+	defer s.pluginReloadMu.Unlock()
+
+	if err := s.pluginManager.TogglePlugin(req.ID, *req.Enabled); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "插件状态已更新"})
+
+	st, lastErr := s.pluginManager.GetPluginStatus(req.ID)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "插件状态已更新",
+		"id":      req.ID,
+		"enabled": *req.Enabled,
+		"status":  st,
+		"error":   lastErr,
+	})
 }
 
 // handleSavePlugin 添加或编辑自定义插件
 func (s *Server) handleSavePlugin(w http.ResponseWriter, r *http.Request) {
+	if s.pluginManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "插件管理器未初始化"})
+		return
+	}
 	var p plugin.PluginInfo
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
 		return
 	}
-	if p.Name == "" {
+	if strings.TrimSpace(p.Name) == "" {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "插件名称不能为空"})
 		return
 	}
+	if p.Type == "webhook" && strings.TrimSpace(p.URL) == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "Webhook URL 不能为空"})
+		return
+	}
+
+	s.pluginReloadMu.Lock()
+	defer s.pluginReloadMu.Unlock()
+
 	if err := s.pluginManager.AddOrUpdatePlugin(p); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "插件已保存并启用"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "插件已保存并启用",
+		"id":      p.ID,
+	})
 }
 
 // handleDeletePlugin 删除自定义插件
 func (s *Server) handleDeletePlugin(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	if s.pluginManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "插件管理器未初始化"})
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
-		id = strings.TrimPrefix(r.URL.Path, "/api/plugins/")
+		id = strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/plugins/"))
 	}
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "缺少插件 ID"})
 		return
 	}
+
+	s.pluginReloadMu.Lock()
+	defer s.pluginReloadMu.Unlock()
+
 	if err := s.pluginManager.DeletePlugin(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "插件已删除"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "插件已删除",
+		"id":      id,
+	})
+}
+
+// handleReloadPlugins 重新加载插件配置（并发防抖与恐慌隔离）
+// POST /api/plugins/reload
+func (s *Server) handleReloadPlugins(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 POST"})
+		return
+	}
+	if s.pluginManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "插件管理器未初始化"})
+		return
+	}
+
+	s.pluginReloadMu.Lock()
+	defer s.pluginReloadMu.Unlock()
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("❌ [API] 重载插件异常 panic: %v", rec)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("重载插件异常: %v", rec)})
+		}
+	}()
+
+	s.pluginManager.Load()
+	plugins := s.pluginManager.GetPluginList()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "插件已重新加载",
+		"count":   len(plugins),
+		"plugins": plugins,
+	})
 }
 
 func (s *Server) handleBangumiAuthLink(w http.ResponseWriter, r *http.Request) {

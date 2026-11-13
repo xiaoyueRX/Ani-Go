@@ -6,24 +6,20 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/metadata"
+	"gorm.io/gorm"
 )
 
 // MetadataMappingPlugin 元数据映射器插件，自动关联 BangumiID 与 TMDB / IMDB
 type MetadataMappingPlugin struct {
-	mu          sync.RWMutex
-	enabled     bool
-	initialized bool
-	subBus      core.EventBus
-	subAddedID  core.SubscriptionID
-	subSuppID   core.SubscriptionID
-	runCtx      context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
+	mu         sync.Mutex
+	enabled    atomic.Bool
+	activePctx PluginContext
 }
 
 func (p *MetadataMappingPlugin) GetInfo() PluginInfo {
@@ -41,113 +37,78 @@ func (p *MetadataMappingPlugin) GetInfo() PluginInfo {
 	}
 }
 
-// Init 启用元数据映射插件（幂等支持重复调用，安全防 nil 总线）
+// Init 启用元数据映射插件（基于 PluginContext 与 OnDispose 销毁模式，幂等支持重复调用）
 func (p *MetadataMappingPlugin) Init(bus core.EventBus, ctx core.Context) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.initialized {
-		unsubBus := p.subBus
-		if unsubBus == nil {
-			unsubBus = bus
-		}
-		if unsubBus != nil {
-			if p.subAddedID != 0 {
-				unsubBus.Unsubscribe(core.EventSubscriptionAdded, p.subAddedID)
-			}
-			if p.subSuppID != 0 {
-				unsubBus.Unsubscribe(core.EventSupplementTriggered, p.subSuppID)
-			}
-		}
-		p.subAddedID = 0
-		p.subSuppID = 0
-		p.subBus = nil
-	}
-	if p.cancel != nil {
-		p.cancel()
-		p.cancel = nil
-	}
-
-	p.runCtx, p.cancel = context.WithCancel(context.Background())
-	p.enabled = true
-	p.subBus = bus
-
-	if bus != nil {
-		p.subAddedID = bus.Subscribe(core.EventSubscriptionAdded, func(ev core.Event) {
-			p.dispatchMapEvent(ev)
-		})
-		p.subSuppID = bus.Subscribe(core.EventSupplementTriggered, func(ev core.Event) {
-			p.dispatchMapEvent(ev)
-		})
-		p.initialized = true
-	} else {
-		p.initialized = false
-	}
-
-	log.Println("🔌 [插件] 元数据映射器已启用")
-	return nil
-}
-
-// Stop 停用元数据映射插件，注销事件并等待在途映射任务结束
-func (p *MetadataMappingPlugin) Stop(bus core.EventBus) error {
-	p.mu.Lock()
-	wasEnabled := p.enabled
-	p.enabled = false
-	if p.cancel != nil {
-		p.cancel()
-		p.cancel = nil
-	}
-	p.runCtx = nil
-
-	unsubBus := bus
-	if unsubBus == nil {
-		unsubBus = p.subBus
-	}
-	if p.initialized && unsubBus != nil {
-		if p.subAddedID != 0 {
-			unsubBus.Unsubscribe(core.EventSubscriptionAdded, p.subAddedID)
-		}
-		if p.subSuppID != 0 {
-			unsubBus.Unsubscribe(core.EventSupplementTriggered, p.subSuppID)
-		}
-	}
-	p.subAddedID = 0
-	p.subSuppID = 0
-	p.subBus = nil
-	p.initialized = false
+	oldCtx := p.activePctx
+	p.activePctx = nil
 	p.mu.Unlock()
 
-	p.wg.Wait()
+	if oldCtx != nil {
+		oldCtx.Dispose()
+	}
+
+	pctx, ok := ctx.(PluginContext)
+	if !ok {
+		pctx = NewPluginContext("metadata-mapping", bus, ctx)
+	}
+
+	p.mu.Lock()
+	p.activePctx = pctx
+	p.enabled.Store(true)
+	p.mu.Unlock()
+
+	// 注册生命周期销毁回调
+	pctx.OnDispose(func() {
+		p.enabled.Store(false)
+	})
+
+	// 订阅事件总线并在插件停用时自动注销
+	if bus != nil {
+		pctx.Subscribe(core.EventSubscriptionAdded, func(ev core.Event) {
+			p.dispatchMapEvent(ev, pctx)
+		})
+		pctx.Subscribe(core.EventSupplementTriggered, func(ev core.Event) {
+			p.dispatchMapEvent(ev, pctx)
+		})
+	}
+
+	pctx.Logf("元数据映射器已启用")
+	return nil
+}
+
+// Stop 停用元数据映射插件，触发上下文 Dispose 释放所有监听与在途任务
+func (p *MetadataMappingPlugin) Stop(bus core.EventBus) error {
+	p.mu.Lock()
+	wasEnabled := p.enabled.Swap(false)
+	pctx := p.activePctx
+	p.activePctx = nil
+	p.mu.Unlock()
+
+	if pctx != nil {
+		pctx.Dispose()
+	}
+
 	if wasEnabled {
-		log.Println("🔌 [插件] 元数据映射器已停用，已注销事件监听")
+		log.Println("🔌 [插件] 元数据映射器已停用，已注销事件监听与在途任务")
 	}
 	return nil
 }
 
-func (p *MetadataMappingPlugin) dispatchMapEvent(ev core.Event) {
+func (p *MetadataMappingPlugin) dispatchMapEvent(ev core.Event, pctx PluginContext) {
 	subID := parseSubID(ev)
 	if subID == 0 {
 		return
 	}
 
-	p.mu.RLock()
-	if !p.enabled || p.runCtx == nil || p.runCtx.Err() != nil {
-		p.mu.RUnlock()
+	if !p.enabled.Load() || pctx == nil || pctx.Context().Err() != nil {
 		return
 	}
-	runCtx := p.runCtx
-	p.wg.Add(1)
-	p.mu.RUnlock()
 
-	go func() {
-		defer p.wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("⚠️ [元数据映射] 后台任务异常崩溃捕获 (subID=%d): %v", subID, r)
-			}
-		}()
-		p.mapOne(runCtx, subID)
-	}()
+	// 派生受管后台协程
+	pctx.Go(func(taskCtx context.Context) {
+		p.mapOne(taskCtx, subID, pctx)
+	})
 }
 
 func parseSubID(ev core.Event) uint {
@@ -179,19 +140,30 @@ func (p *MetadataMappingPlugin) isActive(ctx context.Context) bool {
 	if ctx != nil && ctx.Err() != nil {
 		return false
 	}
-	p.mu.RLock()
-	active := p.enabled
-	p.mu.RUnlock()
-	return active
+	return p.enabled.Load()
 }
 
-func (p *MetadataMappingPlugin) mapOne(parentCtx context.Context, subID uint) {
-	if !p.isActive(parentCtx) || database.DB == nil {
+func (p *MetadataMappingPlugin) mapOne(parentCtx context.Context, subID uint, pctx PluginContext) {
+	if !p.isActive(parentCtx) {
+		return
+	}
+
+	// 解析数据库句柄
+	var gormDB *gorm.DB
+	if pctx != nil {
+		if dbVal, ok := pctx.GetDB().(*gorm.DB); ok && dbVal != nil {
+			gormDB = dbVal
+		}
+	}
+	if gormDB == nil {
+		gormDB = database.DB
+	}
+	if gormDB == nil {
 		return
 	}
 
 	var sub database.Subscription
-	if err := database.DB.First(&sub, subID).Error; err != nil || sub.BangumiID == "" {
+	if err := gormDB.First(&sub, subID).Error; err != nil || sub.BangumiID == "" {
 		return
 	}
 	if sub.TMDBID != "" && sub.IMDBID != "" {
@@ -203,11 +175,9 @@ func (p *MetadataMappingPlugin) mapOne(parentCtx context.Context, subID uint) {
 	// 内部创建映射器：若配置了 TMDB_API_KEY 则注入 TMDBProvider 实现自动搜索兜底
 	var tmdbProvider *metadata.TMDBProvider
 	tmdbKey := ""
-	if database.DB != nil {
-		var s database.Setting
-		if err := database.DB.Where("key = ?", "TMDB_API_KEY").First(&s).Error; err == nil {
-			tmdbKey = strings.TrimSpace(s.Value)
-		}
+	var s database.Setting
+	if err := gormDB.Where("key = ?", "TMDB_API_KEY").First(&s).Error; err == nil {
+		tmdbKey = strings.TrimSpace(s.Value)
 	}
 	if tmdbKey == "" {
 		tmdbKey = strings.TrimSpace(os.Getenv("TMDB_API_KEY"))
@@ -215,13 +185,11 @@ func (p *MetadataMappingPlugin) mapOne(parentCtx context.Context, subID uint) {
 	if tmdbKey != "" {
 		lang := "zh-CN"
 		var mirrors []string
-		if database.DB != nil {
-			var s database.Setting
-			if err := database.DB.Where("key = ?", "TMDB_MIRROR_DOMAINS").First(&s).Error; err == nil && s.Value != "" {
-				for _, m := range strings.Split(s.Value, ",") {
-					if tr := strings.TrimSpace(m); tr != "" {
-						mirrors = append(mirrors, tr)
-					}
+		var mirrorSetting database.Setting
+		if err := gormDB.Where("key = ?", "TMDB_MIRROR_DOMAINS").First(&mirrorSetting).Error; err == nil && mirrorSetting.Value != "" {
+			for _, m := range strings.Split(mirrorSetting.Value, ",") {
+				if tr := strings.TrimSpace(m); tr != "" {
+					mirrors = append(mirrors, tr)
 				}
 			}
 		}
@@ -252,7 +220,7 @@ func (p *MetadataMappingPlugin) mapOne(parentCtx context.Context, subID uint) {
 		updates["imdb_id"] = imdb
 	}
 	if len(updates) > 0 && p.isActive(parentCtx) {
-		if err := database.DB.Model(&sub).Updates(updates).Error; err != nil {
+		if err := gormDB.Model(&sub).Updates(updates).Error; err != nil {
 			log.Printf("⚠️ [插件] 保存映射结果失败 [%s]: %v", sub.TitleCN, err)
 			return
 		}

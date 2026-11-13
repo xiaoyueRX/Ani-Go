@@ -24,13 +24,17 @@ type customSubRef struct {
 	subID  core.SubscriptionID
 }
 
-// Manager 插件生命周期管理器，统一负责内建插件与自定义 Webhook 插件的加载、启停与热重载
+// Manager 插件生命周期管理器，统一负责内建插件与自定义 Webhook 插件的加载、启停、健康追踪与热重载
 type Manager struct {
 	bus                        core.EventBus
+	coreCtx                    core.Context // 核心系统万能上下文
 	mu                         sync.RWMutex
 	builtInPlugins             []BuiltInPlugin
 	customPlugins              []PluginInfo
-	activePlugins              map[string]bool // id -> enabled
+	activePlugins              map[string]bool          // id -> enabled
+	pluginStates               map[string]PluginState   // id -> PluginState (active/inactive/error/loading/disposing)
+	pluginErrors               map[string]string        // id -> 最近错误信息
+	pluginContexts             map[string]PluginContext // id -> PluginContext
 	customSubs                 map[string][]customSubRef
 	webhookCtx                 context.Context
 	webhookCancel              context.CancelFunc
@@ -38,12 +42,26 @@ type Manager struct {
 	allowPrivateWebhookForTest bool // 仅限单元测试使用，允许连接回环/私网地址
 }
 
-// NewManager 创建插件管理器实例并注册全部内建插件
-func NewManager(bus core.EventBus) *Manager {
+// NewManager 创建插件管理器实例并注册全部内建插件，支持注入可选的核心上下文
+func NewManager(bus core.EventBus, coreCtx ...core.Context) *Manager {
+	var cCtx core.Context
+	if len(coreCtx) > 0 && coreCtx[0] != nil {
+		cCtx = coreCtx[0]
+	} else {
+		cCtx = core.NewContext(context.Background())
+		if bus != nil {
+			cCtx.SetService(core.ServiceEventBus, bus)
+		}
+	}
+
 	m := &Manager{
-		bus:           bus,
-		activePlugins: make(map[string]bool),
-		customSubs:    make(map[string][]customSubRef),
+		bus:            bus,
+		coreCtx:        cCtx,
+		activePlugins:  make(map[string]bool),
+		pluginStates:   make(map[string]PluginState),
+		pluginErrors:   make(map[string]string),
+		pluginContexts: make(map[string]PluginContext),
+		customSubs:     make(map[string][]customSubRef),
 	}
 	// 注册内建插件
 	m.builtInPlugins = append(m.builtInPlugins,
@@ -57,7 +75,14 @@ func NewManager(bus core.EventBus) *Manager {
 	return m
 }
 
-// Load 从数据库读取插件配置与启停状态，并重建全部内建与自定义插件订阅
+// SetCoreContext 动态绑定核心上下文
+func (m *Manager) SetCoreContext(ctx core.Context) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.coreCtx = ctx
+}
+
+// Load 从数据库读取插件配置与启停状态，并按 DSH 模式重建全部内建与自定义插件上下文与订阅
 func (m *Manager) Load() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -68,7 +93,7 @@ func (m *Manager) Load() {
 	}
 	m.webhookCtx, m.webhookCancel = context.WithCancel(context.Background())
 
-	// 清理之前的自定义插件事件订阅
+	// 清理旧的自定义插件事件订阅
 	if m.bus != nil {
 		for _, subs := range m.customSubs {
 			for _, s := range subs {
@@ -115,27 +140,60 @@ func (m *Manager) Load() {
 
 		if enabled {
 			log.Printf("🔌 [插件] 启动内建插件: %s (%s)", info.Name, info.Version)
+			m.pluginStates[info.ID] = StateLoading
+
+			// 销毁旧上下文（若存在）
+			if oldCtx, ok := m.pluginContexts[info.ID]; ok && oldCtx != nil {
+				oldCtx.Dispose()
+			}
+			pctx := NewPluginContext(info.ID, m.bus, m.coreCtx)
+			m.pluginContexts[info.ID] = pctx
+
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
+						errMsg := fmt.Sprintf("crash during plugin init: %v", r)
 						log.Printf("❌ [插件 %s] 启动捕获 panic: %v", info.ID, r)
+						m.pluginStates[info.ID] = StateError
+						m.pluginErrors[info.ID] = errMsg
+						pctx.Dispose()
+						delete(m.pluginContexts, info.ID)
 					}
 				}()
-				if err := p.Init(m.bus, nil); err != nil {
+				if err := p.Init(m.bus, pctx); err != nil {
 					log.Printf("❌ [插件] 启动失败 [%s]: %v", info.ID, err)
+					m.pluginStates[info.ID] = StateError
+					m.pluginErrors[info.ID] = err.Error()
+					pctx.Dispose()
+					delete(m.pluginContexts, info.ID)
+				} else {
+					m.pluginStates[info.ID] = StateActive
+					delete(m.pluginErrors, info.ID)
 				}
 			}()
 		} else {
+			m.pluginStates[info.ID] = StateDisposing
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
 						log.Printf("❌ [插件 %s] 停用捕获 panic: %v", info.ID, r)
+						m.pluginStates[info.ID] = StateError
+						m.pluginErrors[info.ID] = fmt.Sprintf("crash during plugin stop: %v", r)
 					}
 				}()
 				if err := p.Stop(m.bus); err != nil {
 					log.Printf("❌ [插件] 停用失败 [%s]: %v", info.ID, err)
 				}
 			}()
+
+			if oldCtx, ok := m.pluginContexts[info.ID]; ok && oldCtx != nil {
+				oldCtx.Dispose()
+				delete(m.pluginContexts, info.ID)
+			}
+			if m.pluginStates[info.ID] != StateError {
+				m.pluginStates[info.ID] = StateInactive
+				delete(m.pluginErrors, info.ID)
+			}
 		}
 	}
 
@@ -147,11 +205,18 @@ func (m *Manager) Load() {
 		}
 		if enabled && cp.Type == "webhook" && cp.URL != "" {
 			m.startWebhookPlugin(cp)
+		} else {
+			if oldCtx, ok := m.pluginContexts[cp.ID]; ok && oldCtx != nil {
+				oldCtx.Dispose()
+				delete(m.pluginContexts, cp.ID)
+			}
+			m.pluginStates[cp.ID] = StateInactive
+			delete(m.pluginErrors, cp.ID)
 		}
 	}
 }
 
-// StopAll 优雅停用全部内建插件与自定义 Webhook 订阅，并等待在途 Webhook 协程退出
+// StopAll 优雅停用全部内建插件与自定义 Webhook 订阅，并等待在途协程退出
 func (m *Manager) StopAll() {
 	m.mu.Lock()
 	if m.webhookCancel != nil {
@@ -171,6 +236,15 @@ func (m *Manager) StopAll() {
 
 	plugins := make([]BuiltInPlugin, len(m.builtInPlugins))
 	copy(plugins, m.builtInPlugins)
+
+	contextsToDispose := make([]PluginContext, 0, len(m.pluginContexts))
+	for id, pctx := range m.pluginContexts {
+		if pctx != nil {
+			contextsToDispose = append(contextsToDispose, pctx)
+		}
+		m.pluginStates[id] = StateInactive
+	}
+	m.pluginContexts = make(map[string]PluginContext)
 	bus := m.bus
 	m.mu.Unlock()
 
@@ -189,6 +263,11 @@ func (m *Manager) StopAll() {
 		}()
 	}
 
+	// 统一 Dispose 全部活跃上下文，释放 LIFO 清理回调
+	for _, pctx := range contextsToDispose {
+		pctx.Dispose()
+	}
+
 	// 等待所有在途 Webhook 协程彻底结束
 	m.webhookWg.Wait()
 }
@@ -197,10 +276,24 @@ func (m *Manager) startWebhookPlugin(p PluginInfo) {
 	if m.bus == nil {
 		return
 	}
+
+	// 清理旧上下文
+	if oldCtx, ok := m.pluginContexts[p.ID]; ok && oldCtx != nil {
+		oldCtx.Dispose()
+		delete(m.pluginContexts, p.ID)
+	}
+
 	if _, err := validateExternalHTTPURL(p.URL, m.allowPrivateWebhookForTest); err != nil {
 		log.Printf("⚠️ [插件 %s] Webhook URL 校验未通过，跳过挂载: %v", p.Name, err)
+		m.pluginStates[p.ID] = StateError
+		m.pluginErrors[p.ID] = fmt.Sprintf("非法的 Webhook URL: %v", err)
 		return
 	}
+
+	pctx := NewPluginContext(p.ID, m.bus, m.coreCtx)
+	m.pluginContexts[p.ID] = pctx
+	m.pluginStates[p.ID] = StateActive
+	delete(m.pluginErrors, p.ID)
 
 	seenEvents := make(map[string]struct{}, len(p.Events))
 	for _, evType := range p.Events {
@@ -219,7 +312,7 @@ func (m *Manager) startWebhookPlugin(p PluginInfo) {
 		pluginName := p.Name
 		allowPrivate := m.allowPrivateWebhookForTest
 
-		subID := m.bus.Subscribe(et, func(ev core.Event) {
+		subID := pctx.Subscribe(et, func(ev core.Event) {
 			// 在读锁下检查上下文并登记 WaitGroup，防止与 StopAll 的 Wait 产生竞态
 			m.mu.RLock()
 			baseCtx := m.webhookCtx
@@ -230,7 +323,7 @@ func (m *Manager) startWebhookPlugin(p PluginInfo) {
 			m.webhookWg.Add(1)
 			m.mu.RUnlock()
 
-			go func() {
+			pctx.Go(func(workerCtx context.Context) {
 				defer m.webhookWg.Done()
 				defer func() {
 					if r := recover(); r != nil {
@@ -248,7 +341,7 @@ func (m *Manager) startWebhookPlugin(p PluginInfo) {
 					return
 				}
 
-				reqCtx, cancel := context.WithTimeout(baseCtx, 10*time.Second)
+				reqCtx, cancel := context.WithTimeout(workerCtx, 10*time.Second)
 				defer cancel()
 
 				req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, targetURL, bytes.NewReader(payloadData))
@@ -276,7 +369,7 @@ func (m *Manager) startWebhookPlugin(p PluginInfo) {
 					return
 				}
 				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-			}()
+			})
 		})
 		m.customSubs[p.ID] = append(m.customSubs[p.ID], customSubRef{evType: et, subID: subID})
 	}
@@ -296,7 +389,7 @@ func clonePluginInfo(p PluginInfo) PluginInfo {
 	return cp
 }
 
-// GetPluginList 返回全部内建插件与自定义插件的当前状态快照
+// GetPluginList 返回全部内建插件与自定义插件的当前状态快照（含详细健康状态与最近错误）
 func (m *Manager) GetPluginList() []PluginInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -309,6 +402,18 @@ func (m *Manager) GetPluginList() []PluginInfo {
 			enabled = !isDefaultDisabled(info.ID)
 		}
 		info.Enabled = enabled
+
+		st, hasStatus := m.pluginStates[info.ID]
+		if !hasStatus {
+			if enabled {
+				st = StateActive
+			} else {
+				st = StateInactive
+			}
+		}
+		info.Status = st
+		info.Error = m.pluginErrors[info.ID]
+
 		list = append(list, info)
 	}
 	for _, cp := range m.customPlugins {
@@ -318,9 +423,47 @@ func (m *Manager) GetPluginList() []PluginInfo {
 			enabled = item.Enabled
 		}
 		item.Enabled = enabled
+
+		st, hasStatus := m.pluginStates[item.ID]
+		if !hasStatus {
+			if enabled {
+				st = StateActive
+			} else {
+				st = StateInactive
+			}
+		}
+		item.Status = st
+		item.Error = m.pluginErrors[item.ID]
+
 		list = append(list, item)
 	}
 	return list
+}
+
+// GetPluginStatus 查询单个插件的当前运行状态与错误信息
+func (m *Manager) GetPluginStatus(id string) (PluginState, string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	st, exists := m.pluginStates[id]
+	if !exists {
+		enabled, ok := m.activePlugins[id]
+		if !ok {
+			enabled = !isDefaultDisabled(id)
+		}
+		if enabled {
+			st = StateActive
+		} else {
+			st = StateInactive
+		}
+	}
+	return st, m.pluginErrors[id]
+}
+
+// GetPluginContext 获取指定已激活插件的 PluginContext 实例
+func (m *Manager) GetPluginContext(id string) PluginContext {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.pluginContexts[id]
 }
 
 // IsPluginEnabled 查询指定插件当前是否处于启用状态
@@ -490,6 +633,13 @@ func (m *Manager) DeletePlugin(id string) error {
 		}
 	}
 	m.customPlugins = newList
+	if oldCtx, ok := m.pluginContexts[id]; ok && oldCtx != nil {
+		oldCtx.Dispose()
+		delete(m.pluginContexts, id)
+	}
+	delete(m.pluginStates, id)
+	delete(m.pluginErrors, id)
+
 	data, err := json.Marshal(m.customPlugins)
 	if err != nil {
 		m.customPlugins = prevList

@@ -184,3 +184,9 @@
 - [x] **Seeding Lifecycle & Disk Killswitch Hardening**: Safe seeding task reclamation, hardlink `SameFile` zero-I/O validation, and cross-platform free space circuit breaker protection.
 - [x] **Native MCP Server Production Audit**: SSE idle session eviction (`EvictStaleSessions`), constant-time token comparison, strict sensitive config key interception, and comprehensive nil-service guards.
 - [x] **3-Tier Disambiguation Anti-Poisoning & Edge Coverage**: Deep filtering of year/resolution vs episode confusion, v2/v3 and decimal episode parsing, airdate window tolerance alignment, and thread-safe AI daily quota guard.
+
+### Phase 13: v0.6.2 DSH/Cordis Modern Plugin Architecture & Full-Repo Audit ✅
+- [x] **DSH / Cordis Reversible Effects Engine**: Introduced `PluginContext` with LIFO `OnDispose(fn)` cleanup stack, automatically unregistering event listeners and releasing resources upon disable/reload, completely eliminating goroutine and listener leaks.
+- [x] **Microkernel Pipeline Interceptors Dual-Track Architecture**: Exposed strongly-typed pipeline interceptors (`OrganizeInterceptor`, `FilterInterceptor`, `ParseInterceptor`) in `internal/core/interfaces.go` and `hooks.go`, completely severing `TVOrganizer`'s reverse dependency on `internal/plugin`.
+- [x] **EventBus Hardening & Concurrency Safeguards**: Eliminated Go runtime timer heap leakage caused by `time.After` (using `time.NewTimer` + Stop/Drain), resolved `Unsubscribe` slice mutation race, and added a 128-concurrency semaphore pool with elastic overflow to guarantee zero event loss.
+- [x] **Plugin Health State Machine & Enhanced UI**: Introduced 6-state lifecycle (`Inactive`, `Loading`, `Active`, `Suspended`, `Error`, `Disposing`), upgraded REST API and MCP governance tools, and updated `SettingsPage.vue` with reactive health badges, error traces, and disposable metric cards.

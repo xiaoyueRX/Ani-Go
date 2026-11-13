@@ -272,6 +272,57 @@ type TaskParser interface {
 	Name() string
 }
 
+// ============================================================
+// 核心流水线拦截器接口 (Pipeline Interceptors)
+// ============================================================
+
+// OrganizeInput 整理阶段拦截器输入
+type OrganizeInput struct {
+	SourcePath   string    // 源物理文件路径
+	Anime        Anime     // 番剧元数据
+	Episode      Episode   // 分集元数据
+	Template     string    // 选用的命名模板
+	VarValues    VarValues // 变量映射字典
+	ProposedPath string    // 初始渲染或前序拦截器处理后的相对目标路径
+}
+
+// OrganizeOutput 整理阶段拦截器输出
+type OrganizeOutput struct {
+	FinalPath string // 修正后的相对目标路径（若为空则保留 ProposedPath）
+	Cancel    bool   // 一票否决：是否取消/中止整理
+	Reason    string // 拦截或取消原因说明
+}
+
+// OrganizeInterceptor 整理流水线拦截器（支持重命名增强、路径合法性过滤、条件阻断）
+type OrganizeInterceptor interface {
+	Name() string
+	InterceptOrganize(ctx context.Context, input OrganizeInput) (OrganizeOutput, error)
+}
+
+// FilterInput 过滤拦截器输入
+type FilterInput struct {
+	Item   TorrentItem // 种子条目
+	Filter Filter      // 订阅过滤规则
+}
+
+// FilterOutput 过滤拦截器输出
+type FilterOutput struct {
+	Allow  bool   // 是否放行
+	Reason string // 判定原因
+}
+
+// FilterInterceptor 种子过滤拦截器（支持高级正则、黑名单、发布组动态拦截）
+type FilterInterceptor interface {
+	Name() string
+	InterceptFilter(ctx context.Context, input FilterInput) (FilterOutput, error)
+}
+
+// ParseInterceptor 任务与标题解析拦截器（支持语义解析修正、大模型回退消歧）
+type ParseInterceptor interface {
+	Name() string
+	InterceptParse(ctx context.Context, rawInput string, current ParseResult) (ParseResult, error)
+}
+
 const (
 	RSSModeClassic  = "classic"
 	RSSModePersonal = "personal"
