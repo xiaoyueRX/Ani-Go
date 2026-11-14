@@ -218,6 +218,10 @@ func (m *BackupManager) cleanOldBackups() {
 func (m *BackupManager) ListBackups() ([]BackupFileInfo, error) {
 	entries, err := os.ReadDir(m.backupDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			_ = os.MkdirAll(m.backupDir, 0755)
+			return []BackupFileInfo{}, nil
+		}
 		return nil, fmt.Errorf("读取备份目录失败: %w", err)
 	}
 

@@ -304,7 +304,7 @@ func (s *Server) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		log.Printf("🔌 [MCP] SSE 会话断开: %s", sessionID)
 	}()
 
-	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")

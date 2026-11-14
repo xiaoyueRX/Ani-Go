@@ -151,9 +151,13 @@ export default {
     fields: {
       db: 'Database Storage Path',
       tv: 'Anime TV Shows Root',
+      media: 'Anime TV Shows Root',
       movie: 'Anime Movies Root',
+      movieMedia: 'Anime Movies Root',
       ova: 'OVA / Specials Root',
+      ovaMedia: 'OVA / Specials Root',
       organizeMode: 'File Organizing Mode',
+      hardlink: 'File Organizing Mode',
       tvTemplate: 'TV Show Renaming Template',
       movieTemplate: 'Movie Renaming Template',
       otherTemplate: 'Other / Specials Template',
@@ -252,7 +256,9 @@ export default {
     },
     options: {
       hardlinkMode: 'Hardlink Mode (Recommended, keep seeding without duplicating space)',
+      hardlinkDirect: 'Hardlink Mode (Recommended, keep seeding without duplicating space)',
       moveMode: 'Move Mode (Move directly to media directory, stop seeding)',
+      hardlinkCopy: 'Move Mode (Move directly to media directory, stop seeding)',
       qbRecommend: 'qBittorrent (Recommended)',
       transmission: 'Transmission',
       aria2: 'Aria2',

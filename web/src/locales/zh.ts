@@ -151,9 +151,13 @@ export default {
     fields: {
       db: '数据库存储路径',
       tv: '番剧 TV 剧集根目录',
+      media: '番剧 TV 剧集根目录',
       movie: '剧场版 / 电影根目录',
+      movieMedia: '剧场版 / 电影根目录',
       ova: 'OVA / 特别篇归档目录',
+      ovaMedia: 'OVA / 特别篇归档目录',
       organizeMode: '文件整理动作 (做种兼容)',
+      hardlink: '文件整理方式 (做种兼容)',
       tvTemplate: 'TV 剧集重命名模板',
       movieTemplate: '剧场版 / 电影重命名模板',
       otherTemplate: '杂项 / SP 命名模板',
@@ -252,7 +256,9 @@ export default {
     },
     options: {
       hardlinkMode: '硬链接模式 (推荐，保留原文件继续做种且不占额外空间)',
+      hardlinkDirect: '硬链接模式 (推荐，保留原文件继续做种且不占额外空间)',
       moveMode: '移动模式 (直接剪切移入媒体库，不可继续做种)',
+      hardlinkCopy: '移动模式 (直接剪切移入媒体库，不可继续做种)',
       qbRecommend: 'qBittorrent (推荐)',
       transmission: 'Transmission',
       aria2: 'Aria2',
