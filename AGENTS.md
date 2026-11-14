@@ -153,7 +153,7 @@ Windows 开发 / Linux (PVE LXC) 部署。**Windows 宿主机未安装 Go，后�
 
 ## 当前项目状态
 
-- **当前版本**：`v0.6.0`（`main.go` 中的 `var version`）
+- **当前版本**：`v0.7.0`（`main.go` 中的 `var version`）
 - **Phase 0 ~ Phase 11 全部完成** ✅（项目初始化 → 核心引擎 MVP → 历史补全与元数据 → Web UI 与部署 → AI/多下载器/插件 → 18 平台通知 → 数据迁移 → 前端美化 → 国际化与批量操作 → v0.5.0 稳定性加固 → v0.5.2~v0.5.4 架构优化 → v0.6.0 微内核 + MCP + 三级消歧）
 - **测试**：31 个测试文件 / 177 个测试函数，`go test -race ./...` 全通过
 - **进度详情**：[docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)（中文） / [docs/DEVELOPMENT_PLAN_EN.md](docs/DEVELOPMENT_PLAN_EN.md)（英文）

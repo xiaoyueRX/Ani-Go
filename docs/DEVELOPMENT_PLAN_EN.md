@@ -190,3 +190,9 @@
 - [x] **Microkernel Pipeline Interceptors Dual-Track Architecture**: Exposed strongly-typed pipeline interceptors (`OrganizeInterceptor`, `FilterInterceptor`, `ParseInterceptor`) in `internal/core/interfaces.go` and `hooks.go`, completely severing `TVOrganizer`'s reverse dependency on `internal/plugin`.
 - [x] **EventBus Hardening & Concurrency Safeguards**: Eliminated Go runtime timer heap leakage caused by `time.After` (using `time.NewTimer` + Stop/Drain), resolved `Unsubscribe` slice mutation race, and added a 128-concurrency semaphore pool with elastic overflow to guarantee zero event loss.
 - [x] **Plugin Health State Machine & Enhanced UI**: Introduced 6-state lifecycle (`Inactive`, `Loading`, `Active`, `Suspended`, `Error`, `Disposing`), upgraded REST API and MCP governance tools, and updated `SettingsPage.vue` with reactive health badges, error traces, and disposable metric cards.
+
+### Phase 14: v0.7.0 qBittorrent 5.x Adaptive Engine, MCP Protocol Hardening & Automated Multi-Platform Release CI ✅
+- [x] **qBittorrent 5.x Adaptive Downloader**: Fully adaptive integration supporting `/api/v2/torrents/stop` and `start` for qB 5.x while maintaining seamless fallback to legacy 4.x `pause`/`resume`.
+- [x] **Native MCP Server Protocol Hardening**: Added `charset=utf-8` to SSE headers and verified 100% success rate under 20-session high-pressure testing.
+- [x] **Automated GitHub Actions Multi-Platform Release CI**: Automatic multi-platform cross-compilation for 7 architectures (Windows, Linux, macOS) with clean source archives and SHA256 checksums.
+- [x] **Storage Resilience & UI Localization**: Auto-creating missing backup folders and completing storage configuration translations.

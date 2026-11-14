@@ -190,3 +190,9 @@
 - [x] **微内核流水线拦截器双轨架构**：在 `internal/core/interfaces.go` 与 `hooks.go` 引入强类型流水线拦截器（`OrganizeInterceptor`、`FilterInterceptor`、`ParseInterceptor`），彻底剥除 `TVOrganizer` 对 `internal/plugin` 的反向依赖。
 - [x] **EventBus 稳定性与高并发加固**：消除 `time.After` 引起的运行时计时器泄漏（改用 `time.NewTimer` + Stop/Drain），修复 `Unsubscribe` 切片竞态，引入 128 并发信号量池与弹性溢出派发机制，100% 保障零丢事件。
 - [x] **插件健康状态机与多渠道管理体验**：引入六状态机（`Inactive`, `Loading`, `Active`, `Suspended`, `Error`, `Disposing`），升级 REST API 与 MCP 治理工具，前端 `SettingsPage.vue` 响应式展示健康度徽章、错误堆栈与 Disposable 绑定数。
+
+### Phase 14: v0.7.0 qBittorrent 5.x 自适应引擎、MCP 字符集加固与多平台 CI 流水线 ✅
+- [x] **qBittorrent 5.x 自适应端点兼容**：适配 qB 5.0+ 废弃 `pause`/`resume` 并引入 `/api/v2/torrents/stop` 与 `start` 的架构变化，实现双向自适应回退。
+- [x] **原生 MCP Server 字符集加固**：SSE 补齐 `charset=utf-8` 响应头，经受 20 并发会话、120 次真实调用高压验证。
+- [x] **自动化 GitHub Actions Release 全平台流水线**：一键自动构建 7 大架构二进制（Windows x86/ARM64, Linux amd64/arm64/armv7, macOS M系列/Intel），打包纯净源码归档并生成 SHA256 校验清单。
+- [x] **备份目录自动容错与存储国际化补齐**：自动容错创建备份目录，补全前端存储与硬链接配置文案。

@@ -159,7 +159,7 @@ Loaded by `internal/config/config.go` with the 3-tier precedence rule (env vars 
 
 ## Current Project Status
 
-- **Current version**: `v0.6.0` (`var version` in `main.go`)
+- **Current version**: `v0.7.0` (`var version` in `main.go`)
 - **Phase 0** ✅ — Project Initialization
 - **Phase 1** ✅ — Core Engine MVP
 - **Phase 2** ✅ — Historical Completion + Metadata + Mirror Support + Dead Torrent Timeout Warning + Custom Regex

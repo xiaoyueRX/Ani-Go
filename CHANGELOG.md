@@ -4,6 +4,24 @@ Ani-Go 的更新日志。所有版本遵循 [语义化版本](https://semver.org
 
 ---
 
+## v0.7.0 — 2026-11-15 (qBittorrent 5.x Adaptive Engine, MCP SSE Hardening, Automated Multi-Platform Release CI)
+
+### 核心新特性与加固 (Major Features & Hardening)
+- **qBittorrent 5.x 自适应端点兼容 (Adaptive Downloader Engine)**:
+  - 自适应兼容 qBittorrent 5.0+ 官方重构端点（`/api/v2/torrents/stop` 与 `/api/v2/torrents/start` 代替废弃的 `pause`/`resume`）；
+  - 遇到 404 时自动回退至 4.x 旧版 API，保证全版本 qBittorrent 客户端透明平滑运行。
+- **原生 MCP Server 字符集加固与高并发验证 (MCP SSE Protocol Hardening)**:
+  - 补齐 `text/event-stream; charset=utf-8` 响应头，彻底根治非 UTF-8 声明时多字节汉字被网络客户端断行分割的问题；
+  - 经受 20 并发会话、120 次真实调用、36.7 QPS 高压测试，全链路 100% 成功率，敏感系统配置防护有效。
+- **自动化多平台 CI/CD 发布流水线 (Automated Multi-Platform Release CI)**:
+  - GitHub Actions Release 流水线全自动构建 7 大平台架构二进制（Windows x86/ARM64, Linux amd64/arm64/armv7, macOS Apple Silicon/Intel）；
+  - 自动生成纯净源码归档（`source.zip` 与 `source.tar.gz`）及全局 `checksums.txt` SHA256 校验清单。
+- **系统稳健性与国际化修复 (Resilience & i18n)**:
+  - 自动容错创建缺失的备份目录 (`./data/backups`)，杜绝空目录 500 异常；
+  - 补齐前端中英文国际化存储与硬链接配置文案，提升 UI 体验一致性。
+
+---
+
 ## v0.6.2 — 2026-11-13 (DSH/Cordis Modern Plugin Architecture & Full-Stack Audit)
 
 ### 核心新特性 (Major Features)
