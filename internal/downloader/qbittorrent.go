@@ -331,7 +331,7 @@ func (q *QBittorrent) Delete(ctx context.Context, hash string, deleteFiles bool)
 	return nil
 }
 
-// Pause 暂停下载/做种任务
+// Pause 暂停下载/做种任务（自适应兼容 qB 5.x 的 /torrents/stop 与 qB 4.x 的 /torrents/pause）
 func (q *QBittorrent) Pause(ctx context.Context, hash string) error {
 	cleanHash := strings.TrimSpace(hash)
 	if cleanHash == "" {
@@ -345,30 +345,44 @@ func (q *QBittorrent) Pause(ctx context.Context, hash string) error {
 	data := url.Values{}
 	data.Set("hashes", cleanHash)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		q.host+"/api/v2/torrents/pause", strings.NewReader(data.Encode()))
-	if err != nil {
-		return fmt.Errorf("创建暂停请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Referer", q.host)
+	// 优先尝试 qB 5.x 标准端点 /api/v2/torrents/stop，遇 404 回退至 qB 4.x 的 /api/v2/torrents/pause
+	endpoints := []string{"/api/v2/torrents/stop", "/api/v2/torrents/pause"}
+	var lastErr error
+	for _, ep := range endpoints {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			q.host+ep, strings.NewReader(data.Encode()))
+		if err != nil {
+			return fmt.Errorf("创建暂停请求失败: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Referer", q.host)
 
-	resp, err := q.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("暂停种子请求失败: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := q.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("暂停种子请求失败: %w", err)
+		}
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+			resp.Body.Close()
+			log.Printf("⏸️ [qBittorrent] 已暂停任务 (%s): %s", ep, cleanHash)
+			return nil
+		}
+
 		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNotFound {
+			lastErr = fmt.Errorf("状态码 404: %s", string(body))
+			continue
+		}
+
 		return fmt.Errorf("暂停种子失败 (状态码 %d): %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("⏸️ [qBittorrent] 已暂停任务: %s", cleanHash)
-	return nil
+	return fmt.Errorf("暂停种子失败: %w", lastErr)
 }
 
-// Resume 恢复下载/做种任务
+// Resume 恢复下载/做种任务（自适应兼容 qB 5.x 的 /torrents/start 与 qB 4.x 的 /torrents/resume）
 func (q *QBittorrent) Resume(ctx context.Context, hash string) error {
 	cleanHash := strings.TrimSpace(hash)
 	if cleanHash == "" {
@@ -382,27 +396,41 @@ func (q *QBittorrent) Resume(ctx context.Context, hash string) error {
 	data := url.Values{}
 	data.Set("hashes", cleanHash)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		q.host+"/api/v2/torrents/resume", strings.NewReader(data.Encode()))
-	if err != nil {
-		return fmt.Errorf("创建恢复请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Referer", q.host)
+	// 优先尝试 qB 5.x 标准端点 /api/v2/torrents/start，遇 404 回退至 qB 4.x 的 /api/v2/torrents/resume
+	endpoints := []string{"/api/v2/torrents/start", "/api/v2/torrents/resume"}
+	var lastErr error
+	for _, ep := range endpoints {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			q.host+ep, strings.NewReader(data.Encode()))
+		if err != nil {
+			return fmt.Errorf("创建恢复请求失败: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Referer", q.host)
 
-	resp, err := q.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("恢复种子请求失败: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := q.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("恢复种子请求失败: %w", err)
+		}
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+			resp.Body.Close()
+			log.Printf("▶️ [qBittorrent] 已恢复任务 (%s): %s", ep, cleanHash)
+			return nil
+		}
+
 		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNotFound {
+			lastErr = fmt.Errorf("状态码 404: %s", string(body))
+			continue
+		}
+
 		return fmt.Errorf("恢复种子失败 (状态码 %d): %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("▶️ [qBittorrent] 已恢复任务: %s", cleanHash)
-	return nil
+	return fmt.Errorf("恢复种子失败: %w", lastErr)
 }
 
 // AddTags 给指定种子添加标签（参考 ani-rss 的 addTags 方法）
