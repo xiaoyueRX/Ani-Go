@@ -66,16 +66,17 @@ jobs:
           go-version: 'stable'
           cache: true
 
-      - name: Build and Package Multi-Platform Binaries
+      - name: Build and Package Multi-Platform Binaries & Source Archives
         id: build
         run: |
-          # 确定版本号
+          # 动态解析或确定版本号
           if [ -n "${{ inputs.tag_name }}" ]; then
             TAG_NAME="${{ inputs.tag_name }}"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG_NAME="${GITHUB_REF#refs/tags/}"
           else
-            TAG_NAME="v0.6.0"
+            APP_VER=$(grep -E 'var version = "([^"]+)"' main.go | sed -E 's/.*"([^"]+)".*/\1/')
+            TAG_NAME="${APP_VER:-v0.6.2}"
           fi
           echo "Building Release for tag: ${TAG_NAME}"
           echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
@@ -85,7 +86,12 @@ jobs:
           PACKAGES_DIR="${OUTPUT_DIR}/packages"
           mkdir -p "${PACKAGES_DIR}"
 
-          # 目标平台矩阵: (GOOS GOARCH)
+          # 1. 打包源码压缩包 (Source Code Archives)
+          echo "==> Creating Source Code Archives..."
+          git archive --format=tar.gz --prefix="ani-go-${TAG_NAME}-source/" -o "${PACKAGES_DIR}/ani-go-${TAG_NAME}-source.tar.gz" HEAD
+          git archive --format=zip --prefix="ani-go-${TAG_NAME}-source/" -o "${PACKAGES_DIR}/ani-go-${TAG_NAME}-source.zip" HEAD
+
+          # 2. 目标跨平台编译矩阵: (GOOS GOARCH)
           TARGETS=(
             "linux amd64"
             "linux arm64"
@@ -139,18 +145,49 @@ jobs:
             cd "${GITHUB_WORKSPACE}"
           done
 
-          # 生成 SHA256 校验和文件
+          # 3. 生成 SHA256 校验和文件
           cd "${PACKAGES_DIR}"
           sha256sum * > checksums.txt
           echo "==> Generated Checksums:"
           cat checksums.txt
           cd "${GITHUB_WORKSPACE}"
 
+      - name: Generate Release Body
+        id: release_body
+        run: |
+          cat << 'EOF' > release_note.md
+## 📦 架构与下载文件速查 (Release Assets)
+
+| 操作系统 | 架构 | 压缩包 | 说明 |
+| :--- | :--- | :--- | :--- |
+| **Windows** | x86_64 / amd64 | `ani-go-${{ steps.build.outputs.tag_name }}-windows-amd64.zip` | 常见 64 位 PC / 服务器 |
+| **Windows** | ARM64 | `ani-go-${{ steps.build.outputs.tag_name }}-windows-arm64.zip` | 骁龙 X Elite / ARM 设备 |
+| **Linux** | x86_64 / amd64 | `ani-go-${{ steps.build.outputs.tag_name }}-linux-amd64.tar.gz` | 标准 Linux 服务器 / NAS (x86) |
+| **Linux** | aarch64 / arm64 | `ani-go-${{ steps.build.outputs.tag_name }}-linux-arm64.tar.gz` | 树莓派 4/5、ARM NAS、LXC |
+| **Linux** | armv7 | `ani-go-${{ steps.build.outputs.tag_name }}-linux-armv7.tar.gz` | 32 位 ARM 开发板 / 老旧 NAS |
+| **macOS** | Apple Silicon (M系列) | `ani-go-${{ steps.build.outputs.tag_name }}-darwin-arm64.tar.gz` | M1 / M2 / M3 / M4 Mac |
+| **macOS** | Intel x86_64 | `ani-go-${{ steps.build.outputs.tag_name }}-darwin-amd64.tar.gz` | 老款 Intel Mac |
+| **源码包** | 全平台源码 | `ani-go-${{ steps.build.outputs.tag_name }}-source.zip` / `.tar.gz` | 纯净源代码归档 (含前端/协议/核心) |
+
+### 🐳 Docker 多架构镜像
+```bash
+docker pull ghcr.io/xiaoyuerx/ani-go:latest
+# 或指定版本
+docker pull ghcr.io/xiaoyuerx/ani-go:${{ steps.build.outputs.tag_name }}
+```
+
+### 🔐 校验和验证 (Checksums)
+下载后可使用 `sha256sum -c checksums.txt` 校验文件完整性。
+
+---
+EOF
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.build.outputs.tag_name }}
           name: Ani-Go ${{ steps.build.outputs.tag_name }}
+          body_path: release_note.md
           files: |
             release-assets/packages/*
           generate_release_notes: true
