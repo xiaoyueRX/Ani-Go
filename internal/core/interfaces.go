@@ -14,20 +14,20 @@ import (
 type ServiceType string
 
 const (
-	ServiceDB             ServiceType = "database"
-	ServiceConfig         ServiceType = "config"
-	ServiceDownloader     ServiceType = "downloader"
-	ServiceSource         ServiceType = "source"
-	ServiceOrganizer      ServiceType = "organizer"
-	ServiceMetadata       ServiceType = "metadata"
-	ServiceAI             ServiceType = "ai"
-	ServiceEventBus       ServiceType = "eventbus"
-	ServiceScheduler      ServiceType = "scheduler"
-	ServiceNotifier       ServiceType = "notifier"
-	ServicePluginManager  ServiceType = "plugin_manager"
-	ServiceBackupManager  ServiceType = "backup_manager"
-	ServiceTaskParser     ServiceType = "task_parser"
-	ServiceSearch         ServiceType = "search"
+	ServiceDB            ServiceType = "database"
+	ServiceConfig        ServiceType = "config"
+	ServiceDownloader    ServiceType = "downloader"
+	ServiceSource        ServiceType = "source"
+	ServiceOrganizer     ServiceType = "organizer"
+	ServiceMetadata      ServiceType = "metadata"
+	ServiceAI            ServiceType = "ai"
+	ServiceEventBus      ServiceType = "eventbus"
+	ServiceScheduler     ServiceType = "scheduler"
+	ServiceNotifier      ServiceType = "notifier"
+	ServicePluginManager ServiceType = "plugin_manager"
+	ServiceBackupManager ServiceType = "backup_manager"
+	ServiceTaskParser    ServiceType = "task_parser"
+	ServiceSearch        ServiceType = "search"
 )
 
 // Context 万能上下文接口
@@ -164,27 +164,28 @@ type Subscription struct {
 }
 
 type Filter struct {
-	IncludeKeywords []string
-	ExcludeKeywords []string
-	PreferSubgroup  string
-	Resolution      string
+	SearchTitle      string // 无专属作品编号的资源站使用的作品检索词
+	IncludeKeywords  []string
+	ExcludeKeywords  []string
+	PreferSubgroup   string
+	Resolution       string
 	AllowedSubgroups []string
 }
 
 type DownloadTask struct {
-	Hash         string
-	Name         string
-	SavePath     string
-	ContentPath  string
-	Status       string
-	Progress     float32
-	SpeedDown    int64
-	SpeedUp      int64
-	Size         int64
-	Done         int64
-	Uploaded     int64
-	Ratio        float64
-	SeedingTime  int64
+	Hash        string
+	Name        string
+	SavePath    string
+	ContentPath string
+	Status      string
+	Progress    float32
+	SpeedDown   int64
+	SpeedUp     int64
+	Size        int64
+	Done        int64
+	Uploaded    int64
+	Ratio       float64
+	SeedingTime int64
 }
 
 type Event struct {
@@ -257,14 +258,14 @@ const (
 )
 
 type ParseResult struct {
-	Action       string   `json:"action"`       // subscribe / unsubscribe / list / search / unknown
-	Title        string   `json:"title"`        // 番剧标题
-	Season       int      `json:"season"`       // 季号 (0 表示未指定)
-	Resolution   string   `json:"resolution"`   // 1080p / 720p / 4K
+	Action       string   `json:"action"`        // subscribe / unsubscribe / list / search / unknown
+	Title        string   `json:"title"`         // 番剧标题
+	Season       int      `json:"season"`        // 季号 (0 表示未指定)
+	Resolution   string   `json:"resolution"`    // 1080p / 720p / 4K
 	SubgroupPref string   `json:"subgroup_pref"` // 字幕组偏好
-	Keywords     []string `json:"keywords"`     // 额外关键词
-	Confidence   float64  `json:"confidence"`   // 0-1
-	RawInput     string   `json:"raw_input"`    // 原始输入
+	Keywords     []string `json:"keywords"`      // 额外关键词
+	Confidence   float64  `json:"confidence"`    // 0-1
+	RawInput     string   `json:"raw_input"`     // 原始输入
 }
 
 type TaskParser interface {

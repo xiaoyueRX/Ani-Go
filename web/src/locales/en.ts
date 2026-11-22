@@ -642,6 +642,9 @@ export default {
     supplement: 'Supplement',
   },
   detail: {
+    manualMark: "Marked · ",
+    downloaded: "Downloaded",
+    organized: "Organized",
     back: "Back to Subscriptions",
     status: {
       finished: "Completed",

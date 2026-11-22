@@ -40,6 +40,13 @@ func Init(dbPath string) error {
 		return err
 	}
 
+	// 旧版详情页将人工完成标记写进了下载状态；保留标记并恢复调度。
+	if err := DB.Unscoped().Model(&Episode{}).Where("status = ?", "completed").Updates(map[string]any{
+		"manual_status": "completed",
+		"status":        gorm.Expr("CASE WHEN final_path IS NOT NULL AND final_path <> '' THEN 'organized' ELSE 'downloading' END"),
+	}).Error; err != nil {
+		return err
+	}
 	log.Printf("✅ 数据库初始化完成: %s", dbPath)
 	return nil
 }

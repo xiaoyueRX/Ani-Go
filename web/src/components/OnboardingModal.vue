@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue"
-import { useI18n } from "vue-i18n"
+import { ref, onMounted, computed } from "vue"
+import { useAuth } from "../composables/useAuth"
+import { activeDownloader, downloaderForms, downloaderSettings, type DownloaderType } from "../utils/setupDownloader"
 import request from "../utils/request"
 import {
   ShieldCheck,
@@ -16,7 +17,7 @@ import {
   HardDrive
 } from "lucide-vue-next"
 
-const { t } = useI18n()
+const { setToken } = useAuth()
 const show = ref(false)
 const currentStep = ref(0)
 const saving = ref(false)
@@ -48,12 +49,10 @@ function applyPreset(key: "fnos" | "synology" | "linux" | "windows") {
   }
 }
 
-const dlType = ref("qbittorrent")
-const dlHost = ref("http://192.168.1.220:8080")
-const dlUser = ref("admin")
-const dlPass = ref("adminadmin")
-const dlCategory = ref("ani-go")
-const dlSecret = ref("")
+const storedSettings = ref<Record<string, string>>({})
+const dlType = ref<DownloaderType>("qbittorrent")
+const forms = ref(downloaderForms({}))
+const downloader = computed(() => forms.value[dlType.value])
 const dlTesting = ref(false)
 const dlTestResult = ref<{ success?: boolean; error?: string } | null>(null)
 
@@ -61,14 +60,12 @@ async function testDownloader() {
   dlTesting.value = true
   dlTestResult.value = null
   try {
-    const { data } = await request.post("/downloader/test", {
-      type: dlType.value,
-      host: dlHost.value,
-      username: dlUser.value,
-      password: dlPass.value,
-      category: dlCategory.value,
-      secret: dlSecret.value,
-    })
+    const form = downloader.value
+    const saved = downloaderForms(storedSettings.value)[dlType.value]
+    const useActive = dlType.value === activeDownloader(storedSettings.value)
+      && form.host === saved.host && form.username === saved.username && form.category === saved.category
+      && !form.password && !form.secret
+    const { data } = await request.post("/downloader/test", useActive ? {} : { type: dlType.value, ...form })
     dlTestResult.value = data
   } catch (e: any) {
     dlTestResult.value = { success: false, error: e.response?.data?.error || e.message }
@@ -92,13 +89,14 @@ onMounted(async () => {
       if (s.TV_BASE_PATH) tvBasePath.value = s.TV_BASE_PATH
       if (s.MOVIE_BASE_PATH) movieBasePath.value = s.MOVIE_BASE_PATH
       if (s.USE_HARDLINK !== undefined) useHardLink.value = s.USE_HARDLINK
-      if (s.DOWNLOADER_TYPE) dlType.value = s.DOWNLOADER_TYPE
-      if (s.QB_HOST) dlHost.value = s.QB_HOST
-      if (s.QB_USER) dlUser.value = s.QB_USER
+      storedSettings.value = s
+      dlType.value = activeDownloader(s)
+      forms.value = downloaderForms(s)
       if (s.MIKAN_RSS_URL) mikanRssUrl.value = s.MIKAN_RSS_URL
       if (s.BGMTV_USER_TOKEN) bgmUserToken.value = s.BGMTV_USER_TOKEN
     }
-    if (isDefaultPassword.value || !s?.QB_HOST || !s?.MIKAN_RSS_URL) {
+    const hostKey = { qbittorrent: "QB_HOST", transmission: "TR_HOST", aria2: "ARIA2_HOST" }[dlType.value]
+    if (isDefaultPassword.value || !s?.[hostKey] || !s?.MIKAN_RSS_URL) {
       show.value = true
     }
   } catch {}
@@ -138,29 +136,18 @@ async function finishSetup() {
   errorMsg.value = ""
   try {
     if (isDefaultPassword.value && !keepDefaultPassword.value && newPassword.value) {
-      await request.post("/user/change-password", {
+      const { data } = await request.post("/user/change-password", {
         old_password: "admin",
         new_password: newPassword.value,
       })
+      setToken(data.token)
+      isDefaultPassword.value = false
     }
     const payload: Record<string, string> = {
       TV_BASE_PATH: tvBasePath.value,
       MOVIE_BASE_PATH: movieBasePath.value,
       USE_HARDLINK: useHardLink.value,
-      DOWNLOADER_TYPE: dlType.value,
-    }
-    if (dlType.value === "qbittorrent") {
-      payload.QB_HOST = dlHost.value
-      payload.QB_USER = dlUser.value
-      payload.QB_PASS = dlPass.value
-      payload.QB_CATEGORY = dlCategory.value
-    } else if (dlType.value === "transmission") {
-      payload.TR_HOST = dlHost.value
-      payload.TR_USER = dlUser.value
-      payload.TR_PASS = dlPass.value
-    } else if (dlType.value === "aria2") {
-      payload.ARIA2_HOST = dlHost.value
-      payload.ARIA2_SECRET = dlSecret.value
+      ...downloaderSettings(dlType.value, downloader.value),
     }
     if (mikanRssUrl.value) payload.MIKAN_RSS_URL = mikanRssUrl.value
     if (bgmUserToken.value) payload.BGMTV_USER_TOKEN = bgmUserToken.value
@@ -348,23 +335,23 @@ async function finishSetup() {
           <div class="space-y-3.5">
             <div class="space-y-1.5">
               <label class="text-xs font-black text-base-content/70 uppercase tracking-wider">{{ $t("wizard.downloader.host") }}</label>
-              <input v-model="dlHost" type="text" class="input input-bordered w-full rounded-2xl font-mono text-xs font-bold bg-base-200/50" />
+              <input v-model="downloader.host" type="text" class="input input-bordered w-full rounded-2xl font-mono text-xs font-bold bg-base-200/50" />
             </div>
 
             <div v-if="dlType !== 'aria2'" class="grid grid-cols-2 gap-3">
               <div class="space-y-1.5">
                 <label class="text-xs font-black text-base-content/70 uppercase tracking-wider">{{ $t("wizard.downloader.user") }}</label>
-                <input v-model="dlUser" type="text" class="input input-bordered w-full rounded-2xl text-xs font-bold bg-base-200/50" />
+                <input v-model="downloader.username" type="text" class="input input-bordered w-full rounded-2xl text-xs font-bold bg-base-200/50" />
               </div>
               <div class="space-y-1.5">
                 <label class="text-xs font-black text-base-content/70 uppercase tracking-wider">{{ $t("wizard.downloader.pass") }}</label>
-                <input v-model="dlPass" type="password" class="input input-bordered w-full rounded-2xl text-xs font-bold bg-base-200/50" />
+                <input v-model="downloader.password" type="password" class="input input-bordered w-full rounded-2xl text-xs font-bold bg-base-200/50" />
               </div>
             </div>
 
             <div v-if="dlType === 'aria2'" class="space-y-1.5">
               <label class="text-xs font-black text-base-content/70 uppercase tracking-wider">{{ $t("wizard.downloader.secret") }}</label>
-              <input v-model="dlSecret" type="password" class="input input-bordered w-full rounded-2xl text-xs font-bold bg-base-200/50" />
+              <input v-model="downloader.secret" type="password" class="input input-bordered w-full rounded-2xl text-xs font-bold bg-base-200/50" />
             </div>
 
             <div class="pt-2 flex items-center justify-between">

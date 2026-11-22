@@ -45,6 +45,7 @@ type Episode struct {
 	Number             float32 `gorm:"not null"`
 	Title              string
 	Status             string `gorm:"default:'pending'"`
+	ManualStatus       string
 	TorrentHash        string `gorm:"uniqueIndex"`
 	TorrentURL         string
 	OriginalName       string

@@ -2,13 +2,13 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
-	"github.com/xiaoyueRX/Ani-Go/internal/source"
 	"gorm.io/gorm"
 )
 
@@ -50,7 +50,7 @@ func (s *Scheduler) pollSyncBangumi(ctx context.Context) {
 		}
 		// 检查是否已订阅
 		var count int64
-		database.DB.Model(&database.Subscription{}).Where("bangumi_id = ?", anime.ID).Count(&count)
+		database.DB.Model(&database.Subscription{}).Where("metadata_provider = ? AND metadata_id = ?", anime.Provider, anime.ID).Count(&count)
 		if count > 0 {
 			continue
 		}
@@ -77,49 +77,59 @@ func (s *Scheduler) autoSubscribe(ctx context.Context, anime core.Anime) (uint, 
 		return 0, fmt.Errorf("数据库未就绪")
 	}
 
-	// 1. 在事务外部获取 Mikan RSS URL，避免网络 I/O 阻塞数据库事务
-	var rssURL string
-	mikanSrc, ok := s.source.(*source.MikanSource)
-	if !ok {
-		// 如果是 MultiSource，尝试获取其中的 MikanSource
-		if multi, ok := s.source.(*source.MultiSource); ok {
-			for _, src := range multi.Sources() {
-				if m, ok := src.(*source.MikanSource); ok {
-					mikanSrc = m
-					break
+	if anime.Provider == "" || anime.ID == "" {
+		return 0, fmt.Errorf("番剧元数据缺少来源或编号")
+	}
+	sub := database.Subscription{
+		TitleCN: anime.TitleCN, TitleEN: anime.TitleEN, TitleJP: anime.TitleJP,
+		MetadataID: anime.ID, MetadataProvider: anime.Provider, TotalEpisodes: anime.TotalEps,
+		Year: anime.Year, Season: anime.Season, CoverURL: anime.CoverURL, Description: anime.Description,
+		SourceName: "Mikan",
+	}
+	if mikan := s.mikanSource(); mikan != nil {
+		sub.BangumiID = resolveMikanID(ctx, mikan, sub)
+		if sub.BangumiID != "" {
+			sub.RSSURL, _ = mikan.ResolveFirstRSSURL(ctx, sub.BangumiID)
+		}
+	}
+	var subID uint
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var existing database.Subscription
+		query := tx.Where("metadata_provider = ? AND metadata_id = ?", anime.Provider, anime.ID)
+		if sub.BangumiID != "" {
+			query = query.Or("bangumi_id = ?", sub.BangumiID)
+		}
+		err := query.First(&existing).Error
+		if err == nil {
+			updates := map[string]interface{}{}
+			if existing.MetadataID == "" {
+				updates["metadata_id"] = anime.ID
+				updates["metadata_provider"] = anime.Provider
+			}
+			if sub.BangumiID != "" && existing.BangumiID != sub.BangumiID {
+				updates["bangumi_id"] = sub.BangumiID
+				updates["rss_url"] = sub.RSSURL
+			}
+			if len(updates) > 0 {
+				return tx.Model(&existing).Updates(updates).Error
+			}
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		// 旧版本把收藏的 subject ID 写入了资源 ID。两项身份同时吻合时才修正旧记录。
+		if anime.Provider == "BGM.tv" {
+			var legacy []database.Subscription
+			if err := tx.Where("bangumi_id = ? AND (metadata_id = '' OR metadata_id IS NULL)", anime.ID).Find(&legacy).Error; err != nil {
+				return err
+			}
+			for _, old := range legacy {
+				if matchesAlias(old.TitleCN, aliases(sub)) && (old.Year == 0 || sub.Year == 0 || old.Year == sub.Year) {
+					return tx.Model(&old).Updates(map[string]interface{}{"metadata_id": anime.ID, "metadata_provider": anime.Provider, "bangumi_id": sub.BangumiID, "rss_url": sub.RSSURL}).Error
 				}
 			}
 		}
-	}
-	if mikanSrc != nil {
-		if url, err := mikanSrc.ResolveFirstRSSURL(ctx, anime.ID); err == nil {
-			rssURL = url
-		}
-	}
-
-	var subID uint
-	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		// 再次检查防止并发冲突
-		var existing database.Subscription
-		if err := tx.Where("bangumi_id = ?", anime.ID).First(&existing).Error; err == nil {
-			return nil // 已存在
-		}
-
-		sub := database.Subscription{
-			TitleCN:       anime.TitleCN,
-			TitleEN:       anime.TitleEN,
-			TitleJP:       anime.TitleJP,
-			BangumiID:     anime.ID,
-			Year:          anime.Year,
-			Season:        anime.Season,
-			CoverURL:      anime.CoverURL,
-			Description:   anime.Description,
-			Enabled:       &[]bool{true}[0],
-			SourceName:    "Mikan",
-			TotalEpisodes: anime.TotalEps,
-			RSSURL:        rssURL,
-		}
-
 		if err := tx.Create(&sub).Error; err != nil {
 			return err
 		}
@@ -127,7 +137,7 @@ func (s *Scheduler) autoSubscribe(ctx context.Context, anime core.Anime) (uint, 
 		return nil
 	})
 
-	if err == nil && subID > 0 {
+	if err == nil && subID > 0 && s.bus != nil {
 		log.Printf("🆕 [自动同步] 已添加订阅: %s (Bangumi ID: %s)", anime.TitleCN, anime.ID)
 		// 触发一次补全扫描
 		s.bus.Publish(core.Event{

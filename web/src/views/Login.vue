@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
 import { 
-  Antenna, AlertTriangle, User, Lock, LogIn, Languages
+  AlertTriangle, User, Lock, LogIn, Languages
 } from 'lucide-vue-next'
 
 const router = useRouter()

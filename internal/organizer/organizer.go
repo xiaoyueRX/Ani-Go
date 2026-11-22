@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,8 +16,6 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 )
-
-
 
 // ============================================================
 // TVOrganizer 实现 core.Organizer 接口
@@ -32,7 +29,7 @@ type TVOrganizer struct {
 	movieBasePath string
 	ovaBasePath   string
 	useHardLink   bool
-	eventBus      core.EventBus               // 事件总线，用于触发整理完成事件（松耦合）
+	eventBus      core.EventBus              // 事件总线，用于触发整理完成事件（松耦合）
 	hookManager   *core.WaterfallHookManager // Waterfall 钩子管理器
 }
 
@@ -116,51 +113,8 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 		return "", fmt.Errorf("创建目录失败: %w", err)
 	}
 
-	// 移动或硬链接文件
-	useHardLink := o.isHardLinkEnabled()
-
-	if useHardLink {
-		// 检查目标路径是否已存在文件（冲突或重整场景）
-		if dstInfo, err := os.Stat(fullPath); err == nil {
-			if srcInfo, sErr := os.Stat(filePath); sErr == nil && os.SameFile(srcInfo, dstInfo) {
-				// 源文件与目标文件已是同一物理硬链接，跳过重复链接与截断风险
-				log.Printf("ℹ️ 目标文件与源文件已是同一物理硬链接，跳过重复处理: %s", fullPath)
-				o.publishOrganizedEvent(filePath, fullPath, anime, episode)
-				return fullPath, nil
-			}
-			// 目标已存在但非同一文件，先清理旧目标文件再重建硬链接（Zero IO 且避免 EEXIST 报错）
-			log.Printf("⚠️ 目标路径已存在旧文件，先清理旧目标以重建硬链接: %s", fullPath)
-			_ = os.Remove(fullPath)
-		}
-
-		if linkErr := os.Link(filePath, fullPath); linkErr != nil {
-			// 任何硬链接失败都回退到复制（跨设备、权限、文件系统不支持等）
-			log.Printf("⚠️ 硬链接创建失败 (%v)，正在降级为文件复制...", linkErr)
-			if err := copyFile(filePath, fullPath); err != nil {
-				return "", fmt.Errorf("硬链接失败且复制降级失败: %w", err)
-			}
-			log.Printf("📋 已复制完成（保留原做种文件）: %s -> %s", filePath, fullPath)
-		}
-	} else {
-		// 移动模式：若目标已存在且不是同一文件，先清理旧目标文件（兼容 Windows Rename 冲突）
-		if dstInfo, err := os.Stat(fullPath); err == nil {
-			if srcInfo, sErr := os.Stat(filePath); sErr == nil && os.SameFile(srcInfo, dstInfo) {
-				log.Printf("ℹ️ 目标文件与源文件完全相同，跳过移动: %s", fullPath)
-				o.publishOrganizedEvent(filePath, fullPath, anime, episode)
-				return fullPath, nil
-			}
-			_ = os.Remove(fullPath)
-		}
-
-		if err := os.Rename(filePath, fullPath); err != nil {
-			// 跨设备移动降级：复制后删除原文件 (解决跨卷 EXDEV 报错)
-			log.Printf("⚠️ 移动文件失败 (%v)，正在尝试跨设备复制并删除...", err)
-			if copyErr := copyFile(filePath, fullPath); copyErr != nil {
-				return "", fmt.Errorf("移动文件失败且跨设备复制失败: %w", copyErr)
-			}
-			_ = os.Remove(filePath)
-			log.Printf("📦 跨设备移动完成: %s -> %s", filePath, fullPath)
-		}
+	if err := installMediaFile(filePath, fullPath, o.isHardLinkEnabled()); err != nil {
+		return "", err
 	}
 
 	o.publishOrganizedEvent(filePath, fullPath, anime, episode)
@@ -456,6 +410,45 @@ func sanitizePath(path string) string {
 	result = strings.TrimSpace(result)
 	result = strings.Trim(result, ".")
 	return result
+}
+
+// installMediaFile 仅在新内容已准备好后替换库文件。跨卷复制和硬链接都在目标卷暂存。
+func installMediaFile(sourcePath, libraryPath string, hardlink bool) error {
+	source, err := os.Stat(sourcePath)
+	if err != nil {
+		return err
+	}
+	if !source.Mode().IsRegular() {
+		return fmt.Errorf("源路径不是普通文件: %s", sourcePath)
+	}
+	if target, err := os.Stat(libraryPath); err == nil && os.SameFile(source, target) {
+		return nil
+	}
+	if !hardlink {
+		// 同卷移动直接替换；失败时源文件和原目标仍保留。
+		if err := os.Rename(sourcePath, libraryPath); err == nil {
+			return nil
+		}
+	}
+	stageDir, err := os.MkdirTemp(filepath.Dir(libraryPath), ".anigo-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(stageDir)
+	staged := filepath.Join(stageDir, "media")
+	defer os.Remove(staged)
+	if !hardlink || os.Link(sourcePath, staged) != nil {
+		if err := copyFile(sourcePath, staged); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(staged, libraryPath); err != nil {
+		return fmt.Errorf("替换库文件失败: %w", err)
+	}
+	if !hardlink {
+		return os.Remove(sourcePath)
+	}
+	return nil
 }
 
 func copyFile(srcPath, dstPath string) error {

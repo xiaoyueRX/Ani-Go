@@ -25,7 +25,7 @@ import (
 // ============================================================
 
 type mikanRSS struct {
-	XMLName xml.Name   `xml:"rss"`
+	XMLName xml.Name     `xml:"rss"`
 	Channel mikanChannel `xml:"channel"`
 }
 
@@ -36,11 +36,11 @@ type mikanChannel struct {
 }
 
 type mikanItem struct {
-	Title       string       `xml:"title"`
-	Link        string       `xml:"link"`
-	GUID        string       `xml:"guid"`
-	PubDate     string       `xml:"pubDate"`
-	Description string       `xml:"description"`
+	Title       string         `xml:"title"`
+	Link        string         `xml:"link"`
+	GUID        string         `xml:"guid"`
+	PubDate     string         `xml:"pubDate"`
+	Description string         `xml:"description"`
 	Enclosure   mikanEnclosure `xml:"enclosure"`
 }
 
@@ -55,7 +55,7 @@ type mikanEnclosure struct {
 // ============================================================
 
 const (
-	searchCacheMaxSize = 128           // 最大缓存条目数
+	searchCacheMaxSize = 128 // 最大缓存条目数
 	cacheEntryTTL      = 30 * time.Second
 )
 
@@ -67,7 +67,7 @@ type cacheEntry struct {
 // lruCache 简单 LRU 缓存（非线程安全，由调用方加锁）
 type lruCache struct {
 	maxSize int
-	keys    []string                // 按访问顺序排列，尾部最新
+	keys    []string // 按访问顺序排列，尾部最新
 	entries map[string]cacheEntry
 }
 
@@ -338,6 +338,9 @@ func getSeason(month time.Month) int {
 
 // FetchHistory 爬取 Mikan 番剧详情页获取全量历史种子
 func (m *MikanSource) FetchHistory(ctx context.Context, bangumiID string, filter core.Filter) ([]core.TorrentItem, error) {
+	if bangumiID == "" {
+		return nil, nil
+	}
 	resp, err := m.tryMirrors(ctx, "/Home/Bangumi/"+bangumiID)
 	if err != nil {
 		return nil, fmt.Errorf("获取详情页失败: %w", err)
@@ -586,8 +589,11 @@ func (m *MikanSource) ResolveFirstRSSURL(ctx context.Context, bangumiID string) 
 func BuildMikanRSSURL(tokenURL string) string {
 	return strings.TrimSpace(tokenURL)
 }
+
 // MikanAnimeInfo 从 Mikan 页面直接抓取的元数据
 type MikanAnimeInfo struct {
+	Title         string // 蜜柑详情页的正式标题
+	SubjectID     string // 蜜柑条目明确链接的 BGM.tv subject
 	TotalEpisodes int
 	Year          int
 	AnimeType     string
@@ -599,8 +605,8 @@ func (m *MikanSource) GetAnimeInfo(ctx context.Context, bangumiID string) (*Mika
 		return nil, fmt.Errorf("bangumiID 不能为空")
 	}
 
-	url := fmt.Sprintf("https://%s/Home/Bangumi/%s", m.GetDomain(), bangumiID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	detailURL := fmt.Sprintf("https://%s/Home/Bangumi/%s", m.GetDomain(), bangumiID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, detailURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -621,7 +627,27 @@ func (m *MikanSource) GetAnimeInfo(ctx context.Context, bangumiID string) (*Mika
 		return nil, err
 	}
 
-	info := &MikanAnimeInfo{}
+	info := &MikanAnimeInfo{Title: strings.TrimSpace(doc.Find(".bangumi-title").First().Text())}
+	doc.Find("a[href*='/subject/']").EachWithBreak(func(_ int, a *goquery.Selection) bool {
+		href, _ := a.Attr("href")
+		link, err := url.Parse(href)
+		if err != nil {
+			return true
+		}
+		switch strings.ToLower(link.Hostname()) {
+		case "bgm.tv", "bangumi.tv", "chii.in":
+		default:
+			return true
+		}
+		parts := strings.Split(strings.Trim(link.Path, "/"), "/")
+		if len(parts) == 2 && parts[0] == "subject" {
+			if id, err := strconv.Atoi(parts[1]); err == nil && id > 0 {
+				info.SubjectID = parts[1]
+				return false
+			}
+		}
+		return true
+	})
 	// Mikan 详情页通常在 .bangumi-info 区域
 	doc.Find(".bangumi-info p").Each(func(i int, s *goquery.Selection) {
 		text := s.Text()

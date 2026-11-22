@@ -28,19 +28,6 @@ const skipBulkUpdate = ref(props.sub.skip_bulk_update || false)
 const allowedSubgroups = ref(props.sub.allowed_subgroups || '[]')
 const stallTimeoutHours = ref(props.sub.stall_timeout_hours || 0)
 
-function parseJsonArray(jsonStr: string): string[] {
-  try {
-    const arr = JSON.parse(jsonStr)
-    return Array.isArray(arr) ? arr : []
-  } catch {
-    return []
-  }
-}
-
-function stringifyJsonArray(arr: string[]): string {
-  return JSON.stringify(arr)
-}
-
 function handleSubmit() {
   const u: Record<string, any> = {}
   if (titleCN.value !== props.sub.title_cn) u.title_cn = titleCN.value

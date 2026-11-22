@@ -236,6 +236,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/subscriptions/supplement-all", s.handleSupplementAll)
 
 	// 剧集管理
+	mux.HandleFunc("POST /api/subscriptions/{id}/episodes/batch-delete", s.handleBatchDeleteEpisodes)
 	mux.HandleFunc("PUT /api/episodes/{id}/status", s.handleUpdateEpisodeStatus)
 
 	// 下载队列

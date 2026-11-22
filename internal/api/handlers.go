@@ -159,6 +159,7 @@ type episodeResponse struct {
 	Number            float32 `json:"number"`
 	Title             string  `json:"title"`
 	Status            string  `json:"status"`
+	ManualStatus      string  `json:"manual_status,omitempty"`
 	TorrentHash       string  `json:"torrent_hash"`
 	TorrentURL        string  `json:"torrent_url"`
 	OriginalName      string  `json:"original_name"`
@@ -216,6 +217,7 @@ func toEpisodeResponse(ep database.Episode) episodeResponse {
 		Number:         ep.Number,
 		Title:          ep.Title,
 		Status:         ep.Status,
+		ManualStatus:   ep.ManualStatus,
 		TorrentHash:    ep.TorrentHash,
 		TorrentURL:     ep.TorrentURL,
 		OriginalName:   ep.OriginalName,
@@ -1203,12 +1205,17 @@ func (s *Server) handleUpdateEpisodeStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := database.DB.Model(&database.Episode{}).Where("id = ?", id).Update("status", req.Status).Error; err != nil {
+	updated := database.DB.Model(&database.Episode{}).Where("id = ?", id).Update("manual_status", req.Status)
+	if updated.Error != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "更新失败"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": req.Status})
+	if updated.RowsAffected == 0 {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "剧集不存在"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": req.Status, "manual_status": req.Status})
 }
 
 // ============================================================
@@ -2352,13 +2359,78 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "密码加密失败"})
 		return
 	}
-	user.PasswordHash = hash
-	user.TokenVersion++
-	if err := database.DB.Save(&user).Error; err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存失败"})
+	// 凭证轮换与版本检查一并提交，防止两个并发改密请求复用同一版本。
+	token, err := auth.GenerateToken(user.Username, user.TokenVersion+1)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建新会话失败"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "密码修改成功"})
+	updated := database.DB.Model(&database.User{}).Where("id = ? AND token_version = ?", user.ID, user.TokenVersion).
+		Updates(map[string]any{"password_hash": hash, "token_version": user.TokenVersion + 1})
+	if updated.Error != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存失败"})
+		return
+	}
+	if updated.RowsAffected != 1 {
+		writeJSON(w, http.StatusConflict, errorResponse{Error: "账户已修改，请重新登录"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "密码修改成功", "token": token})
+}
+
+// 删除前校验整个选择集；即使剧集和订阅的数字主键相同也不会跨订阅操作。
+func (s *Server) handleBatchDeleteEpisodes(w http.ResponseWriter, r *http.Request) {
+	subID, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+	var req batchDeleteRequest
+	if err != nil || subID == 0 || json.NewDecoder(r.Body).Decode(&req) != nil || len(req.IDs) == 0 || len(req.IDs) > 100 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请提供有效订阅和 1 至 100 个剧集 ID"})
+		return
+	}
+	var episodes []database.Episode
+	// 允许重试已经成功删除的同订阅记录，其下载器任务无需重复删除。
+	query := database.DB.Unscoped().Where("subscription_id = ? AND id IN ?", subID, req.IDs)
+	if err := query.Find(&episodes).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "读取剧集失败"})
+		return
+	}
+	if len(episodes) != len(req.IDs) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "所选剧集必须互不重复且均属于当前订阅"})
+		return
+	}
+	if req.DeleteFiles {
+		for _, ep := range episodes {
+			if !ep.DeletedAt.Valid && (s.downloader == nil || ep.TorrentHash == "" || strings.HasPrefix(ep.TorrentHash, "url:")) {
+				writeJSON(w, http.StatusConflict, errorResponse{Error: "下载器任务尚未关联，可选择仅删除记录"})
+				return
+			}
+		}
+	}
+	deleted := 0
+	for _, ep := range episodes {
+		if ep.DeletedAt.Valid {
+			continue
+		}
+		if req.DeleteFiles {
+			if err := s.downloader.Delete(r.Context(), ep.TorrentHash, true); err != nil {
+				writeJSON(w, http.StatusBadGateway, errorResponse{Error: fmt.Sprintf("已移除 %d 项，删除剧集 %d 的下载文件失败", deleted, ep.ID)})
+				return
+			}
+		}
+		err := database.DB.Transaction(func(tx *gorm.DB) error {
+			result := tx.Where("subscription_id = ? AND id = ?", subID, ep.ID).Delete(&database.Episode{})
+			if result.Error != nil {
+				return result.Error
+			}
+			deleted += int(result.RowsAffected)
+			countOrganized := tx.Model(&database.Episode{}).Select("count(*)").Where("subscription_id = ? AND status = ?", subID, "organized")
+			return tx.Model(&database.Subscription{}).Where("id = ?", subID).Update("current_episodes", countOrganized).Error
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "删除剧集记录失败"})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, batchDeleteResponse{Deleted: deleted})
 }
 
 func (s *Server) handleBatchDeleteSubscriptions(w http.ResponseWriter, r *http.Request) {

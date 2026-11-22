@@ -8,12 +8,26 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 )
 
-func TestCachedTitleResult(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_cache.db")
-	if err := database.Init(dbPath); err != nil {
-		t.Fatalf("database.Init failed: %v", err)
+func initCacheTestDB(t *testing.T, name string) {
+	t.Helper()
+	previous := database.DB
+	if err := database.Init(filepath.Join(t.TempDir(), name)); err != nil {
+		t.Fatal(err)
 	}
+	db, err := database.DB.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		database.DB = previous
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+}
+
+func TestCachedTitleResult(t *testing.T) {
+	initCacheTestDB(t, "test_cache.db")
 
 	raw := "[Sakurato] Steel Ball Run - 01 [1080p HEVC]"
 
@@ -42,11 +56,7 @@ func TestCachedTitleResult(t *testing.T) {
 
 // TestParserCache_PoisoningPrevention 测试防毒策略（拒绝缓存零置信度与解析失败结果）
 func TestParserCache_PoisoningPrevention(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "poison_test.db")
-	if err := database.Init(dbPath); err != nil {
-		t.Fatalf("database.Init failed: %v", err)
-	}
+	initCacheTestDB(t, "poison_test.db")
 
 	// 1. 低置信度条目（< 0.2）不应被写入缓存
 	rawLow := "[Unknown] Badly Formatted Title"
@@ -72,11 +82,7 @@ func TestParserCache_PoisoningPrevention(t *testing.T) {
 
 // TestParserCache_UpdateAndClear 测试缓存条目更新与批量清空
 func TestParserCache_UpdateAndClear(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "update_test.db")
-	if err := database.Init(dbPath); err != nil {
-		t.Fatalf("database.Init failed: %v", err)
-	}
+	initCacheTestDB(t, "update_test.db")
 
 	raw := "[Subs] Updating Anime Title - 01"
 

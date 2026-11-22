@@ -11,11 +11,11 @@ import {
   RefreshCw, User, Database, 
   RotateCcw, Upload, Trash2, 
   Shield, Sparkles, Plus, 
-  Copy, Search, Camera, X,
+  Copy, Search, Camera,
   Zap, ExternalLink, Play,
-  Activity, CheckCircle, AlertCircle, Filter, Clock, Calendar
+  Activity, AlertCircle, Filter, Clock, Calendar
 } from 'lucide-vue-next'
-import { CURRENT_VERSION, currentVersion, useVersion } from '../composables/useVersion'
+import { currentVersion, useVersion } from '../composables/useVersion'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -49,7 +49,7 @@ const passwordMsg = ref('')
 const passwordError = ref('')
 
 // 版本与更新检测
-const { latestVersion, hasNewVersion, checkGitHubUpdate, updating, updateProgress, triggerUpdate, canSelfUpdate } = useVersion()
+const { latestVersion, hasNewVersion, checkGitHubUpdate, updating, triggerUpdate, canSelfUpdate, environment } = useVersion()
 const checkingUpdate = ref(false)
 const manualCheckMsg = ref('')
 const manualCheckMsgType = ref<'success' | 'error'>('success')
@@ -64,7 +64,7 @@ async function triggerManualCheckUpdate() {
     if (res?.hasUpdate) {
       manualCheckResult.value = 'update'
       manualCheckMsgType.value = 'success'
-      manualCheckMsg.value = `🎉 发现新版本：${res.latest}！请前往 GitHub Releases 下载并更新。`
+      manualCheckMsg.value = `发现新版本 ${res.latest}`
     } else if (res?.error) {
       manualCheckResult.value = 'error'
       manualCheckMsgType.value = 'error'
@@ -485,7 +485,7 @@ function isPluginActive(id: string): boolean {
   return p ? !!p.enabled : false
 }
 
-const currentTabSections = computed(() => {
+const currentTabSections = computed<SectionDef[]>(() => {
   const currentTab = tabs.value.find(t => t.key === activeTab.value)
   if (!currentTab) return []
   if ((currentTab as any).pluginRequired && !isPluginActive((currentTab as any).pluginRequired)) {
@@ -2770,6 +2770,7 @@ onUnmounted(() => {
                   <span v-if="hasNewVersion" class="badge badge-error badge-xs font-bold animate-pulse">发现新版本 {{ latestVersion }}</span>
                   <span v-else-if="manualCheckResult === 'latest'" class="badge badge-success badge-xs font-bold">已是最新</span>
                 </div>
+                <p v-if="environment === 'docker' && !canSelfUpdate" class="text-xs">在原部署目录执行 <code>docker compose pull ani-go &amp;&amp; docker compose up -d ani-go</code>，或通过原部署工具重建容器。</p>
                 <p class="text-[11px] opacity-60">
                   官方主仓：<a href="https://github.com/xiaoyueRX/Ani-Go/releases" target="_blank" rel="noopener noreferrer" class="hover:underline text-primary">github.com/xiaoyueRX/Ani-Go</a>
                 </p>

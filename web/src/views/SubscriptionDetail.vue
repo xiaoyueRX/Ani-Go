@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
@@ -8,12 +8,8 @@ import {
   Image, Edit3, Pause, Play, 
   History, Download, Check, 
   MoreVertical, FileText, X,
-  UserCheck,
-  UserX,
   Trash2,
-  Shield,
-  Hash,
-  ExternalLink
+  Shield
 } from 'lucide-vue-next'
 import SubscriptionEditForm from '../components/SubscriptionEditForm.vue'
 
@@ -35,7 +31,7 @@ interface Subscription {
 
 interface Episode {
   id: number; subscription_id: number; season: number; number: number
-  title: string; status: string; torrent_hash: string; torrent_url: string
+  title: string; status: string; manual_status?: string; torrent_hash: string; torrent_url: string
   original_name: string; final_path: string; file_size: number
   is_stalled: boolean; group_name?: string
   download_started_at: string; created_at: string
@@ -74,11 +70,11 @@ const statusCycle: Record<string, string> = {
 }
 
 async function cycleEpisodeStatus(ep: Episode) {
-  const nextStatus = statusCycle[ep.status] || 'pending'
+  const nextStatus = statusCycle[ep.manual_status || ep.status] || 'pending'
   updatingEps.value.add(ep.id)
   try {
     await request.put(`/episodes/${ep.id}/status`, { status: nextStatus })
-    ep.status = nextStatus
+    ep.manual_status = nextStatus
     if (sub.value) {
        const { data } = await request.get(`/subscriptions/${id}`)
        sub.value = data.subscription
@@ -125,6 +121,8 @@ const statusCfg = computed<Record<string, { label: string; icon: any; cls: strin
   pending: { label: t('detail.logs.status.pending'), icon: History, cls: 'bg-base-200 text-base-content/40 border-base-300' },
   downloading: { label: t('detail.logs.status.active'), icon: Download, cls: 'bg-primary/10 text-primary border-primary/20' },
   completed: { label: t('detail.logs.status.finished'), icon: Check, cls: 'bg-success/10 text-success border-success/20' },
+  downloaded: { label: t('detail.downloaded'), icon: Download, cls: 'bg-primary/10 text-primary border-primary/20' },
+  organized: { label: t('detail.organized'), icon: Check, cls: 'bg-success/10 text-success border-success/20' },
   failed: { label: t('detail.logs.status.failed'), icon: AlertTriangle, cls: 'bg-error/10 text-error border-error/20' },
 }))
 
@@ -206,7 +204,7 @@ async function bulkDeleteEpisodes(deleteFiles: boolean) {
   bulkActionLoading.value = true
   try {
     const ids = Array.from(selectedEpisodes.value)
-    await request.post('/subscriptions/batch-delete', { ids, delete_files: deleteFiles })
+    await request.post(`/subscriptions/${id}/episodes/batch-delete`, { ids, delete_files: deleteFiles })
     await fetchDetail()
     clearSelection()
   } catch (e: any) {
@@ -529,14 +527,15 @@ onMounted(fetchDetail)
                       <td>
                         <button 
                           class="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all active:scale-95 flex items-center gap-2 group/btn-s shadow-sm"
-                          :class="statusCfg[ep.status]?.cls || 'bg-base-200 text-base-content/40'"
+                          :class="statusCfg[ep.manual_status || ep.status]?.cls || 'bg-base-200 text-base-content/40'"
                           @click="cycleEpisodeStatus(ep)"
                           :disabled="updatingEps.has(ep.id)"
                         >
                           <span v-if="updatingEps.has(ep.id)" class="loading loading-spinner loading-xs"></span>
-                          <component v-else :is="statusCfg[ep.status]?.icon || MoreVertical" :size="14" />
-                          {{ statusCfg[ep.status]?.label || ep.status }}
+                          <component v-else :is="statusCfg[ep.manual_status || ep.status]?.icon || MoreVertical" :size="14" />
+                          {{ ep.manual_status ? t('detail.manualMark') + (statusCfg[ep.manual_status]?.label || ep.manual_status) : (statusCfg[ep.status]?.label || ep.status) }}
                         </button>
+                        <small v-if="ep.manual_status">{{ statusCfg[ep.status]?.label || ep.status }}</small>
                       </td>
                       <td>
                         <span v-if="ep.is_stalled" class="flex items-center gap-1.5 text-warning font-black uppercase text-[9px] tracking-widest bg-warning/5 px-3 py-1.5 rounded-full border border-warning/10">

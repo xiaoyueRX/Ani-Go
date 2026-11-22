@@ -310,7 +310,10 @@ components:
           type: string
         status:
           type: string
-          enum: [pending, downloading, downloaded, completed, failed]
+          enum: [pending, downloading, downloaded, organized, failed]
+        manual_status:
+          type: string
+          enum: [pending, downloading, completed, failed]
         torrent_hash:
           type: string
         torrent_url:
@@ -660,11 +663,14 @@ paths:
               $ref: '#/components/schemas/ChangePasswordRequest'
       responses:
         '200':
-          description: 密码修改成功
+          description: 密码修改成功，返回新会话令牌
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                type: object
+                properties:
+                  message: {type: string}
+                  token: {type: string}
         '400':
           description: 参数校验失败
           content:
@@ -969,10 +975,42 @@ paths:
         '500':
           description: 补全调度器未配置
 
+  /subscriptions/{id}/episodes/batch-delete:
+    post:
+      tags: [Episodes]
+      summary: 删除指定订阅的选定剧集
+      operationId: deleteSubscriptionEpisodes
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchDeleteRequest'
+      responses:
+        '200':
+          description: 返回本次实际删除数量
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchDeleteResponse'
+        '400':
+          description: 参数错误或 ID 不属于当前订阅
+        '409':
+          description: 下载器未关联
+        '502':
+          description: 下载器未能删除文件
+
   /episodes/{id}/status:
     put:
       tags: [Episodes]
-      summary: 更新剧集状态
+      summary: 更新剧集人工标记
       operationId: updateEpisodeStatus
       security:
         - BearerAuth: []

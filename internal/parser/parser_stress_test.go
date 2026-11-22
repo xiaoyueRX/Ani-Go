@@ -3,13 +3,10 @@ package parser
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/xiaoyueRX/Ani-Go/internal/database"
 )
 
 // TestParser_ReDoSResistance 测试超长字符串与重复模式下的正则抗回溯拒绝服务（ReDoS）能力
@@ -100,11 +97,7 @@ func TestParser_ExtremeDirtyData(t *testing.T) {
 
 // TestParser_HighConcurrencyStress 测试高并发任务解析与持久化解析缓存读写无数据竞争
 func TestParser_HighConcurrencyStress(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "stress_cache.db")
-	if err := database.Init(dbPath); err != nil {
-		t.Fatalf("database.Init failed: %v", err)
-	}
+	initCacheTestDB(t, "stress_cache.db")
 
 	p := NewRegexParser()
 

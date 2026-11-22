@@ -17,7 +17,7 @@ import (
 
 // nyaaRSS Nyaa RSS 2.0 结构体
 type nyaaRSS struct {
-	XMLName xml.Name   `xml:"rss"`
+	XMLName xml.Name    `xml:"rss"`
 	Channel nyaaChannel `xml:"channel"`
 }
 
@@ -26,11 +26,11 @@ type nyaaChannel struct {
 }
 
 type nyaaItem struct {
-	Title       string      `xml:"title"`
-	Link        string      `xml:"link"`
-	GUID        string      `xml:"guid"`
-	PubDate     string      `xml:"pubDate"`
-	Enclosure   nyaaEnclosure `xml:"enclosure"`
+	Title     string        `xml:"title"`
+	Link      string        `xml:"link"`
+	GUID      string        `xml:"guid"`
+	PubDate   string        `xml:"pubDate"`
+	Enclosure nyaaEnclosure `xml:"enclosure"`
 }
 
 type nyaaEnclosure struct {
@@ -98,13 +98,10 @@ func (n *NyaaSource) SearchAnime(ctx context.Context, title string) ([]core.Torr
 }
 
 func (n *NyaaSource) FetchHistory(ctx context.Context, bangumiID string, filter core.Filter) ([]core.TorrentItem, error) {
-	// Nyaa 没有番剧 ID 概念，使用关键词搜索
-	query := url.QueryEscape(filter.PreferSubgroup)
-	if query == "" {
-		query = bangumiID
+	if filter.SearchTitle == "" {
+		return nil, nil
 	}
-	rssURL := fmt.Sprintf("https://%s/?page=rss&q=%s&c=1_2&f=0", n.domain, query)
-	return n.FetchRSS(ctx, rssURL)
+	return n.SearchAnime(ctx, filter.SearchTitle)
 }
 
 func (n *NyaaSource) parseRSS(r io.Reader) ([]core.TorrentItem, error) {

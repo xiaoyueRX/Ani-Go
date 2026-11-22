@@ -6,11 +6,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -56,8 +57,6 @@ type Manager struct {
 	client         *http.Client
 	mu             sync.RWMutex
 	progress       UpdateProgress
-	lastCheck      time.Time
-	cachedInfo     *UpdateInfo
 }
 
 var DefaultManager *Manager
@@ -95,79 +94,52 @@ func DetectEnvironment() (EnvironmentType, bool) {
 	return EnvBinary, false
 }
 
-// CheckUpdate 检测云端 Release
+type releaseInfo struct {
+	TagName     string `json:"tag_name"`
+	Body        string `json:"body"`
+	PublishedAt string `json:"published_at"`
+	Assets      []struct {
+		Name   string `json:"name"`
+		Digest string `json:"digest"`
+		Size   int64  `json:"size"`
+	} `json:"assets"`
+}
+
+// 发布版本及其校验值必须由官方发布接口提供。
+func (m *Manager) latestRelease(ctx context.Context) (releaseInfo, error) {
+	var release releaseInfo
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/xiaoyueRX/Ani-Go/releases/latest", nil)
+	if err != nil {
+		return release, err
+	}
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return release, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return release, fmt.Errorf("读取官方发布信息失败: HTTP %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return release, err
+	}
+	if release.TagName == "" {
+		return release, fmt.Errorf("发布信息缺少版本号")
+	}
+	return release, nil
+}
+
 func (m *Manager) CheckUpdate(ctx context.Context) (*UpdateInfo, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	env, hasSock := DetectEnvironment()
-	canSelfUpdate := (env == EnvBinary) || (env == EnvDocker && hasSock)
-
-	info := &UpdateInfo{
-		CurrentVersion: m.currentVersion,
-		Environment:    string(env),
-		CanSelfUpdate:  canSelfUpdate,
-		DockerSock:     hasSock,
+	info := &UpdateInfo{CurrentVersion: m.currentVersion, Environment: string(env), CanSelfUpdate: env == EnvBinary, DockerSock: hasSock}
+	release, err := m.latestRelease(ctx)
+	if err != nil {
+		return info, err
 	}
-
-	endpoints := []string{
-		"https://api.github.com/repos/xiaoyueRX/Ani-Go/releases/latest",
-		"https://ghproxy.net/https://api.github.com/repos/xiaoyueRX/Ani-Go/releases/latest",
-		"https://ghfast.top/https://api.github.com/repos/xiaoyueRX/Ani-Go/releases/latest",
-	}
-
-	var releaseData struct {
-		TagName     string `json:"tag_name"`
-		Body        string `json:"body"`
-		PublishedAt string `json:"published_at"`
-	}
-
-	var lastErr error
-	for _, ep := range endpoints {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ep, nil)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		req.Header.Set("User-Agent", "Ani-Go-Updater/1.0")
-		req.Header.Set("Accept", "application/vnd.github.v3+json")
-
-		resp, err := m.client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if resp.StatusCode == http.StatusOK {
-			decodeErr := json.NewDecoder(resp.Body).Decode(&releaseData)
-			resp.Body.Close()
-			if decodeErr == nil && releaseData.TagName != "" {
-				lastErr = nil
-				break
-			}
-		} else {
-			resp.Body.Close()
-			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
-		}
-	}
-
-	if lastErr != nil && releaseData.TagName == "" {
-		return info, fmt.Errorf("检查云端更新失败: %w", lastErr)
-	}
-
-	info.LatestVersion = releaseData.TagName
-	info.ReleaseNotes = releaseData.Body
-	info.PublishedAt = releaseData.PublishedAt
-
-	currClean := strings.TrimPrefix(m.currentVersion, "v")
-	latestClean := strings.TrimPrefix(releaseData.TagName, "v")
-	info.HasUpdate = (latestClean != "" && currClean != latestClean)
-
-	m.cachedInfo = info
-	m.lastCheck = time.Now()
-
-	if info.HasUpdate {
-		log.Printf("🔔 [更新检查] 发现云端新版本: %s (当前: %s)", info.LatestVersion, info.CurrentVersion)
-	}
+	info.LatestVersion = release.TagName
+	info.PublishedAt = release.PublishedAt
+	info.ReleaseNotes = release.Body
+	info.HasUpdate = strings.TrimPrefix(release.TagName, "v") != strings.TrimPrefix(m.currentVersion, "v")
 	return info, nil
 }
 
@@ -180,6 +152,9 @@ func (m *Manager) GetProgress() UpdateProgress {
 
 // ExecuteUpdate 异步执行一键平滑更新
 func (m *Manager) ExecuteUpdate(ctx context.Context) error {
+	if env, _ := DetectEnvironment(); env == EnvDocker {
+		return fmt.Errorf("请通过部署工具拉取镜像并重建容器；Docker Compose 可执行 docker compose pull 和 docker compose up -d")
+	}
 	m.mu.Lock()
 	if m.progress.Status == "downloading" || m.progress.Status == "applying" || m.progress.Status == "restarting" {
 		m.mu.Unlock()
@@ -206,17 +181,7 @@ func (m *Manager) ExecuteUpdate(ctx context.Context) error {
 			}
 		}()
 
-		env, hasSock := DetectEnvironment()
-		var err error
-		if env == EnvDocker {
-			if !hasSock {
-				err = fmt.Errorf("Docker 容器未挂载 /var/run/docker.sock，无法自动拉取镜像与自愈")
-			} else {
-				err = m.updateDocker(context.Background())
-			}
-		} else {
-			err = m.updateBinary(context.Background())
-		}
+		err := m.updateBinary(context.Background())
 
 		m.mu.Lock()
 		if err != nil {
@@ -241,16 +206,13 @@ func (m *Manager) ExecuteUpdate(ctx context.Context) error {
 
 // updateBinary 独立二进制自更新与原地替换
 func (m *Manager) updateBinary(ctx context.Context) error {
-	targetVersion := ""
-	if m.cachedInfo != nil {
-		targetVersion = m.cachedInfo.LatestVersion
+	release, err := m.latestRelease(ctx)
+	if err != nil {
+		return err
 	}
-	if targetVersion == "" {
-		info, err := m.CheckUpdate(ctx)
-		if err != nil {
-			return err
-		}
-		targetVersion = info.LatestVersion
+	targetVersion := release.TagName
+	if targetVersion == m.currentVersion {
+		return fmt.Errorf("已经是当前发布版本")
 	}
 
 	goos := runtime.GOOS
@@ -266,6 +228,21 @@ func (m *Manager) updateBinary(ctx context.Context) error {
 	}
 
 	pkgName := fmt.Sprintf("ani-go-%s-%s-%s.%s", targetVersion, goos, archName, ext)
+	var expectedDigest string
+	var archiveSize int64
+	for _, asset := range release.Assets {
+		if asset.Name == pkgName {
+			expectedDigest = asset.Digest
+			archiveSize = asset.Size
+			break
+		}
+	}
+	if !strings.HasPrefix(expectedDigest, "sha256:") || len(expectedDigest) != len("sha256:")+sha256.Size*2 {
+		return fmt.Errorf("官方发布信息缺少 %s 的 SHA-256 校验值", pkgName)
+	}
+	if archiveSize <= 0 {
+		return fmt.Errorf("官方发布信息缺少归档大小")
+	}
 	downloadURL := fmt.Sprintf("https://github.com/xiaoyueRX/Ani-Go/releases/download/%s/%s", targetVersion, pkgName)
 
 	log.Printf("📦 [自更新] 正在下载系统对应发行包: %s", pkgName)
@@ -304,7 +281,7 @@ func (m *Manager) updateBinary(ctx context.Context) error {
 	}
 	defer resp.Body.Close()
 
-	bodyData, err := io.ReadAll(resp.Body)
+	bodyData, err := io.ReadAll(io.LimitReader(resp.Body, archiveSize+1))
 	if err != nil {
 		return fmt.Errorf("读取发布包失败: %w", err)
 	}
@@ -313,32 +290,81 @@ func (m *Manager) updateBinary(ctx context.Context) error {
 	m.progress = UpdateProgress{Status: "applying", Progress: 70, Message: "正在解压并校验可执行文件..."}
 	m.mu.Unlock()
 
+	if int64(len(bodyData)) != archiveSize {
+		return fmt.Errorf("发布包大小校验失败")
+	}
+	digest := sha256.Sum256(bodyData)
+	if expectedDigest != "sha256:"+hex.EncodeToString(digest[:]) {
+		return fmt.Errorf("发布包 SHA-256 校验失败")
+	}
+	binaryBytes, err := unpackBinary(bodyData, ext)
+	if err != nil {
+		return err
+	}
+
+	execPath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		return err
+	}
+	if err := installBinary(execPath, binaryBytes); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	m.progress = UpdateProgress{Status: "restarting", Progress: 90, Message: "文件更新完毕，正在自愈重启系统..."}
+	m.mu.Unlock()
+
+	log.Printf("🚀 [自更新] 二进制文件原子替换成功: %s -> 即将重启自身", execPath)
+
+	// 更新任务本身已在后台运行；启动失败必须反馈给调用方。
+	time.Sleep(time.Second)
+	cmd := exec.Command(execPath, os.Args[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		if rollbackErr := os.Rename(execPath+".old", execPath); rollbackErr != nil {
+			return fmt.Errorf("启动新版失败: %v；恢复旧版失败: %w", err, rollbackErr)
+		}
+		return fmt.Errorf("启动新版失败，已恢复原程序: %w", err)
+	}
+	os.Exit(0)
+	return nil
+}
+
+func unpackBinary(bodyData []byte, ext string) ([]byte, error) {
 	var binaryBytes []byte
 	binTargetName := "anigo"
-	if goos == "windows" {
+	if ext == "zip" {
 		binTargetName = "anigo.exe"
 	}
 
 	if ext == "zip" {
 		zr, err := zip.NewReader(bytes.NewReader(bodyData), int64(len(bodyData)))
 		if err != nil {
-			return fmt.Errorf("解析 ZIP 失败: %w", err)
+			return nil, fmt.Errorf("解析 ZIP 失败: %w", err)
 		}
 		for _, f := range zr.File {
 			if filepath.Base(f.Name) == binTargetName {
 				rc, err := f.Open()
 				if err != nil {
-					return err
-					}
-				binaryBytes, _ = io.ReadAll(rc)
+					return nil, err
+				}
+				binaryBytes, err = io.ReadAll(rc)
 				rc.Close()
+				if err != nil {
+					return nil, fmt.Errorf("读取 ZIP 程序失败: %w", err)
+				}
 				break
 			}
 		}
 	} else {
 		gr, err := gzip.NewReader(bytes.NewReader(bodyData))
 		if err != nil {
-			return fmt.Errorf("解析 GZIP 失败: %w", err)
+			return nil, fmt.Errorf("解析 GZIP 失败: %w", err)
 		}
 		defer gr.Close()
 		tr := tar.NewReader(gr)
@@ -348,120 +374,66 @@ func (m *Manager) updateBinary(ctx context.Context) error {
 				break
 			}
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if filepath.Base(hdr.Name) == binTargetName {
-				binaryBytes, _ = io.ReadAll(tr)
+				binaryBytes, err = io.ReadAll(tr)
+				if err != nil {
+					return nil, fmt.Errorf("读取归档程序失败: %w", err)
+				}
 				break
 			}
+		}
+		if _, err := io.Copy(io.Discard, gr); err != nil {
+			return nil, fmt.Errorf("GZIP 完整性检查失败: %w", err)
 		}
 	}
 
 	if len(binaryBytes) == 0 {
-		return fmt.Errorf("在发行包中未找到可执行文件 %s", binTargetName)
+		return nil, fmt.Errorf("在发行包中未找到可执行文件 %s", binTargetName)
 	}
 
-	execPath, err := os.Executable()
-	if err != nil {
-		execPath = os.Args[0]
-	}
-	execPath, _ = filepath.EvalSymlinks(execPath)
-	execPath, _ = filepath.Abs(execPath)
-
-	newPath := execPath + ".new"
-	if err := os.WriteFile(newPath, binaryBytes, 0755); err != nil {
-		return fmt.Errorf("写入新版本文件失败: %w", err)
-	}
-
-	if goos == "windows" {
-		oldPath := execPath + ".old"
-		_ = os.Remove(oldPath)
-		_ = os.Rename(execPath, oldPath)
-		if err := os.Rename(newPath, execPath); err != nil {
-			_ = os.Rename(oldPath, execPath)
-			return fmt.Errorf("Windows 原子替换失败: %w", err)
-		}
-	} else {
-		if err := os.Rename(newPath, execPath); err != nil {
-			return fmt.Errorf("Linux 原地替换文件失败: %w", err)
-		}
-	}
-
-	m.mu.Lock()
-	m.progress = UpdateProgress{Status: "restarting", Progress: 90, Message: "文件更新完毕，正在自愈重启系统..."}
-	m.mu.Unlock()
-
-	log.Printf("🚀 [自更新] 二进制文件原子替换成功: %s -> 即将重启自身", execPath)
-
-	go func() {
-		time.Sleep(1 * time.Second)
-		cmd := exec.Command(execPath, os.Args[1:]...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Start(); err != nil {
-			log.Printf("❌ 重启新进程失败: %v", err)
-			return
-		}
-		log.Println("👋 旧版进程即将正常交接退出")
-		os.Exit(0)
-	}()
-
-	return nil
+	return binaryBytes, nil
 }
 
-// updateDocker 针对 Docker 容器通过挂载的 docker.sock 与 Docker Engine 交互
-func (m *Manager) updateDocker(ctx context.Context) error {
-	m.mu.Lock()
-	m.progress = UpdateProgress{Status: "downloading", Progress: 30, Message: "正在通过 Docker Engine 拉取最新镜像..."}
-	m.mu.Unlock()
-
-	dockerClient := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return net.Dial("unix", "/var/run/docker.sock")
-			},
-		},
-		Timeout: 5 * time.Minute,
-	}
-
-	imageName := "ghcr.io/xiaoyuerx/ani-go:latest"
-	pullURL := fmt.Sprintf("http://localhost/images/create?fromImage=%s", imageName)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pullURL, nil)
+// installBinary 在同目录准备并落盘新程序，保留上一个可执行版本。
+func installBinary(path string, data []byte) error {
+	staged, err := os.CreateTemp(filepath.Dir(path), ".anigo-update-*")
 	if err != nil {
 		return err
 	}
-	resp, err := dockerClient.Do(req)
+	defer os.Remove(staged.Name())
+	if _, err = staged.Write(data); err == nil {
+		err = staged.Chmod(0755)
+	}
+	if err == nil {
+		err = staged.Sync()
+	}
+	closeErr := staged.Close()
 	if err != nil {
-		return fmt.Errorf("Docker Socket 连接失败: %w", err)
+		return err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("Docker Pull 失败 (%d): %s", resp.StatusCode, string(body))
+	if closeErr != nil {
+		return closeErr
 	}
-
-	_, _ = io.Copy(io.Discard, resp.Body)
-
-	m.mu.Lock()
-	m.progress = UpdateProgress{Status: "applying", Progress: 80, Message: "最新镜像拉取完成，准备原地重启容器..."}
-	m.mu.Unlock()
-
-	hostname, _ := os.Hostname()
-	containerID := strings.TrimSpace(hostname)
-	if containerID == "" {
-		containerID = "ani-go"
+	old := path + ".old"
+	if err := os.Remove(old); err != nil && !os.IsNotExist(err) {
+		return err
 	}
-
-	log.Printf("🐳 [Docker 自更新] 镜像拉取完成，准备重启当前容器 [%s]", containerID)
-
-	go func() {
-		time.Sleep(1 * time.Second)
-		restartURL := fmt.Sprintf("http://localhost/containers/%s/restart?t=5", containerID)
-		rreq, _ := http.NewRequest(http.MethodPost, restartURL, nil)
-		_, _ = dockerClient.Do(rreq)
-	}()
-
-	return nil
+	if runtime.GOOS == "windows" {
+		if err := os.Rename(path, old); err != nil {
+			return err
+		}
+		if err := os.Rename(staged.Name(), path); err != nil {
+			if restoreErr := os.Rename(old, path); restoreErr != nil {
+				return fmt.Errorf("替换失败: %v；回滚失败: %w", err, restoreErr)
+			}
+			return err
+		}
+		return nil
+	}
+	if err := os.Link(path, old); err != nil {
+		return fmt.Errorf("保留旧版本失败: %w", err)
+	}
+	return os.Rename(staged.Name(), path)
 }

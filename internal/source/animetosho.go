@@ -25,11 +25,11 @@ type animetoshoChannel struct {
 }
 
 type animetoshoItem struct {
-	Title       string             `xml:"title"`
-	Link        string             `xml:"link"`
-	GUID        string             `xml:"guid"`
-	PubDate     string             `xml:"pubDate"`
-	Description string             `xml:"description"`
+	Title       string              `xml:"title"`
+	Link        string              `xml:"link"`
+	GUID        string              `xml:"guid"`
+	PubDate     string              `xml:"pubDate"`
+	Description string              `xml:"description"`
 	Enclosure   animetoshoEnclosure `xml:"enclosure"`
 }
 
@@ -96,12 +96,10 @@ func (at *AnimeToshoSource) SearchAnime(ctx context.Context, title string) ([]co
 }
 
 func (at *AnimeToshoSource) FetchHistory(ctx context.Context, bangumiID string, filter core.Filter) ([]core.TorrentItem, error) {
-	query := filter.PreferSubgroup
-	if query == "" {
-		query = bangumiID
+	if filter.SearchTitle == "" {
+		return nil, nil
 	}
-	rssURL := fmt.Sprintf("https://%s/rss2?q=%s", at.domain, url.QueryEscape(query))
-	return at.FetchRSS(ctx, rssURL)
+	return at.SearchAnime(ctx, filter.SearchTitle)
 }
 
 func (at *AnimeToshoSource) parseRSS(r io.Reader) ([]core.TorrentItem, error) {

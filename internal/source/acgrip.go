@@ -25,11 +25,11 @@ type acgripChannel struct {
 }
 
 type acgripItem struct {
-	Title       string         `xml:"title"`
-	Link        string         `xml:"link"`
-	GUID        string         `xml:"guid"`
-	PubDate     string         `xml:"pubDate"`
-	Enclosure   acgripEnclosure `xml:"enclosure"`
+	Title     string          `xml:"title"`
+	Link      string          `xml:"link"`
+	GUID      string          `xml:"guid"`
+	PubDate   string          `xml:"pubDate"`
+	Enclosure acgripEnclosure `xml:"enclosure"`
 }
 
 type acgripEnclosure struct {
@@ -95,12 +95,10 @@ func (a *ACGRIPSource) SearchAnime(ctx context.Context, title string) ([]core.To
 }
 
 func (a *ACGRIPSource) FetchHistory(ctx context.Context, bangumiID string, filter core.Filter) ([]core.TorrentItem, error) {
-	query := filter.PreferSubgroup
-	if query == "" {
-		query = bangumiID
+	if filter.SearchTitle == "" {
+		return nil, nil
 	}
-	rssURL := fmt.Sprintf("https://%s/.xml?term=%s", a.domain, url.QueryEscape(query))
-	return a.FetchRSS(ctx, rssURL)
+	return a.SearchAnime(ctx, filter.SearchTitle)
 }
 
 func (a *ACGRIPSource) parseRSS(r io.Reader) ([]core.TorrentItem, error) {

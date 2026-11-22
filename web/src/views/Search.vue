@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import request from '../utils/request'
 import { 
-  ChevronLeft, Search, LayoutGrid, Timer, Calendar, 
+  ChevronLeft, Search, Timer, Calendar,
   AlertTriangle, X, Antenna, Sparkles, Info, 
   Check, Plus, User, Copy, ExternalLink, Trash2, 
   HardDrive, History, Filter, Clock, Download,

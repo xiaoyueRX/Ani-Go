@@ -9,20 +9,17 @@ import (
 )
 
 type mockChatClient struct {
-	response string
-	err      error
-	delay    time.Duration
-	calls    int
+	response       string
+	err            error
+	waitForTimeout bool
+	calls          int
 }
 
 func (m *mockChatClient) Chat(ctx context.Context, _, _ string) (string, error) {
 	m.calls++
-	if m.delay > 0 {
-		select {
-		case <-time.After(m.delay):
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
+	if m.waitForTimeout {
+		<-ctx.Done()
+		return "", ctx.Err()
 	}
 	return m.response, m.err
 }
@@ -62,7 +59,7 @@ func TestExpanderInvalidResponse(t *testing.T) {
 }
 
 func TestExpanderTimeout(t *testing.T) {
-	client := &mockChatClient{delay: 20 * time.Millisecond}
+	client := &mockChatClient{waitForTimeout: true}
 	expander := NewExpander(client, true)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()

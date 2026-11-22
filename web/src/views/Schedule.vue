@@ -5,9 +5,9 @@ import request from '../utils/request'
 import { 
   Antenna, LayoutGrid, RefreshCw, 
   AlertTriangle, X, Calendar, 
-  Image, Check, Clock, ChevronDown,
-  Search, ChevronLeft,
-  Lock, WifiOff, AlertCircle, Info, History
+  Image, Check, Clock,
+  Search,
+  WifiOff, Info, History
 } from 'lucide-vue-next'
 import { ListChecks, CheckCircle, XCircle } from 'lucide-vue-next'
 import OnboardingModal from '../components/OnboardingModal.vue'
@@ -19,7 +19,7 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 
 // 认证状态
-const { isAuthenticated, isLoading: authLoading, isOfflineMode, initAuth, checkAuth } = useAuth()
+const { isAuthenticated, isOfflineMode, initAuth, checkAuth } = useAuth()
 
 interface TorrentItem {
   title: string; 
@@ -28,6 +28,8 @@ interface TorrentItem {
   bangumi_id: string; 
   info_hash: string; 
   cover_url: string;
+  total_episodes?: number;
+  is_finished?: boolean;
   aired_time?: string;
   aired_date?: string;
 }
@@ -275,12 +277,6 @@ function proxyImage(url: string | undefined): string {
   return `/api/proxy/image?url=${encodeURIComponent(target)}`
 }
 
-
-async function toggleSource(source: "yuc" | "bangumi") {
-  if (scheduleSource.value === source) return
-  scheduleSource.value = source
-  await fetchSchedule()
-}
 
 // 季度回退提示：数据源尚未发布所选季度时，后端会回退到最近有内容的季度
 const seasonNotice = ref('')

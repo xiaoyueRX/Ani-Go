@@ -59,9 +59,9 @@ type aria2Status struct {
 	Files           []struct {
 		Path string `json:"path"`
 	} `json:"files"`
-	Bittorrent      *struct {
-		InfoHash string `json:"infoHash"`
-		Info     *struct {
+	InfoHash   string `json:"infoHash"`
+	Bittorrent *struct {
+		Info *struct {
 			Name string `json:"name"`
 		} `json:"info"`
 	} `json:"bittorrent"`
@@ -215,9 +215,9 @@ func (a *Aria2) listAll(ctx context.Context) ([]aria2Status, error) {
 }
 
 func convertAria2Status(t aria2Status) core.DownloadTask {
-	hash := ""
-	if t.Bittorrent != nil {
-		hash = t.Bittorrent.InfoHash
+	hash := t.InfoHash
+	if hash == "" {
+		hash = t.GID
 	}
 	ratio := 0.0
 	if t.CompletedLength > 0 {
@@ -291,7 +291,7 @@ func (a *Aria2) resolveGID(ctx context.Context, hashOrGID string) string {
 	tasks, err := a.listAll(ctx)
 	if err == nil {
 		for _, t := range tasks {
-			if t.Bittorrent != nil && strings.EqualFold(t.Bittorrent.InfoHash, target) {
+			if strings.EqualFold(t.InfoHash, target) {
 				return t.GID
 			}
 			if strings.EqualFold(t.GID, target) {

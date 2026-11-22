@@ -4,11 +4,10 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
 import { 
-  Menu, User, LogOut, Antenna, Languages, ExternalLink,
+  Menu, LogOut, Antenna, Languages, ExternalLink,
   Calendar, LayoutGrid, Search, Download, Settings, Sparkles, X, TriangleAlert
 } from 'lucide-vue-next'
 import { useVersion } from '../composables/useVersion'
-import ChangelogModal from '../components/ChangelogModal.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -19,7 +18,7 @@ const isDrawerOpen = ref(false)
 const isDefaultPassword = ref(false)
 const dismissDefaultPasswordAlert = ref(false)
 
-const { currentVersion, latestVersion, hasNewVersion, checkGitHubUpdate, updating, updateProgress, triggerUpdate, canSelfUpdate } = useVersion()
+const { currentVersion, latestVersion, hasNewVersion, checkGitHubUpdate, updating, updateProgress, triggerUpdate, canSelfUpdate, environment } = useVersion()
 
 interface Toast {
   id: number
@@ -380,7 +379,9 @@ function closeDrawer() {
         </div>
 
         <div v-else class="text-xs text-base-content/70 leading-relaxed font-medium">
-          检测到系统有可用更新，支持无需登录终端即可在当前网页一键平滑升级与原地自愈重启。
+          <template v-if="environment === 'docker'">使用原部署配置重建容器。Compose 部署请在原目录执行 <code>docker compose pull ani-go &amp;&amp; docker compose up -d ani-go</code>。</template>
+          <template v-else-if="canSelfUpdate">可在此下载并安装新版本。</template>
+          <template v-else>请通过原部署方式更新。</template>
         </div>
 
         <div class="flex items-center gap-2 pt-1">

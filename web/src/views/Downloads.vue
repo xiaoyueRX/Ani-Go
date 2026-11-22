@@ -5,7 +5,7 @@ import {
   RefreshCw, AlertTriangle, X, 
   Download, Pause, History, 
   Upload, Check, MoreVertical, 
-  Folder, Search, Zap, Activity,
+  Folder, Search, Zap,
   Play, Trash2, ArrowUp, ArrowDown, Clock, Plus
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -145,9 +145,9 @@ function statusInfo(status: string): { label: string; icon: any; cls: string } {
 }
 
 // 任务控制操作
-async function pauseTask(t: DownloadTask) {
+async function pauseTask(task: DownloadTask) {
   try {
-    await request.post(`/downloads/${t.hash}/pause`)
+    await request.post(`/downloads/${task.hash}/pause`)
     window.showToast?.(t('downloads.action.pausedSuccess') || '任务已暂停', 'success')
     fetchDownloads()
   } catch (e: any) {
@@ -155,9 +155,9 @@ async function pauseTask(t: DownloadTask) {
   }
 }
 
-async function resumeTask(t: DownloadTask) {
+async function resumeTask(task: DownloadTask) {
   try {
-    await request.post(`/downloads/${t.hash}/resume`)
+    await request.post(`/downloads/${task.hash}/resume`)
     window.showToast?.(t('downloads.action.resumedSuccess') || '任务已恢复', 'success')
     fetchDownloads()
   } catch (e: any) {
@@ -199,7 +199,7 @@ const adding = ref(false)
 async function submitNewDownload() {
   const target = addUrl.value.trim()
   if (!target) {
-    window.showToast?.('请提供磁力链接或种子下载链接', 'warning')
+    window.showToast?.('请提供磁力链接或种子下载链接', 'info')
     return
   }
   adding.value = true

@@ -11,11 +11,23 @@ import (
 )
 
 func TestParseMikanTitleAdvanced_AirdateAlignment(t *testing.T) {
+	previous := database.DB
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test_advanced.db")
 	if err := database.Init(dbPath); err != nil {
 		t.Fatalf("db init failed: %v", err)
 	}
+
+	db, err := database.DB.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		database.DB = previous
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 
 	// 模拟剧集：S02E01 对应总集数 25
 	airDate := time.Date(2024, 7, 5, 0, 0, 0, 0, time.UTC)

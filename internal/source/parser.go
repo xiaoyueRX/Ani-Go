@@ -21,16 +21,18 @@ import (
 
 // TitleInfo 保存从种子标题中解析出的元数据
 type TitleInfo struct {
-	Title      string  // 番剧名（不含字幕组、集数、分辨率）
-	RawTitle   string  // 原始标题
-	Subgroup   string  // 字幕组名称
-	Episode    float32 // 集数（0 表示未识别）
-	Season     int     // 季数（默认 1）
-	InfoHash   string  // info hash（如有）
-	Resolution string  // 分辨率，如 "1080p"
-	Version    int     // 版本号（v2 → 2，0 表示无版本标识）
-	IsSpecial  bool    // 是否为特别篇/OVA
-	IsBatch    bool    // 是否为合集
+	Title          string  // 番剧名（不含字幕组、集数、分辨率）
+	ExplicitSeason bool    // 标题中明确指定了季数
+	CustomEpisode  bool    // 自定义规则已决定集数
+	RawTitle       string  // 原始标题
+	Subgroup       string  // 字幕组名称
+	Episode        float32 // 集数（0 表示未识别）
+	Season         int     // 季数（默认 1）
+	InfoHash       string  // info hash（如有）
+	Resolution     string  // 分辨率，如 "1080p"
+	Version        int     // 版本号（v2 → 2，0 表示无版本标识）
+	IsSpecial      bool    // 是否为特别篇/OVA
+	IsBatch        bool    // 是否为合集
 }
 
 // 用于解析 Mikan 标题的正则表达式集合
@@ -40,24 +42,24 @@ var (
 	reSubgroup = regexp.MustCompile(`^[【\[［]([^】\]］]+)[】\]］]\s*`)
 
 	// 集数模式（按优先级排列）
-		reEpisodePatterns = []*regexp.Regexp{
-			// SxxExx 格式优先匹配
-			regexp.MustCompile(`[Ss](?:eason)?\s*(\d{1,2})\s*[Ee](?:p(?:isode)?)?\s*(\d{1,3})(?:\.5)?`),
-			// "- 01"、" 01" 结尾（含可选 END/FIN/完标记）
-			regexp.MustCompile(`[-\s](\d{1,3})(?:\.5)?(?:\s*\(\d+\))?(?:\s*(?:END|end|Fin|fin|完))?\s*(?:$|[\[【])`),
-			// "Vol 5" 卷数
-			regexp.MustCompile(`[Vv]ol\s*(\d{1,3})(?:\.5)?`),
-			// "第01話/话/集"
-			regexp.MustCompile(`第(\d{1,3})(?:\.5)?[話话集]`),
-			// "EP01"、"E01"
-			regexp.MustCompile(`[Ee][Pp]?\s*(\d{1,3})(?:\.5)?`),
-			// "#01"
-			regexp.MustCompile(`#(\d{1,3})(?:\.5)?`),
-			// 【01】中文方括号集数
-					regexp.MustCompile(`【(\d{1,3})(?:\.5)?】`),
-			// [01] 英文方括号集数（含可选版本号和 END 标记）
-			regexp.MustCompile(`\[(\d{1,3})(?:\.5)?(?:\s*\(\d+\))?(?:\s*[vV](\d))?(?:\s*(?:END|end|Fin|fin|完))?\]`),
-		}
+	reEpisodePatterns = []*regexp.Regexp{
+		// SxxExx 格式优先匹配
+		regexp.MustCompile(`[Ss](?:eason)?\s*(\d{1,2})\s*[Ee](?:p(?:isode)?)?\s*(\d{1,3})(?:\.5)?`),
+		// "- 01"、" 01" 结尾（含可选 END/FIN/完标记）
+		regexp.MustCompile(`[-\s](\d{1,3})(?:\.5)?(?:\s*\(\d+\))?(?:\s*(?:END|end|Fin|fin|完))?\s*(?:$|[\[【])`),
+		// "Vol 5" 卷数
+		regexp.MustCompile(`[Vv]ol\s*(\d{1,3})(?:\.5)?`),
+		// "第01話/话/集"
+		regexp.MustCompile(`第(\d{1,3})(?:\.5)?[話话集]`),
+		// "EP01"、"E01"
+		regexp.MustCompile(`[Ee][Pp]?\s*(\d{1,3})(?:\.5)?`),
+		// "#01"
+		regexp.MustCompile(`#(\d{1,3})(?:\.5)?`),
+		// 【01】中文方括号集数
+		regexp.MustCompile(`【(\d{1,3})(?:\.5)?】`),
+		// [01] 英文方括号集数（含可选版本号和 END 标记）
+		regexp.MustCompile(`\[(\d{1,3})(?:\.5)?(?:\s*\(\d+\))?(?:\s*[vV](\d))?(?:\s*(?:END|end|Fin|fin|完))?\]`),
+	}
 
 	// 分辨率（参考 ani-rss 的 getResolution 方法）
 	reResolution = regexp.MustCompile(`(?i)(\d{3,4}p)`)
@@ -70,10 +72,10 @@ var (
 	reVersion = regexp.MustCompile(`(?i)[\s\[【][vV](\d)[\s\]】]?`)
 
 	// 特别篇/OVA/SP
-	reSpecial = regexp.MustCompile(`(?i)(OVA[Ds]?|SP|特别篇|特典|SP\s*\d|OAD|特別篇)`)
+	reSpecial = regexp.MustCompile(`(?i)(\b(?:OVA[Ds]?|OAD|SP)(?:\s*\d+)?\b|特别篇|特典|特別篇)`)
 
 	// 合集/批量
-	reBatch = regexp.MustCompile(`(?i)(合集|全(\d{1,3})集|Fin|END|完结)`)
+	reBatch = regexp.MustCompile(`(?i)(合集|全(\d{1,3})集|\b(?:Fin|END)\b|完结)`)
 
 	// 年份标记 (2024)
 	reCleanTags = regexp.MustCompile(`(?i)\[?\s*(?:1080p|720p|2160p|4k|HEVC|AVC|AV1|H\.?264|H\.?265|x265|x264|AAC|FLAC|MKV|MP4|GB|BIG5|CH[TS]|简|繁|简繁|繁简|内[嵌封挂]|WebRip|BDRip|BD|Remux)\s*\]?\s*`)
@@ -94,7 +96,7 @@ func SetCustomRegexPatterns(patterns []string) error {
 	customRegexMu.Lock()
 	defer customRegexMu.Unlock()
 
-	customRegexPatterns = make([]*regexp.Regexp, 0, len(patterns))
+	compiled := make([]*regexp.Regexp, 0, len(patterns))
 	for _, p := range patterns {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -104,8 +106,12 @@ func SetCustomRegexPatterns(patterns []string) error {
 		if err != nil {
 			return fmt.Errorf("自定义正则编译失败: %s → %w", p, err)
 		}
-		customRegexPatterns = append(customRegexPatterns, re)
+		if re.NumSubexp() == 0 {
+			return fmt.Errorf("自定义正则必须含有集数捕获组: %s", p)
+		}
+		compiled = append(compiled, re)
 	}
+	customRegexPatterns = compiled
 	if len(customRegexPatterns) > 0 {
 		log.Printf("✅ 已加载 %d 条自定义正则解析规则", len(customRegexPatterns))
 	}
@@ -145,17 +151,6 @@ func LoadCustomPatternsFromSettings(getSetting func(key string) (string, bool)) 
 // 参考 ani-rss RenameUtil.rename() 的解析逻辑
 // 优先尝试用户自定义正则，再回退到内置 8 种模式
 func ParseMikanTitle(rawTitle string) TitleInfo {
-	if cached, ok := parser.GetCachedTitleResult(rawTitle); ok {
-		return TitleInfo{
-			Title:      cached.CleanTitle,
-			RawTitle:   rawTitle,
-			Subgroup:   cached.Subgroup,
-			Episode:    cached.Episode,
-			Season:     cached.Season,
-			Resolution: cached.Resolution,
-		}
-	}
-
 	info := TitleInfo{
 		RawTitle: rawTitle,
 		Season:   1,
@@ -214,12 +209,14 @@ func ParseMikanTitle(rawTitle string) TitleInfo {
 				info.Episode = float32(ep)
 			}
 		}
-		if strings.Contains(m[0], ".5") {
+		if strings.Contains(m[0], ".5") && info.Episode == float32(int(info.Episode)) {
 			info.Episode += 0.5
 		}
 		title = re.ReplaceAllString(title, "")
 		log.Printf("🔧 自定义正则命中 [%d]: %s → S%dE%.1f", i, m[0], info.Season, info.Episode)
 		matched = true
+		info.CustomEpisode = true
+		info.ExplicitSeason = len(m) >= 3
 		break
 	}
 
@@ -291,26 +288,37 @@ func ParseMikanTitle(rawTitle string) TitleInfo {
 		title = reTrailingDigits.ReplaceAllString(title, "")
 	}
 
+	if !matched {
+		detailed := parser.ExtractEpisodeDetailed(rawTitle)
+		if detailed.MatchedBy != "" {
+			info.Episode = detailed.Episode
+			info.Season = detailed.Season
+		}
+		info.IsBatch = info.IsBatch || detailed.IsBatch
+		info.ExplicitSeason = detailed.ExplicitSeason
+	}
 	info.Title = strings.TrimSpace(title)
-	_ = parser.SaveCachedTitleResult(rawTitle, info.Title, info.Season, info.Episode, info.Subgroup, info.Resolution, 1.0, "regex")
+	// 重新应用当前规则，避免旧缓存吞掉规则热更新或丢失合集、显式季号等信息。
+	cached, ok := parser.GetCachedTitleResult(rawTitle)
+	keepCalendar := ok && cached.ResolvedBy == "airdate" && !info.CustomEpisode
+	if !keepCalendar && (!ok || cached.CleanTitle != info.Title || cached.Season != info.Season || cached.Episode != info.Episode || cached.Subgroup != info.Subgroup || cached.Resolution != strings.ToLower(info.Resolution)) {
+		_ = parser.SaveCachedTitleResult(rawTitle, info.Title, info.Season, info.Episode, info.Subgroup, info.Resolution, 1.0, "regex")
+	}
 	return info
 }
 
 // ParseMikanTitleAdvanced 在本地正则的基础上，利用放送时间戳与 Bangumi 单集日历进行二阶段零成本对齐
 func ParseMikanTitleAdvanced(rawTitle string, pubDate time.Time, episodes []core.Episode) TitleInfo {
-	if cached, ok := parser.GetCachedTitleResult(rawTitle); ok {
-		return TitleInfo{
-			Title:      cached.CleanTitle,
-			RawTitle:   rawTitle,
-			Subgroup:   cached.Subgroup,
-			Episode:    cached.Episode,
-			Season:     cached.Season,
-			Resolution: cached.Resolution,
-		}
-	}
-
 	info := ParseMikanTitle(rawTitle)
-
+	if info.CustomEpisode || info.ExplicitSeason || info.IsBatch || info.IsSpecial {
+		return info
+	}
+	if len(episodes) == 0 {
+		if cached, ok := parser.GetCachedTitleResult(rawTitle); ok && cached.ResolvedBy == "airdate" {
+			info.Season, info.Episode = cached.Season, cached.Episode
+		}
+		return info
+	}
 	// 第二级：若有放送时间戳与单集日历，进行确定性对齐校准
 	if !pubDate.IsZero() && len(episodes) > 0 {
 		match := parser.MatchEpisodeByAirDate(pubDate, rawTitle, episodes)

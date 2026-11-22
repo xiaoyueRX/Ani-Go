@@ -29,7 +29,6 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/downloader"
 	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
-	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
 
@@ -293,53 +292,31 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 	}
 
 	newCount := 0
+	calendars := episodeCalendars{}
 	for _, item := range items {
 		// 去重检查：通过内存集合判断是否已下载
 		if existingURLs[item.URL] {
 			continue
 		}
 
+		parsed := source.ParseMikanTitle(item.Title)
 		// 匹配订阅：寻找匹配长度最长的订阅标题（解决 Fate vs Fate/Zero 匹配歧义）
 		var matchedSub *database.Subscription
 		var maxMatchLen int
+		normTitle := core.NormalizeTitle(item.Title)
 		for i := range subs {
 			sub := &subs[i]
-			currentMatchLen := 0
-
-			// 预先清理标题中的空格和特殊字符进行匹配
-			itemTitleNorm := core.NormalizeTitle(item.Title)
-
-			if sub.TitleCN != "" && strings.Contains(itemTitleNorm, core.NormalizeTitle(sub.TitleCN)) {
-				currentMatchLen = len(sub.TitleCN)
+			if !matchesRelease(parsed, *sub) {
+				continue
 			}
-			if sub.TitleEN != "" && strings.Contains(itemTitleNorm, core.NormalizeTitle(sub.TitleEN)) {
-				if len(sub.TitleEN) > currentMatchLen {
-					currentMatchLen = len(sub.TitleEN)
+			for _, name := range aliases(*sub) {
+				alias := core.NormalizeTitle(name)
+				if alias != "" && strings.Contains(normTitle, alias) && len(alias) > maxMatchLen {
+					matchedSub = sub
+					maxMatchLen = len(alias)
 				}
 			}
-			if sub.TitleJP != "" && strings.Contains(itemTitleNorm, core.NormalizeTitle(sub.TitleJP)) {
-				if len(sub.TitleJP) > currentMatchLen {
-					currentMatchLen = len(sub.TitleJP)
-				}
-			}
-
-			if currentMatchLen > maxMatchLen {
-				matchedSub = sub
-				maxMatchLen = currentMatchLen
-			}
 		}
-
-		// 个人 RSS 模式下的二次校验：确保标题解析出的关键部分确实匹配
-		if matchedSub != nil && s.getRSSMode() == core.RSSModePersonal {
-			parsed := source.ParseMikanTitle(item.Title)
-			// 如果解析出的标题与订阅标题差异过大，则拒绝匹配（防止误伤）
-			if !strings.Contains(core.NormalizeTitle(parsed.Title), core.NormalizeTitle(matchedSub.TitleCN)) &&
-				!strings.Contains(core.NormalizeTitle(matchedSub.TitleCN), core.NormalizeTitle(parsed.Title)) {
-				log.Printf("⚠️  [Personal模式] 匹配校验未通过: item=%s, parsed=%s, matched=%s", item.Title, parsed.Title, matchedSub.TitleCN)
-				matchedSub = nil
-			}
-		}
-
 		// 如果匹配到了订阅，或者在 Classic 模式下成功自动创建了订阅，才下发下载任务
 		var targetSubID uint
 		var targetSeason int
@@ -356,12 +333,7 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 			}
 
 			// 集数消歧与季数继承：若标题中未显式指明季数（默认第一季），继承订阅所指定的季数
-			parsedSeason, parsedEp := parser.ExtractEpisode(item.Title)
-			if matchedSub.Season > 1 && parsedSeason == 1 {
-				parsedSeason = matchedSub.Season
-			}
-			targetSeason = parsedSeason
-			targetEpNum = parsedEp
+			targetSeason, targetEpNum = s.releaseEpisode(ctx, item, *matchedSub, parsed, calendars)
 
 			// 集数级防重校验：同一订阅下该季该集已有记录则跳过，杜绝多字幕组重复投递
 			if targetEpNum > 0 && episodeNumberExists(targetSubID, targetSeason, targetEpNum) {
@@ -398,9 +370,12 @@ func (s *Scheduler) pollRSS(ctx context.Context) {
 				targetSubID = autoSubID
 				log.Printf("✅ 自动创建订阅 [%s]: ID=%d", item.Title, autoSubID)
 
-				parsedSeason, parsedEp := parser.ExtractEpisode(item.Title)
-				targetSeason = parsedSeason
-				targetEpNum = parsedEp
+				var created database.Subscription
+				if err := database.DB.First(&created, autoSubID).Error; err != nil {
+					continue
+				}
+				subs = append(subs, created)
+				targetSeason, targetEpNum = s.releaseEpisode(ctx, item, created, parsed, calendars)
 
 				// 自动创建成功后，重新获取路径并下载
 				savePath := s.getTVBasePath()
@@ -475,7 +450,7 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 	var doneTasks []core.DownloadTask
 	for _, task := range tasks {
 		// 判断是否下载完成：completed(完全做种/Aria2已完成), stalledUP(做种中但没流量), uploading/seeding(正在做种上传), complete(Aria2原始状态)
-		if task.Status == "completed" || task.Status == "complete" || task.Status == "stalledUP" || task.Status == "uploading" || task.Status == "seeding" || task.Progress >= 1.0 {
+		if downloader.IsDownloadComplete(task) {
 			doneTasks = append(doneTasks, task)
 		}
 	}
@@ -489,7 +464,7 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 		log.Printf("❌ 批量查询下载中剧集失败: %v", err)
 		return
 	}
-	hashIndex := make(map[string]int, len(downloadingEps))     // torrent_hash -> 下标
+	hashIndex := make(map[string]int, len(downloadingEps))   // torrent_hash -> 下标
 	nameIndex := make(map[string][]int, len(downloadingEps)) // original_name -> 下标列表（可能多条）
 	for i, ep := range downloadingEps {
 		if ep.TorrentHash != "" {
@@ -500,40 +475,35 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 		}
 	}
 
+	taskNames := make(map[string]int, len(tasks))
+	for _, task := range tasks {
+		taskNames[task.Name]++
+	}
 	for _, task := range doneTasks {
+		if task.Hash == "" {
+			continue
+		}
 		idx, ok := hashIndex[task.Hash]
 		if !ok {
-			// 回退：通过原始名称匹配，用于处理 RSS 等未提前获取到 Hash 的场景；
-			// 命中后回写 hash，使后续轮询能走更快的 hash 索引
-			candidates, byName := nameIndex[task.Name]
-			if !byName {
+			candidates := nameIndex[task.Name]
+			if taskNames[task.Name] != 1 || len(candidates) != 1 {
 				continue
 			}
-			matched := false
-			for _, ci := range candidates {
-				ep := &downloadingEps[ci]
-				if ep.TorrentHash != "" {
-					continue // 已绑定其他 hash 的记录不抢占
-				}
-				database.DB.Model(ep).Update("torrent_hash", task.Hash)
-				ep.TorrentHash = task.Hash
-				hashIndex[task.Hash] = ci
-				idx = ci
-				matched = true
-				break
-			}
-			if !matched {
+			idx = candidates[0]
+			key := downloadingEps[idx].TorrentHash
+			if key != "" && !strings.HasPrefix(key, "url:") {
 				continue
 			}
 		}
-
 		ep := downloadingEps[idx]
 		now := time.Now()
-		database.DB.Model(&ep).Updates(map[string]interface{}{
-			"status":               "downloaded",
-			"download_finished_at": &now,
+		// 状态与真实哈希一次提交，唯一约束冲突或重复轮询不发送完成事件。
+		updated := database.DB.Model(&ep).Where("status = ? AND torrent_hash = ?", "downloading", ep.TorrentHash).Updates(map[string]interface{}{
+			"status": "downloaded", "download_finished_at": &now, "torrent_hash": task.Hash,
 		})
-
+		if updated.Error != nil || updated.RowsAffected != 1 {
+			continue
+		}
 		log.Printf("📥 下载完成: %s", task.Name)
 
 		// 计算下载耗时（用于通知展示；无起始时间则留空）
@@ -559,8 +529,8 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 					"anime_title": animeTitle,
 					"episode":     ep.Number,
 					"hash":        task.Hash, // 使用 task.Hash，确保即使刚更新也能传正确值
-					"size":        task.Size,  // 文件大小（字节），通知格式化用
-					"duration":    elapsed,    // 下载耗时，通知展示用
+					"size":        task.Size, // 文件大小（字节），通知格式化用
+					"duration":    elapsed,   // 下载耗时，通知展示用
 				},
 				Time: now,
 			})
@@ -583,7 +553,7 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 
 	// 查询数据库中的待整理 Episode 记录
 	var episodes []database.Episode
-	if err := database.DB.Where("status IN ? AND final_path = ?", []string{"downloaded", "downloading"}, "").Find(&episodes).Error; err != nil {
+	if err := database.DB.Where("status = ? AND final_path = ?", "downloaded", "").Find(&episodes).Error; err != nil {
 		log.Printf("❌ 查询待整理文件失败: %v", err)
 		return
 	}
@@ -701,6 +671,11 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 				failureCount++
 				continue
 			}
+		}
+
+		// 下载完成后仍可能被重新校验或重新下载，操作文件前再次确认。
+		if !downloader.IsDownloadComplete(task) {
+			continue
 		}
 
 		// 这里处理任务的真实路径
@@ -854,45 +829,31 @@ func (s *Scheduler) TriggerSupplement(ctx context.Context, subID uint) error {
 
 // supplementOne 对单个订阅执行补全逻辑
 func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription) {
-	// 如果缺失 BangumiID，尝试通过标题自动找回
-	if sub.BangumiID == "" {
-		log.Printf("ℹ️  订阅 [%s] 缺失 BangumiID，尝试自动找回...", sub.TitleCN)
-		var lastErr error
-		if s.metadataProvider != nil {
-			// 设置 10 秒超时，搜索需要更多时间
-			searchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			results, err := s.metadataProvider.SearchAnime(searchCtx, sub.TitleCN)
-			cancel()
-			lastErr = err
-			if err == nil && len(results) > 0 {
-				best := bestMatch(results, sub.TitleCN)
-				if best != nil {
-					sub.BangumiID = best.ID
-					database.DB.Model(&sub).Update("bangumi_id", best.ID)
-					log.Printf("✅ 已通过标题找回 BangumiID: %s -> %s", sub.TitleCN, sub.BangumiID)
-				}
-			} else if err != nil {
-				log.Printf("❌ 找回 BangumiID 搜索失败 [%s]: %v", sub.TitleCN, err)
-			} else {
-				log.Printf("ℹ️  找回 BangumiID 搜索无结果 [%s]", sub.TitleCN)
+	// 仅用资源站目录识别蜜柑编号；元数据编号只能交回对应的提供者。
+	mikan := s.mikanSource()
+	if mikan != nil {
+		confirmed := verifiedMikanID(ctx, mikan, sub)
+		if confirmed != "" && confirmed != sub.BangumiID {
+			if err := database.DB.Model(&sub).Updates(map[string]interface{}{"bangumi_id": confirmed, "rss_url": ""}).Error; err != nil {
+				return
 			}
 		}
-
-		// 如果找回后依然缺失，则无法补全
-		if sub.BangumiID == "" {
-			reason := "搜索无结果"
-			if lastErr != nil {
-				reason = lastErr.Error()
+		sub.BangumiID = confirmed
+	}
+	if sub.MetadataID == "" && mikan != nil && sub.BangumiID != "" && s.metadataProvider != nil && s.metadataProvider.Name() == "BGM.tv" {
+		// 对手动创建的蜜柑订阅，从其详情页的官方跨站链接取得元数据编号。
+		if info, err := mikan.GetAnimeInfo(ctx, sub.BangumiID); err == nil && info.SubjectID != "" {
+			updates := map[string]interface{}{"metadata_provider": "BGM.tv", "metadata_id": info.SubjectID}
+			if err := database.DB.Model(&sub).Updates(updates).Error; err != nil {
+				return
 			}
-			log.Printf("⚠️  订阅 %s 补全跳过：未设置且自动找回失败 (原因: %s)", sub.TitleCN, reason)
-			return
+			sub.MetadataProvider, sub.MetadataID = "BGM.tv", info.SubjectID
 		}
 	}
-
-	if s.metadataProvider != nil {
+	if s.metadataProvider != nil && sub.MetadataID != "" && sub.MetadataProvider == s.metadataProvider.Name() {
 		// 设置 5 秒超时
 		getCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		anime, err := s.metadataProvider.GetAnime(getCtx, sub.BangumiID)
+		anime, err := s.metadataProvider.GetAnime(getCtx, sub.MetadataID)
 		cancel()
 		if err == nil {
 			updates := map[string]interface{}{}
@@ -916,10 +877,6 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 				updates["cover_url"] = anime.CoverURL
 				sub.CoverURL = anime.CoverURL
 			}
-			if sub.MetadataProvider == "" {
-				updates["metadata_provider"] = s.metadataProvider.Name()
-				sub.MetadataProvider = s.metadataProvider.Name()
-			}
 			if sub.TMDBID == "" && anime.TMDBID != "" {
 				updates["tmdb_id"] = anime.TMDBID
 				sub.TMDBID = anime.TMDBID
@@ -936,7 +893,7 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 		}
 	} else if sub.BangumiID != "" {
 		// 兜底：如果没配 metadataProvider，或者 BGM 获取失败，尝试从 Mikan 页面直接抓取
-		if mikan, ok := s.source.(*source.MikanSource); ok {
+		if mikan != nil {
 			info, err := mikan.GetAnimeInfo(ctx, sub.BangumiID)
 			if err == nil {
 				updates := map[string]interface{}{}
@@ -989,6 +946,7 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 	}
 
 	newCount := 0
+	calendars := episodeCalendars{}
 	for _, item := range items {
 		if isDuplicate(item.URL) {
 			continue
@@ -998,7 +956,15 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 		}
 
 		// 集数级防重: 同一订阅下该集已有记录(合集/单集重复)则跳过,避免重复下载
-		season, epNum := parser.ExtractEpisode(item.Title)
+		parsed := source.ParseMikanTitle(item.Title)
+		if sub.Season > 1 && !parsed.ExplicitSeason && item.SourceName != "Mikan" {
+			// 外部搜索的未标季条目不能直接归到续季。
+			continue
+		}
+		if !matchesRelease(parsed, sub) || !matchSubscriptionFilter(item, filter) {
+			continue
+		}
+		season, epNum := s.releaseEpisode(ctx, item, sub, parsed, calendars)
 		if epNum > 0 && episodeNumberExists(sub.ID, season, epNum) {
 			log.Printf("⏭️  补全跳过 [%s] S%02dE%02d: 该集已存在", sub.TitleCN, season, int(epNum))
 			continue
@@ -1009,9 +975,12 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 			savePath = s.getTVBasePath()
 		}
 
-		// 使用订阅的字幕组作为标签（比标题解析更准确）
-		if sub.SubgroupName != "" {
-			item.GroupName = sub.SubgroupName
+		// 补全来源必须符合订阅的字幕组要求。
+		if filter.PreferSubgroup != "" && len(filter.AllowedSubgroups) == 0 && !strings.Contains(strings.ToLower(item.Title), strings.ToLower(filter.PreferSubgroup)) && !strings.EqualFold(item.GroupName, filter.PreferSubgroup) {
+			continue
+		}
+		if item.GroupName == "" {
+			item.GroupName = parsed.Subgroup
 		}
 
 		if err := s.downloader.Add(ctx, item, savePath); err != nil {
@@ -1054,7 +1023,7 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 		Where("subscription_id = ? AND status = ? AND deleted_at IS NULL", sub.ID, "organized").
 		Count(&count)
 	database.DB.Model(&sub).Update("current_episodes", int(count))
-		
+
 	// 仅当确实有新增下载时才派发通知事件，避免每轮调度向各渠道滥发重复空消息
 	if newCount > 0 && s.bus != nil {
 		s.bus.Publish(core.Event{
@@ -1086,6 +1055,13 @@ func (s *Scheduler) supplementOne(ctx context.Context, sub database.Subscription
 func buildFilter(sub database.Subscription) core.Filter {
 	filter := core.Filter{
 		PreferSubgroup: sub.SubgroupName,
+	}
+
+	for _, title := range []string{sub.TitleEN, sub.TitleCN, sub.TitleJP} {
+		if strings.TrimSpace(title) != "" {
+			filter.SearchTitle = title
+			break
+		}
 	}
 
 	// 解析 AllowedSubgroups (JSON 数组字符串)
@@ -1354,6 +1330,10 @@ func autoCreateSubscription(ctx context.Context, s *Scheduler, item core.Torrent
 	}
 
 	// 5. 创建订阅（事务内）
+	rssURL := ""
+	if mikan := s.mikanSource(); mikan != nil {
+		rssURL, _ = mikan.ResolveFirstRSSURL(ctx, mikanBangumiID)
+	}
 	var subID uint
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		// 事务内再次检查重复
@@ -1363,22 +1343,13 @@ func autoCreateSubscription(ctx context.Context, s *Scheduler, item core.Torrent
 			return fmt.Errorf("BangumiID=%s 已存在订阅", mikanBangumiID)
 		}
 
-		// 获取字幕组 RSS URL
-		rssURL := ""
-		mikanSrc, ok := s.source.(*source.MikanSource)
-		if ok {
-			if url, err := mikanSrc.ResolveFirstRSSURL(ctx, mikanBangumiID); err == nil {
-				rssURL = url
-			}
-		}
-
 		sub := database.Subscription{
 			TitleCN:    cleanTitle,
 			BangumiID:  mikanBangumiID,
 			RSSURL:     rssURL,
-				CoverURL:   mikanCover,
-				Enabled:    &[]bool{true}[0],
-				SourceName: "Mikan",
+			CoverURL:   mikanCover,
+			Enabled:    &[]bool{true}[0],
+			SourceName: "Mikan",
 		}
 
 		if err := tx.Create(&sub).Error; err != nil {
@@ -1417,8 +1388,8 @@ func extractMikanMetadata(ctx context.Context, s *Scheduler, item core.TorrentIt
 	}
 
 	// 使用 MikanSource 的抓取能力（镜像回退等）
-	mikanSrc, ok := s.source.(*source.MikanSource)
-	if !ok {
+	mikanSrc := s.mikanSource()
+	if mikanSrc == nil {
 		return "", ""
 	}
 
@@ -1520,53 +1491,8 @@ func createSubscriptionFromTitle(ctx context.Context, s *Scheduler, item core.To
 	}
 
 	// 检查是否已订阅
-	var count int64
-	database.DB.Model(&database.Subscription{}).Where("bangumi_id = ?", best.ID).Count(&count)
-	if count > 0 {
-		return 0, fmt.Errorf("BangumiID=%s 已订阅", best.ID)
-	}
-
-	// 创建订阅
-	var subID uint
-	err = database.DB.Transaction(func(tx *gorm.DB) error {
-		var existing database.Subscription
-		result := tx.Where("bangumi_id = ?", best.ID).First(&existing)
-		if result.RowsAffected > 0 {
-			return fmt.Errorf("BangumiID=%s 已存在", best.ID)
-		}
-
-		sub := database.Subscription{
-			TitleCN:          best.TitleCN,
-			TitleEN:          best.TitleEN,
-			TitleJP:          best.TitleJP,
-			BangumiID:        best.ID,
-			Year:             best.Year,
-			Season:           best.Season,
-			CoverURL:         best.CoverURL,
-				Description:      best.Description,
-				Enabled:          &[]bool{true}[0],
-				SourceName:       "Mikan",
-			MetadataID:       best.ID,
-			MetadataProvider: s.metadataProvider.Name(),
-			TotalEpisodes:    best.TotalEps,
-		}
-
-		// 补全 Mikan RSS URL
-		mikanSrc, ok := s.source.(*source.MikanSource)
-		if ok {
-			if rssURL, err := mikanSrc.ResolveFirstRSSURL(ctx, best.ID); err == nil {
-				sub.RSSURL = rssURL
-			}
-		}
-
-		if err := tx.Create(&sub).Error; err != nil {
-			return fmt.Errorf("创建订阅失败: %w", err)
-		}
-		subID = sub.ID
-		log.Printf("✅ [自动订阅] 已通过标题搜索创建订阅 ID=%d: %s (BangumiID=%s)", subID, best.TitleCN, best.ID)
-		return nil
-	})
-	return subID, err
+	best.Provider = s.metadataProvider.Name()
+	return s.autoSubscribe(ctx, *best)
 }
 
 // bestMatch 从 Bangumi 搜索结果中选最佳匹配
@@ -1575,35 +1501,17 @@ func bestMatch(results []core.Anime, cleanTitle string) *core.Anime {
 		return nil
 	}
 
-	cleanLower := strings.ToLower(cleanTitle)
-
-	// 1. TitleCN 完全匹配优先
-	for i := range results {
-		if strings.ToLower(results[i].TitleCN) == cleanLower ||
-			strings.ToLower(results[i].TitleEN) == cleanLower {
-			return &results[i]
-		}
-	}
-
-	// 2. CleanTitle 包含在 TitleCN 中且长度最长
 	var best *core.Anime
-	var maxLen int
 	for i := range results {
-		title := strings.ToLower(results[i].TitleCN)
-		if strings.Contains(title, cleanLower) || strings.Contains(cleanLower, title) {
-			if len(title) > maxLen {
-				maxLen = len(title)
-				best = &results[i]
+		a := &results[i]
+		if matchesAlias(cleanTitle, []string{a.TitleCN, a.TitleJP, a.TitleEN}) {
+			if best != nil && best.ID != a.ID {
+				return nil
 			}
+			best = a
 		}
 	}
-
-	if best != nil {
-		return best
-	}
-
-	// 3. 直接返回第一个结果（兜底）
-	return &results[0]
+	return best
 }
 
 // pollSeedCleanup 清理已做种满足条件的种子（仅删任务记录，不删文件）
@@ -1685,4 +1593,3 @@ func episodeGroupExists(subscriptionID uint, season int, number float32, groupNa
 		Count(&count)
 	return count > 0
 }
-

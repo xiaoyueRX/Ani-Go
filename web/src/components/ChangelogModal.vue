@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import { X, Zap, CheckCircle2 } from 'lucide-vue-next'
-import { CURRENT_VERSION, currentVersion } from '../composables/useVersion'
+import { currentVersion } from '../composables/useVersion'
 
 const props = defineProps<{
   show: boolean

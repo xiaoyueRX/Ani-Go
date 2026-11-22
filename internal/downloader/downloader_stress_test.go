@@ -235,7 +235,7 @@ func TestAria2_ToleranceAndGIDResolution(t *testing.T) {
 				Result:  json.RawMessage(`{"version": "1.36.0"}`),
 			})
 		case "aria2.tellActive":
-			tasks := fmt.Sprintf(`[{"gid":"%s","status":"active","totalLength":"1000","completedLength":"500","bittorrent":{"infoHash":"%s"}}]`, gid, infoHash)
+			tasks := fmt.Sprintf(`[{"gid":"%s","status":"active","totalLength":"1000","completedLength":"500","infoHash":"%s"}]`, gid, infoHash)
 			_ = json.NewEncoder(w).Encode(aria2Resp{
 				JSONRPC: "2.0",
 				ID:      req.ID,
@@ -251,9 +251,12 @@ func TestAria2_ToleranceAndGIDResolution(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(aria2Resp{
 				JSONRPC: "2.0",
 				ID:      req.ID,
-				Result:  json.RawMessage(fmt.Sprintf(`{"gid":"%s","status":"active","totalLength":"1000","completedLength":"500","bittorrent":{"infoHash":"%s"}}`, gid, infoHash)),
+				Result:  json.RawMessage(fmt.Sprintf(`{"gid":"%s","status":"active","totalLength":"1000","completedLength":"500","infoHash":"%s"}`, gid, infoHash)),
 			})
 		case "aria2.pause", "aria2.unpause", "aria2.remove":
+			if got := req.Params[len(req.Params)-1]; got != gid {
+				t.Errorf("操作使用了错误的 GID: %v", got)
+			}
 			_ = json.NewEncoder(w).Encode(aria2Resp{
 				JSONRPC: "2.0",
 				ID:      req.ID,
@@ -358,6 +361,9 @@ func TestAria2_HTTPErrorAndNameExtraction(t *testing.T) {
 		},
 	}
 	task := convertAria2Status(st)
+	if task.Hash != st.GID {
+		t.Errorf("非种子任务应保留 GID: %q", task.Hash)
+	}
 	if task.Name != "Sousou_no_Frieren" {
 		t.Errorf("任务名称提取失败: 期望 'Sousou_no_Frieren', 得到 %q", task.Name)
 	}

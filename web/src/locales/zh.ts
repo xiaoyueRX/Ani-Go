@@ -643,6 +643,9 @@ export default {
     supplement: '补全',
   },
   detail: {
+    manualMark: "手动标记 · ",
+    downloaded: "已下载",
+    organized: "已入库",
     back: "返回订阅列表",
     status: {
       finished: "已完结",

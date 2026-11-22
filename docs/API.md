@@ -70,7 +70,8 @@
 | `POST` | `/api/subscriptions/batch-restore` | JWT | 批量恢复软删除订阅 |
 | `POST` | `/api/subscriptions/{id}/trigger-supplement` | JWT | 触发单个订阅历史补全 |
 | `POST` | `/api/subscriptions/supplement-all` | JWT | 异步触发全部订阅补全（预过滤后立即返回） |
-| `PUT` | `/api/episodes/{id}/status` | JWT | 手动切换剧集状态 |
+| `POST` | `/api/subscriptions/{id}/episodes/batch-delete` | JWT | 删除指定订阅的选定剧集 |
+| `PUT` | `/api/episodes/{id}/status` | JWT | 设置剧集人工标记 |
 
 ### 📖 下载队列
 
@@ -333,7 +334,8 @@ curl -X POST http://localhost:20001/api/user/change-password \
 **响应示例**:
 ```json
 {
-  "message": "密码修改成功"
+  "message": "密码修改成功",
+  "token": "<替换当前会话的 JWT>"
 }
 ```
 
@@ -916,9 +918,13 @@ curl -X POST http://localhost:20001/api/subscriptions/1/trigger-supplement \
 
 ## 5. 剧集管理
 
+### POST /api/subscriptions/{id}/episodes/batch-delete
+
+请求体为 `{"ids":[2,4],"delete_files":false}`。所有 ID 必须是当前订阅下的剧集 ID，一次最多 100 个。选择删除文件时，下载器会删除关联任务及其下载文件。接口返回本次实际删除的记录数。下载器发生错误时，已删除的项目可随剩余项目一起重试。
+
 ### PUT /api/episodes/{id}/status
 
-手动更新剧集状态。
+设置剧集的人工标记。剧集详情中的 `manual_status` 保存人工标记，`status` 展示下载器与整理流程的进度。
 
 **认证**: ✅ 需要 JWT Token
 

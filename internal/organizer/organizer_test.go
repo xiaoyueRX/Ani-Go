@@ -3,6 +3,7 @@ package organizer
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
@@ -137,11 +138,9 @@ func TestSelectTemplate_MediaTypeTemplates(t *testing.T) {
 	}
 }
 
-
-
 func TestRenderTemplate_SeriesVariable(t *testing.T) {
 	tmpl := "{series}/{title_cn} ({year})/Season {season}/{title_en} S{season:02}E{ep:02}{ext}"
-	
+
 	// 测试用例 1: 指定了 SeriesID
 	v1 := core.VarValues{
 		Series:   "鬼灭之刃",
@@ -161,13 +160,13 @@ func TestRenderTemplate_SeriesVariable(t *testing.T) {
 
 	// 测试用例 2: 未显式指定 Series，应回退为 TitleCN
 	v2 := core.VarValues{
-		Series:   "葬送的芙莉莲",
-		TitleCN:  "葬送的芙莉莲",
-		TitleEN:  "Frieren",
-		Year:     2023,
-		Season:   1,
-		Ep:       10,
-		Ext:      ".mp4",
+		Series:  "葬送的芙莉莲",
+		TitleCN: "葬送的芙莉莲",
+		TitleEN: "Frieren",
+		Year:    2023,
+		Season:  1,
+		Ep:      10,
+		Ext:     ".mp4",
 	}
 	res2 := renderTemplate(tmpl, v2)
 	expected2 := "葬送的芙莉莲/葬送的芙莉莲 (2023)/Season 1/Frieren S01E10.mp4"
@@ -260,5 +259,22 @@ func TestOrganizer_SameFileAndConflictHandling(t *testing.T) {
 	content3, _ := os.ReadFile(path3)
 	if string(content3) != string(initialContent) {
 		t.Errorf("冲突覆盖后内容不匹配，得到: %s", string(content3))
+	}
+}
+
+func TestFailedReplacementPreservesLibraryFile(t *testing.T) {
+	for _, hardlink := range []bool{true, false} {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "episode.mkv")
+		if err := os.WriteFile(target, []byte("原有媒体"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := installMediaFile(filepath.Join(dir, "missing.mkv"), target, hardlink); err == nil {
+			t.Fatal("缺失的文件不能替换目标")
+		}
+		got, err := os.ReadFile(target)
+		if err != nil || string(got) != "原有媒体" {
+			t.Fatalf("替换失败后原目标发生变化: %q, %v", got, err)
+		}
 	}
 }
