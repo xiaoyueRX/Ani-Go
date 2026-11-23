@@ -82,3 +82,43 @@ test('typed passwords and tokens remain in their own drafts and only the chosen 
   assert.equal(saved.QB_PASS, undefined)
   assert.equal(saved.ARIA2_SECRET, undefined)
 })
+
+for (const [type, hostKey, userKey, credentialKey] of [
+  ['qbittorrent', 'QB_HOST', 'QB_USER', 'QB_PASS'],
+  ['transmission', 'TR_HOST', 'TR_USER', 'TR_PASS'],
+  ['aria2', 'ARIA2_HOST', null, 'ARIA2_SECRET'],
+]) {
+  test(`settings tests the ${type} address with the saved credential or the user's current input`, async () => {
+    let payload
+    const { component: c } = view('views/SettingsPage', {
+      get: async () => ({ data: { ...settings } }),
+      post: async (path, body) => {
+        assert.equal(path, '/downloader/test')
+        payload = { ...body }
+        return { data: { success: true } }
+      },
+    })
+    await c.fetchSettings()
+    const expected = { type, host: settings[hostKey] }
+    if (userKey) expected.username = settings[userKey]
+    if (type === 'qbittorrent') expected.category = settings.QB_CATEGORY
+    await c.testDownloader(type)
+    assert.deepEqual(payload, { ...expected, use_saved_credentials: true })
+
+    // The server checks the requested endpoint and account before reusing a saved credential.
+    expected.host = 'http://new-host:9000'
+    c.setVal(hostKey, expected.host)
+    if (userKey) {
+      expected.username = 'new-user'
+      c.setVal(userKey, expected.username)
+    }
+    await c.testDownloader(type)
+    assert.deepEqual(payload, { ...expected, use_saved_credentials: true })
+
+    c.setVal(credentialKey, 'entered-for-new-endpoint')
+    await c.testDownloader(type)
+    assert.deepEqual(payload, { ...expected, [type === 'aria2' ? 'secret' : 'password']: 'entered-for-new-endpoint' })
+    await c.testDownloader('current')
+    assert.ok(!payload.type && !payload.host && !payload.password && !payload.secret)
+  })
+}

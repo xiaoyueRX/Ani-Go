@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
+import { downloaderForms, downloaderProbe, type DownloaderType } from '../utils/setupDownloader'
 import PluginPanel from '../components/PluginPanel.vue'
 import { 
   Check, Antenna, Download, 
@@ -240,7 +241,7 @@ interface FieldDef {
   type?: string
   hint?: string
   testChannel?: string
-  testDownloader?: string
+  testDownloader?: DownloaderType | 'current'
   selectOptions?: { label: string; value: string }[]
 }
 
@@ -302,7 +303,7 @@ const tabs = computed(() => [
     { title: t('settings.sections.diskGuard'), desc: t('settings.sections.diskGuardDesc'), fields: [
       { label: t('settings.fields.diskMinFreeGb'), key: 'DISK_MIN_FREE_GB', placeholder: '5.0' },
     ]}
-  ]},
+  ] satisfies SectionDef[] },
   { key: 'sources', label: t('settings.tabs.sources'), icon: Search, sections: [
     { title: t('settings.sections.sourcesNyaa'), desc: t('settings.sections.sourcesNyaaDesc'), fields: [
       { label: t('settings.fields.nyaaEnabled'), key: 'NYAA_ENABLED', placeholder: 'false', type: 'select', selectOptions: [
@@ -972,24 +973,15 @@ async function sendTestNotify(channel: string) {
 
 // 下载器连接与健康探测
 const testingDownloaderKey = ref<string | null>(null)
-async function testDownloader(type: string) {
+async function testDownloader(type: DownloaderType | 'current') {
   testingDownloaderKey.value = type
   try {
-    let payload: any = { type }
-    if (type === 'qbittorrent') {
-      payload.host = getVal('QB_HOST') || 'http://localhost:8081'
-      payload.username = getVal('QB_USER') || ''
-      payload.password = getVal('QB_PASS') || ''
-      payload.category = getVal('QB_CATEGORY') || 'ani-go'
-    } else if (type === 'transmission') {
-      payload.host = getVal('TR_HOST') || 'http://localhost:9091'
-      payload.username = getVal('TR_USER') || ''
-      payload.password = getVal('TR_PASS') || ''
-    } else if (type === 'aria2') {
-      payload.host = getVal('ARIA2_HOST') || 'http://localhost:6800/jsonrpc'
-      payload.secret = getVal('ARIA2_SECRET') || ''
-    } else if (type === 'current') {
-      payload = { type: '' }
+    let payload: { type: string } = { type: '' }
+    if (type !== 'current') {
+      const form = downloaderForms(settings.value)[type]
+      if (type === 'aria2') form.secret = getVal('ARIA2_SECRET')
+      else form.password = getVal(type === 'qbittorrent' ? 'QB_PASS' : 'TR_PASS')
+      payload = downloaderProbe(type, form)
     }
 
     const { data } = await request.post('/downloader/test', payload)
