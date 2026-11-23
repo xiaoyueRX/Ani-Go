@@ -203,6 +203,11 @@ def check_filtered_batch_selection(browser, service, saved):
         return wait.until(EC.element_to_be_clickable((By.XPATH, f"//button[normalize-space(.)='{label}']")),
                           f"Filtered batch selection did not offer {label}")
 
+    def click_in_view(element):
+        # WebDriver 从上方滚回控件时可能将其贴在固定顶栏后面。
+        browser.execute_script("arguments[0].scrollIntoView({block: 'center'})", element)
+        element.click()
+
     def filter_to(title):
         field = browser.find_element(By.CSS_SELECTOR, 'input[placeholder="搜索追番标题、字幕组或年份..."]')
         field.clear()
@@ -213,21 +218,20 @@ def check_filtered_batch_selection(browser, service, saved):
     def selected_count(n):
         wait.until(EC.visibility_of_element_located((By.XPATH, f"//span[normalize-space(.)='已选 {n}']")))
 
-    button("批量删除").click()
+    click_in_view(button("批量删除"))
     filter_to(saved_title)
     row = wait.until(EC.element_to_be_clickable((By.XPATH, f"//h3[normalize-space(.)='{saved_title}']")))
-    browser.execute_script("arguments[0].scrollIntoView({block: 'center'})", row)
-    row.click()
+    click_in_view(row)
     selected_count(1)
     filter_to(TITLE)
-    button("全选本页").click()
+    click_in_view(button("全选本页"))
     selected_count(2)
     filter_to(saved_title)
-    button("取消全选").click()
+    click_in_view(button("取消全选"))
     selected_count(1)
     filter_to(TITLE)
     button("取消全选")  # 取消另一组后，这张卡仍已选中。
-    button("取消").click()
+    click_in_view(button("取消"))
     button("批量删除")
     if {s["title_cn"] for s in service.api("subscriptions")} != {saved_title, TITLE}:
         raise RuntimeError("Canceling batch selection should leave both subscriptions intact")
