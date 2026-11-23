@@ -326,3 +326,57 @@ func TestRestoreFileValidatesPortableNestedMember(t *testing.T) {
 		}
 	}
 }
+
+func TestRestoreFileChecksOtherDirectoriesWithTheSameFilename(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want int
+	}{
+		{"distinct directory", 200}, {"missing directory", 200}, {"inaccessible directory", 409}, {"invalid historical directory", 409},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRepairFixture(t)
+			base := t.TempDir()
+			parent := filepath.Join(base, "another series")
+			if tc.name == "invalid historical directory" {
+				parent += "\x00"
+			} else if tc.name != "missing directory" {
+				if err := os.Mkdir(parent, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.name == "inaccessible directory" {
+				if err := os.Chmod(base, 0); err != nil {
+					t.Skipf("此文件系统无法设置目录访问权限: %v", err)
+				}
+				t.Cleanup(func() {
+					if err := os.Chmod(base, 0700); err != nil {
+						t.Error(err)
+					}
+				})
+				if _, err := os.Stat(parent); !os.IsPermission(err) {
+					t.Skipf("当前进程仍可访问该目录: %v", err)
+				}
+			}
+			sibling := database.Episode{SubscriptionID: f.sub.ID, FinalPath: filepath.Join(parent, filepath.Base(f.ep.FinalPath))}
+			if err := database.DB.Create(&sibling).Error; err != nil {
+				t.Fatal(err)
+			}
+			w := f.post(`{}`)
+			if w.Code != tc.want || strings.Contains(w.Body.String(), base) {
+				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
+			}
+			if tc.want == 409 {
+				if !strings.Contains(w.Body.String(), "无法核验") {
+					t.Fatalf("未说明核验失败: %s", w.Body.String())
+				}
+				if _, err := os.Lstat(f.ep.FinalPath); !os.IsNotExist(err) {
+					t.Fatalf("目标状态: %v", err)
+				}
+				if _, err := os.Stat(f.src); err != nil {
+					t.Fatalf("下载原件: %v", err)
+				}
+			}
+		})
+	}
+}

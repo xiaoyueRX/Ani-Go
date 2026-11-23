@@ -25,6 +25,7 @@ var (
 	errRepairUnavailable = errors.New("媒体库未配置")
 	errRepairSource      = errors.New("无法确认原下载任务与已完成的源文件，请核对下载器和原件")
 	errRepairChanged     = errors.New("记录已变化，请刷新后重新核对库文件")
+	errRepairOtherDir    = errors.New("无法核验另一条同名记录的目录，请检查媒体卷和访问权限后重试")
 	errRepairShared      = errors.New("其他剧集或回收站记录也使用该目标路径，请手工核对")
 	errRepairUnmarked    = errors.New("此媒体库未配置卷标，请确认已挂载正确的媒体卷")
 	errRepairTarget      = errors.New("未能补回文件，请检查媒体卷、原件和目标路径")
@@ -111,12 +112,19 @@ func checkRepairOwner(tx *gorm.DB, ep database.Episode) error {
 		}
 		absolute, err := filepath.Abs(other)
 		if err != nil {
-			return errRepairShared
+			return errRepairOtherDir
 		}
 		if filepath.Dir(absolute) == filepath.Dir(target) {
 			return errRepairShared
 		}
-		if dir, err := os.Stat(filepath.Dir(absolute)); err == nil && os.SameFile(parent, dir) {
+		dir, err := os.Stat(filepath.Dir(absolute))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return errRepairOtherDir
+		}
+		if os.SameFile(parent, dir) {
 			return errRepairShared
 		}
 	}
@@ -224,7 +232,7 @@ func (s *Server) handleRestoreFile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: err.Error()})
 	case err == organizer.ErrLinkUnavailable:
 		writeJSON(w, http.StatusConflict, errorResponse{Error: "无法建立硬链接，跨卷或文件系统不支持时请手工复制原件"})
-	case err == errRepairSource || err == errRepairChanged || err == errRepairShared || err == errRepairUnmarked || err == errRepairTarget:
+	case err == errRepairSource || err == errRepairChanged || err == errRepairShared || err == errRepairOtherDir || err == errRepairUnmarked || err == errRepairTarget:
 		writeJSON(w, http.StatusConflict, errorResponse{Error: err.Error()})
 	default:
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "读取或核对补回记录失败"})
