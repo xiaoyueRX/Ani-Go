@@ -25,8 +25,8 @@ COPY . ./
 COPY --from=frontend-builder /src/web/dist ./web/dist
 
 # Go 原生交叉编译：amd64 / arm64 / armv7 等
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+ARG TARGETOS
+ARG TARGETARCH
 ARG APP_VERSION
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w ${APP_VERSION:+-X main.version=$APP_VERSION}" -trimpath -o /anigo .

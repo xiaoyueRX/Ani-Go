@@ -4,6 +4,8 @@
 
 ## Containers
 
+For v0.7.0 on an ARM64 NAS, use the release archive `ani-go-v0.7.0-linux-arm64.tar.gz`. The ARM64 variant of `ghcr.io/xiaoyuerx/ani-go:0.7.0` contains an x86-64 executable and fails with `exec format error` on hosts with native ARM64 execution only. [v0.7.0 release assets](https://github.com/xiaoyueRX/Ani-Go/releases/tag/v0.7.0)
+
 1. In the repository directory, copy `.env.example` to `.env` and enter the downloader address and credentials. Use a container service name or a host address reachable from Ani-Go.
 2. Replace `/path/to/your/data` in Compose with an existing NAS share. An empty directory works for a fresh install when the container account can create files and subdirectories there. The default container user is `1000:1000`. If the share already grants write access to another account, set its numeric `PUID` and `PGID` in `.env` before starting. Use `docker run --user UID:GID` for standalone containers.
 3. Run `docker compose up -d ani-go`. Visit `http://localhost:20001`, or use the NAS address from another device. On first startup you can set `ANIGO_ADMIN_PASSWORD`. Otherwise the generated administrator password is printed in `docker compose logs ani-go`. [Compose file](../docker-compose.yml) · [Example environment](../.env.example)

@@ -16,10 +16,22 @@ from test_platform_runtime import Service, TITLE, verify_subscription
 DB_PATH = "/data/db/ani-go.db"
 DOWNLOADS = "/data/downloads"
 MACHINES = {"amd64": "x86_64", "arm64": "aarch64"}
+ELF_MACHINES = {"amd64": 62, "arm64": 183}
 
 
 def docker(*args, env=None):
     return subprocess.check_output(["docker", *args], text=True, env=env).strip()
+
+
+def verify_executable(image, arch):
+    header = bytes.fromhex(docker("run", "--rm", "--network", "none", "--entrypoint", "od",
+                                  image, "-An", "-tx1", "-N20", "/app/anigo"))
+    if len(header) != 20 or header[:6] != b"\x7fELF\x02\x01":
+        raise RuntimeError("Expected a 64-bit little-endian Linux ELF at /app/anigo")
+    machine = int.from_bytes(header[18:20], "little")
+    if machine != ELF_MACHINES[arch]:
+        raise RuntimeError(f"Image {arch} contains /app/anigo ELF machine {machine}, expected {ELF_MACHINES[arch]}")
+    print(f"Verified /app/anigo ELF machine {machine} for linux/{arch}", flush=True)
 
 
 @contextmanager
@@ -80,6 +92,7 @@ def main():
     image_platform = docker("image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", args.image)
     if platform.system() != "Linux" or machine != MACHINES[args.arch] or image_platform != "linux/" + args.arch:
         raise RuntimeError(f"Expected native linux/{args.arch}, got host {platform.system()}/{machine}, image {image_platform}")
+    verify_executable(args.image, args.arch)
     password = secrets.token_urlsafe(24)
     volume = docker("volume", "create")
     try:

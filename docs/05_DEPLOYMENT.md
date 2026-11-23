@@ -4,6 +4,8 @@
 
 ## 容器部署
 
+使用 ARM64 NAS 安装 v0.7.0 时，可选用发布附件 `ani-go-v0.7.0-linux-arm64.tar.gz`。GHCR 上 `ghcr.io/xiaoyuerx/ani-go:0.7.0` 的 ARM64 镜像内含 x86-64 程序，在原生 ARM64 主机上启动会遇到 `exec format error`。[v0.7.0 发布附件](https://github.com/xiaoyueRX/Ani-Go/releases/tag/v0.7.0)
+
 1. 在仓库目录复制 `.env.example` 为 `.env`，填写下载器地址和凭据。容器需要通过服务名或可达的宿主机地址访问下载器。
 2. 编辑仓库的 Compose 文件，把 `/path/to/your/data` 换为 NAS 上已存在的共享目录。首次部署可以使用空目录，容器账户须能在其中创建文件及子目录。默认容器以 UID/GID `1000:1000` 运行。若共享目录已授权给其他账户，可在 `.env` 填写其数字 `PUID`、`PGID`。独立使用 `docker run` 时，通过 `--user UID:GID` 选择账户。
 3. 运行 `docker compose up -d ani-go`。访问 `http://localhost:20001`；从其他设备使用 NAS 的地址。首次启动可预设 `ANIGO_ADMIN_PASSWORD`，否则从 `docker compose logs ani-go` 读取随机生成的管理员密码。[Compose 文件](../docker-compose.yml) · [环境变量示例](../.env.example)
