@@ -16,6 +16,44 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 )
 
+// 卷身份故障按本轮、同一个库根和同一原因合并。只延后日志输出，逐文件校验照常执行。
+type volumeIssue struct {
+	volume organizer.LibraryVolume
+	reason string
+}
+
+type volumeDiagnostic struct {
+	count int
+	title string
+}
+
+type volumeDiagnostics map[volumeIssue]volumeDiagnostic
+
+func (d volumeDiagnostics) collect(ep database.Episode, err error) bool {
+	var issue *organizer.VolumeUnavailableError
+	if !errors.As(err, &issue) {
+		return false
+	}
+	key := volumeIssue{volume: issue.Volume, reason: err.Error()}
+	entry := d[key]
+	if entry.count == 0 {
+		entry.title = ep.Title
+	}
+	entry.count++
+	d[key] = entry
+	return true
+}
+
+func (d volumeDiagnostics) report() {
+	for issue, entry := range d {
+		if entry.count == 1 {
+			log.Printf("文件整理失败 [%s]: %s", entry.title, issue.reason)
+		} else {
+			log.Printf("媒体卷不可用，本轮有 %d 个文件整理失败（首项 %s）: %s", entry.count, entry.title, issue.reason)
+		}
+	}
+}
+
 func (s *Scheduler) reportOrganizationError(ctx context.Context, ep database.Episode, err error) {
 	log.Printf("文件整理失败 [%s]: %v", ep.Title, err)
 	if errors.Is(err, errOrganizationReview) || errors.Is(err, organizer.ErrVersionConflict) {

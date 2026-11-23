@@ -17,6 +17,15 @@ const maxVolumeIDBytes = 256
 // LibraryVolume 保存移动提交时实际使用的库根和标识，供重启后核验下载源清理。
 type LibraryVolume struct{ Root, ID string }
 
+// VolumeUnavailableError 只标识库根或卷标本身无法核验，单个目标路径的错误保持独立。
+type VolumeUnavailableError struct {
+	Volume LibraryVolume
+	cause  error
+}
+
+func (e *VolumeUnavailableError) Error() string { return e.cause.Error() }
+func (e *VolumeUnavailableError) Unwrap() error { return e.cause }
+
 func volumeID(kind string) string {
 	switch normalizeAnimeType(kind) {
 	case "movie":
@@ -40,7 +49,7 @@ func (v LibraryVolume) hold(dst string) (*heldVolume, error) {
 	}
 	h, err := v.openRoot()
 	if err != nil {
-		return nil, err
+		return nil, &VolumeUnavailableError{Volume: v, cause: err}
 	}
 	if err := h.check(dst); err != nil {
 		h.close()
@@ -134,7 +143,7 @@ func (h *heldVolume) checkIdentity() error {
 
 func (h *heldVolume) checkRoot(dst string) error {
 	if err := h.checkIdentity(); err != nil {
-		return err
+		return &VolumeUnavailableError{Volume: h.volume, cause: err}
 	}
 	abs, err := filepath.Abs(dst)
 	if err != nil {

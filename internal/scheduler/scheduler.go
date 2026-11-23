@@ -595,6 +595,7 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 
 	successCount := 0
 	failureCount := 0
+	volumeIssues := make(volumeDiagnostics)
 	lastOrganizedPath := ""
 	lastOrganizedAnimeTitle := ""
 	var lastOrganizedEpNum float32
@@ -659,7 +660,9 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 		// 3. 应用路径模板并整理
 		newPath, err := s.commitOrganization(ctx, ep, realPath, anime, coreEp)
 		if err != nil {
-			s.reportOrganizationError(ctx, ep, err)
+			if !volumeIssues.collect(ep, err) {
+				s.reportOrganizationError(ctx, ep, err)
+			}
 			failureCount++
 			continue
 		}
@@ -678,6 +681,8 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 			log.Printf("更新订阅 %d 整理进度失败: %v", sub.ID, err)
 		}
 	}
+
+	volumeIssues.report()
 
 	if s.bus != nil && (successCount > 0 || failureCount > 0) {
 		s.bus.Publish(core.Event{
