@@ -94,7 +94,7 @@ func TestLongVersionNameFitsExistingMediaDirectory(t *testing.T) {
 	original := filepath.Join(dir, strings.Repeat("长", 80)+"E01.mkv")
 	writeVersion(t, original, "older")
 	writeVersion(t, source, "newer")
-	path, err := publishVersion(context.Background(), source, original, "other version")
+	path, err := publishVersion(context.Background(), source, original, "other version", publishNewFile)
 	if err != nil || path == original || !strings.HasSuffix(path, ".mkv") {
 		t.Fatalf("长文件名的版本发布失败 %q: %v", path, err)
 	}
@@ -116,7 +116,7 @@ func TestVersionConflictPreservesBothExistingTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeVersion(t, other, "third")
-	_, err = publishVersion(context.Background(), src, base, "version")
+	_, err = publishVersion(context.Background(), src, base, "version", publishNewFile)
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("两个候选目标都被占用，期望可复核的冲突: %v", err)
 	}
@@ -140,14 +140,14 @@ func TestCrossVolumeVersionRetryReusesPreviousCopy(t *testing.T) {
 		t.Skip("测试需要两个独立的文件系统")
 	}
 	writeVersion(t, dst, "older")
-	alt, err := publishVersion(context.Background(), src, dst, "cross-volume")
+	alt, err := publishVersion(context.Background(), src, dst, "cross-volume", publishNewFile)
 	if err != nil || alt == dst {
 		t.Fatalf("跨卷发布版本 %s: %v", alt, err)
 	}
 	if err := os.Remove(dst); err != nil {
 		t.Fatal(err)
 	}
-	retry, err := publishVersion(context.Background(), src, dst, "cross-volume")
+	retry, err := publishVersion(context.Background(), src, dst, "cross-volume", publishNewFile)
 	if err != nil || retry != alt {
 		t.Fatalf("重试应复用跨卷副本 %s，实际为 %s (%v)", alt, retry, err)
 	}

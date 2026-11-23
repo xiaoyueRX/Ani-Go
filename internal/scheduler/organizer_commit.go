@@ -38,8 +38,8 @@ func durableMoveCommit(ctx context.Context, ep database.Episode, dst string, mov
 	}
 	now := time.Now()
 	result, err := conn.ExecContext(ctx,
-		"UPDATE episodes SET status = ?, final_path = ?, organized_at = ?, updated_at = ?, move_source_path = ?, move_source_mod_time = ?, movie_feature = ? WHERE id = ? AND status = ? AND (updated_at = ? OR (updated_at IS NULL AND ?)) AND deleted_at IS NULL",
-		"organized", dst, now, now, move.Path, move.ModTime, ep.MovieFeature, ep.ID, ep.Status, ep.UpdatedAt, ep.UpdatedAt.IsZero())
+		"UPDATE episodes SET status = ?, final_path = ?, organized_at = ?, updated_at = ?, move_source_path = ?, move_source_mod_time = ?, move_volume_root = ?, move_volume_id = ?, movie_feature = ? WHERE id = ? AND status = ? AND (updated_at = ? OR (updated_at IS NULL AND ?)) AND deleted_at IS NULL",
+		"organized", dst, now, now, move.Path, move.ModTime, move.Volume.Root, move.Volume.ID, ep.MovieFeature, ep.ID, ep.Status, ep.UpdatedAt, ep.UpdatedAt.IsZero())
 	if err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func (s *Scheduler) commitOrganization(ctx context.Context, ep database.Episode,
 	return path, commit(path, nil)
 }
 
-func finishPendingMoves(ctx context.Context) {
+func (s *Scheduler) finishPendingMoves(ctx context.Context) {
 	var pending []database.Episode
 	db := database.DB.WithContext(ctx)
 	if err := db.Where("status = ? AND move_source_path <> ''", "organized").Find(&pending).Error; err != nil {
@@ -108,12 +108,25 @@ func finishPendingMoves(ctx context.Context) {
 		return
 	}
 	for _, ep := range pending {
-		move := organizer.MoveSource{Path: ep.MoveSourcePath, ModTime: ep.MoveSourceModTime}
+		volume := organizer.LibraryVolume{Root: ep.MoveVolumeRoot, ID: ep.MoveVolumeID}
+		if volume.ID == "" {
+			if org, ok := s.organizer.(interface {
+				PendingMoveVolume(context.Context, database.Episode) (organizer.LibraryVolume, error)
+			}); ok {
+				var err error
+				volume, err = org.PendingMoveVolume(ctx, ep)
+				if err != nil {
+					log.Printf("保留待清理移动源 [%d]: %v", ep.ID, err)
+					continue
+				}
+			}
+		}
+		move := organizer.MoveSource{Path: ep.MoveSourcePath, ModTime: ep.MoveSourceModTime, Volume: volume}
 		if err := move.Cleanup(ctx, ep.FinalPath); err != nil {
 			log.Printf("保留待清理移动源 [%d]: %v", ep.ID, err)
 			continue
 		}
-		if err := db.Model(&database.Episode{}).Where("id = ? AND move_source_path = ?", ep.ID, move.Path).Updates(map[string]any{"move_source_path": "", "move_source_mod_time": 0}).Error; err != nil {
+		if err := db.Model(&database.Episode{}).Where("id = ? AND move_source_path = ?", ep.ID, move.Path).Updates(map[string]any{"move_source_path": "", "move_source_mod_time": 0, "move_volume_root": "", "move_volume_id": ""}).Error; err != nil {
 			log.Printf("更新移动源清理状态失败 [%d]: %v", ep.ID, err)
 		}
 	}

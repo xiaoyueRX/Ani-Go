@@ -580,6 +580,8 @@ func preserveLocalFileEvidence(tx *gorm.DB, id uint, ep *database.Episode) error
 	if ep.Status == "organized" && local.Status == "organized" && ep.FinalPath != "" && ep.FinalPath == local.FinalPath {
 		ep.MoveSourcePath = local.MoveSourcePath
 		ep.MoveSourceModTime = local.MoveSourceModTime
+		ep.MoveVolumeRoot = local.MoveVolumeRoot
+		ep.MoveVolumeID = local.MoveVolumeID
 		if ep.MovieFeature == nil && local.MovieFeature != nil {
 			ep.MovieFeature = local.MovieFeature
 		}

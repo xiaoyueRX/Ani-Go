@@ -17,30 +17,54 @@ func newMediaStage(dir string, tryLock func(*os.File) bool) (string, func(), err
 			reclaimMediaStage(stage, tryLock)
 		}
 	}
-	stage, err := os.MkdirTemp(dir, stagePrefix)
+	parent, err := os.OpenRoot(dir)
 	if err != nil {
 		return "", nil, err
 	}
-	lock, err := os.Open(stage)
-	if err == nil && tryLock(lock) {
-		if err := os.WriteFile(filepath.Join(stage, "owner"), []byte(stageOwner), 0600); err != nil {
+	stage, err := os.MkdirTemp(dir, stagePrefix)
+	if err != nil {
+		parent.Close()
+		return "", nil, err
+	}
+	name := filepath.Base(stage)
+	root, err := parent.OpenRoot(name)
+	if err != nil {
+		parent.Close()
+		return "", nil, err
+	}
+	own, err := root.Stat(".")
+	if err != nil {
+		root.Close()
+		parent.Close()
+		return "", nil, err
+	}
+	lock, err := root.Open(".")
+	if err != nil || !tryLock(lock) {
+		if lock != nil {
 			lock.Close()
-			_ = os.Remove(filepath.Join(stage, "owner"))
-			_ = os.Remove(stage)
-			return "", nil, err
 		}
-	} else if lock != nil {
-		_ = lock.Close()
 		lock = nil
 	}
+	// 通过原卷的目录句柄清理；强制卸载后，路径可能指向另一份同名暂存目录。
 	release := func() {
-		_ = os.Remove(filepath.Join(stage, "media"))
-		_ = os.Remove(filepath.Join(stage, "owner"))
-		_ = os.Remove(stage)
+		_ = root.Remove("media")
+		_ = root.Remove("owner")
+		_ = root.Close()
 		if lock != nil {
 			_ = lock.Close()
 		}
+		if current, err := parent.Lstat(name); err == nil && os.SameFile(own, current) {
+			_ = parent.Remove(name)
+		}
+		_ = parent.Close()
 	}
+	if lock != nil {
+		if err := root.WriteFile("owner", []byte(stageOwner), 0600); err != nil {
+			release()
+			return "", nil, err
+		}
+	}
+
 	return stage, release, nil
 }
 

@@ -110,16 +110,30 @@ func (o *TVOrganizer) organizeAndCommit(ctx context.Context, filePath string, an
 		return "", fmt.Errorf("源文件不是非空普通文件: %s", filePath)
 	}
 	dst := plan.FinalPath
+	volume, err := (LibraryVolume{Root: plan.basePath, ID: volumeID(anime.Type)}).hold(dst)
+	if err != nil {
+		return "", err
+	}
+	defer volume.close()
 	if err := makeMediaDir(filepath.Dir(dst)); err != nil {
 		return "", err
 	}
+	guardedPublish := func(stage, target string) error {
+		if err := volume.check(target); err != nil {
+			return err
+		}
+		if versionKey != "" {
+			return publishNewFile(stage, target)
+		}
+		return os.Rename(stage, target)
+	}
 	if versionKey != "" {
-		dst, err = publishVersion(ctx, filePath, dst, versionKey)
+		dst, err = publishVersion(ctx, filePath, dst, versionKey, guardedPublish)
 	} else {
 		var existing os.FileInfo
 		existing, err = os.Lstat(dst)
 		if os.IsNotExist(err) || (err == nil && !os.SameFile(src, existing)) {
-			err = installMedia(ctx, filePath, dst, os.Rename)
+			err = installMedia(ctx, filePath, dst, guardedPublish)
 		}
 	}
 	if err != nil {
@@ -134,7 +148,17 @@ func (o *TVOrganizer) organizeAndCommit(ctx context.Context, filePath string, an
 		if err != nil {
 			return "", err
 		}
-		move = &MoveSource{Path: source, ModTime: src.ModTime().UnixNano()}
+		root, err := filepath.Abs(plan.basePath)
+		if err != nil {
+			return "", err
+		}
+		move = &MoveSource{Path: source, ModTime: src.ModTime().UnixNano(), Volume: LibraryVolume{Root: root}}
+		if volume != nil {
+			move.Volume = volume.volume
+		}
+	}
+	if err := volume.check(dst); err != nil {
+		return "", err
 	}
 	if err := commit(dst, move); err != nil {
 		return "", err

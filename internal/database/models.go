@@ -71,6 +71,8 @@ type Episode struct {
 	OriginalName       string
 	MoveSourcePath     string `gorm:"index:idx_episode_move_pending,where:move_source_path <> ''" json:"-"`
 	MoveSourceModTime  int64  `json:"-"`
+	MoveVolumeRoot     string `json:"-"`
+	MoveVolumeID       string `json:"-"`
 	FinalPath          string
 	FileSize           int64
 	GroupName          string

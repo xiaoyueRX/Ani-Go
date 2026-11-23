@@ -142,3 +142,28 @@ func TestStagingWithoutDirectoryLocksLeavesOtherWorkAlone(t *testing.T) {
 		t.Fatal("own normal cleanup failed")
 	}
 }
+
+func TestStageReleaseAfterDirectoryReplacement(t *testing.T) {
+	stage, release, err := newMediaStage(t.TempDir(), func(*os.File) bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeVersion(t, filepath.Join(stage, "media"), "our stage")
+	old := stage + "-detached"
+	if err := os.Rename(stage, old); err != nil {
+		release()
+		t.Skipf("system prevents moving an open directory: %v", err)
+	}
+	if err := os.Mkdir(stage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(stage, "media")
+	writeVersion(t, other, "other volume's stage")
+	release()
+	if got, err := os.ReadFile(other); err != nil || string(got) != "other volume's stage" {
+		t.Fatalf("removed replacement stage: %q %v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(old, "media")); !os.IsNotExist(err) {
+		t.Fatalf("original stage media not reclaimed: %v", err)
+	}
+}

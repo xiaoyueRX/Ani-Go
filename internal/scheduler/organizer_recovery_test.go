@@ -199,3 +199,87 @@ func TestRestartFinishesOnlyUnchangedPendingMoveSource(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardedPendingMoveKeepsSourceUntilOriginalVolumeReturns(t *testing.T) {
+	db := pipelineDB(t)
+	sub := database.Subscription{TitleCN: "Show", AnimeType: "TV"}
+	savePipelineRow(t, db, &sub)
+	lib := t.TempDir()
+	marker := filepath.Join(lib, ".anigo-volume-id")
+	source := filepath.Join(t.TempDir(), "download.mkv")
+	write := func(path, data string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("TV_VOLUME_ID", "correct")
+	write(marker, "correct\n")
+	write(source, "fixture")
+	o := organizer.New("Series/E01.mkv", "", "", lib, "", false, nil)
+	s := &Scheduler{organizer: o}
+	ep := database.Episode{SubscriptionID: sub.ID, Season: 1, Number: 1, Status: "downloaded"}
+	savePipelineRow(t, db, &ep)
+	if _, err := s.commitOrganization(t.Context(), ep, source, core.Anime{Type: "TV"}, core.Episode{Season: 1, Number: 1}); err != nil {
+		t.Fatal(err)
+	}
+	// 模拟重新启动时库目录已经换盘；替代盘碰巧含相同字节也不能据此删除源。
+	write(marker, "different")
+	t.Setenv("TV_VOLUME_ID", "")
+	restarted := &Scheduler{organizer: organizer.New("", "", "", t.TempDir(), "", false, nil)}
+	restarted.pollOrganizer(t.Context())
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("removed pending source after marker changed: %v", err)
+	}
+	if err := db.First(&ep, ep.ID).Error; err != nil || ep.MoveSourcePath != source {
+		t.Fatalf("pending move lost: %v %q", err, ep.MoveSourcePath)
+	}
+	write(marker, "correct")
+	restarted.pollOrganizer(t.Context())
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Fatalf("restored volume cleanup = %v", err)
+	}
+}
+
+func TestPreGuardPendingMoveChecksConfiguredLibrary(t *testing.T) {
+	db := pipelineDB(t)
+	sub := database.Subscription{TitleCN: "Legacy", AnimeType: "tv"}
+	savePipelineRow(t, db, &sub)
+	t.Setenv("TV_VOLUME_ID", "protected")
+	lib := t.TempDir()
+	outside := t.TempDir()
+	s := &Scheduler{organizer: organizer.New("", "", "", lib, outside, false, nil, t.TempDir())}
+	var originals []string
+	for i, root := range []string{lib, outside} {
+		dst := filepath.Join(root, "ep.mkv")
+		src := filepath.Join(t.TempDir(), "ep.mkv")
+		originals = append(originals, src)
+		for _, path := range []string{dst, src} {
+			if err := os.WriteFile(path, []byte("same"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		stat, err := os.Stat(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ep := database.Episode{SubscriptionID: sub.ID, Season: 1, Number: float32(i + 1), Status: "organized", FinalPath: dst, MoveSourcePath: src, MoveSourceModTime: stat.ModTime().UnixNano()}
+		savePipelineRow(t, db, &ep)
+	}
+	s.pollOrganizer(t.Context())
+	for _, src := range originals {
+		if _, err := os.Stat(src); err != nil {
+			t.Fatalf("source lost while volume unknown: %v", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(lib, ".anigo-volume-id"), []byte("protected"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.pollOrganizer(t.Context())
+	if _, err := os.Stat(originals[0]); !os.IsNotExist(err) {
+		t.Fatalf("cleanup on returning volume = %v", err)
+	}
+	if _, err := os.Stat(originals[1]); err != nil {
+		t.Fatalf("removed source with unknown library: %v", err)
+	}
+}

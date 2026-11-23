@@ -562,7 +562,7 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 		return
 	}
 	defer s.pollOrganizerRunning.Store(false)
-	defer finishPendingMoves(ctx)
+	defer s.finishPendingMoves(ctx)
 
 	// 查询数据库中的待整理 Episode 记录
 	var episodes []database.Episode

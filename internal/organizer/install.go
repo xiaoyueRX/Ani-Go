@@ -16,12 +16,18 @@ import (
 
 // MoveSource 是已发布库文件所对应的待清理下载源。可随整理记录持久化。
 type MoveSource struct {
+	Volume  LibraryVolume
 	Path    string
 	ModTime int64
 }
 
 // Cleanup 在媒体库文件仍然完整且下载路径未被替换时完成移动。
 func (m MoveSource) Cleanup(ctx context.Context, dst string) error {
+	volume, err := m.Volume.hold(dst)
+	if err != nil {
+		return err
+	}
+	defer volume.close()
 	src, err := os.Lstat(m.Path)
 	if os.IsNotExist(err) {
 		return nil
@@ -63,6 +69,9 @@ func (m MoveSource) Cleanup(ctx context.Context, dst string) error {
 		return fmt.Errorf("清理前媒体库文件已变更: %s", dst)
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := volume.check(dst); err != nil {
 		return err
 	}
 	if err := os.Remove(m.Path); err != nil {

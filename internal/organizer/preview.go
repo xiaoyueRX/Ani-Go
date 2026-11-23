@@ -20,6 +20,7 @@ type PreviewItem struct {
 
 // PreviewResult 整理 Dry-Run 预览结果
 type PreviewResult struct {
+	basePath     string // 本次预览解析的库根，供实际整理沿用同一配置。
 	OriginalPath string `json:"original_path"`
 	RenderedPath string `json:"rendered_path"`
 	FinalPath    string `json:"final_path"`
@@ -79,6 +80,7 @@ func (o *TVOrganizer) Preview(ctx context.Context, filePath string, anime core.A
 	exists := (statErr == nil)
 
 	return PreviewResult{
+		basePath:     basePath,
 		OriginalPath: filePath,
 		RenderedPath: input.RenderedPath,
 		FinalPath:    fullPath,

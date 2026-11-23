@@ -32,6 +32,12 @@ Move mode stages the complete file on the media library's filesystem, commits th
 
 The default series layout uses `Title (Year)/Season 1` or `Title/Season 1` when the year is unknown. Jellyfin can use the parentheses to identify the title and year separately. After an upgrade, if the only existing directory for the same title and year uses the older `TitleYear` layout, later episodes and seasons continue there. You can set a custom TV template in Settings.
 
+### Pause library writes when a media volume disconnects
+
+After a volume disconnects, its path can reveal a writable directory on the system disk. To protect a TV library, first verify the correct volume is mounted. Place a regular file named `.anigo-volume-id` in the effective `TV_BASE_PATH` directory and write a single identifier such as `nas-tv`. Set `TV_VOLUME_ID=nas-tv` in the Ani-Go deployment environment and restart the service. Use `MOVIE_VOLUME_ID` and `OVA_VOLUME_ID` for movies and specials, each with a marker in its own library root. Use the same ID for categories sharing the same root. When changing a library path in the web UI, verify the new root and place its marker there first.
+
+Use plain UTF-8 without a BOM, with up to 256 bytes for the identifier and an optional trailing newline. Ani-Go reads the marker before creating directories, publishing files and committing library records. A missing or mismatched marker leaves the download source available for automatic retry when the volume returns. Pending moves also check their volume before removing the source after a restart. This check applies to the main media organizer. Plugins can write artwork and metadata separately. Keep the marker on the intended volume and use directories on that volume below the root. Configure an independent nested mount as its own library root. For kernel-enforced protection when a forced detach coincides with a filesystem operation, deny the Ani-Go account write access to the uncovered mount point.
+
 ## Backups and restore
 
 Point `BACKUP_PATH` at a writable directory on a persistent volume. Manual and scheduled backups share `BACKUP_KEEP_COUNT`, which defaults to the latest seven archives. The default schedule is midnight. `BACKUP_CRON` accepts five fields, such as `0 3 * * *`, or six fields including seconds. Saving either setting applies it to the running backup scheduler. Deployment environment variables take precedence.

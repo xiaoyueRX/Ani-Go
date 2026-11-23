@@ -403,6 +403,7 @@ func TestRestorePreservesOnlyMatchingLocalFileEvidence(t *testing.T) {
 	organized := base
 	organized.Status, organized.SourceFile, organized.FinalPath = "organized", "show-b.mkv", "/library/b.mkv"
 	organized.MoveSourcePath, organized.MoveSourceModTime = "/downloads/show-b.mkv", 456
+	organized.MoveVolumeRoot, organized.MoveVolumeID = "/library", "local-volume"
 	replaced := organized
 	replaced.SourceFile, replaced.FinalPath, replaced.MoveSourcePath = "show-c.mkv", "/library/c.mkv", "/downloads/show-c.mkv"
 	moved := organized
@@ -417,6 +418,13 @@ func TestRestorePreservesOnlyMatchingLocalFileEvidence(t *testing.T) {
 	files, err := m.ListBackups()
 	if err != nil || len(files) != 1 {
 		t.Fatalf("备份清单 %+v，错误 %v", files, err)
+	}
+	raw, err := os.ReadFile(m.GetBackupPath(files[0].Name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "local-volume") {
+		t.Fatal("备份带有本机卷绑定")
 	}
 	if err := database.DB.Model(&rows[0]).Updates(map[string]any{
 		"torrent_hash": strings.ToUpper(btih), "origin_key": strings.ToUpper(btih),
@@ -442,13 +450,13 @@ func TestRestorePreservesOnlyMatchingLocalFileEvidence(t *testing.T) {
 		if got[0].Status != "needs_review" || got[0].SourceModTime != 123 {
 			t.Errorf("待核对记录的本地源文件凭证丢失：%+v", got[0])
 		}
-		if got[1].MoveSourcePath != organized.MoveSourcePath || got[1].MoveSourceModTime != 456 {
+		if got[1].MoveSourcePath != organized.MoveSourcePath || got[1].MoveSourceModTime != 456 || got[1].MoveVolumeRoot != "/library" || got[1].MoveVolumeID != "local-volume" {
 			t.Errorf("丢失已入库记录的本地清理信息：%+v", got[1])
 		}
-		if got[2].SourceModTime != 0 || got[2].MoveSourcePath != "" || got[2].MoveSourceModTime != 0 {
+		if got[2].SourceModTime != 0 || got[2].MoveSourcePath != "" || got[2].MoveSourceModTime != 0 || got[2].MoveVolumeRoot != "" || got[2].MoveVolumeID != "" {
 			t.Errorf("不同文件继承了本地操作信息：%+v", got[2])
 		}
-		if got[3].SourceModTime != 123 || got[3].MoveSourcePath != "" || got[3].MoveSourceModTime != 0 {
+		if got[3].SourceModTime != 123 || got[3].MoveSourcePath != "" || got[3].MoveSourceModTime != 0 || got[3].MoveVolumeRoot != "" || got[3].MoveVolumeID != "" {
 			t.Errorf("目标路径变更后应只保留源文件核验时间：%+v", got[3])
 		}
 	}

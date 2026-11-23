@@ -79,7 +79,7 @@ func compareDestination(ctx context.Context, src, dst string) (exists, equal boo
 	return true, equal, err
 }
 
-func publishVersion(ctx context.Context, src, base, key string) (string, error) {
+func publishVersion(ctx context.Context, src, base, key string, publish func(string, string) error) (string, error) {
 	// 若预览后有并发发布抢先占用路径，则重新判断两个候选路径的归属。
 	for attempt := 0; attempt < 3; attempt++ {
 		dst, exists, err := versionTarget(ctx, src, base, key)
@@ -89,7 +89,7 @@ func publishVersion(ctx context.Context, src, base, key string) (string, error) 
 		if exists {
 			return dst, nil
 		}
-		if err := installMedia(ctx, src, dst, publishNewFile); !errors.Is(err, os.ErrExist) {
+		if err := installMedia(ctx, src, dst, publish); !errors.Is(err, os.ErrExist) {
 			return dst, err
 		}
 	}
