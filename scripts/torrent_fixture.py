@@ -8,7 +8,7 @@ import re
 import socket
 from threading import Thread
 import time
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 from xml.sax.saxutils import escape
 
 from test_platform_runtime import HOST
@@ -114,8 +114,8 @@ def web_seed(media_ready=None, *, http_seed=True, payloads=PAYLOADS, member_dire
 
 
 @contextmanager
-def movie_feed(title):
-    """逐条发布私有单文件种子，同一份回环 RSS 保留先前发行。"""
+def movie_feed(title, *, http_seed=False):
+    """逐条发布私有单文件种子。启用 http_seed 时，同时在回环提供媒体字节。"""
     with ThreadingHTTPServer((HOST, 0), SeedHandler) as server:
         url = f"http://{HOST}:{server.server_port}"
         server.media, server.media_ready = {}, None
@@ -131,7 +131,12 @@ def movie_feed(title):
                                         for i in range(0, len(payload), PIECE_SIZE))}
             infohash = hashlib.sha1(bencode(info)).hexdigest()
             path = f"/{infohash}.torrent"
-            torrent = bencode({b"info": info})
+            metainfo = {b"info": info}
+            if http_seed:
+                media_path = "/media/" + infohash + "/" + release + ".mkv"
+                server.media[media_path] = payload
+                metainfo[b"url-list"] = [(url + quote(media_path)).encode()]
+            torrent = bencode(metainfo)
             server.media[path] = torrent
             items.append(f'<item><title>{escape(release)}</title><link>{url}/Home/Episode/{infohash}</link>'
                          f'<enclosure url="{url}{path}" length="{len(torrent)}" type="application/x-bittorrent"/></item>')

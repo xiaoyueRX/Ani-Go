@@ -1,7 +1,8 @@
-"""用 Transmission 原生 RPC 验收 RSS、选集、下载中重启、入库与做种。"""
+"""用 Transmission 验收 RSS 选集、断线恢复、完整备份换目录与重启后做种。"""
 
 import argparse
 import base64
+import hashlib
 from contextlib import contextmanager
 from http.client import HTTPConnection, HTTPException
 import json
@@ -16,7 +17,8 @@ from threading import Event
 import time
 
 from test_platform_runtime import HOST, start
-from torrent_fixture import PAYLOADS, PIECE_SIZE, create_pack_subscription, free_port, verify_library, wait_for, web_seed
+from test_portable_backup import import_backup, load_backup, verify_history
+from torrent_fixture import NAMES, PAYLOADS, PIECE_SIZE, TITLE, create_pack_subscription, free_port, movie_feed, verify_library, wait_for, web_seed
 
 
 WANTED = [True, False, True]
@@ -53,7 +55,7 @@ class Transmission:
         raise RuntimeError("Transmission rejected its session ID")
 
     def torrent(self, infohash):
-        fields = ["hashString", "status", "leftUntilDone", "sizeWhenDone", "pieces", "files", "fileStats", "errorString"]
+        fields = ["hashString", "status", "leftUntilDone", "sizeWhenDone", "pieces", "files", "fileStats", "errorString", "downloadDir"]
         rows = self.rpc("torrent-get", fields=fields)["torrents"]
         if not rows:
             return None
@@ -102,8 +104,8 @@ def check_wanted(record):
         raise RuntimeError("Transmission file sizes differ from the Web Seed content")
 
 
-def verify_peer_upload(port, infohash):
-    # 使用独立回环对等端通过 BEP 3 请求首集首个分片，验证客户端仍能上传原文件。
+def verify_peer_upload(port, infohash, expected):
+    # 独立回环对等端依次请求分片，同时核对片号、长度和实际媒体字节。
     def read_exact(peer, size):
         data = bytearray()
         while len(data) < size:
@@ -122,33 +124,51 @@ def verify_peer_upload(port, infohash):
         if handshake[:20] != protocol or handshake[28:48] != torrent_hash:
             raise RuntimeError("Transmission returned an invalid peer handshake")
         peer.sendall(struct.pack("!IB", 1, 2))  # interested
-        deadline = time.monotonic() + 35
-        while time.monotonic() < deadline:
+        deadline = time.monotonic() + 45
+        unchoked = False
+        pending = False
+        offset = 0
+        received = hashlib.sha256()
+        while time.monotonic() < deadline and offset < len(expected):
+            piece = offset // PIECE_SIZE
+            block = expected[offset:offset + PIECE_SIZE]
+            if unchoked and not pending:
+                peer.sendall(struct.pack("!IBIII", 13, 6, piece, 0, len(block)))
+                pending = True
             length = struct.unpack("!I", read_exact(peer, 4))[0]
             if not length:
                 continue
             if length > (1 << 20):
                 raise RuntimeError("Unexpected peer message size")
             message = read_exact(peer, length)
-            if message[0] == 1:  # unchoke
-                peer.sendall(struct.pack("!IBIII", 13, 6, 0, 0, PIECE_SIZE))
+            if message[0] == 0:  # choke
+                unchoked = pending = False
+            elif message[0] == 1:  # unchoke
+                unchoked = True
             elif message[0] == 7:  # piece
-                if message[1:9] != bytes(8) or message[9:] != ALIGNED_PAYLOADS[0][:PIECE_SIZE]:
-                    raise RuntimeError("Transmission uploaded different content for piece zero")
-                print(f"Verified {PIECE_SIZE} uploaded bytes from Transmission after library organization.")
-                return
-        raise RuntimeError("Transmission did not upload the requested block to the loopback peer")
+                if not pending or message[1:9] != struct.pack("!II", piece, 0) or message[9:] != block:
+                    raise RuntimeError(f"Transmission uploaded different content for piece {piece}")
+                received.update(message[9:])
+                offset += len(block)
+                pending = False
+        if offset != len(expected):
+            raise RuntimeError(f"Transmission uploaded only {offset} of {len(expected)} requested bytes")
+        print(f"Verified {offset} uploaded bytes from Transmission after library organization, sha256={received.hexdigest()}.")
+
+
+def verify_completed_task(service, infohash):
+    queue = service.api("downloads")
+    if len(queue) != 1 or queue[0]["hash"] != infohash or not queue[0]["complete"]:
+        raise RuntimeError("Ani-Go did not reconnect to the original completed torrent")
 
 
 def verified_pieces(record):
     return int.from_bytes(base64.b64decode(record["pieces"]), "big")
 
 
-def verify(binary, transmission_bin, root, offline, url, infohash, media_ready):
-    home, downloads, config = root / "app", root / "downloads", root / "transmission"
-    downloads.mkdir()
+def configure_daemon(config, rpc, downloads):
     config.mkdir()
-    rpc = Transmission(free_port())
+    downloads.mkdir()
     settings = {
         "rpc-enabled": True, "rpc-port": rpc.port, "rpc-bind-address": HOST,
         "bind-address-ipv4": HOST, "bind-address-ipv6": "::1", "peer-port": free_port(),
@@ -158,10 +178,21 @@ def verify(binary, transmission_bin, root, offline, url, infohash, media_ready):
         "speed-limit-down": 35, "speed-limit-down-enabled": True,
     }
     (config / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
-    overrides = dict(DEFAULT_DOWNLOADER="transmission", TR_HOST=f"http://{HOST}:{rpc.port}",
-                     RSS_INTERVAL="1s", ORGANIZER_INTERVAL="1s", MIKAN_RSS_MODE="personal", MIKAN_DOMAIN=url,
-                     MIKAN_MIRROR_DOMAINS=url, MIKAN_PROXY_DOMAIN=url, MIKAN_RSS_URL=url + "/RSS/Bangumi?bangumiId=42",
-                     DISK_MIN_FREE_GB="0", USE_HARDLINK="true", SEED_CLEANUP_ENABLED="false")
+    return settings["peer-port"]
+
+
+def app_environment(rpc, url, rss_path):
+    return dict(DEFAULT_DOWNLOADER="transmission", TR_HOST=f"http://{HOST}:{rpc.port}",
+                RSS_INTERVAL="1s", ORGANIZER_INTERVAL="1s", MIKAN_RSS_MODE="personal", MIKAN_DOMAIN=url,
+                MIKAN_MIRROR_DOMAINS=url, MIKAN_PROXY_DOMAIN=url, MIKAN_RSS_URL=url + rss_path,
+                DISK_MIN_FREE_GB="0", USE_HARDLINK="true", SEED_CLEANUP_ENABLED="false")
+
+
+def verify(binary, transmission_bin, root, offline, url, infohash, media_ready):
+    home, downloads, config = root / "app", root / "downloads", root / "transmission"
+    rpc = Transmission(free_port())
+    peer_port = configure_daemon(config, rpc, downloads)
+    overrides = app_environment(rpc, url, "/RSS/Bangumi?bangumiId=42")
     with start([binary], home, root / "backups", free_port(), secrets.token_urlsafe(24), offline, env_overrides=overrides) as service:
         with daemon(transmission_bin, config, rpc) as version:
             route = create_pack_subscription(service, url, downloads)
@@ -202,17 +233,67 @@ def verify(binary, transmission_bin, root, offline, url, infohash, media_ready):
             verify_library(service, route, home, downloads, ALIGNED_PAYLOADS)
             if torrent()["status"] != 6:
                 raise RuntimeError("Transmission stopped seeding after library organization")
-            verify_peer_upload(settings["peer-port"], infohash)
-            queue = service.api("downloads")
-            if len(queue) != 1 or queue[0]["hash"] != infohash or not queue[0]["complete"]:
-                raise RuntimeError("Ani-Go did not reconnect to the original completed torrent")
+            verify_peer_upload(peer_port, infohash, ALIGNED_PAYLOADS[0][:PIECE_SIZE])
+            verify_completed_task(service, infohash)
     print(f"Passed: Transmission {version}, RSS, selection, mid-download restart, library and verified peer upload.")
+
+
+def verify_restore(binary, transmission_bin, root, offline, archive):
+    home, backups, config = root / "app", root / "backups", root / "transmission"
+    library, downloads, default = home / "剧集", root / "更新后 Downloads", root / "daemon-default"
+    downloads.mkdir()
+    rpc = Transmission(free_port())
+    peer_port = configure_daemon(config, rpc, default)
+    port, password = free_port(), secrets.token_urlsafe(32)
+    source_sub, source_episode = archive[2:]
+    payload = PAYLOADS[1]
+
+    def app():
+        return start([binary], home, backups, port, password, offline, env_overrides=env)
+
+    def transfer(service, route, number):
+        filename = NAMES[number - 1]
+        infohash, _ = publish(Path(filename).stem, payload)
+        torrent = wait_for("E02 seeding in Transmission", lambda: rpc.torrent(infohash),
+                           lambda row: row and row["status"] == 6 and row["leftUntilDone"] == 0)
+        if not Path(torrent["downloadDir"]).samefile(downloads) or any(default.iterdir()):
+            raise RuntimeError("Transmission did not use the restored subscription's new download directory")
+        detail = wait_for("restored E02 organized", lambda: service.api(route),
+                          lambda d: any(ep["torrent_hash"] == infohash and ep["status"] == "organized" for ep in d["episodes"]))
+        episode, = [ep for ep in detail["episodes"] if ep["number"] == number]
+        final = Path(episode["final_path"])
+        original = downloads / filename
+        if (episode["torrent_hash"] != infohash or episode["file_size"] != len(payload) or original.is_symlink()
+                or final.is_symlink() or not final.resolve().is_relative_to(library.resolve())
+                or not final.samefile(original) or original.read_bytes() != payload):
+            raise RuntimeError("The native E02 download and hard-linked library file differ from the reference")
+        return episode
+
+    with movie_feed(TITLE, http_seed=True) as (url, publish):
+        env = app_environment(rpc, url, "/RSS/MyBangumi")
+        with daemon(transmission_bin, config, rpc) as version:
+            import_backup(app, transfer, archive, backups, library, downloads)
+
+    # 此时 RSS 和 Web Seed 已关闭。只允许新对等端从重启后的 Transmission 取回 E02。
+    with daemon(transmission_bin, config, rpc), app() as service:
+        route = verify_history(service, source_sub["ID"], source_sub, source_episode, downloads, 2)
+        episode, = [ep for ep in service.api(route)["episodes"] if ep["number"] == 2 and ep["status"] == "organized"]
+        infohash = episode["torrent_hash"]
+        torrent = wait_for("E02 seeding after both restarts", lambda: rpc.torrent(infohash),
+                           lambda row: row and row["status"] == 6 and row["leftUntilDone"] == 0)
+        if not Path(torrent["downloadDir"]).samefile(downloads) or not Path(episode["final_path"]).samefile(downloads / NAMES[1]):
+            raise RuntimeError("The new directory and E02 library link did not survive restart")
+        verify_peer_upload(peer_port, infohash, payload)
+        verify_completed_task(service, infohash)
+    print(f"Passed: Windows backup to Transmission {version}, new download directory and full E02 upload after restart.")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path, help="Built Ani-Go executable")
     parser.add_argument("--daemon", default="transmission-daemon", help="Transmission daemon executable name or path")
+    parser.add_argument("--restore-windows-backup", type=Path, metavar="ARCHIVE_DIR",
+                        help="Restore the native Windows full backup and seed the new E02 after restarting")
     args = parser.parse_args()
     daemon_path = shutil.which(args.daemon)
     if not daemon_path:
@@ -220,9 +301,15 @@ def main():
     with tempfile.TemporaryDirectory(prefix="Ani-Go Transmission ") as folder, socket.socket() as blocked:
         blocked.bind((HOST, 0))
         offline = f"http://{HOST}:{blocked.getsockname()[1]}"
+        binary = str(args.binary.resolve(strict=True))
+        daemon_bin = str(Path(daemon_path).resolve())
+        if args.restore_windows_backup:
+            archive = load_backup(args.restore_windows_backup, require_windows=True)
+            verify_restore(binary, daemon_bin, Path(folder), offline, archive)
+            return
         media_ready = Event()
         with web_seed(media_ready, payloads=ALIGNED_PAYLOADS) as (url, infohash):
-            verify(str(args.binary.resolve(strict=True)), str(Path(daemon_path).resolve()), Path(folder), offline, url, infohash, media_ready)
+            verify(binary, daemon_bin, Path(folder), offline, url, infohash, media_ready)
 
 
 if __name__ == "__main__":

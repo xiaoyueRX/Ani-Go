@@ -126,33 +126,17 @@ jobs:
           fi
           file "$aria"
           "$py" scripts/test_aria2_runtime.py "./anigo$(go env GOEXE)" --aria2c "$aria"
-      - name: Resume selected RSS episodes and seed with Transmission
+      - name: Install Transmission
+        id: transmission
         if: ${{ !cancelled() && steps.application.outcome == 'success' }}
+        run: bash scripts/install_ci_transmission.sh
+      - name: Resume selected RSS episodes and seed with Transmission
+        if: ${{ !cancelled() && steps.transmission.outcome == 'success' }}
+        env:
+          TRANSMISSION_DAEMON: ${{ steps.transmission.outputs.executable }}
         run: |
-          py=python3
-          if [[ "$RUNNER_OS" == Windows ]]; then
-            py=python
-            curl --fail --silent --show-error --location --output transmission.msi https://github.com/transmission/transmission/releases/download/4.1.4/transmission-4.1.4-x64.msi
-            echo "cf51e5772f39a3ead3c8f763b689399b9b4b8b016a4c0ca68ab5d6c634be2e1c  transmission.msi" | sha256sum --check
-            pwsh -NoProfile -Command '
-              $out = Join-Path $env:RUNNER_TEMP transmission-files
-              $msi = (Resolve-Path transmission.msi).Path
-              $result = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/a `"$msi`" /qn TARGETDIR=`"$out`""
-              exit $result.ExitCode'
-            daemon=$(find "$(cygpath -u "$RUNNER_TEMP")/transmission-files" -iname transmission-daemon.exe -print -quit)
-          elif [[ "$RUNNER_OS" == macOS ]]; then
-            HOMEBREW_NO_AUTO_UPDATE=1 brew install transmission-cli
-            daemon="$(brew --prefix transmission-cli)/bin/transmission-daemon"
-          else
-            if ! command -v transmission-daemon >/dev/null; then
-              sudo systemctl mask --runtime transmission-daemon.service
-              sudo apt-get update -qq
-              sudo apt-get install -y --no-install-recommends transmission-daemon
-            fi
-            daemon=$(command -v transmission-daemon)
-          fi
-          file "$daemon"
-          "$py" scripts/test_transmission_runtime.py "./anigo$(go env GOEXE)" --daemon "$daemon"
+          if [[ "$RUNNER_OS" == Windows ]]; then py=python; else py=python3; fi
+          "$py" scripts/test_transmission_runtime.py "./anigo$(go env GOEXE)" --daemon "$TRANSMISSION_DAEMON"
       - name: Install qBittorrent
         id: qb
         if: ${{ !cancelled() && steps.application.outcome == 'success' }}
@@ -189,6 +173,11 @@ jobs:
           path: ${{ runner.temp }}/portable-backup/*.json
           if-no-files-found: error
           retention-days: 1
+      - name: Restore the exported Windows backup into a fresh Windows Transmission instance
+        if: ${{ !cancelled() && steps.portable.outcome == 'success' && steps.transmission.outcome == 'success' }}
+        env:
+          TRANSMISSION_DAEMON: ${{ steps.transmission.outputs.executable }}
+        run: python scripts/test_transmission_runtime.py ./anigo.exe --daemon "$TRANSMISSION_DAEMON" --restore-windows-backup "$RUNNER_TEMP/portable-backup"
       - name: Test direct ARMv7 execution and downloaders on the ARM64 host
         if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'linux' && matrix.arch == 'arm64' }}
         run: |
@@ -210,15 +199,23 @@ jobs:
   restore-windows-backup:
     name: Restore Windows backup on ${{ matrix.runner }}
     needs: platform
-    if: github.event_name == 'pull_request'
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.platform.result != 'skipped' }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHON: ${{ startsWith(matrix.target, 'windows/') && 'python' || 'python3' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - { runner: ubuntu-24.04, target: linux/amd64 }
+          - { runner: ubuntu-24.04-arm, target: linux/arm64 }
           - { runner: macos-15, target: darwin/arm64 }
+          - { runner: macos-15-intel, target: darwin/amd64 }
+          - { runner: windows-11-arm, target: windows/arm64 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -235,20 +232,34 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Build the native destination application
+        id: application
         env:
           TARGET: ${{ matrix.target }}
           CGO_ENABLED: '0'
         run: |
           go version
           test "$(go env GOHOSTOS)/$(go env GOHOSTARCH)" = "$TARGET"
-          go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o anigo .
+          go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o "anigo$(go env GOEXE)" .
       - name: Install qBittorrent
         id: qb
         run: bash scripts/install_ci_qbittorrent.sh
       - name: Restore the Windows archive and organize a new local download
         env:
           QB: ${{ steps.qb.outputs.executable }}
-        run: python3 scripts/test_portable_backup.py import ./anigo "$RUNNER_TEMP/portable-backup" --require-windows-source --qbittorrent "$QB"
+        run: >-
+          "$PYTHON" scripts/test_portable_backup.py import "./anigo$(go env GOEXE)"
+          "$RUNNER_TEMP/portable-backup" --require-windows-source --qbittorrent "$QB"
+      - name: Install Transmission for the destination
+        id: transmission
+        if: ${{ !cancelled() && steps.application.outcome == 'success' }}
+        run: bash scripts/install_ci_transmission.sh
+      - name: Restore the Windows backup into Transmission and seed the new episode after restart
+        if: ${{ !cancelled() && steps.transmission.outcome == 'success' }}
+        env:
+          TRANSMISSION_DAEMON: ${{ steps.transmission.outputs.executable }}
+        run: >-
+          "$PYTHON" scripts/test_transmission_runtime.py "./anigo$(go env GOEXE)"
+          --daemon "$TRANSMISSION_DAEMON" --restore-windows-backup "$RUNNER_TEMP/portable-backup"
 
   check-container:
     needs: verify
