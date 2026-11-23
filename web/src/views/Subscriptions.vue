@@ -943,7 +943,7 @@ onUnmounted(() => {
     </dialog>
 
     <!-- 聚合任务中心 -->
-    <div v-if="taskCenter.active" class="fixed bottom-6 right-6 z-[100] pointer-events-none w-80">
+    <div v-if="taskCenter.active" class="fixed bottom-20 right-4 z-[100] pointer-events-none w-80 max-w-[calc(100%-2rem)] lg:bottom-6 lg:right-6">
       <div class="bg-base-300/95 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl pointer-events-auto overflow-hidden transition-all duration-500"
            :class="{ 'h-14': taskCenter.minimized }">
         <!-- Header -->

@@ -297,7 +297,7 @@ function closeDrawer() {
     <!-- Mobile Slide-over Drawer Backdrop & Panel -->
     <Teleport to="body">
       <Transition name="fade">
-        <div v-if="isDrawerOpen" class="fixed inset-0 z-50 lg:hidden flex">
+        <div v-if="isDrawerOpen" class="fixed inset-0 z-[110] lg:hidden flex">
           <!-- Backdrop -->
           <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" @click="closeDrawer"></div>
           
