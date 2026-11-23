@@ -826,11 +826,7 @@ onUnmounted(() => {
 
     <!-- Subscription Grid -->
     <div v-else>
-      <TransitionGroup
-        name="list"
-        tag="div"
-        class="grid gap-3 sm:gap-6 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 3xl:grid-cols-8"
-      >
+      <div class="grid gap-3 sm:gap-6 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 3xl:grid-cols-8">
         <SubscriptionCard
           v-for="sub in filteredSubs"
           :key="sub.id"
@@ -844,7 +840,7 @@ onUnmounted(() => {
           @delete="isPending(sub.id) ? null : handleDelete(sub)"
           @supplement="triggerSupplement(sub)"
         />
-      </TransitionGroup>
+      </div>
     </div>
 
     <!-- 撤回浮条 -->
@@ -938,16 +934,6 @@ onUnmounted(() => {
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
-}
-
-.list-enter-active,
-.list-leave-active {
-  transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.list-enter-from,
-.list-leave-to {
-  opacity: 0;
-  transform: scale(0.9) translateY(20px);
 }
 
 .progress-list-enter-active, .progress-list-leave-active { transition: all 0.5s ease; }
