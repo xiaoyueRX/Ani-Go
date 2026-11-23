@@ -67,6 +67,10 @@ type Manager struct {
 
 var DefaultManager *Manager
 
+// 发行构建使用官方渠道。原生集成测试在链接时改用本地的测试发行包与校验清单。
+var releaseMetadataURL = "https://api.github.com/repos/xiaoyueRX/Ani-Go/releases/latest"
+var releaseDownloadBase = "https://github.com/xiaoyueRX/Ani-Go/releases/download"
+
 func InitManager(currentVersion string) *Manager {
 	DefaultManager = &Manager{
 		currentVersion: currentVersion,
@@ -127,9 +131,9 @@ func (m *Manager) CheckUpdate(ctx context.Context) (*UpdateInfo, error) {
 	}
 
 	endpoints := []string{
-		"https://api.github.com/repos/xiaoyueRX/Ani-Go/releases/latest",
-		"https://ghproxy.net/https://api.github.com/repos/xiaoyueRX/Ani-Go/releases/latest",
-		"https://ghfast.top/https://api.github.com/repos/xiaoyueRX/Ani-Go/releases/latest",
+		releaseMetadataURL,
+		"https://ghproxy.net/" + releaseMetadataURL,
+		"https://ghfast.top/" + releaseMetadataURL,
 	}
 
 	type release struct {
@@ -272,7 +276,7 @@ func (m *Manager) updateBinary(ctx context.Context, targetVersion string) error 
 	}
 
 	pkgName := fmt.Sprintf("ani-go-%s-%s-%s.%s", targetVersion, goos, archName, ext)
-	downloadURL := fmt.Sprintf("https://github.com/xiaoyueRX/Ani-Go/releases/download/%s/%s", targetVersion, pkgName)
+	downloadURL := fmt.Sprintf("%s/%s/%s", releaseDownloadBase, targetVersion, pkgName)
 
 	log.Printf("📦 [自更新] 正在下载系统对应发行包: %s", pkgName)
 	m.mu.Lock()
