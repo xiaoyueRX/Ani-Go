@@ -82,7 +82,7 @@ func serveWindowsUpdateFixture() error {
 			if version == "v1.0.1" {
 				requested = "v1.0.2"
 			}
-			err = startHandoff(exe, candidate, requested, "http://"+addr+"/api/health")
+			_, err = startHandoff(exe, candidate, requested, "http://"+addr+"/api/health")
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

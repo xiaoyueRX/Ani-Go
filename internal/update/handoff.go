@@ -42,10 +42,11 @@ type replacement struct {
 	Version string
 }
 
-func startHandoff(executable string, program []byte, version, healthURL string) error {
+// 复用监管进程时先允许请求返回；延迟交接的最终错误由本次更新的调用者接收。
+func startHandoff(executable string, program []byte, version, healthURL string) (<-chan error, error) {
 	stage, err := os.MkdirTemp(filepath.Dir(executable), ".anigo-update-")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	installed := false
 	defer func() {
@@ -56,16 +57,16 @@ func startHandoff(executable string, program []byte, version, healthURL string) 
 	candidate := filepath.Join(stage, filepath.Base(executable))
 	old := filepath.Join(stage, "previous-"+filepath.Base(executable))
 	if err := os.WriteFile(candidate, program, 0755); err != nil {
-		return err
+		return nil, err
 	}
 	// 旧进程运行期间先保留原程序，随后的失败都可以回退。
 	if runtime.GOOS == "windows" {
 		if err := os.Rename(executable, old); err != nil {
-			return err
+			return nil, err
 		}
 	} else if err := os.Link(executable, old); err != nil {
 		if err := copyExecutable(executable, old); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	rollback := func(cause error) error {
@@ -77,9 +78,9 @@ func startHandoff(executable string, program []byte, version, healthURL string) 
 	}
 	if err := os.Rename(candidate, executable); err != nil {
 		if runtime.GOOS == "windows" {
-			return rollback(err)
+			return nil, rollback(err)
 		}
-		return err
+		return nil, err
 	}
 	installed = true
 	freshHandoff := func() error {
@@ -97,23 +98,23 @@ func startHandoff(executable string, program []byte, version, healthURL string) 
 		}
 		if err != nil {
 			if !monitorAlive() {
-				return freshHandoff()
+				return nil, freshHandoff()
 			}
-			return rollback(err)
+			return nil, rollback(err)
 		}
+		result := make(chan error, 1)
 		go func() {
+			defer close(result)
 			time.Sleep(time.Second)
 			if monitorAlive() {
 				os.Exit(nextUpdateExit)
 			}
 			// 写入交接记录后监管进程仍可能退出，此时由当前服务启动新的监管进程。
-			if err := freshHandoff(); err != nil {
-				log.Printf("重新启动更新监管进程失败: %v", err)
-			}
+			result <- freshHandoff()
 		}()
-		return nil
+		return result, nil
 	}
-	return freshHandoff()
+	return nil, freshHandoff()
 }
 
 func copyExecutable(src, dst string) error {

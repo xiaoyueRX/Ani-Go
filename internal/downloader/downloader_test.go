@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -79,6 +80,97 @@ func TestQBittorrent_ConcurrentLogin(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestQBittorrentAvailabilityAfterRestart(t *testing.T) {
+	for _, rejected := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(rejected), func(t *testing.T) {
+			var restarted atomic.Bool
+			var logins, staleProbes atomic.Int32
+			bothStale := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				session := "original"
+				if restarted.Load() {
+					session = "restarted"
+				}
+				switch r.URL.Path {
+				case "/api/v2/auth/login":
+					logins.Add(1)
+					http.SetCookie(w, &http.Cookie{Name: "SID", Value: session, Path: "/"})
+					_, _ = w.Write([]byte("Ok."))
+				case "/api/v2/app/version":
+					sid, err := r.Cookie("SID")
+					if err != nil || sid.Value != session {
+						if restarted.Load() {
+							if staleProbes.Add(1) == 2 {
+								close(bothStale)
+							}
+							select {
+							case <-bothStale:
+							case <-r.Context().Done():
+							}
+						}
+						w.WriteHeader(rejected)
+					}
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			qb := NewQBittorrent(server.URL, "admin", "pass", "")
+			if !qb.IsAvailable(t.Context()) {
+				t.Fatal("首次连接失败")
+			}
+			restarted.Store(true)
+			results := make(chan bool, 2)
+			for range 2 {
+				go func() { results <- qb.IsAvailable(t.Context()) }()
+			}
+			first, second := <-results, <-results
+			if !first || !second || !qb.IsAvailable(t.Context()) || logins.Load() != 2 {
+				t.Fatalf("重启后应重新登录一次并复用新会话，实际共登录 %d 次", logins.Load())
+			}
+			server.Close()
+			if qb.IsAvailable(t.Context()) {
+				t.Fatal("连接已关闭的客户端应当离线")
+			}
+		})
+	}
+}
+
+func TestQBittorrentAvailabilityDenied(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		loginBody   string
+		versionCode int
+		wantLogins  int32
+		wantProbes  int32
+	}{
+		{"错误密码", "Fails.", http.StatusForbidden, 1, 0},
+		{"权限不足", "Ok.", http.StatusForbidden, 2, 2},
+		{"服务故障", "Ok.", http.StatusServiceUnavailable, 1, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logins, probes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v2/auth/login":
+					logins.Add(1)
+					_, _ = w.Write([]byte(test.loginBody))
+				case "/api/v2/app/version":
+					probes.Add(1)
+					w.WriteHeader(test.versionCode)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			qb := NewQBittorrent(server.URL, "admin", "password", "")
+			if qb.IsAvailable(t.Context()) || logins.Load() != test.wantLogins || probes.Load() != test.wantProbes {
+				t.Fatalf("连接应失败并停止重试，实际登录 %d 次，探测 %d 次", logins.Load(), probes.Load())
+			}
+		})
+	}
 }
 
 func TestAria2_DeleteWithFiles(t *testing.T) {

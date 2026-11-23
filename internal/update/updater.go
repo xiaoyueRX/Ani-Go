@@ -326,13 +326,16 @@ func (m *Manager) updateBinary(ctx context.Context, targetVersion string) error 
 	if err != nil {
 		return err
 	}
-	if err := startHandoff(executable, program, targetVersion, m.healthURL); err != nil {
+	pending, err := startHandoff(executable, program, targetVersion, m.healthURL)
+	if err != nil {
 		return err
 	}
 	m.mu.Lock()
 	m.progress = UpdateProgress{Status: "restarting", Progress: 90, Message: "等待新版实例健康检查"}
 	m.mu.Unlock()
-
+	if pending != nil {
+		return <-pending
+	}
 	return nil
 }
 

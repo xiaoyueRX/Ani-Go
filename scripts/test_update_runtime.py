@@ -9,9 +9,11 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
@@ -141,7 +143,7 @@ def running(binary, home, port, password, offline, log):
         proc = subprocess.Popen([binary], cwd=home, env=env, stdin=subprocess.DEVNULL,
                                 stdout=output, stderr=subprocess.STDOUT, start_new_session=os.name != "nt")
         try:
-            yield Service(port)
+            yield Service(port), proc
         finally:
             if os.name == "nt":
                 stop_windows_install(binary.parent, psutil)
@@ -158,13 +160,54 @@ def running(binary, home, port, password, offline, log):
                     except ProcessLookupError:
                         pass
             proc.wait(timeout=15)
-    with socket.socket() as probe:
-        probe.settimeout(1)
-        if probe.connect_ex((HOST, port)) == 0:
-            raise RuntimeError("The update test's HTTP listener stayed open after process cleanup")
+    # 测试中原始监管 PID 可能已退出，仍要等同一进程组中的替代服务释放监听端口。
+    for _ in range(50):
+        with socket.socket() as probe:
+            probe.settimeout(0.3)
+            if probe.connect_ex((HOST, port)) != 0:
+                return
+        time.sleep(0.1)
+    raise RuntimeError("The update test's HTTP listener stayed open after process cleanup")
 
 
-def exercise(service, installed, expected_hash, home, offline, password, log):
+def check_late_handoff_failure(service, installed, expected_hash, monitor, log):
+    # Linux 对仍有写句柄的映像返回 ETXTBSY，回滚时的 rename 仍可成功。
+    held = installed.with_name("held-previous")
+    shutil.copy2(installed, held)
+    monitor_dir, = installed.parent.glob(".anigo-monitor-*")
+    control = monitor_dir / "next.json"
+
+    def have_request():
+        try:
+            return json.loads(control.read_text(encoding="utf-8")).get("Version") == BROKEN
+        except json.JSONDecodeError:
+            return False
+
+    with held.open("r+b"):
+        service.api("system/update/execute", "POST")
+        wait_for("monitor control file", have_request, log)
+        previous = Path(json.loads(control.read_text(encoding="utf-8"))["Old"])
+        if previous.parent.parent != installed.parent or previous.name != "previous-" + installed.name:
+            raise RuntimeError(f"Unexpected rollback path {previous}")
+        os.replace(held, previous)
+        monitor.kill()
+        monitor.wait(timeout=5)
+        wait_for("failed handoff", lambda: "text file busy" in log.read_text(encoding="utf-8").lower(), log)
+        progress = service.api("system/update/progress")
+        if progress.get("status") != "failed" or "text file busy" not in progress.get("error", "").lower():
+            raise RuntimeError(f"Failed handoff left unexpected public progress: {progress}")
+        if sha256(installed) != expected_hash or service.api("health").get("version") != GOOD:
+            raise RuntimeError("Running version or restored executable changed after handoff failure")
+    rollbacks = log.read_text(encoding="utf-8").count("已恢复旧版")
+    service.api("system/update/execute", "POST")
+    wait_for("retry rolls back the invalid release", lambda: log.read_text(encoding="utf-8").count("已恢复旧版") > rollbacks, log)
+    wait_for("restored service after retry", lambda: service.api("health").get("version") == GOOD, log)
+    if sha256(installed) != expected_hash:
+        raise RuntimeError("Retry did not restore the verified executable")
+    print("Passed Linux handoff failure: public failed status, verified rollback image and accepted retry.")
+
+
+def exercise(service, installed, expected_hash, home, offline, password, log, monitor):
     def healthy(version):
         reply = service.api("health")
         return reply.get("version") == version and reply.get("status") == "ok"
@@ -195,6 +238,9 @@ def exercise(service, installed, expected_hash, home, offline, password, log):
         Service(service.port).request("/api/" + row_path, status=401)
         if service.api(row_path)["subscription"]["title_cn"] != TITLE:
             raise RuntimeError("Original subscription ID or authenticated session was lost")
+    if sys.platform.startswith("linux"):
+        check_late_handoff_failure(service, installed, expected_hash, monitor, log)
+        verify_subscription(service, custom)
 
 
 def main():
@@ -225,8 +271,8 @@ def main():
                 port = free.getsockname()[1]
             password = secrets.token_urlsafe(32)
             log = root / "app.log"
-            with running(installed, home, port, password, offline, log) as service:
-                exercise(service, installed, wanted_hash, home, offline, password, log)
+            with running(installed, home, port, password, offline, log) as (service, monitor):
+                exercise(service, installed, wanted_hash, home, offline, password, log, monitor)
             expected = packages | {"/latest", f"/download/{GOOD}/checksums.txt", f"/download/{BROKEN}/checksums.txt"}
             if not expected.issubset(served):
                 raise RuntimeError(f"Missing local release requests: {sorted(expected - served)}")

@@ -88,6 +88,15 @@ func (q *QBittorrent) login(ctx context.Context) error {
 		return fmt.Errorf("登录失败 (状态码 %d): %s", resp.StatusCode, string(body))
 	}
 
+	// Web API 在凭据无效时也会返回 HTTP 200，正文为 Fails.。
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	if err != nil {
+		return fmt.Errorf("读取登录响应失败: %w", err)
+	}
+	if strings.TrimSpace(string(body)) == "Fails." {
+		return errors.New("qBittorrent 拒绝了登录凭据")
+	}
+
 	q.loggedIn = true
 	q.lastLogin = time.Now()
 	log.Println("✅ qBittorrent 登录成功")
@@ -498,24 +507,36 @@ func (q *QBittorrent) IsAvailable(ctx context.Context) bool {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// 1. 确保已登录（若需要凭据，先进行会话握手）
-	if err := q.ensureLogin(timeoutCtx); err != nil {
-		return false
-	}
-
-	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodGet,
-		q.host+"/api/v2/app/version", nil)
+	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodGet, q.host+"/api/v2/app/version", nil)
 	if err != nil {
 		return false
 	}
 	req.Header.Set("Referer", q.host)
-	resp, err := q.httpClient.Do(req)
-	if err != nil {
-		return false
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := q.ensureLogin(timeoutCtx); err != nil {
+			return false
+		}
+		q.loginMu.Lock()
+		session := q.lastLogin
+		q.loginMu.Unlock()
+		resp, err := q.httpClient.Do(req.Clone(timeoutCtx))
+		if err != nil {
+			return false
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+			return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent
+		}
+		if attempt == 0 {
+			// 服务重启可使未到期的 Cookie 失效；只作废本次探测使用的会话。
+			q.loginMu.Lock()
+			if q.lastLogin == session {
+				q.loggedIn = false
+			}
+			q.loginMu.Unlock()
+		}
 	}
-	defer resp.Body.Close()
-
-	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent
+	return false
 }
 
 // ensureLogin 确保已登录，如果未登录或 Cookie 过期则登录

@@ -43,7 +43,7 @@ func TestUpdateTestService(t *testing.T) {
 		if err := os.WriteFile(marker, []byte("v1.0.1"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if err := startHandoff(executable, image, "v1.0.1", health); err != nil {
+		if _, err := startHandoff(executable, image, "v1.0.1", health); err != nil {
 			t.Fatal(err)
 		}
 		return
@@ -61,7 +61,7 @@ func TestUpdateTestService(t *testing.T) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		if err := startHandoff(executable, image, "v1.0.2", health); err != nil {
+		if _, err := startHandoff(executable, image, "v1.0.2", health); err != nil {
 			http.Error(w, err.Error(), 500)
 		}
 	})

@@ -68,7 +68,7 @@ func TestLegacyMonitoredService(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := startHandoff(exe, image, "v2", "http://"+addr+"/api/health"); err != nil {
+		if _, err := startHandoff(exe, image, "v2", "http://"+addr+"/api/health"); err != nil {
 			t.Fatal(err)
 		}
 		select {}
