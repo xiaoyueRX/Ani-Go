@@ -2,7 +2,7 @@
 
 import argparse
 import base64
-from contextlib import contextmanager, ExitStack
+from contextlib import closing, contextmanager, ExitStack
 import hashlib
 import http.cookiejar
 import json
@@ -10,9 +10,11 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import build_opener, HTTPCookieProcessor, ProxyHandler, Request
@@ -212,6 +214,53 @@ def verify_new_episode(service, route, restored_home, central, seed, receiver, f
           f"new_download_directory=verified episode=2 uploaded_bytes={uploaded}", flush=True)
 
 
+def reconnect_and_restore_file(service, route, home, central, restarted_client):
+    before = service.api(route)
+    episode, = [row for row in before["episodes"] if row["number"] == 1]
+    db_uri = (home / "订阅 数据.sqlite").as_uri() + "?mode=ro"
+
+    def stored_episodes():
+        with closing(sqlite3.connect(db_uri, uri=True)) as db:
+            return db.execute("SELECT * FROM episodes WHERE subscription_id = ? ORDER BY id",
+                              (episode["subscription_id"],)).fetchall()
+
+    history = stored_episodes()
+    target = Path(episode["final_path"])
+    source = central.downloads / TITLE / NAMES[0]
+    original = source.stat()
+    if (target.is_symlink() or not target.resolve().is_relative_to((home / "剧集").resolve())
+            or not target.samefile(source)):
+        raise RuntimeError("Expected E01 to be a hard link inside the temporary library")
+    # 此时 qB 已关闭。仅移除库链接，避免 Windows 下载器尚未释放文件句柄。
+    target.unlink()
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    if target.exists() or digest != hashlib.sha256(PAYLOADS[0]).hexdigest():
+        raise RuntimeError("Removing the temporary E01 library link did not preserve its download")
+
+    restarted_client.enter_context(central.running())
+    if not service.api("downloader/test", "POST", {})["success"]:
+        raise RuntimeError("The source Ani-Go instance did not reconnect to qBittorrent")
+    wait_for("qBittorrent to resume the complete pack", lambda: central.info(episode["torrent_hash"]),
+             lambda task: task.get("progress") == 1 and not task["state"].startswith("checking"))
+    started = time.monotonic()
+    check = service.api(route + "/verify-files", "POST", {"ids": [episode["id"]]})
+    if check["volume_guarded"] or [(row["id"], row["status"]) for row in check["results"]] != [(episode["id"], "missing")]:
+        raise RuntimeError("Ani-Go did not find exactly the removed E01 library link missing")
+    response = service.api(f"{route}/episodes/{episode['id']}/restore-file", "POST", {"confirm_unmarked_volume": True})
+    if (response != {"restored": True} or target.is_symlink() or not target.samefile(source)
+            or not os.path.samestat(target.stat(), original) or hashlib.sha256(target.read_bytes()).hexdigest() != digest):
+        raise RuntimeError("The restore did not recreate the E01 hard link to the original download")
+    after = service.api(route)
+    progress = ("current_episodes", "total_episodes", "completed")
+    for detail in (before, after):
+        if tuple(detail["subscription"][field] for field in progress) != (2, 3, False):
+            raise RuntimeError("Restoring E01 changed the subscription progress")
+    if before["episodes"] != after["episodes"] or history != stored_episodes():
+        raise RuntimeError("Restoring E01 changed the original episode history")
+    print(f"Library file restore: episode=1 hard_link=verified sha256={digest} history=unchanged progress=2/3 "
+          f"elapsed_ms={round((time.monotonic() - started) * 1000)}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
@@ -259,10 +308,7 @@ def main():
                 print("Selected S01E01 and S01E03 arrived from the seed and were hard-linked into the library.", flush=True)
             if service.api("downloader/test", "POST", {})["success"]:
                 raise RuntimeError("Ani-Go reported a stopped qBittorrent client online")
-            # 同一源实例先观察离线再重连。该 qB 进程随后继续为恢复目标和独立对端服务。
-            restarted_client.enter_context(central.running())
-            if not service.api("downloader/test", "POST", {})["success"]:
-                raise RuntimeError("The source Ani-Go instance did not reconnect to qBittorrent")
+            reconnect_and_restore_file(service, route, home, central, restarted_client)
             history = {row["id"]: row["final_path"] for row in service.api(route)["episodes"]}
             service.api("backup/create", "POST", {"include_episodes": True})
             archive, = service.api("backup/list")
