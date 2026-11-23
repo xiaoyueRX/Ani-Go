@@ -64,8 +64,18 @@ jobs:
           go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o "$binary" .
           if [[ "$TARGET_OS" == windows ]]; then py=python; else py=python3; fi
           "$py" scripts/test_platform_runtime.py "./$binary"
+      - name: Upgrade an official v0.7.0 installation and restore its data
+        if: ${{ !cancelled() && steps.application.outcome == 'success' }}
+        env:
+          TARGET_OS: ${{ matrix.os }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          if [[ "$TARGET_OS" == windows ]]; then py=python; else py=python3; fi
+          legacy="$RUNNER_TEMP/anigo-v0.7.0$(go env GOEXE)"
+          "$py" scripts/fetch_legacy_runtime.py --os "$TARGET_OS" --arch "$TARGET_ARCH" --output "$legacy"
+          "$py" scripts/test_legacy_upgrade.py "./anigo$(go env GOEXE)" --legacy "$legacy"
       - name: Sign in and create a subscription in the native browser
-        if: matrix.runner == 'windows-2025' || matrix.runner == 'macos-15'
+        if: ${{ !cancelled() && steps.application.outcome == 'success' && (matrix.runner == 'windows-2025' || matrix.runner == 'macos-15') }}
         run: |
           if [[ "$RUNNER_OS" == Windows ]]; then
             python -m venv .browser-venv
@@ -178,7 +188,8 @@ jobs:
         if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'linux' && matrix.arch == 'arm64' }}
         run: |
           GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o anigo-armv7 .
-          python3 scripts/probe_armv7_runtime.py ./anigo-armv7 --downloaders
+          python3 scripts/fetch_legacy_runtime.py --os linux --arch armv7 --output "$RUNNER_TEMP/anigo-v0.7.0-armv7"
+          python3 scripts/probe_armv7_runtime.py ./anigo-armv7 --downloaders --legacy "$RUNNER_TEMP/anigo-v0.7.0-armv7"
       - name: Exercise the macOS installer
         if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'darwin' }}
         run: python3 scripts/test_install.py

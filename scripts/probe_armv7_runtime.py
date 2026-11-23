@@ -70,6 +70,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--downloaders", action="store_true", help="用本机真实的 aria2、Transmission 和 qBittorrent 验收 ARMv7 应用")
+    parser.add_argument("--legacy", type=Path, help="已校验的官方 v0.7.0 ARMv7 程序，用于历史数据升级验收")
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     verify_binary(binary)
@@ -78,6 +79,10 @@ def main():
         return
     scripts = Path(__file__).resolve().parent
     subprocess.run([sys.executable, scripts / "test_platform_runtime.py", binary], check=True)
+    if args.legacy:
+        legacy = args.legacy.resolve(strict=True)
+        verify_binary(legacy)
+        subprocess.run([sys.executable, scripts / "test_legacy_upgrade.py", binary, "--legacy", legacy], check=True)
     subprocess.run([sys.executable, scripts / "test_update_runtime.py", "--armv7"], check=True)
     if args.downloaders:
         for script in ("test_aria2_runtime.py", "test_transmission_runtime.py", "test_qb_runtime.py"):
