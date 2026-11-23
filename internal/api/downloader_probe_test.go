@@ -89,7 +89,7 @@ func TestDownloaderProbeSavedCredentials(t *testing.T) {
 		probe(map[string]any{"type": typ, "host": host, "username": identity, "use_saved_credentials": true}, true)
 		probe(map[string]any{"type": typ, "host": host, "username": identity}, false)
 	}
-	// An edited host or login must use only the credentials explicitly typed for it.
+	// 修改主机地址或账号后，只能使用本次为该连接输入的凭据。
 	other := httptest.NewServer(rpc.Config.Handler)
 	defer other.Close()
 	probe(map[string]any{"type": "aria2", "host": other.URL + "/jsonrpc", "use_saved_credentials": true}, false)

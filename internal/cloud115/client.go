@@ -1,4 +1,4 @@
-// Package cloud115 submits magnet links to the 115 Open Platform and lists cloud tasks.
+// Package cloud115 向 115 开放平台提交磁力链接并查询云任务列表。
 package cloud115
 
 import (
@@ -52,14 +52,14 @@ type Task struct {
 	Progress int    `json:"progress"`
 }
 
-// ValidateMagnet accepts BitTorrent v1 (hex or base32) and v2 SHA-256 exact topics.
+// ValidateMagnet 校验磁力链接的 xt 参数，支持 BitTorrent v1 的十六进制或 Base32 哈希以及 v2 的 SHA-256 哈希。
 func ValidateMagnet(link string) error {
 	_, err := magnetlink.Parse(link)
 	return err
 }
 
-// The provider's task ID is a SHA-1. For v2-only submissions the echoed magnet
-// carries the SHA-256 identity needed to confirm which submission succeeded.
+// 115 使用 SHA-1 作为任务 ID。对于仅含 v2 哈希的请求，
+// 需核对回执中磁力链接的 SHA-256，以确认提交成功的是同一任务。
 func matchesReceipt(want magnetlink.Hashes, infoHash, echoedURL string) bool {
 	received := magnetlink.NormalizeBTIH(infoHash)
 	if received == "" || (want.V1 != "" && want.V1 != received) {
@@ -76,7 +76,7 @@ func matchesReceipt(want magnetlink.Hashes, infoHash, echoedURL string) bool {
 	return (want.V1 != "" && want.V1 == echoed.V1) || (want.V2 != "" && want.V2 == echoed.V2)
 }
 
-// Add sends one link in the 115 urls form field. Submission requires an acknowledgement for that link.
+// Add 通过 115 表单的 urls 字段提交一条链接，收到与该链接匹配的回执才算成功。
 func (c *Client) Add(ctx context.Context, accessToken, link string) error {
 	expected, err := magnetlink.Parse(link)
 	if err != nil {
@@ -104,7 +104,7 @@ func (c *Client) Add(ctx context.Context, accessToken, link string) error {
 	return nil
 }
 
-// List reads a single page. Only fields used by the plugin are exposed to callers.
+// List 读取一页任务，只向调用方返回插件使用的字段。
 func (c *Client) List(ctx context.Context, accessToken string, page int) (TaskPage, error) {
 	if page < 1 {
 		return TaskPage{}, errors.New("115 任务页码必须为正数")

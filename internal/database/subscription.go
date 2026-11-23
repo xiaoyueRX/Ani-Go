@@ -9,12 +9,12 @@ import (
 
 var ErrSubscriptionExists = errors.New("该番剧已在订阅列表中")
 
-// CreateSubscription applies the same identity rules to manual, batch and MCP requests.
+// CreateSubscription 对手动、批量和 MCP 订阅请求使用同一套查重规则。
 func CreateSubscription(db *gorm.DB, sub *Subscription) error {
 	created := *sub
 	err := db.Transaction(func(tx *gorm.DB) error {
-		// A write first takes SQLite's writer lock. Concurrent requests then see
-		// the previous committed subscription, even on separate connections.
+		// 先写入以取得 SQLite 写锁，再检查重复订阅。
+		// 即使使用不同连接，并发请求也能看到前一个事务已提交的订阅。
 		if err := tx.Create(&created).Error; err != nil {
 			return err
 		}
@@ -50,13 +50,13 @@ func checkSubscriptionIdentity(tx *gorm.DB, created Subscription) error {
 	return nil
 }
 
-// UpdateSubscription updates identity and derived RSS fields together. Existing
-// duplicate legacy rows can still be edited when their identity is unchanged.
+// UpdateSubscription 同时更新订阅标识和由此派生的 RSS 字段。
+// 只要标识不变，仍可编辑历史重复记录。
 func UpdateSubscription(db *gorm.DB, id uint, changes map[string]interface{}) (Subscription, error) {
 	var updated Subscription
 	err := db.Transaction(func(tx *gorm.DB) error {
-		// Start a write transaction before reading old identity fields. No rows
-		// are touched by this statement, including rows with update triggers.
+		// 先开启写事务，再读取原有订阅标识。
+		// 这条语句不匹配任何记录，因此行级更新触发器不会执行。
 		if err := tx.Exec("UPDATE subscriptions SET id = id WHERE 0").Error; err != nil {
 			return err
 		}

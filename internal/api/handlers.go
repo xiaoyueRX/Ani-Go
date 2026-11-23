@@ -839,7 +839,7 @@ func (s *Server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// Keep native status in the API for callers that need downloader-specific details.
+// 展示状态统一转换，API 同时保留下载器的原始状态供调用方查询。
 func downloadDisplayStatus(status string, complete bool) string {
 	if downloader.CanResume(status) {
 		return "paused"

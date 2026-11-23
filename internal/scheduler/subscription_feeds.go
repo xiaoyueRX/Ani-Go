@@ -53,8 +53,8 @@ func mikanFeedMatchesID(feedURL, id string) bool {
 	return false
 }
 
-// The second return value marks an ambiguous release so classic mode cannot
-// auto-create another subscription for an already tracked multi-season series.
+// 第二个返回值表示资源是否同时匹配不同季的订阅。
+// 此时经典模式跳过自动创建，以免为已追踪的多季作品重复建订阅。
 func matchFeedSubscription(item core.TorrentItem, subs []database.Subscription) (*database.Subscription, bool) {
 	title := source.ParseMikanTitle(item.Title).Title
 	var best *database.Subscription

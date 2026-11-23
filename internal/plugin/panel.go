@@ -17,7 +17,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/magnet"
 )
 
-// PanelService is registered only in the owning plugin context.
+// PanelService 仅注册在所属插件的上下文中。
 const PanelService core.ServiceType = "plugin-panel"
 
 type Panel struct {
@@ -198,7 +198,7 @@ func (a PanelAction) ValidateInput(input string, page int) error {
 	return nil
 }
 
-// PanelSnapshot gets the manifest and the matching runtime generation under one read lock.
+// PanelSnapshot 一次加读锁，同时获取清单及其对应的运行时上下文。
 func (m *Manager) PanelSnapshot(id string) (PluginInfo, PluginContext, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -236,7 +236,7 @@ func (m *Manager) PanelSnapshot(id string) (PluginInfo, PluginContext, bool) {
 	return info, m.pluginContexts[id], true
 }
 
-// LocalPanelRunner never falls back to a service belonging to a different plugin.
+// LocalPanelRunner 只查找当前插件的面板服务。
 func LocalPanelRunner(scope PluginContext) (PanelRunner, bool) {
 	return localPanelService[PanelRunner](scope, PanelService)
 }
@@ -352,7 +352,7 @@ func (r *webhookPanelRunner) Run(ctx context.Context, selected PanelAction, cred
 	return decodePanelResult(data, action.Result, credential, r.plugin.Secret)
 }
 
-// Validate checks the public response contract for both native and Webhook runners.
+// Validate 检查原生和 Webhook 执行器的响应是否符合对外约定。
 func (r PanelResult) Validate(kind string, secrets ...string) error {
 	publicText := func(text string, limit int) bool {
 		if !panelText(text, limit) {

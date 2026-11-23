@@ -10,7 +10,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
 
-// Zero records a missing or ambiguous match. Neither can identify a subscription.
+// 0 表示未匹配或匹配到多个订阅，无法确定唯一的订阅 ID。
 func addScheduleMatch(index map[string]uint, key string, id uint) {
 	if key == "" {
 		return
@@ -21,7 +21,7 @@ func addScheduleMatch(index map[string]uint, key string, id uint) {
 	index[key] = id
 }
 
-// A provider can cache a season's schedule. Annotate a copy for the current request.
+// 数据源可能会缓存整季时间表，因此只在当前请求的副本上标注订阅。
 func scheduleSubscriptions(schedule []source.WeekDayItem, subs []database.Subscription) ([]source.WeekDayItem, map[string]uint) {
 	bgm, mikan, titles := map[string]uint{}, map[string]uint{}, map[string]uint{}
 	result := map[string]uint{}

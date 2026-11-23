@@ -875,8 +875,8 @@ func (s *Scheduler) scanSubscription(ctx context.Context, sub database.Subscript
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	// A title query cannot tell which same-named season an unnumbered release
-	// or a provider search hit belongs to. An explicit site ID remains usable.
+	// 多季同名时，仅凭片名无法判断未标季号的资源或数据源的搜索结果属于哪一季。
+	// 有明确的站点 ID 时，仍可按该 ID 匹配。
 	var peer database.Subscription
 	matches := database.DB.WithContext(ctx).Where("enabled = ? AND title_cn = ? AND id <> ? AND COALESCE(NULLIF(season, 0), 1) <> ?", true, sub.TitleCN, sub.ID, max(1, sub.Season)).Select("id").Limit(1).Find(&peer)
 	if matches.Error != nil {
