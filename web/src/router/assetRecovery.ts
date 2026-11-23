@@ -7,6 +7,8 @@ function entryScript(doc: Document) {
   return src && /^\/assets\/index-[\w-]+\.js$/.test(src) ? src : null
 }
 
+type EntryState = 'changed' | 'same' | 'unavailable' | 'unverified'
+
 interface Traversal {
   path: string
   position: number
@@ -33,24 +35,28 @@ export function installAssetRecovery(router: Router) {
   const failures = new WeakSet<Error>()
   const history = router.options.history
   let nextTraversal: Traversal | undefined
-  let intent: { route: RouteLocationNormalized; pop?: Traversal; recovering?: boolean } | undefined
-  let checking: Promise<boolean> | undefined
-  let changed = false
+  let intent: { route: RouteLocationNormalized; pop?: Traversal; checked?: boolean } | undefined
+  let outageTarget: string | undefined
+  let checking: Promise<EntryState> | undefined
+  let lastEntry: EntryState = 'unverified'
   let checkedUntil = 0
 
-  function entryChanged() {
+  function checkEntry() {
     if (checking) return checking
-    if (Date.now() < checkedUntil) return Promise.resolve(changed)
-    checking = fetch('/', { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(5000) })
-      .then(async response => {
-        if (!response.ok || !response.headers.get('Content-Type')?.startsWith('text/html')) return false
+    if (Date.now() < checkedUntil) return Promise.resolve(lastEntry)
+    checking = fetch('/', { cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(5000) })
+      .then(async (response): Promise<EntryState> => {
+        if ([502, 503, 504].includes(response.status)) return 'unavailable'
+        if (!response.ok || !response.headers.get('Content-Type')?.startsWith('text/html')) return 'unverified'
         const next = entryScript(new DOMParser().parseFromString(await response.text(), 'text/html'))
-        return next !== null && next !== original
+        if (!next) return 'unverified'
+        return next === original ? 'same' : 'changed'
       })
-      .catch(() => false)
+      .catch((): EntryState => 'unavailable')
       .then(result => {
-        changed = result
-        checkedUntil = Date.now() + 5000
+        lastEntry = result
+        // 整站停服时，允许下一次主动导航立即重试。重复上报同一次导航仍只检查一次。
+        checkedUntil = result === 'unavailable' ? 0 : Date.now() + 5000
         checking = undefined
         return result
       })
@@ -65,26 +71,35 @@ export function installAssetRecovery(router: Router) {
     nextTraversal = delta && typeof position === 'number' ? { path, position, delta } : undefined
   })
   router.beforeEach(to => {
+    if (outageTarget !== to.fullPath) outageTarget = undefined
     intent = { route: to, pop: nextTraversal?.path === to.fullPath ? nextTraversal : undefined }
     nextTraversal = undefined
   })
   router.afterEach((_to, _from, failure) => {
     if (!failure || isNavigationFailure(failure, NavigationFailureType.duplicated)) intent = undefined
     if (!failure) {
+      outageTarget = undefined
       try { sessionStorage.removeItem(recoveryKey) } catch { /* 浏览器可能禁用会话存储。 */ }
     }
   })
   router.onError(async (error, to) => {
     console.error(error)
     const active = intent
-    if (!active || active.route !== to || !failures.has(error)) return
-    if (!await entryChanged() || active !== intent || active.recovering) return
+    if (!active || active.route !== to || active.checked || !failures.has(error)) return
+    active.checked = true
+    const entry = await checkEntry()
+    if (active !== intent) return
+    if (entry === 'unavailable') {
+      outageTarget = to.fullPath
+      return
+    }
+    // 浏览器会记住失败的动态导入。只有用户再次打开停服时失败的目标才恢复同一版本。
+    if (entry !== 'changed' && !(entry === 'same' && outageTarget === to.fullPath)) return
     const href = router.resolve(to.fullPath).href
     if (new URL(href, location.origin).origin !== location.origin) return
     try {
       if (sessionStorage.getItem(recoveryKey)) return
     } catch { return }
-    active.recovering = true
     function load(replace: boolean) {
       // 新文档成功进入页面才解除标记，避免混合部署反复刷新。
       try { sessionStorage.setItem(recoveryKey, '1') } catch { return }

@@ -23,7 +23,11 @@ function browser(t, currentPath = '/subscriptions') {
   const location = Object.assign(new URL(currentPath, 'https://example.test'), {
     assign: href => loads.push(['assign', href]), replace: href => loads.push(['replace', href]),
   })
-  const page = pending()
+  let page = pending()
+  function finish(result) {
+    page.resolve(result)
+    page = pending()
+  }
   const globals = {
     window, document: doc(old), location, sessionStorage: storage,
     fetch: (...args) => { calls.push(args); return page.promise },
@@ -61,8 +65,8 @@ function browser(t, currentPath = '/subscriptions') {
   return {
     old, begin, fail, hooks, calls, loads, window, history, jumps,
     reload: () => installAssetRecovery(router),
-    respond(entry = next) { page.resolve(new Response(entry, { headers: { 'Content-Type': 'text/html' } })) },
-    offline() { page.resolve(Promise.reject(new TypeError('offline'))) },
+    respond(entry = next, status = 200) { finish(new Response(entry, { status, headers: { 'Content-Type': 'text/html' } })) },
+    offline() { finish(Promise.reject(new TypeError('offline'))) },
   }
 }
 
@@ -131,6 +135,7 @@ test('初次直达的深链保留当前历史项，异常重载只能尝试一�
   assert.deepEqual(b.loads, [['replace', path]])
   b.reload()
   b.fail(b.begin(path))
+  b.respond()
   await settle()
   assert.deepEqual(b.loads, [['replace', path]])
 })
@@ -164,4 +169,63 @@ test('预加载抛出非对象时保留原始错误，忽略非标准负载', as
   b.hooks.error?.('offline', to)
   await settle()
   assert.equal(b.calls.length, 0)
+})
+
+for (const unavailable of ['offline', '503']) {
+  test('整站暂不可用后，仅再次打开相同目标才恢复已失败的模块：' + unavailable, async t => {
+    const b = browser(t), path = '/settings?tab=plugins#local'
+    const first = b.begin(path)
+    b.fail(first)
+    if (unavailable === 'offline') b.offline()
+    else b.respond(null, 503)
+    await settle()
+    b.window.dispatchEvent(new Event('online'))
+    b.fail(first)
+    await settle()
+    assert.equal(b.calls.length, 1)
+    assert.deepEqual(b.loads, [])
+    b.fail(b.begin(path))
+    assert.equal(b.calls.length, 2)
+    b.respond(b.old)
+    await settle()
+    assert.deepEqual(b.loads, [['assign', path]])
+  })
+}
+
+test('整站仍不可用时反复点击保留当前文档，改往别处会取消原目标重试', async t => {
+  const b = browser(t), path = '/settings'
+  b.fail(b.begin(path))
+  b.offline()
+  await settle()
+  b.fail(b.begin(path))
+  b.respond(null, 503)
+  await settle()
+  assert.deepEqual(b.loads, [])
+  b.fail(b.begin(path))
+  b.begin('/downloads')
+  b.respond(b.old)
+  await settle()
+  assert.deepEqual(b.loads, [])
+  b.fail(b.begin(path))
+  b.respond(b.old)
+  await settle()
+  assert.deepEqual(b.loads, [])
+})
+
+test('仅模块反复出错或首页返回无效响应，重复用户导航也不刷新', async t => {
+  const b = browser(t), path = '/downloads'
+  let now = 100000
+  t.mock.method(Date, 'now', () => now)
+  b.fail(b.begin(path))
+  b.respond(null, 404)
+  await settle()
+  now += 6000
+  b.fail(b.begin(path))
+  assert.equal(b.calls.length, 2)
+  b.respond(b.old)
+  await settle()
+  b.fail(b.begin(path))
+  await settle()
+  assert.equal(b.calls.length, 2)
+  assert.deepEqual(b.loads, [])
 })
