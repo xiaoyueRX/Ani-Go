@@ -11,11 +11,13 @@ import zh from '../src/locales/zh.ts'
 import { view } from './view.mjs'
 
 const source = readFileSync(new URL('../src/views/SubscriptionDetail.vue', import.meta.url), 'utf8')
-function groupTemplate(node) {
-  if (node.props?.some(prop => prop.type === 7 && prop.name === 'for' && prop.exp?.content.includes('groupedEpisodes'))) return node.loc.source
-  return node.children?.map(groupTemplate).find(Boolean)
+function findTemplate(node, matches) {
+  if (matches(node)) return node.loc.source
+  return node.children?.map(child => findTemplate(child, matches)).find(Boolean)
 }
-const template = groupTemplate(parse(source).descriptor.template.ast)
+const tree = parse(source).descriptor.template.ast
+const template = findTemplate(tree, node => node.props?.some(prop => prop.name === 'for' && prop.exp?.content.includes('groupedEpisodes')))
+const resultTemplate = findTemplate(tree, node => node.tag === 'details' && node.props.some(prop => prop.exp?.content === 'recheckResults.length'))
 function review(overrides = {}) {
   return { id: 41, status: 'needs_review', review_kind: '', can_retry_organize: true, review_reason: 'The destination was unavailable', season: 1, number: 0,
     group_name: 'Harbor', manual_status: 'pending', ...overrides }
@@ -24,7 +26,7 @@ function setup(rows, request = {}, locale = 'en') {
   const { t } = createI18n({ legacy: false, locale, messages: { en, zh } }).global
   const { component } = view('views/SubscriptionDetail', {
     get: async () => ({ data: { subscription: { id: 2 }, episodes: rows } }), ...request,
-  }, { route: { params: { id: 2 } }, translate: t })
+  }, { route: { params: { id: 2 } }, translate: (key, values) => values ? t(key, { ...values }) : t(key) })
   component.episodes.value = rows
   return component
 }
@@ -210,4 +212,63 @@ test('核验源文件与确认独立授权；核验使用空请求体，刷新�
   assert.equal(c.episodes.value[2].status, 'needs_review')
   assert.equal(c.episodes.value[2].review_kind, 'movie_selection')
   assert.ok((await renderGroups(c)).split('<tbody')[1].split('</tr>')[2].includes('确认为电影正片并整理'))
+})
+
+test('批量核验按项排队、跳过人工确认并保留失败；重复点击只重试尚可核验的选项', async () => {
+  const items = [
+    review({ id: 1, original_name: 'A.mkv' }), review({ id: 2, original_name: 'B.mkv' }),
+    review({ id: 3, review_kind: 'episode_identity', can_assign_episode: true, original_name: 'C.mkv' }),
+    review({ id: 4, review_kind: 'movie_selection', can_confirm_movie: true, original_name: 'D.mkv' }),
+    review({ id: 5, status: 'organized', can_retry_organize: false, original_name: 'E.mkv' }),
+    review({ id: 6, can_retry_organize: false, original_name: 'F.mkv' }), review({ id: 7 }),
+  ]
+  const calls = []
+  let reads = 0
+  const first = Promise.withResolvers()
+  const c = setup(items, {
+    post: async (url, body) => {
+      calls.push([url, body])
+      if (calls.length === 1) await first.promise
+      if (calls.length === 2) throw { response: { status: 409, data: { error: 'another session updated B' } } }
+      const row = items.find(row => url === `/episodes/${row.id}/retry-organize`)
+      row.status = 'downloaded'
+      return { data: { status: row.status } }
+    },
+    get: async () => { reads++; return { data: { subscription: { id: 2 }, episodes: items } } },
+  }, 'zh')
+  for (const row of items.slice(0, 6)) c.toggleEpisodeSelect(row.id)
+  const batch = c.bulkRecheck()
+  await c.bulkRecheck()
+  await c.retryOrganize(items[0])
+  assert.deepEqual(calls, [['/episodes/1/retry-organize', undefined]])
+  first.resolve()
+  await batch
+  assert.deepEqual(calls, [['/episodes/1/retry-organize', undefined], ['/episodes/2/retry-organize', undefined]])
+  assert.equal(reads, 1)
+  assert.deepEqual([...c.selectedEpisodes.value], [2, 3, 4, 5, 6])
+  const results = () => renderToString(createSSRApp({ template: resultTemplate, setup: () => ({ ...c }) }))
+  const html = await results()
+  for (const expected of ['A.mkv', '已排队', 'B.mkv', 'another session updated B', 'C.mkv', '指定季集', 'D.mkv', '确认正片', 'E.mkv', 'F.mkv', '已跳过']) assert.ok(html.includes(expected), expected)
+  await c.bulkRecheck()
+  assert.deepEqual(calls.slice(2), [['/episodes/2/retry-organize', undefined]])
+  assert.equal(reads, 2)
+  assert.deepEqual([...c.selectedEpisodes.value], [3, 4, 5, 6])
+  await c.bulkRecheck()
+  assert.equal(calls.length, 3)
+  assert.equal(reads, 2)
+})
+
+test('刷新后已删除的文件仍有可追溯的请求失败原因，并显示英文核验结果', async () => {
+  const gone = review({ original_name: 'Removed edition.mkv' })
+  const c = setup([gone], {
+    post: async () => { throw { response: { status: 404, data: { error: 'Episode no longer exists' } } } },
+    get: async () => ({ data: { subscription: { id: 2 }, episodes: [] } }),
+  })
+  c.toggleEpisodeSelect(gone.id)
+  await c.bulkRecheck()
+  assert.equal(c.selectedEpisodes.value.size, 0)
+  assert.equal(c.episodes.value.length, 0)
+  const html = await renderToString(createSSRApp({ template: resultTemplate, setup: () => ({ ...c }) }))
+  assert.ok(html.includes('Recheck results: 0 queued, 1 failed, 0 skipped'), html)
+  for (const label of ['Removed edition.mkv', 'Request failed', 'Episode no longer exists']) assert.ok(html.includes(label), label)
 })

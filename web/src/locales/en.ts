@@ -709,7 +709,11 @@ export default {
     },
     manualMark: 'Manual mark', noMark: 'None', clearMarks: 'Clear marks',
     bulk: {
-      selected: 'Mark {count} selected', deleteRecords: 'Delete records', deleteFiles: 'Delete files', blacklist: 'Block keywords', cancel: 'Cancel',
+      recheck: 'Recheck selected', recheckResults: 'Recheck results: {queued} queued, {failed} failed, {skipped} skipped',
+      queued: 'Queued', failed: 'Request failed', skipped: 'Skipped',
+      needsAssignment: 'Assign the season and episode individually', needsConfirmation: 'Confirm the feature film individually',
+      notInReview: 'This item is not awaiting review', recheckUnavailable: 'This item cannot currently be rechecked',
+      selected: '{count} selected', deleteRecords: 'Delete records', deleteFiles: 'Delete files', blacklist: 'Block keywords', cancel: 'Cancel',
       confirmRecords: 'Delete the {count} selected episode records?',
       confirmFiles: 'Delete the {count} selected episode records and their downloaded files?',
       blocked: 'Added {count} new blocked keywords.',

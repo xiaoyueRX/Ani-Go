@@ -39,6 +39,14 @@ interface Episode {
   download_started_at: string; created_at: string
 }
 
+type ReviewCorrection = { season: number; number: number } | { confirm_movie: true }
+interface RecheckResult {
+  id: number
+  name: string
+  status: 'queued' | 'failed' | 'skipped'
+  reason?: string
+}
+
 const route = useRoute()
 const router = useRouter()
 const id = Number(route.params.id)
@@ -65,6 +73,12 @@ const updatingEps = ref<Set<number>>(new Set())
 const selectedEpisodes = ref<Set<number>>(new Set())
 const showBulkActions = ref(false)
 const bulkActionLoading = ref(false)
+const recheckResults = ref<RecheckResult[]>([])
+const recheckCounts = computed(() => {
+  const counts = { queued: 0, failed: 0, skipped: 0 }
+  for (const result of recheckResults.value) counts[result.status]++
+  return counts
+})
 const reviewErrors = ref<Record<number, string>>({})
 const assignment = ref<{ id: number; sourceFile: string; season: number | ''; number: number | '' } | null>(null)
 const validAssignment = computed(() => {
@@ -91,23 +105,27 @@ async function retryWithAssignment(ep: Episode) {
   await retryOrganize(ep, { season: Number(draft.season), number: Number(draft.number) })
 }
 
-async function retryOrganize(ep: Episode, correction?: { season: number; number: number } | { confirm_movie: true }) {
+async function queueOrganization(ep: Episode, correction?: ReviewCorrection) {
+  delete reviewErrors.value[ep.id]
+  const { data } = await request.post(`/episodes/${ep.id}/retry-organize`, correction)
+  const current = episodes.value.find(row => row.id === ep.id)
+  if (current) {
+    current.status = data.status
+    current.review_reason = ''
+    if (correction && 'season' in correction) Object.assign(current, correction)
+  }
+  if (assignment.value?.id === ep.id) assignment.value = null
+}
+
+async function retryOrganize(ep: Episode, correction?: ReviewCorrection) {
   if (ep.status !== 'needs_review' || updatingEps.value.has(ep.id) || bulkActionLoading.value) return
   if (correction) {
     if (reviewConfirmation(ep) !== ('confirm_movie' in correction ? 'movie' : 'assign')) return
   } else if (!ep.can_retry_organize) return
   updatingEps.value.add(ep.id)
-  delete reviewErrors.value[ep.id]
   actionError.value = ''
   try {
-    const { data } = await request.post(`/episodes/${ep.id}/retry-organize`, correction)
-    const current = episodes.value.find(row => row.id === ep.id)
-    if (current) {
-      current.status = data.status
-      current.review_reason = ''
-      if (correction && 'season' in correction) Object.assign(current, correction)
-    }
-    if (assignment.value?.id === ep.id) assignment.value = null
+    await queueOrganization(ep, correction)
     await fetchDetail()
   } catch (e: any) {
     const message = e.response?.data?.error || t(!correction && ep.review_kind ? 'detail.review.recheckFailed' : 'detail.review.failed')
@@ -260,6 +278,43 @@ function toggleSelectAll(groupEps: Episode[]) {
 function clearSelection() {
   selectedEpisodes.value.clear()
   showBulkActions.value = false
+}
+
+function recheckSkipReason(ep: Episode) {
+  if (ep.status !== 'needs_review') return t('detail.bulk.notInReview')
+  if (ep.review_kind === 'episode_identity') return t('detail.bulk.needsAssignment')
+  if (ep.review_kind === 'movie_selection') return t('detail.bulk.needsConfirmation')
+  if (ep.review_kind || !ep.can_retry_organize) return t('detail.bulk.recheckUnavailable')
+}
+
+async function bulkRecheck() {
+  if (!selectedEpisodes.value.size || bulkActionLoading.value || updatingEps.value.size) return
+  const selected = episodes.value.filter(ep => selectedEpisodes.value.has(ep.id))
+  bulkActionLoading.value = true
+  actionError.value = ''
+  const results: RecheckResult[] = []
+  try {
+    for (const ep of selected) {
+      const item = { id: ep.id, name: ep.source_file || ep.original_name || ep.title || episodeLabel(ep) }
+      const reason = recheckSkipReason(ep)
+      if (reason) {
+        results.push({ ...item, status: 'skipped', reason })
+        continue
+      }
+      try {
+        await queueOrganization(ep)
+        results.push({ ...item, status: 'queued' })
+        selectedEpisodes.value.delete(ep.id)
+      } catch (e: any) {
+        results.push({ ...item, status: 'failed', reason: e.response?.data?.error || t('detail.review.recheckFailed') })
+      }
+    }
+    recheckResults.value = results
+    showBulkActions.value = selectedEpisodes.value.size > 0
+    if (results.some(result => result.status !== 'skipped')) await fetchDetail()
+  } finally {
+    bulkActionLoading.value = false
+  }
 }
 
 async function bulkUpdateStatus(newStatus: string) {
@@ -550,6 +605,9 @@ onUnmounted(() => {
                {{ t('detail.bulk.selected', { count: selectedEpisodes.size }) }}
              </span>
              <div class="flex flex-wrap items-center justify-center gap-1.5">
+               <button type="button" class="btn btn-sm btn-outline btn-warning gap-2" @click="bulkRecheck">
+                 <RefreshCw :size="16" /> {{ t('detail.bulk.recheck') }}
+               </button>
                <button class="btn btn-sm btn-ghost gap-2" @click="bulkUpdateStatus('pending')">
                  <History :size="16" /> {{ t('detail.logs.status.pending') }}
                </button>
@@ -586,6 +644,14 @@ onUnmounted(() => {
             <h2 class="text-2xl font-black tracking-tight italic uppercase">{{ t('detail.logs.title') }}</h2>
             <span class="text-[10px] font-black uppercase tracking-widest text-base-content/20 mt-1">{{ t('detail.logs.count', { count: episodes.length }) }}</span>
          </div>
+         <details v-if="recheckResults.length" open class="rounded-2xl border border-base-300 bg-base-100 p-4 text-sm">
+           <summary class="cursor-pointer font-semibold"><span aria-live="polite">{{ t('detail.bulk.recheckResults', recheckCounts) }}</span></summary>
+           <ul class="mt-2 max-h-60 space-y-1 overflow-y-auto break-words">
+             <li v-for="result in recheckResults" :key="result.id">
+               <span class="font-medium">{{ result.name }}</span> · {{ t(`detail.bulk.${result.status}`) }}<template v-if="result.reason"> · {{ result.reason }}</template>
+             </li>
+           </ul>
+         </details>
          <div v-if="episodes.length === 0" class="bg-base-100 rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden">
             <div class="flex flex-col items-center justify-center py-24 gap-4">
                <div class="w-16 h-16 rounded-full bg-base-200 flex items-center justify-center">

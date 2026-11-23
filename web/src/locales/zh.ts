@@ -710,7 +710,11 @@ export default {
       season: '季号', episode: '集号',
     },
     bulk: {
-      selected: '已选 {count} 集 · 手动标记', deleteRecords: '删记录', deleteFiles: '删文件', blacklist: '加黑名单', cancel: '取消',
+      recheck: '批量重新核验', recheckResults: '本次核验：已排队 {queued} 项，失败 {failed} 项，已跳过 {skipped} 项',
+      queued: '已排队', failed: '请求失败', skipped: '已跳过',
+      needsAssignment: '请逐项指定季集', needsConfirmation: '请逐项确认正片',
+      notInReview: '此条目不在待复核状态', recheckUnavailable: '此条目当前无法重新核验',
+      selected: '已选 {count} 项', deleteRecords: '删记录', deleteFiles: '删文件', blacklist: '加黑名单', cancel: '取消',
       confirmRecords: '确定删除选中的 {count} 条剧集记录？',
       confirmFiles: '确定删除选中的 {count} 条剧集记录及下载文件？',
       blocked: '已新增 {count} 个屏蔽关键词。',
