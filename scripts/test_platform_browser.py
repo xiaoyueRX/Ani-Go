@@ -185,6 +185,45 @@ def check_subscription_grid(browser, service, saved):
     print("Verified coverless card, title filter, detail navigation and clearing the filter.", flush=True)
 
 
+def check_filtered_batch_selection(browser, service, saved):
+    wait = WebDriverWait(browser, 20)
+    saved_title = saved["title_cn"]
+
+    def button(label):
+        return wait.until(EC.element_to_be_clickable((By.XPATH, f"//button[normalize-space(.)='{label}']")),
+                          f"Filtered batch selection did not offer {label}")
+
+    def filter_to(title):
+        field = browser.find_element(By.CSS_SELECTOR, 'input[placeholder="搜索追番标题、字幕组或年份..."]')
+        field.clear()
+        field.send_keys(title)
+        only_card = (By.XPATH, f"//h3[@title and normalize-space(.)='{title}' and count(//h3[@title])=1]")
+        wait.until(EC.visibility_of_element_located(only_card), f"The filter should show only {title}")
+
+    def selected_count(n):
+        wait.until(EC.visibility_of_element_located((By.XPATH, f"//span[normalize-space(.)='已选 {n}']")))
+
+    button("批量删除").click()
+    filter_to(saved_title)
+    row = wait.until(EC.element_to_be_clickable((By.XPATH, f"//h3[normalize-space(.)='{saved_title}']")))
+    browser.execute_script("arguments[0].scrollIntoView({block: 'center'})", row)
+    row.click()
+    selected_count(1)
+    filter_to(TITLE)
+    button("全选本页").click()
+    selected_count(2)
+    filter_to(saved_title)
+    button("取消全选").click()
+    selected_count(1)
+    filter_to(TITLE)
+    button("取消全选")  # 取消另一组后，这张卡仍已选中。
+    button("取消").click()
+    button("批量删除")
+    if {s["title_cn"] for s in service.api("subscriptions")} != {saved_title, TITLE}:
+        raise RuntimeError("Canceling batch selection should leave both subscriptions intact")
+    print("Verified filtered batch selection keeps hidden selections and cancels without deletion.", flush=True)
+
+
 def check_restored_plugin(browser, service):
     base = f"http://{HOST}:{service.port}"
     wait = WebDriverWait(browser, 20)
@@ -286,6 +325,7 @@ def main():
                 browser.set_page_load_timeout(30)
                 saved = check_form(browser, service, password, home / "data" / "ani-go.log")
                 check_subscription_grid(browser, service, saved)
+                check_filtered_batch_selection(browser, service, saved)
                 check_restored_plugin(browser, service)
                 check_library_files(browser, service, home)
                 print(f"Passed: {browser.name} {browser.capabilities.get('browserVersion')}, login, "
