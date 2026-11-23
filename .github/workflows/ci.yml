@@ -174,11 +174,11 @@ jobs:
           fi
           file "$qb"
           "$py" scripts/test_qb_runtime.py "./anigo$(go env GOEXE)" --qbittorrent "$qb"
-      - name: Probe direct ARMv7 execution on the ARM64 host
+      - name: Test direct ARMv7 execution and downloaders on the ARM64 host
         if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'linux' && matrix.arch == 'arm64' }}
         run: |
           GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o anigo-armv7 .
-          python3 scripts/probe_armv7_runtime.py ./anigo-armv7
+          python3 scripts/probe_armv7_runtime.py ./anigo-armv7 --downloaders
       - name: Exercise the macOS installer
         if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'darwin' }}
         run: python3 scripts/test_install.py

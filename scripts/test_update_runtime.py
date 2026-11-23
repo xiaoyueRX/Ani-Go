@@ -1,5 +1,6 @@
 """通过实际 HTTP 更新接口验收本平台的发行包、进程交接和自动回滚。"""
 
+import argparse
 from contextlib import contextmanager
 from functools import partial
 import hashlib
@@ -8,6 +9,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import platform
 import secrets
 import shutil
 import signal
@@ -21,6 +23,7 @@ import time
 import zipfile
 
 from test_platform_runtime import HOST, TITLE, Service, process_environment, verify_subscription
+from probe_armv7_runtime import verify_binary as verify_armv7_binary
 
 
 FIRST = "v1.0.1"
@@ -244,9 +247,18 @@ def exercise(service, installed, expected_hash, home, offline, password, log, mo
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--armv7", action="store_true", help="在支持直接执行 ARMv7 的 Linux ARM64 主机上验收 32 位发行包")
+    args = parser.parse_args()
     # 原生 CI 已准备好 Go 工具链、Go 模块和 web/dist；模拟发行包与测试进程均只使用回环网络。
     env = dict(os.environ, CGO_ENABLED="0", GOPROXY="off", GOSUMDB="off", GOTOOLCHAIN="local")
     host, arch = subprocess.check_output(["go", "env", "GOHOSTOS", "GOHOSTARCH"], cwd=REPO, env=env, text=True).split()
+    if args.armv7:
+        if (host, arch) != ("linux", "arm64") or sys.platform != "linux" or platform.machine().lower() not in ("aarch64", "arm64"):
+            parser.error("--armv7 requires a Linux ARM64 host and native ARM64 Go toolchain")
+        arch = "arm"
+    if host == "linux" and arch == "arm":
+        env["GOARM"] = "7"
     env.update(GOOS=host, GOARCH=arch)
     target = host + "-" + ("armv7" if arch == "arm" else arch)
     with tempfile.TemporaryDirectory(prefix="Ani-Go 原生更新 ") as folder, socket.socket() as blocked:
@@ -262,6 +274,10 @@ def main():
             build(installed, FIRST, base, env)
             good = root / ("good" + installed.suffix)
             build(good, GOOD, base, env)
+            if args.armv7:
+                for binary in (installed, good):
+                    verify_armv7_binary(binary)
+                print(f"Verified {FIRST} and {GOOD}: static ELF32 ARM, GOOS=linux GOARCH=arm GOARM=7.", flush=True)
             wanted_hash = sha256(good)
             broken = root / "invalid-program"
             broken.write_bytes(b"synthetic release: not an executable\n")
@@ -272,6 +288,8 @@ def main():
             password = secrets.token_urlsafe(32)
             log = root / "app.log"
             with running(installed, home, port, password, offline, log) as (service, monitor):
+                if args.armv7 and not Path(f"/proc/{monitor.pid}/exe").samefile(installed):
+                    raise RuntimeError("The running process is not the verified ARMv7 executable")
                 exercise(service, installed, wanted_hash, home, offline, password, log, monitor)
             expected = packages | {"/latest", f"/download/{GOOD}/checksums.txt", f"/download/{BROKEN}/checksums.txt"}
             if not expected.issubset(served):

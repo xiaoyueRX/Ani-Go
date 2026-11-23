@@ -69,13 +69,25 @@ def executes_directly(binary):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
+    parser.add_argument("--downloaders", action="store_true", help="用本机真实的 aria2、Transmission 和 qBittorrent 验收 ARMv7 应用")
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     verify_binary(binary)
     print(f"Verified {binary.name}: static ELF32 ARM, Ani-Go linux/arm GOARM=7.", flush=True)
-    if executes_directly(binary):
-        subprocess.run([sys.executable, Path(__file__).with_name("test_platform_runtime.py"), binary], check=True)
-        print("Passed: verified direct ARMv7 execution and the complete platform runtime acceptance.")
+    if not executes_directly(binary):
+        return
+    scripts = Path(__file__).resolve().parent
+    subprocess.run([sys.executable, scripts / "test_platform_runtime.py", binary], check=True)
+    subprocess.run([sys.executable, scripts / "test_update_runtime.py", "--armv7"], check=True)
+    if args.downloaders:
+        for script in ("test_aria2_runtime.py", "test_transmission_runtime.py", "test_qb_runtime.py"):
+            print(f"Running {script} against {binary.name} (ARMv7).", flush=True)
+            subprocess.run([sys.executable, scripts / script, binary], check=True)
+    env = dict(os.environ, CGO_ENABLED="0", GOOS="linux", GOARCH="arm", GOARM="7")
+    # 直接由内核执行每个测试程序，避免 Go 在 PATH 中自动选择跨架构模拟器。
+    subprocess.run(["go", "test", "-exec", "/usr/bin/env", "-count=1", "-timeout=5m", "./..."],
+                   cwd=scripts.parent, env=env, check=True)
+    print("Passed: direct ARMv7 platform acceptance, self-update and rollback, and native Go package tests.")
 
 
 if __name__ == "__main__":
