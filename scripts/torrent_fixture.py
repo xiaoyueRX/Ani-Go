@@ -9,6 +9,7 @@ import socket
 from threading import Thread
 import time
 from urllib.parse import unquote, urlsplit
+from xml.sax.saxutils import escape
 
 from test_platform_runtime import HOST
 
@@ -51,7 +52,8 @@ class SeedHandler(BaseHTTPRequestHandler):
             if self.server.media_ready is not None and not self.server.media_ready.wait(timeout=60):
                 self.send_error(503)
                 return
-            data, mime = self.server.media[path], "application/octet-stream"
+            data = self.server.media[path]
+            mime = "application/x-bittorrent" if path.endswith(".torrent") else "application/octet-stream"
         else:
             self.send_error(404)
             return
@@ -106,6 +108,41 @@ def web_seed(media_ready=None, *, http_seed=True, payloads=PAYLOADS):
         finally:
             if media_ready is not None:
                 media_ready.set()
+            server.shutdown()
+            worker.join()
+
+
+@contextmanager
+def movie_feed(title):
+    """逐条发布私有单文件种子，同一份回环 RSS 保留先前发行。"""
+    with ThreadingHTTPServer((HOST, 0), SeedHandler) as server:
+        url = f"http://{HOST}:{server.server_port}"
+        server.media, server.media_ready = {}, None
+        items = []
+
+        def rss():
+            return f'<rss version="2.0"><channel><title>{escape(title)}</title>{"".join(items)}</channel></rss>'.encode()
+
+        def publish(release, payload):
+            info = {b"name": (release + ".mkv").encode(), b"length": len(payload), b"private": 1,
+                    b"piece length": PIECE_SIZE,
+                    b"pieces": b"".join(hashlib.sha1(payload[i:i + PIECE_SIZE]).digest()
+                                        for i in range(0, len(payload), PIECE_SIZE))}
+            infohash = hashlib.sha1(bencode(info)).hexdigest()
+            path = f"/{infohash}.torrent"
+            torrent = bencode({b"info": info})
+            server.media[path] = torrent
+            items.append(f'<item><title>{escape(release)}</title><link>{url}/Home/Episode/{infohash}</link>'
+                         f'<enclosure url="{url}{path}" length="{len(torrent)}" type="application/x-bittorrent"/></item>')
+            server.rss = rss()
+            return infohash, path
+
+        server.rss = rss()
+        worker = Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            yield url, publish
+        finally:
             server.shutdown()
             worker.join()
 

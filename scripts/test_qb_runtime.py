@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from urllib.request import build_opener, HTTPCookieProcessor, ProxyHandler, Request
 
 from test_platform_runtime import HOST, start
-from torrent_fixture import create_pack_subscription, free_port, NAMES, PAYLOADS, TITLE, verify_library, wait_for, web_seed
+from torrent_fixture import create_pack_subscription, free_port, movie_feed, NAMES, PAYLOADS, TITLE, verify_library, wait_for, web_seed
 
 
 class QB:
@@ -66,8 +66,8 @@ class QB:
         wait_for("qBittorrent file selection", lambda: json.loads(self.request(route)),
                  lambda rows: [row["priority"] > 0 for row in rows] == [True, False, True])
 
-    def add(self, feed_url):
-        if self.request("torrents/add", {"urls": feed_url + "/pack.torrent", "savepath": str(self.downloads)}).strip() == b"Fails.":
+    def add(self, feed_url, torrent_path="/pack.torrent"):
+        if self.request("torrents/add", {"urls": feed_url + torrent_path, "savepath": str(self.downloads)}).strip() == b"Fails.":
             raise RuntimeError("qBittorrent rejected the local torrent")
 
     @contextmanager
@@ -98,7 +98,7 @@ class QB:
                     proc.kill()
                     proc.wait()
 
-    def download_from(self, source, infohash):
+    def download_from(self, source, infohash, expected=None):
         # 私有种子没有 tracker 和 Web Seed，唯一的种源由原生 Web API 显式添加。
         def transfer():
             task = self.info(infohash)
@@ -106,9 +106,66 @@ class QB:
                 self.request("torrents/addPeers", {"hashes": infohash, "peers": f"{HOST}:{source.peer_port}"})
             return task
         wait_for("peer to transfer selected media", transfer, lambda task: task.get("progress") == 1)
-        for i in (0, 2):
-            if (self.downloads / TITLE / NAMES[i]).read_bytes() != PAYLOADS[i]:
+        if expected is None:
+            expected = {Path(TITLE) / NAMES[i]: PAYLOADS[i] for i in (0, 2)}
+        for name, data in expected.items():
+            if (self.downloads / name).read_bytes() != data:
                 raise RuntimeError("qBittorrent received incorrect media bytes")
+
+
+def verify_movie(service, home, central, seed):
+    title = "Harbor Lights"
+    with movie_feed(title) as (url, publish):
+        sub = service.api("subscriptions", "POST", {
+            "title_cn": title, "mikan_id": "43", "rss_url": url + "/RSS/Bangumi?bangumiId=43",
+            "custom_path": str(central.downloads),
+        }, status=201)
+        route = f"subscriptions/{sub['id']}"
+        service.api(route, "PUT", {"anime_type": "Movie", "total_episodes": 1})
+
+        def release(suffix, status):
+            name = title + suffix
+            filename = name + ".mkv"
+            payload = hashlib.shake_256(name.encode()).digest(54_611)
+            (seed.downloads / filename).write_bytes(payload)
+            infohash, torrent_path = publish(name, payload)
+            seed.add(url, torrent_path)
+            wait_for("qBittorrent seed to verify " + filename, lambda: seed.info(infohash), lambda row: row.get("progress") == 1)
+            wait_for("movie RSS task " + filename, lambda: central.info(infohash), bool)
+            central.download_from(seed, infohash, {filename: payload})
+
+            def settled(detail):
+                return any(ep["torrent_hash"] == infohash and ep["status"] in ("organized", "needs_review")
+                           for ep in detail["episodes"])
+
+            detail = wait_for("movie organization decision for " + filename, lambda: service.api(route), settled)
+            matches = [ep for ep in detail["episodes"] if ep["torrent_hash"] == infohash]
+            if len(matches) != 1 or matches[0]["number"] != 0 or matches[0]["status"] != status:
+                raise RuntimeError(f"Expected one unnumbered {status} row for {filename}, got "
+                                   f"{[(ep['number'], ep['status']) for ep in matches]}")
+            return detail, matches[0], filename, payload
+
+        detail, trailer, _, _ = release(" - Trailer", "needs_review")
+        sub = detail["subscription"]
+        if (len(detail["episodes"]) != 1 or trailer["final_path"] or trailer["review_kind"] != "movie_selection"
+                or not trailer["can_confirm_movie"] or (sub["current_episodes"], sub["total_episodes"], sub["completed"]) != (0, 1, False)):
+            raise RuntimeError("Trailer must await feature confirmation and leave movie progress at 0/1")
+
+        print("Movie trailer awaits review with collection progress at 0/1.", flush=True)
+        _, main, filename, payload = release(" [Movie]", "organized")
+        # 整理记录先提交，随后更新订阅完成标记，两次 HTTP 读取可以跨越这个边界。
+        detail = wait_for("movie collection to reach 1/1 and remain enabled", lambda: service.api(route),
+                          lambda data: data["subscription"]["current_episodes"] == data["subscription"]["total_episodes"] == 1
+                          and data["subscription"]["completed"] and data["subscription"]["enabled"])
+        trailer_after = next(ep for ep in detail["episodes"] if ep["id"] == trailer["id"])
+        if len(detail["episodes"]) != 2 or trailer_after["status"] != "needs_review" or trailer_after["final_path"]:
+            raise RuntimeError("Organizing the feature changed the trailer's review state")
+        target = Path(main["final_path"])
+        library = home / "电影"
+        if ([file.resolve() for file in library.rglob("*.mkv")] != [target.resolve()] or target.is_symlink()
+                or not target.samefile(central.downloads / filename) or target.read_bytes() != payload):
+            raise RuntimeError("Movie library must contain only the hard-linked feature from qBittorrent")
+        print("Movie RSS: the standalone trailer remained in review at 0/1; the unnumbered feature was organized at 1/1.", flush=True)
 
 
 def main():
@@ -147,6 +204,7 @@ def main():
                     seed.add(url)
                     wait_for("source hashes verified", lambda: seed.info(infohash), lambda row: row.get("progress") == 1)
                     central.download_from(seed, infohash)
+                    verify_movie(service, home, central, seed)
                 verify_library(service, route, home, central.downloads)
                 for row in service.api(route)["episodes"]:
                     source = central.downloads / TITLE / NAMES[int(row["number"]) - 1]
