@@ -205,6 +205,14 @@ function formatSize(bytes: number): string {
   return (bytes / 1e3).toFixed(0) + ' KB'
 }
 
+function episodeLabel(ep: Episode): string {
+  if (ep.number === 0 && ['movie', 'film', '剧场版', '劇場版'].includes(sub.value?.anime_type?.trim().toLowerCase() ?? '')) {
+    return t('detail.logs.unnumbered')
+  }
+  const season = ep.season === 0 || ep.season > 1 ? `S${ep.season}` : ''
+  return `${season}E${ep.number}`
+}
+
 // 按字幕组分组的剧集列表
 const groupedEpisodes = computed(() => {
   const groups: Record<string, Episode[]> = {}
@@ -623,7 +631,7 @@ onUnmounted(() => {
                       </td>
                       <td class="pl-10">
                         <span class="text-xs font-black font-mono bg-base-200 py-1.5 px-3 rounded-lg group-hover/row:bg-primary group-hover/row:text-primary-content transition-colors">
-                          {{ ep.season === 0 || ep.season > 1 ? 'S' + ep.season : '' }}E{{ ep.number }}
+                          {{ episodeLabel(ep) }}
                         </span>
                       </td>
                       <td class="max-w-md">

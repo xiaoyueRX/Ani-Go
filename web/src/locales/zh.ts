@@ -750,6 +750,7 @@ export default {
       empty: "暂无剧集记录",
       episodes: "集",
       ungrouped: "未分组",
+      unnumbered: "无集号",
       status: {
         submitting: "正在提交", retrying: "等待重试", downloaded: "已下载",
         organizing: "正在整理", organized: "已入库", needsReview: "待复核",

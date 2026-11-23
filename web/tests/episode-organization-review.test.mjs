@@ -86,10 +86,27 @@ test('普通重试只提交一次，不改变手动标记，重试后显示服�
 
 test('特别篇季号与小数集号如实显示，已有的零号整包记录仍可识别', async () => {
   const c = setup([review({ status: 'organized', season: 0, number: 1.25 }), review({ id: 44, status: 'organized', season: 1, number: 0 })])
+  c.sub.value = { anime_type: 'TV' }
   const html = await renderGroups(c)
   assert.match(html, />S0E1\.25</)
   assert.match(html, />E0</)
 })
+
+for (const [locale, label] of [['zh', '无集号'], ['en', 'Unnumbered']]) {
+  test(`电影的无集号记录显示中性标签，已编号记录保留季集（${locale}）`, async () => {
+    const c = setup([
+      review({ status: 'organized' }),
+      review({ id: 42, review_kind: 'movie_selection', can_confirm_movie: true, source_file: 'Extras/Preview.mkv' }),
+      review({ id: 43, status: 'organized', season: 2, number: 1.5 }),
+    ], {}, locale)
+    for (const type of ['movie', ' FILM ', '剧场版', '劇場版']) {
+      c.sub.value = { anime_type: type }
+      const rows = (await renderGroups(c)).split('<tbody')[1].split('</tr>').slice(0, 3)
+      const numbers = rows.map(row => row.split('</td>')[1].match(/<span\b[^>]*>([^<]*)<\/span>/)[1].trim())
+      assert.deepEqual(numbers, [label, label, 'S2E1.5'], type)
+    }
+  })
+}
 
 test('仅已绑定视频可指派，特别篇第零季与小数集号原样提交，越界值和空值不会触发请求', async () => {
   const ep = review({ review_kind: 'episode_identity', can_retry_organize: false, can_assign_episode: true, source_file: 'Extras/Harbor.mkv' })

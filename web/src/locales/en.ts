@@ -749,6 +749,7 @@ export default {
       empty: "No episode records",
       episodes: "Eps",
       ungrouped: "Ungrouped",
+      unnumbered: "Unnumbered",
       status: {
         submitting: "Submitting", retrying: "Retrying", downloaded: "Downloaded",
         organizing: "Organizing", organized: "In library", needsReview: "Needs review",
