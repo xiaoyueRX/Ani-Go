@@ -43,3 +43,57 @@ func TestMoveBetweenEquivalentFileNamesPreservesMedia(t *testing.T) {
 		})
 	}
 }
+
+func TestMoveCleansOnlyTheOldHardlink(t *testing.T) {
+	for _, aliasParent := range []bool{false, true} {
+		name := "same directory"
+		if aliasParent {
+			name = "alias of same directory"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "library")
+			if err := os.Mkdir(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			publishedDir := dir
+			if aliasParent {
+				publishedDir = filepath.Join(root, "alias")
+				if err := os.Symlink(dir, publishedDir); err != nil {
+					t.Skipf("directory symlink unavailable: %v", err)
+				}
+			}
+			src := filepath.Join(dir, "Café-release.mkv")
+			const content = "complete episode with a seeding link"
+			if err := os.WriteFile(src, []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			seed := filepath.Join(dir, "seed.mkv")
+			if err := os.Link(src, seed); err != nil {
+				t.Skipf("hardlinks unavailable: %v", err)
+			}
+			dst := filepath.Join(publishedDir, "Episode.mkv")
+			if err := os.Link(src, dst); err != nil {
+				t.Fatal(err)
+			}
+			// 有些卷接受两种 Unicode 写法，下载器提供的路径可能与目录中保存的拼法不同。
+			alternative := filepath.Join(dir, "Cafe\u0301-release.mkv")
+			if _, err := os.Stat(alternative); err == nil {
+				src = alternative
+			}
+			org := New("Episode{ext}", "", "", publishedDir, "", false, nil)
+			path, err := org.Organize(t.Context(), src, core.Anime{Type: "TV"}, core.Episode{Season: 1, Number: 1})
+			if err != nil || path != dst {
+				t.Fatalf("move to existing hardlink: got %q, err = %v", path, err)
+			}
+			if _, err := os.Stat(src); !os.IsNotExist(err) {
+				t.Fatalf("old entry still exists after move: %v", err)
+			}
+			for _, path := range []string{dst, seed} {
+				if data, err := os.ReadFile(path); err != nil || string(data) != content {
+					t.Fatalf("link %q lost or changed: %q, %v", path, data, err)
+				}
+			}
+		})
+	}
+}

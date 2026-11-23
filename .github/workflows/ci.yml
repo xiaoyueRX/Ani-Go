@@ -51,6 +51,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Build and start the native application
+        id: application
         if: matrix.arch != 'armv7'
         env:
           TARGET_OS: ${{ matrix.os }}
@@ -63,11 +64,26 @@ jobs:
           go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o "$binary" .
           if [[ "$TARGET_OS" == windows ]]; then py=python; else py=python3; fi
           "$py" scripts/test_platform_runtime.py "./$binary"
+      - name: Sign in and create a subscription in the native browser
+        if: matrix.runner == 'windows-2025' || matrix.runner == 'macos-15'
+        run: |
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            python -m venv .browser-venv
+            python=.browser-venv/Scripts/python.exe
+            browser=edge
+          else
+            python3 -m venv .browser-venv
+            python=.browser-venv/bin/python
+            browser=safari
+            sudo /usr/bin/safaridriver --enable
+          fi
+          "$python" -m pip install --disable-pip-version-check -r scripts/requirements-browser.txt
+          "$python" scripts/test_platform_browser.py "./anigo$(go env GOEXE)" --browser "$browser"
       - name: Native Go tests
-        if: matrix.arch != 'armv7'
+        if: ${{ !cancelled() && steps.application.outcome == 'success' }}
         run: go test -count=1 -timeout=5m ./...
       - name: Exercise the macOS installer
-        if: matrix.os == 'darwin'
+        if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'darwin' }}
         run: python3 scripts/test_install.py
       - name: Build and start the ARMv7 application with QEMU
         if: matrix.arch == 'armv7'

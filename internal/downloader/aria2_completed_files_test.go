@@ -110,10 +110,11 @@ func TestAria2ArchivedFilesSharingPieces(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const gid = "1123456789abcdef"
+			root := t.TempDir()
 			files := []map[string]string{
-				{"index": "1", "length": "3", "path": "/data/a.mkv", "completedLength": "0", "selected": "true"},
-				{"index": tc.middleIndex, "length": tc.middleLength, "path": "/data/b.mkv", "completedLength": "0", "selected": "false"},
-				{"index": "3", "length": "4", "path": "/data/c.mkv", "completedLength": "0", "selected": "true"},
+				{"index": "1", "length": "3", "path": filepath.Join(root, "a.mkv"), "completedLength": "0", "selected": "true"},
+				{"index": tc.middleIndex, "length": tc.middleLength, "path": filepath.Join(root, "b.mkv"), "completedLength": "0", "selected": "false"},
+				{"index": "3", "length": "4", "path": filepath.Join(root, "c.mkv"), "completedLength": "0", "selected": "true"},
 			}
 			if tc.middleIndex == "" {
 				delete(files[1], "index")
@@ -133,9 +134,9 @@ func TestAria2ArchivedFilesSharingPieces(t *testing.T) {
 				"bitfield": tc.bitfield, "numPieces": pieces, "pieceLength": "4",
 			}
 			client := archivedAria2Client(t, status)
-			list, err := client.CompletedFiles(t.Context(), core.DownloadTask{SavePath: "/data", ClientID: gid})
+			list, err := client.CompletedFiles(t.Context(), core.DownloadTask{SavePath: root, ClientID: gid})
 			if tc.accept {
-				if err != nil || !list.Partial || len(list.Files) != 2 || list.Files[0].Path != "/data/a.mkv" || list.Files[1].Path != "/data/c.mkv" {
+				if err != nil || !list.Partial || len(list.Files) != 2 || list.Files[0].Path != files[0]["path"] || list.Files[1].Path != files[2]["path"] {
 					t.Fatalf("shared piece selection = %+v, err = %v", list, err)
 				}
 			} else if err == nil {

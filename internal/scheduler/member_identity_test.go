@@ -115,7 +115,8 @@ func TestRetryKeepsUnconfirmedMemberAndResumesVerifiedSibling(t *testing.T) {
 	root, lib := t.TempDir(), t.TempDir()
 	dl := &memberListDownloader{}
 	dl.tasks = []core.DownloadTask{{Hash: "mixed", SavePath: root, ContentPath: root, Progress: 1, Status: "completed"}}
-	for _, name := range []string{"Extra/Mini Anime - 03.mkv", "S02E01.mkv", "S02E02.mkv"} {
+	extra := filepath.Join("Extra", "Mini Anime - 03.mkv")
+	for _, name := range []string{extra, "S02E01.mkv", "S02E02.mkv"} {
 		p := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 			t.Fatal(err)
@@ -132,7 +133,7 @@ func TestRetryKeepsUnconfirmedMemberAndResumesVerifiedSibling(t *testing.T) {
 	s := Scheduler{downloader: dl, organizer: organizer.New("Show/S{season:02}E{ep:02}{ext}", "", "", lib, "", true, nil)}
 	s.pollOrganizer(context.Background())
 	var unknown, wrong database.Episode
-	for n, r := range map[string]*database.Episode{"Extra/Mini Anime - 03.mkv": &unknown, "S02E02.mkv": &wrong} {
+	for n, r := range map[string]*database.Episode{extra: &unknown, "S02E02.mkv": &wrong} {
 		if err := db.Where("source_file = ?", n).First(r).Error; err != nil {
 			t.Fatal(err)
 		}

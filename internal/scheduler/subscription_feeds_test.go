@@ -2,11 +2,10 @@ package scheduler
 
 import (
 	"context"
-	"github.com/xiaoyueRX/Ani-Go/internal/ai"
-	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/xiaoyueRX/Ani-Go/internal/ai"
 	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
@@ -46,9 +45,7 @@ func TestSubscriptionFeedUsesItsURLAndAliases(t *testing.T) {
 			name = "独立订阅源"
 		}
 		t.Run(name, func(t *testing.T) {
-			if err := database.Init(filepath.Join(t.TempDir(), "feeds.db")); err != nil {
-				t.Fatal(err)
-			}
+			db := pipelineDB(t)
 			cfg := &config.Config{}
 			cfg.Mikan.RSSMode = core.RSSModePersonal
 			feed := &subscriptionFeedFixture{items: []core.TorrentItem{{Title: "[Group] Example Show - 01 [1080p]", URL: "https://example.test/1.torrent"}}}
@@ -61,7 +58,7 @@ func TestSubscriptionFeedUsesItsURLAndAliases(t *testing.T) {
 			} else {
 				s.mikanRSSURL = url
 			}
-			if e := database.DB.Create(&sub).Error; e != nil {
+			if e := db.Create(&sub).Error; e != nil {
 				t.Fatal(e)
 			}
 			s.pollRSS(context.Background())
@@ -73,11 +70,9 @@ func TestSubscriptionFeedUsesItsURLAndAliases(t *testing.T) {
 }
 
 func TestSupplementRejectsUnrelatedReleases(t *testing.T) {
-	if err := database.Init(filepath.Join(t.TempDir(), "history.db")); err != nil {
-		t.Fatal(err)
-	}
+	db := pipelineDB(t)
 	sub := database.Subscription{TitleCN: "甲作品", BangumiID: "101", FilterJSON: `{"resolution":"1080p"}`}
-	if e := database.DB.Create(&sub).Error; e != nil {
+	if e := db.Create(&sub).Error; e != nil {
 		t.Fatal(e)
 	}
 	feed := &subscriptionFeedFixture{items: []core.TorrentItem{
@@ -94,15 +89,13 @@ func TestSupplementRejectsUnrelatedReleases(t *testing.T) {
 }
 
 func TestSubscriptionRegexUsedByRSS(t *testing.T) {
-	if err := database.Init(filepath.Join(t.TempDir(), "regex.db")); err != nil {
-		t.Fatal(err)
-	}
+	db := pipelineDB(t)
 	if err := source.SetCustomRegexPatterns([]string{`ReleaseNo([0-9]+)`}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = source.SetCustomRegexPatterns(nil) })
 	sub := database.Subscription{TitleCN: "甲作品"}
-	if err := database.DB.Create(&sub).Error; err != nil {
+	if err := db.Create(&sub).Error; err != nil {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{}
@@ -111,7 +104,7 @@ func TestSubscriptionRegexUsedByRSS(t *testing.T) {
 	s := &Scheduler{cfg: cfg, source: feed, downloader: &feedDownloader{}, mikanRSSURL: "https://example.test/feed"}
 	s.pollRSS(context.Background())
 	var ep database.Episode
-	if err := database.DB.First(&ep).Error; err != nil {
+	if err := db.First(&ep).Error; err != nil {
 		t.Fatal(err)
 	}
 	if ep.Number != 26 {
@@ -140,18 +133,16 @@ func (p *feedMetadata) GetEpisodes(_ context.Context, id string, _ int) ([]core.
 }
 
 func TestSupplementUsesProviderSpecificIDs(t *testing.T) {
-	if err := database.Init(filepath.Join(t.TempDir(), "ids.db")); err != nil {
-		t.Fatal(err)
-	}
+	db := pipelineDB(t)
 	sub := database.Subscription{TitleCN: "甲作品", BangumiID: "9988"}
-	if err := database.DB.Create(&sub).Error; err != nil {
+	if err := db.Create(&sub).Error; err != nil {
 		t.Fatal(err)
 	}
 	feed := &subscriptionFeedFixture{}
 	md := &feedMetadata{}
 	s := &Scheduler{cfg: &config.Config{}, source: feed, downloader: &feedDownloader{}, metadataProvider: md}
 	s.supplementOne(context.Background(), sub)
-	if err := database.DB.First(&sub, sub.ID).Error; err != nil {
+	if err := db.First(&sub, sub.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	if md.lookedUp != "765432" || feed.historyID != "" || sub.MetadataID != "765432" || sub.MikanID != "" {
@@ -165,9 +156,7 @@ func TestSupplementUsesProviderSpecificIDs(t *testing.T) {
 }
 
 func TestAmbiguousSubscriptionEpisodeUsesVerifiedCalendar(t *testing.T) {
-	if err := database.Init(filepath.Join(t.TempDir(), "calendar.db")); err != nil {
-		t.Fatal(err)
-	}
+	pipelineDB(t)
 	now := time.Date(2024, 7, 5, 8, 0, 0, 0, time.UTC)
 	md := &feedMetadata{releases: []core.Episode{{Season: 2, Number: 1, AiredAt: now.Add(-8 * time.Hour)}}}
 	s := &Scheduler{metadataProvider: md}
@@ -189,9 +178,7 @@ func (p *feedAI) DisambiguateTitle(context.Context, string, string, time.Time) (
 }
 
 func TestAmbiguousSubscriptionEpisodeUsesEnabledAIAndCache(t *testing.T) {
-	if err := database.Init(filepath.Join(t.TempDir(), "ai.db")); err != nil {
-		t.Fatal(err)
-	}
+	pipelineDB(t)
 	client := &feedAI{}
 	s := &Scheduler{aiClient: client}
 	sub := database.Subscription{TitleCN: "甲作品", Season: 2}
@@ -219,13 +206,11 @@ func TestSharedFeedAndHistoryResolveIdenticalTitlesAcrossSeasons(t *testing.T) {
 			name = "历史搜索"
 		}
 		t.Run(name, func(t *testing.T) {
-			if err := database.Init(filepath.Join(t.TempDir(), "two-seasons.db")); err != nil {
-				t.Fatal(err)
-			}
+			db := pipelineDB(t)
 			first := database.Subscription{TitleCN: "Harbor Story", Season: 1, MikanID: "101"}
 			second := database.Subscription{TitleCN: "Harbor Story", Season: 2, MikanID: "102"}
 			for _, sub := range []*database.Subscription{&first, &second} {
-				if err := database.DB.Create(sub).Error; err != nil {
+				if err := db.Create(sub).Error; err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -248,7 +233,7 @@ func TestSharedFeedAndHistoryResolveIdenticalTitlesAcrossSeasons(t *testing.T) {
 				s.pollRSS(t.Context())
 			}
 			var episodes []database.Episode
-			if err := database.DB.Find(&episodes).Error; err != nil {
+			if err := db.Find(&episodes).Error; err != nil {
 				t.Fatal(err)
 			}
 			if len(episodes) != 2 {
@@ -264,13 +249,11 @@ func TestSharedFeedAndHistoryResolveIdenticalTitlesAcrossSeasons(t *testing.T) {
 }
 
 func TestPrivateSeasonFeedAcceptsReleaseWithoutSeasonMarker(t *testing.T) {
-	if err := database.Init(filepath.Join(t.TempDir(), "scoped.db")); err != nil {
-		t.Fatal(err)
-	}
+	db := pipelineDB(t)
 	first := database.Subscription{TitleCN: "Harbor Story", Season: 1}
 	second := database.Subscription{TitleCN: "Harbor Story", Season: 2, RSSURL: "https://local.test/season-two"}
 	for _, sub := range []*database.Subscription{&first, &second} {
-		if err := database.DB.Create(sub).Error; err != nil {
+		if err := db.Create(sub).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -279,7 +262,7 @@ func TestPrivateSeasonFeedAcceptsReleaseWithoutSeasonMarker(t *testing.T) {
 	s := &Scheduler{cfg: &config.Config{}, source: feed, downloader: dl}
 	s.pollRSS(t.Context())
 	var ep database.Episode
-	if err := database.DB.First(&ep).Error; err != nil || ep.SubscriptionID != second.ID || ep.Season != 2 {
+	if err := db.First(&ep).Error; err != nil || ep.SubscriptionID != second.ID || ep.Season != 2 {
 		t.Fatalf("独立订阅源未正确归季：%+v, %v", ep, err)
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // MoveSource 是已发布库文件所对应的待清理下载源。可随整理记录持久化。
@@ -71,31 +73,47 @@ func (m MoveSource) Cleanup(ctx context.Context, dst string) error {
 
 func sameDirectoryEntry(src, dst string) bool {
 	sourceName, targetName := filepath.Base(src), filepath.Base(dst)
-	if !strings.EqualFold(sourceName, targetName) {
-		return false
-	}
 	a, err := os.Stat(filepath.Dir(src))
 	if err != nil {
-		return false
+		return true
 	}
 	b, err := os.Stat(filepath.Dir(dst))
-	if err != nil || !os.SameFile(a, b) {
+	if err != nil {
+		return true
+	}
+	if !os.SameFile(a, b) {
 		return false
 	}
 	if sourceName == targetName {
 		return true
 	}
-	// 区分大小写的卷允许同目录存在两个仅大小写不同的独立目录项。
+	// 只有确认是两个目录项时才可清理。两个硬链接也可能指向同一 inode。
 	entries, err := os.ReadDir(filepath.Dir(src))
 	if err != nil {
 		return true
 	}
-	var sourcePresent, targetPresent bool
+	sourceEntry := listedMediaName(entries, sourceName)
+	targetEntry := listedMediaName(entries, targetName)
+	return sourceEntry == "" || targetEntry == "" || sourceEntry == targetEntry
+}
+
+func listedMediaName(entries []os.DirEntry, name string) string {
+	folded := norm.NFC.String(name)
+	var match string
+	var ambiguous bool
 	for _, entry := range entries {
-		sourcePresent = sourcePresent || entry.Name() == sourceName
-		targetPresent = targetPresent || entry.Name() == targetName
+		if entry.Name() == name {
+			return name
+		}
+		if strings.EqualFold(norm.NFC.String(entry.Name()), folded) {
+			ambiguous = match != ""
+			match = entry.Name()
+		}
 	}
-	return !(sourcePresent && targetPresent)
+	if ambiguous {
+		return ""
+	}
+	return match
 }
 
 // SameMediaContents 逐段核对两个常规文件的大小和全部字节，供跨卷恢复使用。

@@ -26,7 +26,7 @@ require (
 	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.42.0
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/text v0.35.0
 	modernc.org/libc v1.22.5 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
 	modernc.org/memory v1.5.0 // indirect

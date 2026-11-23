@@ -182,13 +182,13 @@ def main():
         shutil.copy2(args.binary, executable)
         command = [str(executable)]
         if args.runner:
-            command.insert(0, shutil.which(args.runner) or str(Path(args.runner).resolve()))
+            command.insert(0, str(Path(shutil.which(args.runner) or args.runner).resolve()))
         # 本地占住但不监听的端口用于外部依赖和出站 HTTP 代理。
-        with socket.socket() as blocked, socket.socket() as available:
+        with socket.socket() as blocked:
             blocked.bind((HOST, 0))
-            available.bind((HOST, 0))
-            port = available.getsockname()[1]
-            available.close()
+            with socket.socket() as available:
+                available.bind((HOST, 0))
+                port = available.getsockname()[1]
             run(command, root, port, f"http://{HOST}:{blocked.getsockname()[1]}")
 
 
