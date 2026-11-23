@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -19,7 +20,22 @@ import (
 
 const handoffFlag = "--anigo-update-handoff"
 const monitorControl = "ANIGO_INTERNAL_UPDATE_CONTROL"
+const monitorOwner = "ANIGO_INTERNAL_UPDATE_MONITOR_PID"
 const nextUpdateExit = 75
+
+// 服务启动时绑定父进程；旧监管版本只传控制路径，仍然沿用原退出码和 JSON 协议。
+var monitorAlive = bindUpdateMonitor()
+
+func bindUpdateMonitor() func() bool {
+	if os.Getenv(monitorControl) == "" || len(os.Args) > 1 && os.Args[1] == handoffFlag {
+		return nil
+	}
+	pid := os.Getppid()
+	if owner := os.Getenv(monitorOwner); pid <= 0 || owner != "" && owner != strconv.Itoa(pid) {
+		return nil
+	}
+	return watchUpdateParent(pid)
+}
 
 type replacement struct {
 	Old     string
@@ -53,7 +69,7 @@ func startHandoff(executable string, program []byte, version, healthURL string) 
 		}
 	}
 	rollback := func(cause error) error {
-		if err := os.Rename(old, executable); err != nil {
+		if err := restoreExecutable(old, executable); err != nil {
 			installed = true
 			return fmt.Errorf("%v；旧版保存在 %s，恢复失败: %w", cause, old, err)
 		}
@@ -66,23 +82,38 @@ func startHandoff(executable string, program []byte, version, healthURL string) 
 		return err
 	}
 	installed = true
+	freshHandoff := func() error {
+		args := append([]string{handoffFlag, executable, version, healthURL}, os.Args[1:]...)
+		if err := launchHandoff(old, args); err != nil {
+			return rollback(err)
+		}
+		return nil
+	}
 	// 已有监管进程继续复用同一 PID 和控制文件，防止连续升级累积后台进程。
-	if control := os.Getenv(monitorControl); control != "" && filepath.Dir(filepath.Dir(control)) == filepath.Dir(executable) && strings.HasPrefix(filepath.Base(filepath.Dir(control)), ".anigo-monitor-") {
+	if control := os.Getenv(monitorControl); monitorAlive != nil && monitorAlive() && filepath.Dir(filepath.Dir(control)) == filepath.Dir(executable) && strings.HasPrefix(filepath.Base(filepath.Dir(control)), ".anigo-monitor-") {
 		data, err := json.Marshal(replacement{Old: old, Version: version})
 		if err == nil {
 			err = os.WriteFile(control, data, 0600)
 		}
 		if err != nil {
+			if !monitorAlive() {
+				return freshHandoff()
+			}
 			return rollback(err)
 		}
-		go func() { time.Sleep(time.Second); os.Exit(nextUpdateExit) }()
+		go func() {
+			time.Sleep(time.Second)
+			if monitorAlive() {
+				os.Exit(nextUpdateExit)
+			}
+			// 写入交接记录后监管进程仍可能退出，此时由当前服务启动新的监管进程。
+			if err := freshHandoff(); err != nil {
+				log.Printf("重新启动更新监管进程失败: %v", err)
+			}
+		}()
 		return nil
 	}
-	args := append([]string{handoffFlag, executable, version, healthURL}, os.Args[1:]...)
-	if err := launchHandoff(old, args); err != nil {
-		return rollback(err)
-	}
-	return nil
+	return freshHandoff()
 }
 
 func copyExecutable(src, dst string) error {
@@ -142,6 +173,8 @@ func RunHandoff(args []string) bool {
 }
 
 func runReplacement(old, executable, version, healthURL string, args []string) error {
+	// Windows 首次交接使用旧映像运行监管进程，之后各次升级的旧映像可以回收。
+	supervisorImage := old
 	monitor, err := os.MkdirTemp(filepath.Dir(executable), ".anigo-monitor-")
 	if err != nil {
 		return err
@@ -157,7 +190,7 @@ func runReplacement(old, executable, version, healthURL string, args []string) e
 		cmd := exec.Command(executable, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		cmd.Env = append(os.Environ(), monitorControl+"="+control)
+		cmd.Env = append(os.Environ(), monitorControl+"="+control, monitorOwner+"="+strconv.Itoa(os.Getpid()))
 		startErr := cmd.Start()
 		if startErr == nil {
 			done := make(chan error, 1)
@@ -166,7 +199,7 @@ func runReplacement(old, executable, version, healthURL string, args []string) e
 			confirmed := old == ""
 			var exitErr error
 			confirmed, exitErr = monitorProgram(cmd, done, signals, client, healthURL, version, confirmed, func() {
-				if runtime.GOOS != "windows" && old != "" {
+				if old != "" && (runtime.GOOS != "windows" || old != supervisorImage) {
 					_ = os.Remove(old)
 					_ = os.Remove(filepath.Dir(old))
 				}
@@ -199,7 +232,7 @@ func runReplacement(old, executable, version, healthURL string, args []string) e
 		if old == "" {
 			return startErr
 		}
-		if err := os.Rename(old, executable); err != nil {
+		if err := restoreExecutable(old, executable); err != nil {
 			return fmt.Errorf("%v；旧版位于 %s，回滚失败: %w", startErr, old, err)
 		}
 		log.Printf("新版未通过健康检查，已恢复旧版: %v", startErr)

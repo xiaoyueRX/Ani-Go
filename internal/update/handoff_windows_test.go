@@ -5,6 +5,7 @@ package update
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -234,6 +235,11 @@ func TestWindowsRollbackAfterTemporarySharingViolation(t *testing.T) {
 		nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// 先确认当前文件系统确实拒绝替换，再允许占用者延迟释放。
+	if err := os.Rename(old, target); !errors.Is(err, windows.ERROR_SHARING_VIOLATION) && !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		windows.CloseHandle(handle)
+		t.Fatalf("持锁时的替换未返回预期的共享错误: %v", err)
 	}
 	unlocked := make(chan error, 1)
 	time.AfterFunc(750*time.Millisecond, func() { unlocked <- windows.CloseHandle(handle) })
