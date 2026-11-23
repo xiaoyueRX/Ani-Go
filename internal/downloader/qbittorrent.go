@@ -34,6 +34,7 @@ type QBittorrent struct {
 	loginMu    sync.Mutex
 	loggedIn   bool
 	lastLogin  time.Time
+	sessionGen uint64 // 登录时间可能相同，用代次区分不同会话
 	retryCount int
 }
 
@@ -99,6 +100,7 @@ func (q *QBittorrent) login(ctx context.Context) error {
 
 	q.loggedIn = true
 	q.lastLogin = time.Now()
+	q.sessionGen++
 	log.Println("✅ qBittorrent 登录成功")
 	return nil
 }
@@ -517,7 +519,7 @@ func (q *QBittorrent) IsAvailable(ctx context.Context) bool {
 			return false
 		}
 		q.loginMu.Lock()
-		session := q.lastLogin
+		session := q.sessionGen
 		q.loginMu.Unlock()
 		resp, err := q.httpClient.Do(req.Clone(timeoutCtx))
 		if err != nil {
@@ -530,7 +532,7 @@ func (q *QBittorrent) IsAvailable(ctx context.Context) bool {
 		if attempt == 0 {
 			// 服务重启可使未到期的 Cookie 失效；只作废本次探测使用的会话。
 			q.loginMu.Lock()
-			if q.lastLogin == session {
+			if q.sessionGen == session {
 				q.loggedIn = false
 			}
 			q.loginMu.Unlock()
