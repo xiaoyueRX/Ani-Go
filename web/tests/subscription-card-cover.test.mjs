@@ -89,3 +89,16 @@ test('只跳过离屏的装饰动画，保留图片、替代文本和卡片标�
   assert.equal(find(layer, node => node.type === 'h3'), undefined)
   assert.ok(find(root, node => node.type === 'h3'))
 })
+
+test('同一张已加载的封面改为等价 HTTPS 地址时保持可见', async () => {
+  const c = card('//covers.example/series.jpg')
+  const initial = c.cover().image
+  initial.onLoad()
+  assert.equal(c.cover().skeleton, false)
+
+  await c.changeCover('https://covers.example/series.jpg')
+  const updated = c.cover()
+  assert.equal(updated.image.src, initial.src)
+  assert.equal(updated.skeleton, false)
+  assert.ok(updated.image.class.split(' ').includes('opacity-100'))
+})

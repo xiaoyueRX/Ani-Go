@@ -56,8 +56,9 @@ const emit = defineEmits<{
   (e: 'supplement'): void
 }>()
 
+const coverSrc = computed(() => proxyImage(props.sub.cover_url))
 const isImageLoaded = ref(false)
-watch(() => props.sub.cover_url, () => { isImageLoaded.value = false })
+watch(coverSrc, () => { isImageLoaded.value = false })
 
 const progress = computed(() => {
   if (props.sub.total_episodes <= 0) return null
@@ -80,13 +81,13 @@ const progressColor = computed(() => {
     <!-- Cover Image Wrapper -->
     <div class="relative aspect-[3/3.8] overflow-hidden bg-base-300">
       <!-- Loading Skeleton -->
-      <div v-if="sub.cover_url && !isImageLoaded" class="absolute inset-0 [content-visibility:auto]" aria-hidden="true">
+      <div v-if="coverSrc && !isImageLoaded" class="absolute inset-0 [content-visibility:auto]" aria-hidden="true">
         <div class="skeleton h-full rounded-none"></div>
       </div>
       
       <img
-        v-if="sub.cover_url"
-        :src="proxyImage(sub.cover_url)"
+        v-if="coverSrc"
+        :src="coverSrc"
         :alt="sub.title_cn"
         class="w-full h-full object-contain bg-black transition-all duration-1000 group-hover:scale-105"
         :class="{ 'opacity-0': !isImageLoaded, 'opacity-100': isImageLoaded }"
