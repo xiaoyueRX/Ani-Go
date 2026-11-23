@@ -88,10 +88,12 @@ def process_environment(home, backups, port, password, offline):
 
 
 @contextmanager
-def start(command, home, backups, port, password, offline):
+def start(command, home, backups, port, password, offline, env_overrides=None):
     home.mkdir(exist_ok=True)
     service = Service(port)
     env = process_environment(home, backups, port, password, offline)
+    if env_overrides:
+        env.update(env_overrides)
     proc = subprocess.Popen(command, cwd=home, env=env, stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

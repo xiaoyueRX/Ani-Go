@@ -82,6 +82,67 @@ jobs:
       - name: Native Go tests
         if: ${{ !cancelled() && steps.application.outcome == 'success' }}
         run: go test -count=1 -timeout=5m ./...
+      - name: Exercise HTTP self-update and rollback
+        if: ${{ !cancelled() && steps.application.outcome == 'success' }}
+        run: |
+          py=python3
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            python -m venv .update-venv
+            py=.update-venv/Scripts/python.exe
+            "$py" -m pip install --disable-pip-version-check --only-binary=:all: psutil==7.2.2
+          fi
+          "$py" scripts/test_update_runtime.py
+      - name: Download selected RSS episodes with aria2
+        if: ${{ !cancelled() && steps.application.outcome == 'success' }}
+        run: |
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            py=python
+            if ! command -v aria2c >/dev/null; then
+              archive=aria2-1.37.0-win-64bit-build1.zip
+              curl --fail --silent --show-error --location --output "$archive" "https://github.com/aria2/aria2/releases/download/release-1.37.0/$archive"
+              echo "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288  $archive" | sha256sum --check
+              unzip -q "$archive" -d "$RUNNER_TEMP"
+              export PATH="$(cygpath -u "$RUNNER_TEMP")/${archive%.zip}:$PATH"
+            fi
+          elif [[ "$RUNNER_OS" == macOS ]]; then
+            py=python3
+            command -v aria2c >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install aria2
+          else
+            py=python3
+            if ! command -v aria2c >/dev/null; then
+              sudo apt-get update -qq
+              sudo apt-get install -y --no-install-recommends aria2
+            fi
+          fi
+          file "$(command -v aria2c)"
+          "$py" scripts/test_aria2_runtime.py "./anigo$(go env GOEXE)"
+      - name: Resume selected RSS episodes and seed with Transmission
+        if: ${{ !cancelled() && steps.application.outcome == 'success' }}
+        run: |
+          py=python3
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            py=python
+            curl --fail --silent --show-error --location --output transmission.msi https://github.com/transmission/transmission/releases/download/4.1.4/transmission-4.1.4-x64.msi
+            echo "cf51e5772f39a3ead3c8f763b689399b9b4b8b016a4c0ca68ab5d6c634be2e1c  transmission.msi" | sha256sum --check
+            pwsh -NoProfile -Command '
+              $out = Join-Path $env:RUNNER_TEMP transmission-files
+              $msi = (Resolve-Path transmission.msi).Path
+              $result = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/a `"$msi`" /qn TARGETDIR=`"$out`""
+              exit $result.ExitCode'
+            daemon=$(find "$(cygpath -u "$RUNNER_TEMP")/transmission-files" -iname transmission-daemon.exe -print -quit)
+          elif [[ "$RUNNER_OS" == macOS ]]; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install transmission-cli
+            daemon="$(brew --prefix transmission-cli)/bin/transmission-daemon"
+          else
+            if ! command -v transmission-daemon >/dev/null; then
+              sudo systemctl mask --runtime transmission-daemon.service
+              sudo apt-get update -qq
+              sudo apt-get install -y --no-install-recommends transmission-daemon
+            fi
+            daemon=$(command -v transmission-daemon)
+          fi
+          file "$daemon"
+          "$py" scripts/test_transmission_runtime.py "./anigo$(go env GOEXE)" --daemon "$daemon"
       - name: Exercise the macOS installer
         if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'darwin' }}
         run: python3 scripts/test_install.py
