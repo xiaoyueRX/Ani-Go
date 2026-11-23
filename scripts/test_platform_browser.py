@@ -1,10 +1,12 @@
-"""用原生浏览器验收重启后恢复的订阅、社区插件、登录回跳和表单保存。"""
+"""用原生浏览器验收恢复后的订阅、插件、登录回跳、表单保存和库文件核对。"""
 
 import argparse
+from contextlib import closing
 import os
 from pathlib import Path
 import shutil
 import socket
+import sqlite3
 import tempfile
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -164,6 +166,63 @@ def check_restored_plugin(browser, service):
         raise RuntimeError("The API did not confirm the restored plugin was activated through the browser")
 
 
+def library_history(dbpath, sub_id):
+    with closing(sqlite3.connect(dbpath.as_uri() + "?mode=ro", uri=True)) as db:
+        progress = db.execute("""SELECT current_episodes, total_episodes, completed, enabled, updated_at
+                                 FROM subscriptions WHERE id = ?""", (sub_id,)).fetchone()
+        episodes = db.execute("SELECT * FROM episodes WHERE subscription_id = ? ORDER BY id", (sub_id,)).fetchall()
+        return progress, episodes
+
+
+def check_library_files(browser, service, home):
+    # 在同一个已停用的合成订阅中生成两条入库历史，再移走 E02，只留下历史记录。
+    sub, = [row for row in service.api("subscriptions") if row["title_cn"] == TITLE]
+    route = f"subscriptions/{sub['id']}"
+    folder = home / "剧集" / TITLE / "Season 2"
+    folder.mkdir(parents=True)
+    present, missing = folder / "S02E01.mkv", folder / "S02E02.mkv"
+    contents = b"Ani-Go synthetic episode 1\n" * 64
+    dbpath = home / "订阅 数据.sqlite"
+    with closing(sqlite3.connect(dbpath)) as db, db:
+        for number, path, data in [(1, present, contents), (2, missing, b"Ani-Go synthetic episode 2\n" * 128)]:
+            path.write_bytes(data)
+            db.execute("""INSERT INTO episodes
+                (subscription_id, season, number, status, original_name, source_file, source_mod_time,
+                 final_path, file_size, organized_at, created_at, updated_at)
+                VALUES (?, 2, ?, 'organized', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+                       (sub["id"], number, path.name, path.name, path.stat().st_mtime_ns, str(path), len(data)))
+    service.api(route, "PUT", {"total_episodes": 2})
+    missing.unlink()
+    before = library_history(dbpath, sub["id"])
+    if before[0][:4] != (2, 2, True, False) or len(before[1]) != 2:
+        raise RuntimeError("Expected two completed episodes before the library check")
+
+    browser.get(f"http://{HOST}:{service.port}/{route}")
+    wait = WebDriverWait(browser, 20)
+    progress = (By.XPATH, "//p[translate(normalize-space(.), ' ', '')='2/2']")
+    organized = (By.XPATH, "//tbody/tr/td/span[normalize-space(.)='已入库']")
+
+    def original_progress_visible(driver):
+        return (EC.visibility_of_element_located(progress)(driver)
+                and len([e for e in driver.find_elements(*organized) if e.is_displayed()]) == 2)
+
+    wait.until(original_progress_visible, "The detail page did not show 2/2 with two organized episodes")
+    button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='核对全部已整理文件']")),
+                        "Missing the manual library file check on the subscription detail page")
+    browser.execute_script("arguments[0].scrollIntoView({block: 'center'})", button)
+    button.click()
+
+    report = wait.until(EC.visibility_of_element_located((By.XPATH, "//details[summary[contains(., '库文件核对')]]")))
+    rows = sorted(item.text for item in report.find_elements(By.TAG_NAME, "li"))
+    expected = sorted([f"{present.name} · 文件存在，大小与记录一致", f"{missing.name} · 当前路径未找到文件"])
+    if rows != expected:
+        raise RuntimeError(f"Library file check returned unexpected rows: {rows!r}")
+    if not original_progress_visible(browser):
+        raise RuntimeError("The file check changed the rendered progress or organized status")
+    if library_history(dbpath, sub["id"]) != before or present.read_bytes() != contents or missing.exists():
+        raise RuntimeError("The file check changed the stored progress, episode history or media files")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
@@ -182,8 +241,10 @@ def main():
                 browser.set_page_load_timeout(30)
                 check_form(browser, service, password, home / "data" / "ani-go.log")
                 check_restored_plugin(browser, service)
+                check_library_files(browser, service, home)
                 print(f"Passed: {browser.name} {browser.capabilities.get('browserVersion')}, login, "
-                      "subscription save, restored subscription and plugin activation after reload.")
+                      "subscription save, restored plugin activation, present and missing library files, "
+                      "unchanged 2/2 progress and organized history.")
 
 
 if __name__ == "__main__":
