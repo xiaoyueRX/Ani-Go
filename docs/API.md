@@ -59,6 +59,7 @@ curl -fsS -H "Authorization: Bearer $jwt" "$base/api/plugins"
 | `POST` | `/api/subscriptions/merge-collections` | JWT | 按合集归并订阅元数据 |
 | `POST` | `/api/subscriptions/{id}/resolve-collection` | JWT | 解析单个订阅所属的合集 |
 | `POST` | `/api/subscriptions/{id}/verify-files` | JWT | 手动只读核对该订阅所选版本的库文件 |
+| `POST` | `/api/subscriptions/{id}/episodes/{episodeID}/restore-file` | JWT | 从已完成下载的同卷原件补回指定版本的硬链接 |
 | `POST` | `/api/subscriptions/{id}/episodes/batch-delete` | JWT | 删除当前订阅下选中的剧集 |
 | `PUT` | `/api/episodes/{id}/status` | JWT | 设置或清除剧集的手动标记 |
 | `POST` | `/api/episodes/{id}/retry-organize` | JWT | 将待复核文件重新排入整理队列，可附上核实的季集 |
@@ -217,6 +218,8 @@ curl -fsS -H "Authorization: Bearer $jwt" -H 'Content-Type: application/json' \
 ```
 
 `size_matches` 表示普通文件存在且大小与逐文件证据相符；`size_mismatch` 包含 `expected_size`、`actual_size`。没有可靠历史大小时返回 `present`；这时若文件为零字节则返回 `empty`。当前库中未找到为 `missing`。库离线、配置卷标错误、没有权限或历史路径不能安全定位时返回 `unverified`，用固定的 `reason` 说明。未整理的记录为 `not_applicable`。`volume_guarded` 说明该媒体类型是否配置本机卷标。核对结果只适用于查询当时，人工标记、任务、记录和进度保持原值。[卷标配置与操作](05_DEPLOYMENT.md)
+
+若核对发现单个已整理版本缺失，调用该版本的 `restore-file` 并发送 `{}`。未配置卷标识时，先确认当前挂载和目标文件名，再发送 `{"confirm_unmarked_volume":true}`。服务器向下载器核验已选且完成的原任务成员，按记录的大小、修改时间和原路径补回硬链接。原库父目录须仍在，原件与库目录须支持同卷硬链接。成功返回 `{"restored":true}`，人工标记和入库进度保持原值。原链接已存在且指向同一原件时，可以安全重试。其他内容占用目标、卷不可用、跨卷或来源证据不足时返回 409，并附上原因。
 
 待复核条目的实际状态为 `needs_review`。详情给出 `review_reason` 和可执行操作。以下三种请求均使用 `POST /api/episodes/{id}/retry-organize`。成功返回 `{"status":"downloaded"}` 并由调度器重新核验。文件证据过期或记录状态已改变时，按 409 响应中的原因刷新条目。
 

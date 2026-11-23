@@ -42,6 +42,8 @@ The built-in Bangumi NFO scraper uses the volume verified for each organized med
 
 After remounting a library or restoring a backup, open the subscription details to check all organized files or selected editions. Ani-Go checks the library directory visible to the running instance. With a configured volume ID, a missing or mismatched marker makes the check inconclusive. Without one, a missing result refers to the currently mounted path. Check the mount before taking recovery action. A size match confirms the byte count. The check leaves media files and collection progress intact.
 
+If one edition is missing and the downloader still has its completed task and selected source file, use the restore action on that edition. The download and the existing library parent directory must share a filesystem that supports hard links. Confirm the mounted library before proceeding if you have no volume ID. Ani-Go links the original file at its recorded path and checks that edition again. The torrent, history and manual flags are preserved. For different filesystems, you can copy the verified source to the recorded library path yourself and run the check again.
+
 ## Backups and restore
 
 Point `BACKUP_PATH` at a writable directory on a persistent volume. Manual and scheduled backups share `BACKUP_KEEP_COUNT`, which defaults to the latest seven archives. The default schedule is midnight. `BACKUP_CRON` accepts five fields, such as `0 3 * * *`, or six fields including seconds. Saving either setting applies it to the running backup scheduler. Deployment environment variables take precedence.

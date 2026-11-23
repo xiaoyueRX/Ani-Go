@@ -1411,6 +1411,40 @@ paths:
         '500': {description: Database read failed}
         '503': {description: Organizer unavailable}
 
+  /subscriptions/{id}/episodes/{episodeID}/restore-file:
+    post:
+      tags: [Episodes]
+      summary: 从下载原件补回一个缺失版本 / Restore a missing library hard link
+      operationId: restoreEpisodeFile
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: episodeID, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                confirm_unmarked_volume: {type: boolean, default: false, description: The user verified the mounted library when no volume ID is configured}
+      responses:
+        '200':
+          description: The recorded path is a hard link to the verified download member
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [restored]
+                properties:
+                  restored: {type: boolean, enum: [true]}
+        '400': {description: Invalid request}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+        '404': {description: Subscription or episode unavailable}
+        '409': {description: Unable to establish a verified hard link at the recorded path}
+        '500': {description: Database or verification failed}
+        '503': {description: Organizer unavailable}
+
   /subscriptions/{id}/episodes/batch-delete:
     post:
       tags: [Episodes]
