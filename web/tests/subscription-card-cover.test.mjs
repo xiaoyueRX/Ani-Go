@@ -73,3 +73,19 @@ for (const failed of [false, true]) {
     assert.equal(c.cover().skeleton, false)
   })
 }
+
+test('只跳过离屏的装饰动画，保留图片、替代文本和卡片标题', () => {
+  const sub = { title_cn: '合成订阅', cover_url: first, enabled: true }
+  const { component: render } = view('components/SubscriptionCard', {}, { props: { sub }, inlineTemplate: true })
+  const root = render({ $t: key => key }, [])
+  const layer = find(root, node => node.props?.class?.split(' ').includes('[content-visibility:auto]'))
+  assert.ok(layer, '骨架装饰层应允许跳过离屏渲染')
+  assert.equal(layer.props['aria-hidden'], 'true')
+  assert.ok(find(layer, node => node.props?.class?.split(' ').includes('skeleton')))
+  assert.equal(find(layer, node => node.type === 'img'), undefined)
+  const image = find(root, node => node.type === 'img')
+  assert.equal(image.props.loading, 'lazy')
+  assert.equal(image.props.alt, sub.title_cn)
+  assert.equal(find(layer, node => node.type === 'h3'), undefined)
+  assert.ok(find(root, node => node.type === 'h3'))
+})

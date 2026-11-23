@@ -80,7 +80,9 @@ const progressColor = computed(() => {
     <!-- Cover Image Wrapper -->
     <div class="relative aspect-[3/3.8] overflow-hidden bg-base-300">
       <!-- Loading Skeleton -->
-      <div v-if="sub.cover_url && !isImageLoaded" class="absolute inset-0 skeleton rounded-none"></div>
+      <div v-if="sub.cover_url && !isImageLoaded" class="absolute inset-0 [content-visibility:auto]" aria-hidden="true">
+        <div class="skeleton h-full rounded-none"></div>
+      </div>
       
       <img
         v-if="sub.cover_url"
