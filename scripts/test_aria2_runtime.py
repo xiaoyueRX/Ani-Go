@@ -280,7 +280,7 @@ def main():
         binary = str(args.binary.resolve(strict=True))
         aria_path = str(Path(aria_path).resolve())
         if args.restore_windows_backup:
-            archive = load_backup(args.restore_windows_backup, require_windows=True)
+            archive = load_backup(args.restore_windows_backup, required_source="Windows")
             verify_restore(binary, aria_path, root, offline, archive)
             return
         home, downloads = root / "app", root / "downloads"

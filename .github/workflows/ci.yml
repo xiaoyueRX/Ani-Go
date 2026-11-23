@@ -143,27 +143,29 @@ jobs:
           else
             bash scripts/test_cross_volume_macos.sh ./anigo "$QB"
           fi
-      - name: Export a complete Windows backup after organizing a real download
+      - name: Export a complete native backup after organizing a real download
         id: portable
-        if: ${{ !cancelled() && github.event_name == 'pull_request' && matrix.runner == 'windows-2025' && steps.qb.outcome == 'success' }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && (matrix.runner == 'windows-2025' || matrix.runner == 'ubuntu-24.04') && steps.qb.outcome == 'success' }}
         env:
           QB: ${{ steps.qb.outputs.executable }}
-        run: python scripts/test_portable_backup.py export ./anigo.exe "$RUNNER_TEMP/portable-backup" --qbittorrent "$QB"
-      - name: Share the Windows backup with the target operating systems
+        run: |
+          if [[ "$RUNNER_OS" == Windows ]]; then py=python; else py=python3; fi
+          "$py" scripts/test_portable_backup.py export "./anigo$(go env GOEXE)" "$RUNNER_TEMP/portable-backup" --qbittorrent "$QB"
+      - name: Share the native backup with the target operating systems
         if: ${{ !cancelled() && steps.portable.outcome == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-portable-backup
+          name: ${{ matrix.os }}-portable-backup
           path: ${{ runner.temp }}/portable-backup/*.json
           if-no-files-found: error
           retention-days: 1
       - name: Restore the exported Windows backup into a fresh Windows Transmission instance
-        if: ${{ !cancelled() && steps.portable.outcome == 'success' && steps.transmission.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.os == 'windows' && steps.portable.outcome == 'success' && steps.transmission.outcome == 'success' }}
         env:
           TRANSMISSION_DAEMON: ${{ steps.transmission.outputs.executable }}
         run: python scripts/test_transmission_runtime.py ./anigo.exe --daemon "$TRANSMISSION_DAEMON" --restore-windows-backup "$RUNNER_TEMP/portable-backup"
       - name: Restore the exported Windows backup and resume E02 with aria2
-        if: ${{ !cancelled() && steps.portable.outcome == 'success' && steps.aria2.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.os == 'windows' && steps.portable.outcome == 'success' && steps.aria2.outcome == 'success' }}
         env:
           ARIA2C: ${{ steps.aria2.outputs.executable }}
         run: >-
@@ -224,7 +226,21 @@ jobs:
           QB: ${{ steps.qb.outputs.executable }}
         run: >-
           "$PYTHON" scripts/test_portable_backup.py import "./anigo$(go env GOEXE)"
-          "$RUNNER_TEMP/portable-backup" --require-windows-source --qbittorrent "$QB"
+          "$RUNNER_TEMP/portable-backup" --require-source Windows --qbittorrent "$QB"
+      - name: Download the Linux x64 archive on native Windows
+        id: linux_backup
+        if: ${{ !cancelled() && matrix.target == 'windows/arm64' && steps.qb.outcome == 'success' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-portable-backup
+          path: ${{ runner.temp }}/linux-portable-backup
+      - name: Restore the Linux archive twice on Windows and organize E02 locally
+        if: ${{ !cancelled() && steps.linux_backup.outcome == 'success' }}
+        env:
+          QB: ${{ steps.qb.outputs.executable }}
+        run: >-
+          "$PYTHON" scripts/test_portable_backup.py import ./anigo.exe
+          "$RUNNER_TEMP/linux-portable-backup" --require-source Linux --qbittorrent "$QB"
       - name: Install Transmission for the destination
         id: transmission
         if: ${{ !cancelled() && steps.application.outcome == 'success' }}

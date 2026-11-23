@@ -304,7 +304,7 @@ def main():
         binary = str(args.binary.resolve(strict=True))
         daemon_bin = str(Path(daemon_path).resolve())
         if args.restore_windows_backup:
-            archive = load_backup(args.restore_windows_backup, require_windows=True)
+            archive = load_backup(args.restore_windows_backup, required_source="Windows")
             verify_restore(binary, daemon_bin, Path(folder), offline, archive)
             return
         media_ready = Event()

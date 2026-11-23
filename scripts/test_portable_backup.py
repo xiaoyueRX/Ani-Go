@@ -92,16 +92,15 @@ def export_backup(app, transfer, directory, downloads, url, passwords):
     source = platform.system()
     verify_member_key(saved, archived, source)
     (directory / name).write_bytes(raw)
-    manifest = {"archive": name, "source_os": source, "sha256": digest}
+    manifest = {"archive": name, "source_os": source, "source_arch": platform.machine(), "sha256": digest}
     (directory / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     print(f"Portable backup export: source={source} sha256={digest} organized_episodes=1 nested_member_key=verified media_bytes={len(PAYLOADS[0])}")
 
 
 def verify_member_key(sub, episode, source):
     path_type = PureWindowsPath if source == "Windows" else PurePosixPath
-    member = path_type(episode["SourceFile"])
-    if (member.is_absolute() or member.parts[-2:] != (SEASON, NAMES[0])
-            or (source == "Windows" and "\\" not in episode["SourceFile"])):
+    member = path_type(TITLE, SEASON, NAMES[0])
+    if episode["SourceFile"] != str(member):
         raise RuntimeError("The source episode does not contain a native nested torrent member")
     content = (episode["TorrentHash"].lower() + "\0" + member.as_posix()).encode()
     expected = f"{sub['ID']}/file/{hashlib.sha256(content).hexdigest()}"
@@ -109,10 +108,10 @@ def verify_member_key(sub, episode, source):
         raise RuntimeError("The archived E01 does not have its verified file reservation key")
 
 
-def load_backup(directory, require_windows):
+def load_backup(directory, required_source=None):
     manifest = json.loads((directory / "manifest.json").read_bytes())
     source, name = manifest["source_os"], manifest["archive"]
-    if source not in ("Linux", "Darwin", "Windows") or (require_windows and source != "Windows"):
+    if source not in ("Linux", "Darwin", "Windows") or (required_source and source != required_source):
         raise RuntimeError("The artifact was not produced on the requested native system")
     archives = list(directory.glob("anigo_backup_*_full.json"))
     if len(archives) != 1 or archives[0].name != name:
@@ -203,15 +202,18 @@ def main():
     parser.add_argument("binary", type=Path)
     parser.add_argument("artifact_dir", type=Path)
     parser.add_argument("--qbittorrent", help="Native qBittorrent or qBittorrent-nox executable")
-    parser.add_argument("--require-windows-source", action="store_true", help="Require a Windows export manifest and absolute paths")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--require-source", choices=("Linux", "Windows", "Darwin"), help="Require an archive from this native system")
+    source.add_argument("--require-windows-source", dest="require_source", action="store_const", const="Windows",
+                        help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if args.require_windows_source and args.phase != "import":
-        parser.error("--require-windows-source applies to import")
+    if args.require_source and args.phase != "import":
+        parser.error("The source-system requirement applies to import")
     program = (shutil.which(args.qbittorrent) if args.qbittorrent else shutil.which("qbittorrent-nox") or shutil.which("qbittorrent"))
     if not program:
         parser.error("qBittorrent executable not found")
     command = [str(args.binary.resolve(strict=True))]
-    archive = load_backup(args.artifact_dir, args.require_windows_source) if args.phase == "import" else None
+    archive = load_backup(args.artifact_dir, args.require_source) if args.phase == "import" else None
     with tempfile.TemporaryDirectory(prefix="Ani-Go portable ") as folder, ExitStack() as feeds:
         root = Path(folder)
         home, backups = root / "本地 实例", root / "备份"
