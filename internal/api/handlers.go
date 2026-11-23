@@ -171,6 +171,12 @@ type episodeResponse struct {
 	Title             string  `json:"title"`
 	Status            string  `json:"status"`
 	ManualStatus      string  `json:"manual_status,omitempty"`
+	ReviewReason      string  `json:"review_reason"`
+	ReviewKind        string  `json:"review_kind"`
+	CanRetryOrganize  bool    `json:"can_retry_organize"`
+	CanConfirmMovie   bool    `json:"can_confirm_movie"`
+	CanAssignEpisode  bool    `json:"can_assign_episode"`
+	SourceFile        string  `json:"source_file,omitempty"`
 	TorrentHash       string  `json:"torrent_hash"`
 	TorrentURL        string  `json:"torrent_url"`
 	OriginalName      string  `json:"original_name"`
@@ -230,6 +236,8 @@ func toEpisodeResponse(ep database.Episode) episodeResponse {
 		Title:          ep.Title,
 		Status:         ep.Status,
 		ManualStatus:   ep.ManualStatus,
+		ReviewReason:   ep.ReviewReason,
+		ReviewKind:     ep.ReviewKind,
 		TorrentHash:    ep.TorrentHash,
 		TorrentURL:     ep.TorrentURL,
 		OriginalName:   ep.OriginalName,
@@ -237,6 +245,16 @@ func toEpisodeResponse(ep database.Episode) episodeResponse {
 		FileSize:       ep.FileSize,
 		GroupName:      ep.GroupName,
 		CreatedAt:      ep.CreatedAt.Format(time.RFC3339),
+	}
+	if ep.Status == database.EpisodeNeedsReview {
+		r.CanRetryOrganize = ep.CanRetryOrganization()
+		if ep.HasBoundReviewFile() {
+			r.SourceFile = ep.SourceFile
+			if ep.ConfirmationSignature(ep.ReviewKind) != "" {
+				r.CanAssignEpisode = ep.ReviewKind == database.ReviewEpisodeIdentity
+				r.CanConfirmMovie = ep.ReviewKind == database.ReviewMovieSelection
+			}
+		}
 	}
 	if ep.DownloadStartedAt != nil {
 		r.DownloadStartedAt = ep.DownloadStartedAt.Format(time.RFC3339)
@@ -500,16 +518,22 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	db := database.DB.WithContext(r.Context())
 	var sub database.Subscription
-	if err := database.DB.First(&sub, id).Error; err != nil {
-		writeJSON(w, http.StatusNotFound, errorResponse{Error: "订阅不存在"})
+	if err := db.First(&sub, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "订阅不存在"})
+		} else {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "读取订阅失败"})
+		}
 		return
 	}
 
 	var episodes []database.Episode
-	database.DB.Where("subscription_id = ?", sub.ID).
-		Order("season ASC, number ASC").
-		Find(&episodes)
+	if err := db.Where("subscription_id = ?", sub.ID).Order("season ASC, number ASC, id ASC").Find(&episodes).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "读取剧集失败"})
+		return
+	}
 
 	timeout := getStallTimeout(sub)
 	eps := make([]episodeResponse, 0, len(episodes))
@@ -527,7 +551,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	subResp := toSubscriptionResponse(sub)
-	counts, err := database.FinishedEpisodeCounts(database.DB.WithContext(r.Context()), []uint{sub.ID})
+	counts, err := database.FinishedEpisodeCounts(db, []uint{sub.ID})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "读取剧集进度失败"})
 		return

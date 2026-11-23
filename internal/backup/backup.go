@@ -18,6 +18,7 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/magnet"
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -474,19 +475,38 @@ func (m *BackupManager) RestoreBackup(ctx context.Context, fileName string) erro
 			if !ok {
 				return fmt.Errorf("%w：剧集缺少订阅（%d）", ErrInvalidArchive, ep.ID)
 			}
+			// 合集文件以任务与相对路径识别，用户确认的季集号之后可能变化。
+			fileBound := ep.TorrentHash != "" && filepath.IsLocal(ep.SourceFile) && filepath.Clean(ep.SourceFile) != "."
+			if fileBound && ep.ReservationKey != nil && *ep.ReservationKey == database.EpisodeFileReservationKey(ep.SubscriptionID, ep.TorrentHash, ep.SourceFile) {
+				key := database.EpisodeFileReservationKey(parent, ep.TorrentHash, ep.SourceFile)
+				ep.ReservationKey = &key
+			} else {
+				ep.ReservationKey = nil
+			}
 			ep.SubscriptionID = parent
 			if ep.RecoverLegacyStatus() {
 				legacyProgress[parent] = true
 			}
-			ep.ReservationKey = nil
 			model := tx.Unscoped().Model(&database.Episode{}).Where("subscription_id = ?", parent)
-			q := model.Session(&gorm.Session{}).Where("season = ? AND number = ? AND COALESCE(torrent_hash, '') = ? AND COALESCE(source_file, '') = ?", ep.Season, ep.Number, ep.TorrentHash, ep.SourceFile)
+			hashCondition := "COALESCE(torrent_hash, '') = ?"
+			if magnet.IsHexInfoHash(ep.TorrentHash) {
+				hashCondition += " COLLATE NOCASE"
+			}
+			q := model.Session(&gorm.Session{}).Where(hashCondition, ep.TorrentHash).Where("COALESCE(source_file, '') = ?", ep.SourceFile)
+			if !fileBound {
+				q = q.Where("season = ? AND number = ?", ep.Season, ep.Number)
+			}
 			if ep.TorrentHash == "" {
 				q = q.Where("COALESCE(torrent_url, '') = ? AND COALESCE(original_name, '') = ?", ep.TorrentURL, ep.OriginalName)
 			}
 			id, err := matchArchiveRow(model, q, ep.ID, ep.CreatedAt, claimedEpisodes)
 			if err != nil {
 				return err
+			}
+			if id != 0 {
+				if err := preserveLocalFileEvidence(tx, id, &ep); err != nil {
+					return err
+				}
 			}
 			err = saveArchiveRow(tx, &ep, &ep.Model, id, backup.FormatVersion == archiveFormat)
 			if err != nil {
@@ -508,6 +528,30 @@ func (m *BackupManager) RestoreBackup(ctx context.Context, fileName string) erro
 		return ctx.Err()
 	}
 	return errors.New("恢复备份失败，请检查数据库后重试")
+}
+
+// 源文件核验时间与待清理路径只属于本机，恢复同一份文件时沿用本地记录。
+func preserveLocalFileEvidence(tx *gorm.DB, id uint, ep *database.Episode) error {
+	var local database.Episode
+	if err := tx.Unscoped().First(&local, id).Error; err != nil {
+		return err
+	}
+	if magnet.CanonicalTaskID(local.TorrentHash) != magnet.CanonicalTaskID(ep.TorrentHash) ||
+		magnet.CanonicalTaskID(local.OriginKey) != magnet.CanonicalTaskID(ep.OriginKey) ||
+		local.SourceFile != ep.SourceFile || local.DownloadRoot != ep.DownloadRoot || local.FileSize != ep.FileSize {
+		return nil
+	}
+	if ep.TorrentHash == "" && ep.OriginKey == "" && (ep.TorrentURL != local.TorrentURL || ep.OriginalName != local.OriginalName) {
+		return nil
+	}
+	if ep.SourceFile != "" && ep.DownloadRoot != "" {
+		ep.SourceModTime = local.SourceModTime
+	}
+	if ep.Status == "organized" && local.Status == "organized" && ep.FinalPath != "" && ep.FinalPath == local.FinalPath {
+		ep.MoveSourcePath = local.MoveSourcePath
+		ep.MoveSourceModTime = local.MoveSourceModTime
+	}
+	return nil
 }
 
 // 同库按主键和创建时间原地恢复。跨库按来源匹配，原创建时间可区分重复条目。

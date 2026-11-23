@@ -75,7 +75,7 @@ func TestMarkDownloadingEpisodeStillReachesLibrary(t *testing.T) {
 	if err != nil || string(data) != content {
 		t.Fatalf("整理文件内容 %q %v", data, err)
 	}
-	if err := db.First(&sub, sub.ID).Error; err != nil || sub.CurrentEpisodes != 1 {
+	if err := db.First(&sub, sub.ID).Error; err != nil || sub.CurrentEpisodes != 1 || !sub.Completed {
 		t.Fatalf("已入库进度：%+v %v", sub, err)
 	}
 }

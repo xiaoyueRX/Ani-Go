@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/ai"
 	"github.com/xiaoyueRX/Ani-Go/internal/backup"
@@ -619,6 +619,12 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 			dl = dynamic.GetCurrent()
 		}
 		if ep.Status == "renaming" {
+			if unknownLegacyEpisode(ep, sub) {
+				if err := s.recoverLegacyEpisode(ctx, ep, sub); err != nil {
+					s.reportOrganizationError(ctx, ep, err)
+				}
+				continue
+			}
 			if !existingVideo(realPath) {
 				continue
 			}
@@ -630,80 +636,25 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 			if err := database.DB.Unscoped().Model(&database.Episode{}).Where("id <> ? AND final_path IN ?", ep.ID, []string{realPath, target}).Count(&other).Error; err != nil || other > 0 {
 				continue
 			}
-		} else if verifiedBatchSource(ep, dl) {
-			realPath = filepath.Join(ep.DownloadRoot, ep.SourceFile)
 		} else {
-			if unboundHash(ep.TorrentHash) {
+			var members []database.Episode
+			var err error
+			realPath, members, err = s.organizationSource(ctx, ep, sub, dl)
+			if err != nil {
+				s.reportOrganizationError(ctx, ep, err)
+				failureCount++
 				continue
 			}
-			if dl == nil {
+			episodes = append(episodes, members...)
+			if realPath == "" {
 				continue
 			}
-			task, err := dl.GetStatus(ctx, ep.TorrentHash)
-			if err != nil || !task.IsComplete() {
-				continue
-			}
-			realPath = task.ContentPath
-			if realPath == "" && task.Name != "" {
-				realPath = filepath.Join(task.SavePath, task.Name)
-			}
-			batch := ep.Number == 0 && parser.ExtractEpisodeDetailed(ep.OriginalName).IsBatch
-			if lister, ok := dl.(downloader.FileLister); ok {
-				selected, err := lister.CompletedFiles(ctx, task)
-				if err == nil {
-					selected, err = availableVideos(task.SavePath, selected, batch && ep.FinalPath != "")
-				}
-				if err != nil {
-					log.Printf("读取已完成视频文件失败 [%s]: %v", ep.Title, err)
-					continue
-				}
-				if batch {
-					members, err := s.expandBatch(ctx, ep, sub, task.SavePath, &selected)
-					if err != nil {
-						log.Printf("合集文件匹配失败 [%s]: %v", ep.Title, err)
-						failureCount++
-					}
-					episodes = append(episodes, members...)
-					continue
-				}
-				realPath = selectedVideo(selected, realPath, ep.SourceFile, task.SavePath)
-			} else {
-				if realPath == "" {
-					continue
-				}
-				if ep.SourceFile != "" {
-					if !filepath.IsLocal(ep.SourceFile) {
-						continue
-					}
-					realPath = filepath.Join(realPath, ep.SourceFile)
-				}
-				info, err := os.Stat(realPath)
-				if err != nil {
-					continue
-				}
-				if info.IsDir() {
-					if batch {
-						members, err := s.expandBatch(ctx, ep, sub, realPath, nil)
-						if err != nil {
-							log.Printf("合集文件匹配失败 [%s]: %v", ep.Title, err)
-							failureCount++
-						}
-						episodes = append(episodes, members...)
-						continue
-					}
-					realPath = findLargestVideoFile(realPath)
-				}
-			}
-			if !existingVideo(realPath) {
-				continue
-			}
-
 		}
 
 		// 3. 应用路径模板并整理
 		newPath, err := s.commitOrganization(ctx, ep, realPath, anime, coreEp)
 		if err != nil {
-			log.Printf("❌ 文件整理失败 [%s]: %v", ep.Title, err)
+			s.reportOrganizationError(ctx, ep, err)
 			failureCount++
 			continue
 		}
@@ -718,7 +669,7 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 		}
 		lastOrganizedEpNum = coreEp.Number
 
-		if _, err := database.SyncEpisodeProgress(database.DB.WithContext(ctx), sub.ID, false); err != nil {
+		if _, err := database.SyncEpisodeProgress(database.DB.WithContext(ctx), sub.ID, sub.Enabled == nil || *sub.Enabled); err != nil {
 			log.Printf("更新订阅 %d 整理进度失败: %v", sub.ID, err)
 		}
 	}
@@ -779,13 +730,18 @@ func (s *Scheduler) pollSupplement(ctx context.Context) {
 		return
 	}
 	for i := range subs {
-		count := counts[subs[i].ID]
-		if count != subs[i].CurrentEpisodes {
-			if _, err := database.SyncEpisodeProgress(db, subs[i].ID, true); err != nil {
+		sub := &subs[i]
+		count := counts[sub.ID]
+		if count != sub.CurrentEpisodes || (sub.TotalEpisodes > 0 && sub.Completed != (count >= sub.TotalEpisodes)) {
+			current, err := database.SyncEpisodeProgress(db, sub.ID, true)
+			if err != nil {
 				log.Printf("修复订阅进度失败: %v", err)
 				return
 			}
-			subs[i].CurrentEpisodes = count
+			sub.CurrentEpisodes = current
+			if sub.TotalEpisodes > 0 {
+				sub.Completed = current >= sub.TotalEpisodes
+			}
 		}
 	}
 
@@ -886,48 +842,55 @@ func (s *Scheduler) scanSubscription(ctx context.Context, sub database.Subscript
 	if !multipleSeasons {
 		s.resolveSubscriptionIDs(ctx, &sub)
 	}
-	if s.metadataProvider != nil && sub.MetadataID != "" && strings.EqualFold(s.metadataProvider.Name(), sub.MetadataProvider) {
+	if id := s.subscriptionMetadataID(sub); id != "" {
 		getCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		anime, err := s.metadataProvider.GetAnime(getCtx, sub.MetadataID)
+		var anime core.Anime
+		var err error
+		if md, ok := s.metadataProvider.(core.SeasonMetadataProvider); ok {
+			anime, err = md.GetAnimeForSeason(getCtx, id, max(1, sub.Season))
+		} else {
+			anime, err = s.metadataProvider.GetAnime(getCtx, id)
+		}
 		cancel()
 		if err == nil {
 			updates := map[string]interface{}{}
+			if sub.MetadataID == "" {
+				updates["metadata_id"] = id
+			}
 			if sub.TotalEpisodes == 0 && anime.TotalEps > 0 {
-				updates["total_episodes"] = anime.TotalEps
-				sub.TotalEpisodes = anime.TotalEps
+				updates["total_episodes"] = gorm.Expr("COALESCE(NULLIF(total_episodes, 0), ?)", anime.TotalEps)
 			}
 			if sub.Year == 0 && anime.Year > 0 {
 				updates["year"] = anime.Year
-				sub.Year = anime.Year
 			}
 			if sub.AnimeType == "" && anime.Type != "" {
 				updates["anime_type"] = anime.Type
-				sub.AnimeType = anime.Type
 			}
 			if sub.Description == "" && anime.Description != "" {
 				updates["description"] = anime.Description
-				sub.Description = anime.Description
 			}
 			if sub.CoverURL == "" && anime.CoverURL != "" {
 				updates["cover_url"] = anime.CoverURL
-				sub.CoverURL = anime.CoverURL
 			}
 			if sub.MetadataProvider == "" {
 				updates["metadata_provider"] = s.metadataProvider.Name()
-				sub.MetadataProvider = s.metadataProvider.Name()
 			}
 			if sub.TMDBID == "" && anime.TMDBID != "" {
 				updates["tmdb_id"] = anime.TMDBID
-				sub.TMDBID = anime.TMDBID
 			}
 			if sub.IMDBID == "" && anime.IMDBID != "" {
 				updates["imdb_id"] = anime.IMDBID
-				sub.IMDBID = anime.IMDBID
 			}
 
 			if len(updates) > 0 {
-				database.DB.Model(&sub).Updates(updates)
-				log.Printf("✅ 已通过 %s 补全订阅 [%s] 的元数据: %+v", s.metadataProvider.Name(), sub.TitleCN, updates)
+				saved := database.DB.WithContext(ctx).Model(&sub).
+					Where("COALESCE(NULLIF(season, 0), 1) = ? AND COALESCE(metadata_id, '') = ? AND COALESCE(metadata_provider, '') = ? AND COALESCE(tmdb_id, '') = ?",
+						max(1, sub.Season), sub.MetadataID, sub.MetadataProvider, sub.TMDBID).
+					Clauses(clause.Returning{}).Updates(updates)
+				if saved.Error != nil || saved.RowsAffected == 0 {
+					return saved.Error
+				}
+				log.Printf("✅ 已通过 %s 补全订阅 [%s] 的元数据", s.metadataProvider.Name(), sub.TitleCN)
 			}
 		}
 	} else if sub.MikanID != "" {
@@ -1200,25 +1163,6 @@ func matchSubscriptionFilter(item core.TorrentItem, filter core.Filter) bool {
 	return true
 }
 
-// findLargestVideoFile 遍历目录找出最大的视频文件
-func findLargestVideoFile(dirPath string) string {
-	var largestFile string
-	var maxSize int64
-
-	filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-		if mediaFile(path) && info.Size() > maxSize {
-			maxSize = info.Size()
-			largestFile = path
-		}
-		return nil
-	})
-
-	return largestFile
-}
-
 // isDuplicate 检查种子 URL 是否已存在下载记录
 func isDuplicate(torrentURL string) bool {
 	if database.DB == nil {
@@ -1428,6 +1372,19 @@ func createSubscriptionFromTitle(ctx context.Context, s *Scheduler, item core.To
 		return 0, fmt.Errorf("无法识别番剧: %s", cleanTitle)
 	}
 
+	provider := s.metadataProvider.Name()
+	season := 0
+	if strings.EqualFold(provider, "TMDB") {
+		detail := parser.ExtractEpisodeDetailed(item.Title)
+		if detail.ExplicitSeason && detail.Season > 0 {
+			season = detail.Season
+			// TMDB 按整部作品搜索；资源标题中明确指定的季号用于建立订阅。
+			cleanTitle = strings.TrimSpace(releaseSeason.ReplaceAllString(cleanTitle, ""))
+			if cleanTitle == "" {
+				return 0, fmt.Errorf("无法识别番剧: %s", item.Title)
+			}
+		}
+	}
 	results, err := s.metadataProvider.SearchAnime(ctx, cleanTitle)
 	if err != nil {
 		return 0, fmt.Errorf("搜索番剧失败: %w", err)
@@ -1439,7 +1396,10 @@ func createSubscriptionFromTitle(ctx context.Context, s *Scheduler, item core.To
 	for _, anime := range results {
 		sub := database.Subscription{TitleCN: cleanTitle}
 		if sameAnimeTitle(sub, anime) {
-			anime.Provider = s.metadataProvider.Name()
+			anime.Provider = provider
+			if season > 0 {
+				anime.Season = season
+			}
 			return s.autoSubscribe(ctx, anime)
 		}
 	}

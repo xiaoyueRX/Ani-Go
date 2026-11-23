@@ -699,6 +699,14 @@ export default {
     supplement: 'Supplement',
   },
   detail: {
+    review: {
+      noReason: 'No review reason was recorded.', retry: 'Retry organization', failed: 'Could not retry organization.',
+      assign: 'Assign season and episode', assignAndRetry: 'Retry with these numbers', source: 'Source file',
+      confirmMovie: 'Confirm as feature film and organize',
+      recheck: 'Recheck source file', recheckFailed: 'Could not request a source file recheck.',
+      missingSource: 'Check the original download and its files. A verified source file is required to confirm this item.',
+      season: 'Season', episode: 'Episode',
+    },
     manualMark: 'Manual mark', noMark: 'None', clearMarks: 'Clear marks',
     bulk: {
       selected: 'Mark {count} selected', deleteRecords: 'Delete records', deleteFiles: 'Delete files', blacklist: 'Block keywords', cancel: 'Cancel',
@@ -743,7 +751,7 @@ export default {
       ungrouped: "Ungrouped",
       status: {
         submitting: "Submitting", retrying: "Retrying", downloaded: "Downloaded",
-        organizing: "Organizing", organized: "In library",
+        organizing: "Organizing", organized: "In library", needsReview: "Needs review",
         pending: "Pending",
         active: "Downloading",
         finished: "Completed",

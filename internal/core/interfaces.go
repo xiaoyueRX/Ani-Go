@@ -232,6 +232,11 @@ type MetadataProvider interface {
 	GetCollections(ctx context.Context, username string) ([]Anime, error)
 }
 
+// SeasonMetadataProvider 供多季共用作品 ID 的提供者按订阅季返回总集数。
+type SeasonMetadataProvider interface {
+	GetAnimeForSeason(ctx context.Context, id string, season int) (Anime, error)
+}
+
 type Organizer interface {
 	Name() string
 	Organize(ctx context.Context, filePath string, anime Anime, episode Episode) (newPath string, err error)

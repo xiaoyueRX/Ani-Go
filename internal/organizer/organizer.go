@@ -90,6 +90,10 @@ func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.
 
 // OrganizeAndCommit 先完整发布库文件，再让调用方提交记录。提交失败时保留下载源供重试。
 func (o *TVOrganizer) OrganizeAndCommit(ctx context.Context, filePath string, anime core.Anime, episode core.Episode, commit func(string, *MoveSource) error) (string, error) {
+	return o.organizeAndCommit(ctx, filePath, anime, episode, "", commit)
+}
+
+func (o *TVOrganizer) organizeAndCommit(ctx context.Context, filePath string, anime core.Anime, episode core.Episode, versionKey string, commit func(string, *MoveSource) error) (string, error) {
 	plan, err := o.Preview(ctx, filePath, anime, episode)
 	if err != nil {
 		return "", err
@@ -108,14 +112,17 @@ func (o *TVOrganizer) OrganizeAndCommit(ctx context.Context, filePath string, an
 	if err := makeMediaDir(filepath.Dir(dst)); err != nil {
 		return "", err
 	}
-	existing, err := os.Lstat(dst)
-	if err != nil && !os.IsNotExist(err) {
-		return "", err
-	}
-	if existing == nil || !os.SameFile(src, existing) {
-		if err := installMedia(ctx, filePath, dst); err != nil {
-			return "", err
+	if versionKey != "" {
+		dst, err = publishVersion(ctx, filePath, dst, versionKey)
+	} else {
+		var existing os.FileInfo
+		existing, err = os.Lstat(dst)
+		if os.IsNotExist(err) || (err == nil && !os.SameFile(src, existing)) {
+			err = installMedia(ctx, filePath, dst, os.Rename)
 		}
+	}
+	if err != nil {
+		return "", err
 	}
 	if err := syncMediaDir(filepath.Dir(dst)); err != nil {
 		return "", err

@@ -20,8 +20,8 @@ type interruptibleOrganizer struct {
 	dir, phase string
 }
 
-func (o interruptibleOrganizer) OrganizeAndCommit(ctx context.Context, path string, anime core.Anime, ep core.Episode, commit func(string, *organizer.MoveSource) error) (string, error) {
-	return o.TVOrganizer.OrganizeAndCommit(ctx, path, anime, ep, func(dst string, move *organizer.MoveSource) error {
+func (o interruptibleOrganizer) OrganizeVersionAndCommit(ctx context.Context, path string, anime core.Anime, ep core.Episode, key string, commit func(string, *organizer.MoveSource) error) (string, error) {
+	return o.TVOrganizer.OrganizeVersionAndCommit(ctx, path, anime, ep, key, func(dst string, move *organizer.MoveSource) error {
 		if o.phase == "after" {
 			if err := commit(dst, move); err != nil {
 				return err

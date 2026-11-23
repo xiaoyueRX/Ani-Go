@@ -38,8 +38,8 @@ func durableMoveCommit(ctx context.Context, ep database.Episode, dst string, mov
 	}
 	now := time.Now()
 	result, err := conn.ExecContext(ctx,
-		"UPDATE episodes SET status = ?, final_path = ?, organized_at = ?, updated_at = ?, move_source_path = ?, move_source_mod_time = ? WHERE id = ? AND status = ? AND deleted_at IS NULL",
-		"organized", dst, now, now, move.Path, move.ModTime, ep.ID, ep.Status)
+		"UPDATE episodes SET status = ?, final_path = ?, organized_at = ?, updated_at = ?, move_source_path = ?, move_source_mod_time = ? WHERE id = ? AND status = ? AND (updated_at = ? OR (updated_at IS NULL AND ?)) AND deleted_at IS NULL",
+		"organized", dst, now, now, move.Path, move.ModTime, ep.ID, ep.Status, ep.UpdatedAt, ep.UpdatedAt.IsZero())
 	if err != nil {
 		return err
 	}
@@ -52,11 +52,18 @@ func durableMoveCommit(ctx context.Context, ep database.Episode, dst string, mov
 
 func (s *Scheduler) commitOrganization(ctx context.Context, ep database.Episode, source string, anime core.Anime, coreEp core.Episode) (string, error) {
 	db := database.DB.WithContext(ctx)
+	var matches int64
+	if err := ep.OrganizationSnapshot(db).Count(&matches).Error; err != nil {
+		return "", err
+	}
+	if matches != 1 {
+		return "", fmt.Errorf("剧集 %d 的整理快照已失效", ep.ID)
+	}
 	commit := func(path string, move *organizer.MoveSource) error {
 		if move != nil {
 			return durableMoveCommit(ctx, ep, path, *move)
 		}
-		result := db.Model(&database.Episode{}).Where("id = ? AND status = ?", ep.ID, ep.Status).Updates(map[string]any{"status": "organized", "final_path": path, "organized_at": time.Now()})
+		result := ep.OrganizationSnapshot(db).Updates(map[string]any{"status": "organized", "final_path": path, "organized_at": time.Now()})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -64,6 +71,17 @@ func (s *Scheduler) commitOrganization(ctx context.Context, ep database.Episode,
 			return fmt.Errorf("剧集 %d 的整理状态已变更", ep.ID)
 		}
 		return nil
+	}
+	if org, ok := s.organizer.(interface {
+		OrganizeVersionAndCommit(context.Context, string, core.Anime, core.Episode, string, func(string, *organizer.MoveSource) error) (string, error)
+	}); ok {
+		// 历史单集记录未存成员名时，用实际路径与下载任务一起标识来源，重启后仍可复用。
+		member := ep.SourceFile
+		if member == "" {
+			member = source
+		}
+		key := database.EpisodeFileReservationKey(ep.SubscriptionID, ep.TorrentHash, member)
+		return org.OrganizeVersionAndCommit(ctx, source, anime, coreEp, key, commit)
 	}
 	if org, ok := s.organizer.(interface {
 		OrganizeAndCommit(context.Context, string, core.Anime, core.Episode, func(string, *organizer.MoveSource) error) (string, error)

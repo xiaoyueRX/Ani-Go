@@ -90,6 +90,33 @@ func TestConcurrentSearchAndBatchSubscriptionCreation(t *testing.T) {
 	}
 }
 
+func TestTMDBSubscriptionSeasonIdentity(t *testing.T) {
+	setupTestDB(t)
+	mux := http.NewServeMux()
+	(&Server{}).registerRoutes(mux)
+	const path = "/api/subscriptions"
+	panelCall(t, mux, "POST", path, `{"title_cn":"第一季","metadata_id":"42","metadata_provider":"TMDB"}`, 201)
+	// 旧订阅可能没有写入季号，同一作品的第一季仍应查重。
+	if err := database.DB.Exec("UPDATE subscriptions SET season = NULL WHERE id = 1").Error; err != nil {
+		t.Fatal(err)
+	}
+	panelCall(t, mux, "POST", path, `{"title_cn":"第一季别名","season":1,"metadata_id":"42","metadata_provider":"tmdb"}`, 409)
+	panelCall(t, mux, "POST", path, `{"title_cn":"第二季","season":2,"metadata_id":"42","metadata_provider":"tmdb"}`, 201)
+	panelCall(t, mux, "POST", path, `{"title_cn":"第二季别名","season":2,"metadata_id":"42","metadata_provider":"TMDB"}`, 409)
+	panelCall(t, mux, "POST", path, `{"title_cn":"第三季","season":3}`, 201)
+	panelCall(t, mux, "PUT", path+"/3", `{"metadata_id":"42","metadata_provider":"TmDb"}`, 200)
+	panelCall(t, mux, "PUT", path+"/3", `{"season":2}`, 409)
+	var saved database.Subscription
+	if err := database.DB.First(&saved, 3).Error; err != nil || saved.Season != 3 || saved.MetadataID != "42" {
+		t.Fatalf("冲突后第三季未保留原订阅：%+v，错误 %v", saved, err)
+	}
+	body := panelCall(t, mux, "POST", path+"/batch", `{"items":[{"title_cn":"第四季","season":4,"metadata_id":"42","metadata_provider":"TMDB"},{"title_cn":"同季别名","season":4,"metadata_id":"42","metadata_provider":"tmdb"}]}`, 201)
+	var batch batchSubscriptionResponse
+	if err := json.Unmarshal([]byte(body), &batch); err != nil || len(batch.Success) != 1 || len(batch.Failed) != 1 {
+		t.Fatalf("批量创建结果错误：%s", body)
+	}
+}
+
 func TestEditedSubscriptionPreservesIdentityAndAllowsEditingLegacyDuplicates(t *testing.T) {
 	setupTestDB(t)
 	mux := http.NewServeMux()
@@ -109,4 +136,52 @@ func TestEditedSubscriptionPreservesIdentityAndAllowsEditingLegacyDuplicates(t *
 	panelCall(t, mux, "PUT", path+"/2", `{"enabled":false,"title_cn":"Two Seasons","season":1}`, 200)
 	panelCall(t, mux, "PUT", path+"/2", `{"description":"更新历史重复记录"}`, 200)
 	panelCall(t, mux, "PUT", path+"/2", `{"season":-3}`, 400)
+}
+
+func TestTMDBIdentityUsesSeparateMovieAndTVNamespaces(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		old          database.Subscription
+		id           string
+		season, want int
+	}{
+		{"旧裸号电视剧匹配带类型的同季", database.Subscription{MetadataID: "123", Season: 1}, "tv/123", 1, 409},
+		{"电视剧保留不同季", database.Subscription{MetadataID: "tv/123", Season: 1}, "123", 2, 201},
+		{"同号电影和电视剧可同名", database.Subscription{MetadataID: "123", TMDBID: "movie/123", TitleCN: "同名作品"}, "tv/123", 1, 201},
+		{"同号裸电视剧与电影可并存", database.Subscription{MetadataID: "123", TMDBID: "movie/123"}, "123", 1, 201},
+		{"电影不按季分割", database.Subscription{MetadataID: "123", TMDBID: "movie/123", Season: 2}, "movie/123", 1, 409},
+		{"旧电影分类可用于同作品查重", database.Subscription{MetadataID: "123", AnimeType: "剧场版", Season: 3}, "movie/123", 1, 409},
+		{"历史标识含空白", database.Subscription{MetadataID: "movie/123\n"}, "movie/123", 1, 409},
+		{"仅有专用标识的旧记录", database.Subscription{TMDBID: "movie/123"}, "movie/123", 1, 409},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupTestDB(t)
+			if tc.old.TitleCN == "" {
+				tc.old.TitleCN = "旧作品"
+			}
+			tc.old.MetadataProvider = "TMDB"
+			if err := database.DB.Create(&tc.old).Error; err != nil {
+				t.Fatal(err)
+			}
+			mux := http.NewServeMux()
+			(&Server{}).registerRoutes(mux)
+			body, _ := json.Marshal(map[string]any{"title_cn": "同名作品", "metadata_provider": "TMDB", "metadata_id": tc.id, "season": tc.season})
+			panelCall(t, mux, "POST", "/api/subscriptions", string(body), tc.want)
+		})
+	}
+}
+
+func TestTMDBIdentityChecksEditedMediaType(t *testing.T) {
+	setupTestDB(t)
+	mux := http.NewServeMux()
+	(&Server{}).registerRoutes(mux)
+	shows := []database.Subscription{{TitleCN: "电影", MetadataProvider: "TMDB", MetadataID: "123", AnimeType: "剧场版"}, {TitleCN: "电视剧", MetadataProvider: "TMDB", MetadataID: "123", AnimeType: "tv"}}
+	if err := database.DB.Create(&shows).Error; err != nil {
+		t.Fatal(err)
+	}
+	panelCall(t, mux, "PUT", "/api/subscriptions/2", `{"anime_type":"movie"}`, 409)
+	var saved database.Subscription
+	if err := database.DB.First(&saved, shows[1].ID).Error; err != nil || saved.AnimeType != "tv" {
+		t.Fatalf("冲突编辑后类型为 %q，错误 %v", saved.AnimeType, err)
+	}
 }

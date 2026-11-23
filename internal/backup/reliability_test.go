@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -390,6 +391,69 @@ func TestArchivePreservesLabelsAndRestoresLegacyProgress(t *testing.T) {
 	}
 }
 
+func TestRestorePreservesOnlyMatchingLocalFileEvidence(t *testing.T) {
+	m := newArchiveFixture(t, 1)
+	sub := database.Subscription{TitleCN: "多版本合集"}
+	if err := database.DB.Create(&sub).Error; err != nil {
+		t.Fatal(err)
+	}
+	const btih = "abcdef0123456789abcdef0123456789abcdef01"
+	base := database.Episode{SubscriptionID: sub.ID, Season: 1, Number: 1, Status: "needs_review",
+		TorrentHash: btih, OriginKey: btih, DownloadRoot: "/downloads", SourceFile: "show-a.mkv", FileSize: 48, SourceModTime: 123}
+	organized := base
+	organized.Status, organized.SourceFile, organized.FinalPath = "organized", "show-b.mkv", "/library/b.mkv"
+	organized.MoveSourcePath, organized.MoveSourceModTime = "/downloads/show-b.mkv", 456
+	replaced := organized
+	replaced.SourceFile, replaced.FinalPath, replaced.MoveSourcePath = "show-c.mkv", "/library/c.mkv", "/downloads/show-c.mkv"
+	moved := organized
+	moved.SourceFile, moved.FinalPath, moved.MoveSourcePath = "show-d.mkv", "/library/d.mkv", "/downloads/show-d.mkv"
+	rows := []database.Episode{base, organized, replaced, moved}
+	if err := database.DB.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := m.CreateBackup(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	files, err := m.ListBackups()
+	if err != nil || len(files) != 1 {
+		t.Fatalf("备份清单 %+v，错误 %v", files, err)
+	}
+	if err := database.DB.Model(&rows[0]).Updates(map[string]any{
+		"torrent_hash": strings.ToUpper(btih), "origin_key": strings.ToUpper(btih),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB.Model(&rows[2]).Updates(map[string]any{
+		"torrent_hash": "replacement", "final_path": "/library/other.mkv",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB.Model(&rows[3]).UpdateColumn("final_path", "/library/relocated.mkv").Error; err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := m.RestoreBackup(t.Context(), files[0].Name); err != nil {
+			t.Fatal(err)
+		}
+		var got []database.Episode
+		if err := database.DB.Order("id").Find(&got).Error; err != nil || len(got) != 4 {
+			t.Fatalf("恢复后有 %d 个版本，错误 %v", len(got), err)
+		}
+		if got[0].Status != "needs_review" || got[0].SourceModTime != 123 {
+			t.Errorf("待核对记录的本地源文件凭证丢失：%+v", got[0])
+		}
+		if got[1].MoveSourcePath != organized.MoveSourcePath || got[1].MoveSourceModTime != 456 {
+			t.Errorf("丢失已入库记录的本地清理信息：%+v", got[1])
+		}
+		if got[2].SourceModTime != 0 || got[2].MoveSourcePath != "" || got[2].MoveSourceModTime != 0 {
+			t.Errorf("不同文件继承了本地操作信息：%+v", got[2])
+		}
+		if got[3].SourceModTime != 123 || got[3].MoveSourcePath != "" || got[3].MoveSourceModTime != 0 {
+			t.Errorf("目标路径变更后应只保留源文件核验时间：%+v", got[3])
+		}
+	}
+}
+
 func TestForeignArchivePreservesLocalSubscriptionFilters(t *testing.T) {
 	m := newArchiveFixture(t, 3)
 	imported := database.Subscription{TitleCN: "同一作品", Season: 1, FilterJSON: `{"resolution":"720p"}`}
@@ -434,5 +498,94 @@ func TestForeignArchivePreservesLocalSubscriptionFilters(t *testing.T) {
 		if row.ID == local.ID && row.FilterJSON != local.FilterJSON || row.ID != local.ID && (row.ID != got.SubscriptionID || row.FilterJSON != imported.FilterJSON) {
 			t.Fatalf("还原改变了筛选或剧集归属：订阅 %+v，剧集 %+v", row, got)
 		}
+	}
+}
+
+func TestRestoreRemappedBatchMemberAfterEpisodeAssignment(t *testing.T) {
+	m := newArchiveFixture(t, 1)
+	sub := database.Subscription{TitleCN: "待复核合集", Season: 1}
+	if err := database.DB.Create(&sub).Error; err != nil {
+		t.Fatal(err)
+	}
+	ep := database.Episode{SubscriptionID: sub.ID, Season: 1, Status: database.EpisodeNeedsReview, ReviewReason: "请核对集号",
+		TorrentHash: "abcdef0123456789abcdef0123456789abcdef01", SourceFile: "alternate.mkv", DownloadRoot: "/src", FileSize: 24}
+	key := database.EpisodeFileReservationKey(sub.ID, ep.TorrentHash, ep.SourceFile)
+	ep.ReservationKey = &key
+	if err := database.DB.Create(&ep).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := m.CreateBackup(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	files, err := m.ListBackups()
+	if err != nil || len(files) != 1 {
+		t.Fatalf("备份清单 %+v，错误 %v", files, err)
+	}
+	newArchiveFixture(t, 1)
+	other := database.Subscription{TitleCN: "占用原编号的作品"}
+	if err := database.DB.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB.Create(&database.Episode{SubscriptionID: other.ID, Number: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var restoredID uint
+	for range 2 {
+		if err := m.RestoreBackup(t.Context(), files[0].Name); err != nil {
+			t.Fatal(err)
+		}
+		var rows []database.Episode
+		if err := database.DB.Where("torrent_hash = ? COLLATE NOCASE", ep.TorrentHash).Find(&rows).Error; err != nil || len(rows) != 1 {
+			t.Fatalf("同一合集文件恢复出 %d 条记录：%v", len(rows), err)
+		}
+		got := rows[0]
+		want := database.EpisodeFileReservationKey(got.SubscriptionID, ep.TorrentHash, ep.SourceFile)
+		if got.SubscriptionID == sub.ID || got.ID == ep.ID || got.ReservationKey == nil || *got.ReservationKey != want ||
+			got.Status != database.EpisodeNeedsReview || got.ReviewReason != ep.ReviewReason || got.Number != 0 {
+			t.Errorf("跨库恢复后合集成员的身份或整理状态有误：%+v", got)
+		}
+		if restoredID != 0 && restoredID != got.ID {
+			t.Fatal("再次恢复改变了同一合集文件的编号")
+		}
+		restoredID = got.ID
+		if err := database.DB.Model(&got).Updates(map[string]any{
+			"number": 4, "status": "downloaded", "review_reason": "", "torrent_hash": strings.ToUpper(ep.TorrentHash),
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRestoreDistinguishesOpaqueTaskIDsThatDifferByCase(t *testing.T) {
+	m := newArchiveFixture(t, 1)
+	sub := database.Subscription{TitleCN: "不透明任务标识", Season: 1}
+	if err := database.DB.Create(&sub).Error; err != nil {
+		t.Fatal(err)
+	}
+	ep := database.Episode{SubscriptionID: sub.ID, Season: 1, Number: 1, TorrentHash: "Task-A", SourceFile: "episode.mkv"}
+	if err := database.DB.Create(&ep).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := m.CreateBackup(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	files, err := m.ListBackups()
+	if err != nil || len(files) != 1 {
+		t.Fatalf("备份清单 %+v，错误 %v", files, err)
+	}
+	if err := database.DB.Unscoped().Delete(&ep).Error; err != nil {
+		t.Fatal(err)
+	}
+	other := database.Episode{SubscriptionID: sub.ID, Season: 1, Number: 1, TorrentHash: "task-a", SourceFile: ep.SourceFile}
+	if err := database.DB.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RestoreBackup(t.Context(), files[0].Name); err != nil {
+		t.Fatal(err)
+	}
+	var rows []database.Episode
+	if err := database.DB.Order("id").Find(&rows).Error; err != nil || len(rows) != 2 ||
+		rows[0].TorrentHash != ep.TorrentHash || rows[1].TorrentHash != other.TorrentHash {
+		t.Fatalf("不透明任务标识被误合并：%+v %v", rows, err)
 	}
 }

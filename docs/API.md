@@ -60,6 +60,7 @@ curl -fsS -H "Authorization: Bearer $jwt" "$base/api/plugins"
 | `POST` | `/api/subscriptions/{id}/resolve-collection` | JWT | 解析单个订阅所属的合集 |
 | `POST` | `/api/subscriptions/{id}/episodes/batch-delete` | JWT | 删除当前订阅下选中的剧集 |
 | `PUT` | `/api/episodes/{id}/status` | JWT | 设置或清除剧集的手动标记 |
+| `POST` | `/api/episodes/{id}/retry-organize` | JWT | 将待复核文件重新排入整理队列，可附上核实的季集 |
 
 ### 下载队列
 
@@ -188,7 +189,7 @@ curl -fsS -H "Authorization: Bearer $jwt" "$base/api/plugins"
 
 ## 订阅与剧集
 
-使用 `POST /api/subscriptions` 手动添加订阅，至少提供 `title_cn`，可附上 `season`、`rss_url` 和字幕组限制。成功返回 201。同标题同季返回 409，同标题可分别创建不同季。省略季号或填 0 按第一季创建，旧数据中空或零季号也按第一季查重。相同蜜柑 ID、同一提供方的相同元数据 ID，或仅给出旧 `bangumi_id` 且该编号已存在时，也按重复订阅处理。蜜柑条目 ID 放在 `mikan_id`，外部元数据标识放在 `metadata_id` 并指定 `metadata_provider`。只有已知来源时再填提供方。详情包含按季集排序的剧集。部分更新时只发送改动字段。修改片名、季号或来源标识若与另一订阅冲突则返回 409，原记录保留。[订阅处理器](../internal/api/handlers.go)
+使用 `POST /api/subscriptions` 手动添加订阅，至少提供 `title_cn`，可附上 `season`、`rss_url` 和字幕组限制。成功返回 201。同标题同季返回 409，同标题可分别创建不同季。省略季号或填 0 按第一季创建，旧数据中空或零季号也按第一季查重。TMDB 电视作品的各季共享作品 ID，因此同一 ID 可分别订阅不同季。已知类型的电影按影片查重；即使编号相同，电影和电视剧也可以分别订阅。相同蜜柑 ID、其他同一提供方的相同元数据 ID，或仅给出旧 `bangumi_id` 且该编号已存在时，也按重复订阅处理。蜜柑条目 ID 放在 `mikan_id`，外部元数据标识放在 `metadata_id` 并指定 `metadata_provider`。只有已知来源时再填提供方。详情包含按季集排序的剧集。部分更新时只发送改动字段。修改片名、季号或来源标识若与另一订阅冲突则返回 409，原记录保留。[订阅处理器](../internal/api/handlers.go)
 
 ```bash
 curl -fsS -H "Authorization: Bearer $jwt" -H 'Content-Type: application/json' \
@@ -197,10 +198,18 @@ curl -fsS -H "Authorization: Bearer $jwt" -H 'Content-Type: application/json' \
 
 - 搜索发布标题可向 `POST /api/settings/custom-regex/test` 发送 `{"title":"[CityLab] Harbor Story - 01 [1080p]"}` 预览作品名、季集、字幕组和分辨率。该接口只解析输入，适合在创建订阅前供用户校正结果。
 - 同时启用同名多季时，共享 RSS 及历史搜索遇到无法区分季的发布会跳过。资源标题中的明确季标、对应的蜜柑作品 ID 或分季独立的 RSS 可区分归属。
-- `current_episodes` 统计订阅季中状态为 `organized` 或 `completed` 的正片集号。同集多个字幕组只计一次，特典和小数集单列在剧集详情中。
+- `current_episodes` 统计订阅季中已整理的正片集号。已知总集数时只计范围内的整数集号。同集多个版本只计一次，独立的手动标记保存在 `manual_status`。
 - 批量创建发送 `{"items":[…]}`，每批 1–20 项，各项可传 `season`，和单条创建采用相同的判重条件。按项读取 `success` 和 `failed`。单条或全量补全异步执行，202 表示已受理。全量补全最多同时处理三个订阅，同一订阅已有扫描时共享该次结果。
 - 批量删除与恢复订阅发送 `{"ids":[1,2]}`。删除剧集向所属订阅的 `episodes/batch-delete` 发送 `{"ids":[1],"delete_files":false}`，单次 1–1000 个剧集 ID。跨订阅选择返回 404。删除共享下载的文件时会返回 409；下载器执行失败返回 502。[删除与文件归属](../internal/api/episodes.go)
 - 写入手动标记时发送 `{"status":"completed"}`，可用值还有 `pending`、`downloading`、`failed`。发送 `{"status":""}` 可清除。成功响应中的 `status` 和 `manual_status` 均回显本次标记。读取订阅详情时，剧集的 `status` 是实际下载或整理状态，`manual_status` 是用户标记。整理进度和完结统计按实际状态计算。
+
+待复核条目的实际状态为 `needs_review`。详情给出 `review_reason` 和可执行操作。以下三种请求均使用 `POST /api/episodes/{id}/retry-organize`。成功返回 `{"status":"downloaded"}` 并由调度器重新核验。文件证据过期或记录状态已改变时，按 409 响应中的原因刷新条目。
+
+| 详情中的可执行操作 | 请求体 | 用途 |
+| --- | --- | --- |
+| `can_retry_organize` | 空请求体 | 修正路径、挂载或文件后重新核验。 |
+| `can_assign_episode` | `{"season":0,"number":15}` | 核对 `source_file` 后确认实际季集。季号 0 表示特别篇。 |
+| `can_confirm_movie` | `{"confirm_movie":true}` | 确认该文件为电影正片。一个下载任务有多个版本时，每个版本可分别确认。 |
 
 ## 下载队列与媒体整理
 

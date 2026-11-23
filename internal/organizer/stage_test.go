@@ -34,7 +34,7 @@ func TestKilledCrossVolumeCopyReclaimsOnlyAbandonedStage(t *testing.T) {
 	const ctl = "ANIGO_TEST_STAGE_DIR"
 	if dir := os.Getenv(ctl); dir != "" {
 		ctx := stopDuringCopy{context.Background(), dir, os.Getenv("ANIGO_TEST_STAGE_SIGNAL")}
-		t.Fatal(installMedia(ctx, os.Getenv("ANIGO_TEST_STAGE_SOURCE"), filepath.Join(dir, "episode.mkv")))
+		t.Fatal(installMedia(ctx, os.Getenv("ANIGO_TEST_STAGE_SOURCE"), filepath.Join(dir, "episode.mkv"), os.Rename))
 	}
 	lib, err := os.MkdirTemp("/dev/shm", "anigo-stage-test-")
 	if err != nil {
@@ -101,7 +101,7 @@ func TestKilledCrossVolumeCopyReclaimsOnlyAbandonedStage(t *testing.T) {
 	if before, err := os.ReadFile(dst); err != nil || string(before) != "original" {
 		t.Fatal("半成品替换了原媒体")
 	}
-	if err := installMedia(context.Background(), src, dst); err != nil {
+	if err := installMedia(context.Background(), src, dst, os.Rename); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(string(abandoned)); !os.IsNotExist(err) {

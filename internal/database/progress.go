@@ -5,9 +5,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// 进度按订阅季的正片集号统计，已整理的同一集有多个字幕组时只计一次。
+// 进度按订阅季的正片集号统计。已知总集数时，超出范围的集号不能抵作缺集。
 // 早期手动导入的无标题记录可能未写季号；保持其原有正片进度。
 const regularEpisode = `episodes.number >= 1 AND episodes.number = CAST(episodes.number AS INTEGER)
+	AND (COALESCE(subscriptions.total_episodes, 0) <= 0 OR episodes.number <= subscriptions.total_episodes)
 	AND (episodes.season = COALESCE(NULLIF(subscriptions.season, 0), 1)
 		OR (COALESCE(episodes.season, 0) = 0 AND COALESCE(episodes.title, '') = '' AND COALESCE(episodes.original_name, '') = ''))`
 

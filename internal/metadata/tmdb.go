@@ -86,14 +86,18 @@ type tmdbCollectionRef struct {
 }
 
 type tmdbTVDetail struct {
-	ID                  int                `json:"id"`
-	Name                string             `json:"name"`
-	OriginalName        string             `json:"original_name"`
-	FirstAirDate        string             `json:"first_air_date"`
-	PosterPath          string             `json:"poster_path"`
-	Overview            string             `json:"overview"`
-	NumberOfSeasons     int                `json:"number_of_seasons"`
-	NumberOfEpisodes    int                `json:"number_of_episodes"`
+	ID               int    `json:"id"`
+	Name             string `json:"name"`
+	OriginalName     string `json:"original_name"`
+	FirstAirDate     string `json:"first_air_date"`
+	PosterPath       string `json:"poster_path"`
+	Overview         string `json:"overview"`
+	NumberOfSeasons  int    `json:"number_of_seasons"`
+	NumberOfEpisodes int    `json:"number_of_episodes"`
+	Seasons          []struct {
+		Number       int `json:"season_number"`
+		EpisodeCount int `json:"episode_count"`
+	} `json:"seasons"`
 	Type                string             `json:"type"`
 	BelongsToCollection *tmdbCollectionRef `json:"belongs_to_collection"`
 	ExternalIDs         struct {
@@ -165,29 +169,9 @@ type SeriesCollectionInfo struct {
 // TMDB ID 与系列名称规范化辅助函数
 // ============================================================
 
-// ParseTMDBID 解析 TMDB ID 的媒体类型和纯数字/字符串标识
-// 支持 "tv/123"、"movie/456" 或裸 ID "123"（默认归为 tv）
+// ParseTMDBID 解析 TMDB 的电影、电视剧命名空间。裸号沿用电视剧默认值。
 func ParseTMDBID(raw string) (mediaType string, cleanID string) {
-	s := strings.Trim(strings.TrimSpace(raw), "/")
-	if s == "" {
-		return "", ""
-	}
-	lower := strings.ToLower(s)
-	if strings.HasPrefix(lower, "movie/") {
-		id := strings.Trim(s[len("movie/"):], "/")
-		if id == "" {
-			return "", ""
-		}
-		return "movie", id
-	}
-	if strings.HasPrefix(lower, "tv/") {
-		id := strings.Trim(s[len("tv/"):], "/")
-		if id == "" {
-			return "", ""
-		}
-		return "tv", id
-	}
-	return "tv", s
+	return core.ParseTMDBID(raw)
 }
 
 // NormalizeTMDBID 将 TMDB ID 规范化为 "tv/{id}" 或 "movie/{id}" 形式
@@ -431,6 +415,11 @@ func (p *TMDBProvider) GetCollection(ctx context.Context, collectionID int) (*TM
 
 // GetAnime 获取番剧或剧场版详情（同时支持 "tv/{id}"、"movie/{id}" 与裸 ID）
 func (p *TMDBProvider) GetAnime(ctx context.Context, id string) (core.Anime, error) {
+	return p.GetAnimeForSeason(ctx, id, 0)
+}
+
+// GetAnimeForSeason 返回指定正片季的集数；season 为零时提供整部作品详情。
+func (p *TMDBProvider) GetAnimeForSeason(ctx context.Context, id string, season int) (core.Anime, error) {
 	mediaType, cleanID := ParseTMDBID(id)
 	if cleanID == "" {
 		return core.Anime{}, fmt.Errorf("TMDB: 番剧 ID 不能为空")
@@ -500,7 +489,7 @@ func (p *TMDBProvider) GetAnime(ctx context.Context, id string) (core.Anime, err
 		TitleCN:     detail.Name,
 		TitleJP:     detail.OriginalName,
 		Year:        year,
-		TotalEps:    detail.NumberOfEpisodes,
+		TotalEps:    detail.episodeCount(season),
 		Type:        animeType,
 		Description: detail.Overview,
 		CoverURL:    coverURL,
@@ -508,6 +497,21 @@ func (p *TMDBProvider) GetAnime(ctx context.Context, id string) (core.Anime, err
 		TMDBID:      idStr,
 		IMDBID:      detail.ExternalIDs.IMDBID,
 	}, nil
+}
+
+func (detail *tmdbTVDetail) episodeCount(season int) int {
+	if season == 0 {
+		return detail.NumberOfEpisodes
+	}
+	for _, s := range detail.Seasons {
+		if s.Number == season {
+			return max(0, s.EpisodeCount)
+		}
+	}
+	if season == 1 && detail.NumberOfSeasons == 1 && len(detail.Seasons) == 0 {
+		return max(0, detail.NumberOfEpisodes)
+	}
+	return 0
 }
 
 func (p *TMDBProvider) getTVDetail(ctx context.Context, cleanID string) (*tmdbTVDetail, error) {

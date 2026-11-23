@@ -277,6 +277,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 剧集管理
 	mux.HandleFunc("PUT /api/episodes/{id}/status", s.handleUpdateEpisodeStatus)
+	mux.HandleFunc("POST /api/episodes/{id}/retry-organize", s.handleRetryOrganization)
 	mux.HandleFunc("POST /api/subscriptions/{id}/episodes/batch-delete", s.handleBatchDeleteEpisodes)
 
 	// 下载队列

@@ -42,6 +42,12 @@ docker compose up -d ani-go
 curl -fsS http://localhost:20001/api/health
 ```
 
+### 试用候选版和回滚
+
+升级前记录当前镜像的仓库摘要或保留可启动的旧二进制、Compose 和环境配置。在宿主机上用 SQLite 的 `.backup` 为实际的 `DB_PATH` 创建独立快照，用 `PRAGMA quick_check` 检查快照应返回 `ok`。SQLite 的备份接口会包含已提交到 WAL 的事务。容器使用 `latest` 时，试用前将 `image` 固定为要验证的候选标签或摘要。
+
+需要回滚时，先停止 Ani-Go，把升级后的库及其可能存在的 `-wal`、`-shm` 一起移至单独目录保存。将升级前的快照还原到原 `DB_PATH`，恢复文件所有者和权限，再用先前记录的镜像摘要或二进制启动。核对健康接口的版本、原账号登录、订阅季数及已入库剧集的路径。数据库快照只回滚应用记录，媒体和下载器中的文件需单独核对。
+
 ## 独立二进制安装
 
 Linux 或 macOS 可使用安装脚本，它从 GitHub 下载发行包，核对同一版本的 `checksums.txt` 后安装到当前用户的目录。需要固定版本时，把示例中的 `| sh` 改成 `| ANIGO_VERSION=v0.7.0 sh`。

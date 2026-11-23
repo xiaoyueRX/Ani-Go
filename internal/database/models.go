@@ -56,6 +56,9 @@ type Episode struct {
 	Title              string
 	Status             string  `gorm:"default:'pending'"`
 	ManualStatus       string  `json:"ManualStatus,omitempty"`
+	ReviewReason       string  `json:"ReviewReason,omitempty"`
+	ReviewKind         string  `json:"ReviewKind,omitempty"`
+	ConfirmedIdentity  string  `json:"ConfirmedIdentity,omitempty"`
 	TorrentHash        string  `gorm:"index:idx_episode_client_hash"`
 	OriginKey          string  `gorm:"index"`
 	ReservationKey     *string `gorm:"uniqueIndex:idx_episode_claim,where:deleted_at IS NULL"`

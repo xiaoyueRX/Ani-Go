@@ -112,6 +112,38 @@ func TestSupplementRepairsStaleCompleteCountAcrossReleases(t *testing.T) {
 	}
 }
 
+func TestSupplementReconcilesKnownTotalWhenCountIsUnchanged(t *testing.T) {
+	db := pipelineDB(t)
+	s := Scheduler{source: deliveryHistory{err: errors.New("历史源暂不可用")}}
+	for _, tt := range []struct {
+		name      string
+		oldTotal  int
+		total     int
+		completed bool
+		enabled   bool
+		want      bool
+	}{
+		{"总集数下调为已有集数", 2, 1, false, true, true},
+		{"总集数上调后仍有缺集", 1, 2, true, true, false},
+		{"未知总集数保留手工完结", 0, 0, true, true, true},
+		{"停用订阅保留原标记", 2, 1, false, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sub := database.Subscription{TitleCN: tt.name, MikanID: "42", Season: 1, TotalEpisodes: tt.oldTotal,
+				CurrentEpisodes: 1, Completed: tt.completed, Enabled: &tt.enabled}
+			savePipelineRow(t, db, &sub)
+			savePipelineRow(t, db, &database.Episode{SubscriptionID: sub.ID, Season: 1, Number: 1, Status: "organized"})
+			if err := db.Model(&sub).UpdateColumn("total_episodes", tt.total).Error; err != nil {
+				t.Fatal(err)
+			}
+			s.pollSupplement(t.Context())
+			if err := db.First(&sub, sub.ID).Error; err != nil || sub.Completed != tt.want || sub.CurrentEpisodes != 1 {
+				t.Fatalf("实际进度 %d，完结 %t，期望完结 %t：%v", sub.CurrentEpisodes, sub.Completed, tt.want, err)
+			}
+		})
+	}
+}
+
 type blockedHistory struct {
 	pipelineSource
 	started chan struct{}

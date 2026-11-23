@@ -137,7 +137,7 @@ components:
         description: {type: string}
         anime_type: {type: string}
         total_episodes: {type: integer}
-        current_episodes: {type: integer, description: 该订阅季已整理或手工完成的正片集号数，同集多份只计一次}
+        current_episodes: {type: integer, description: 该订阅季已整理的正片集号数，同集多份只计一次}
         enabled: {type: boolean}
         completed: {type: boolean}
         filter_json: {type: string}
@@ -292,6 +292,12 @@ components:
         number: {type: number, format: float}
         title: {type: string}
         status: {type: string, description: 下载器及整理流程记录的实际状态}
+        review_reason: {type: string, description: 待复核的具体原因}
+        review_kind: {type: string, enum: ['', episode_identity, movie_selection], description: 需要确认的文件归属}
+        can_retry_organize: {type: boolean, description: 可发送空请求重新核验}
+        can_confirm_movie: {type: boolean, description: 可确认此文件是电影正片}
+        can_assign_episode: {type: boolean, description: 已绑定可确认的文件，可在重试时指定季集}
+        source_file: {type: string, readOnly: true, description: 待复核的已绑定文件在下载任务内的相对路径}
         manual_status: {type: string, enum: ['', pending, downloading, completed, failed], description: 用户的手动标记}
         torrent_hash: {type: string}
         torrent_url: {type: string}
@@ -913,6 +919,9 @@ components:
         Number: {type: number, format: float}
         Title: {type: string}
         Status: {type: string}
+        ReviewReason: {type: string}
+        ReviewKind: {type: string}
+        ConfirmedIdentity: {type: string, description: 已确认文件及季集的证据摘要}
         ManualStatus: {type: string, enum: ['', pending, downloading, completed, failed]}
         TorrentHash: {type: string}
         OriginKey: {type: string}
@@ -1268,6 +1277,7 @@ paths:
               schema: {$ref: '#/components/schemas/SubscriptionDetail'}
         '400': {description: 无效的订阅 ID}
         '404': {description: 订阅不存在}
+        '500': {description: 订阅或剧集读取失败}
         '401': {$ref: '#/components/responses/LoginRequired'}
     put:
       tags: [Subscriptions]
@@ -1422,6 +1432,49 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
         '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /episodes/{id}/retry-organize:
+    post:
+      tags: [Episodes]
+      summary: 重新整理待复核文件
+      operationId: retryEpisodeOrganization
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [season, number]
+                  properties:
+                    season: {type: integer, minimum: 0, maximum: 99, description: 特别篇使用 0}
+                    number: {type: number, minimum: 0, exclusiveMinimum: true, maximum: 2000}
+                - type: object
+                  additionalProperties: false
+                  required: [confirm_movie]
+                  properties:
+                    confirm_movie: {type: boolean, enum: [true], description: 确认此文件是电影正片}
+      responses:
+        '200':
+          description: 已排入整理队列
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [downloaded]}
+        '400': {description: 无效的编号或季集}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+        '404': {description: 记录不存在或已删除}
+        '409': {description: 记录已离开待复核状态，或无法对该记录人工赋号}
+        '500': {description: 数据库操作失败}
 
   /downloads:
     get:

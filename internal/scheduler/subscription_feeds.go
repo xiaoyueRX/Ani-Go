@@ -21,6 +21,23 @@ func subscriptionTitles(sub database.Subscription) []string {
 	return []string{sub.TitleCN, sub.TitleJP, sub.TitleEN}
 }
 
+// TMDB 的电视剧与电影各自分配数字 ID；明确的 movie/ 标识须保留到详情及分集查询。
+func (s *Scheduler) subscriptionMetadataID(sub database.Subscription) string {
+	md := s.metadataProvider
+	if md == nil || sub.MetadataProvider != "" && !strings.EqualFold(sub.MetadataProvider, md.Name()) {
+		return ""
+	}
+	id := strings.TrimSpace(sub.MetadataID)
+	if sub.MetadataProvider == "" && id != "" {
+		return ""
+	}
+	if !strings.EqualFold(md.Name(), "TMDB") {
+		return id
+	}
+	_, lookup := sub.TMDBIdentity()
+	return lookup
+}
+
 func sameAnimeTitle(sub database.Subscription, anime core.Anime) bool {
 	for _, name := range subscriptionTitles(sub) {
 		norm := core.NormalizeTitle(strings.TrimSpace(name))
@@ -142,7 +159,8 @@ func matchesHistoryRelease(item core.TorrentItem, sub database.Subscription, fil
 // 只有提供者范围内的 ID 可用于其详情接口，旧记录按标题重新核实。
 func (s *Scheduler) resolveSubscriptionIDs(ctx context.Context, sub *database.Subscription) {
 	updates := map[string]any{}
-	if md := s.metadataProvider; md != nil && sub.MetadataID == "" {
+	if md := s.metadataProvider; md != nil && sub.MetadataID == "" &&
+		(!strings.EqualFold(md.Name(), "TMDB") || sub.TMDBID == "" && !movieSubscription(*sub)) {
 		lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		results, err := md.SearchAnime(lookupCtx, sub.TitleCN)
 		cancel()
@@ -248,6 +266,16 @@ func disambiguationSetting(key string) string {
 	return ""
 }
 
+// 缓存键同时限定订阅、季和原始标题；旧映射也须符合当前订阅可验证的范围。
+func cachedSubscriptionEpisode(key string, season, total int) (*parser.CachedTitleResult, bool) {
+	m, ok := parser.GetCachedTitleResult(key)
+	if !ok || m.Season != season || !parser.ValidEpisodeIdentity(m.Season, m.Episode) ||
+		(total > 0 && m.Episode > float32(total)) || (m.ResolvedBy != "airdate" && m.ResolvedBy != "ai") {
+		return nil, false
+	}
+	return m, true
+}
+
 func (s *Scheduler) resolveSubscriptionEpisode(ctx context.Context, item core.TorrentItem, sub database.Subscription) (int, float32) {
 	info := parser.ExtractEpisodeDetailed(item.Title)
 	season := info.Season
@@ -263,12 +291,12 @@ func (s *Scheduler) resolveSubscriptionEpisode(ctx context.Context, item core.To
 		return season, info.Episode
 	}
 	key := fmt.Sprintf("sub/%d/s%d/%s", sub.ID, season, item.Title)
-	if result, ok := parser.GetCachedTitleResult(key); ok && result.Episode > 0 && (result.ResolvedBy == "airdate" || result.ResolvedBy == "ai") {
+	if result, ok := cachedSubscriptionEpisode(key, season, sub.TotalEpisodes); ok {
 		return result.Season, result.Episode
 	}
-	if s.metadataProvider != nil && sub.MetadataID != "" && strings.EqualFold(sub.MetadataProvider, s.metadataProvider.Name()) && !item.PublishedAt.IsZero() {
+	if id := s.subscriptionMetadataID(sub); id != "" && !item.PublishedAt.IsZero() {
 		matchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		match, err := parser.MatchEpisodeFromProvider(matchCtx, s.metadataProvider, sub.MetadataID, season, item.PublishedAt, item.Title)
+		match, err := parser.MatchEpisodeFromProvider(matchCtx, s.metadataProvider, id, season, item.PublishedAt, item.Title)
 		cancel()
 		if err == nil && match.Matched && match.Season == season {
 			_ = parser.SaveCachedTitleResult(key, sub.TitleCN, match.Season, match.Episode, item.GroupName, item.Resolution, match.Confidence, "airdate")

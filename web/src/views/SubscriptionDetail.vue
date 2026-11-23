@@ -34,6 +34,8 @@ interface Episode {
   title: string; status: string; manual_status?: string; torrent_hash: string; torrent_url: string
   original_name: string; final_path: string; file_size: number
   is_stalled: boolean; group_name?: string
+  review_reason?: string; review_kind?: string; source_file?: string
+  can_retry_organize?: boolean; can_assign_episode?: boolean; can_confirm_movie?: boolean
   download_started_at: string; created_at: string
 }
 
@@ -63,6 +65,59 @@ const updatingEps = ref<Set<number>>(new Set())
 const selectedEpisodes = ref<Set<number>>(new Set())
 const showBulkActions = ref(false)
 const bulkActionLoading = ref(false)
+const reviewErrors = ref<Record<number, string>>({})
+const assignment = ref<{ id: number; sourceFile: string; season: number | ''; number: number | '' } | null>(null)
+const validAssignment = computed(() => {
+  if (!assignment.value) return false
+  const { season, number } = assignment.value
+  return typeof season === 'number' && Number.isInteger(season) && season >= 0 && season <= 99 &&
+    typeof number === 'number' && number > 0 && number <= 2000
+})
+
+function reviewConfirmation(ep: Episode) {
+  if (ep.status !== 'needs_review' || !ep.source_file) return
+  if (ep.review_kind === 'episode_identity' && ep.can_assign_episode) return 'assign'
+  if (ep.review_kind === 'movie_selection' && ep.can_confirm_movie) return 'movie'
+}
+
+function editAssignment(ep: Episode) {
+  if (reviewConfirmation(ep) !== 'assign' || !ep.source_file || updatingEps.value.has(ep.id) || bulkActionLoading.value) return
+  assignment.value = { id: ep.id, sourceFile: ep.source_file, season: ep.season, number: ep.number > 0 ? ep.number : '' }
+}
+
+async function retryWithAssignment(ep: Episode) {
+  const draft = assignment.value
+  if (!ep.can_assign_episode || !draft || ep.id !== draft.id || ep.source_file !== draft.sourceFile || !validAssignment.value) return
+  await retryOrganize(ep, { season: Number(draft.season), number: Number(draft.number) })
+}
+
+async function retryOrganize(ep: Episode, correction?: { season: number; number: number } | { confirm_movie: true }) {
+  if (ep.status !== 'needs_review' || updatingEps.value.has(ep.id) || bulkActionLoading.value) return
+  if (correction) {
+    if (reviewConfirmation(ep) !== ('confirm_movie' in correction ? 'movie' : 'assign')) return
+  } else if (!ep.can_retry_organize) return
+  updatingEps.value.add(ep.id)
+  delete reviewErrors.value[ep.id]
+  actionError.value = ''
+  try {
+    const { data } = await request.post(`/episodes/${ep.id}/retry-organize`, correction)
+    const current = episodes.value.find(row => row.id === ep.id)
+    if (current) {
+      current.status = data.status
+      current.review_reason = ''
+      if (correction && 'season' in correction) Object.assign(current, correction)
+    }
+    if (assignment.value?.id === ep.id) assignment.value = null
+    await fetchDetail()
+  } catch (e: any) {
+    const message = e.response?.data?.error || t(!correction && ep.review_kind ? 'detail.review.recheckFailed' : 'detail.review.failed')
+    if ([404, 409].includes(e.response?.status)) await fetchDetail()
+    if (episodes.value.some(row => row.id === ep.id && row.status === 'needs_review')) reviewErrors.value[ep.id] = message
+    else actionError.value = message
+  } finally {
+    updatingEps.value.delete(ep.id)
+  }
+}
 
 async function setEpisodeMark(ep: Episode, event: Event) {
   const select = event.target as HTMLSelectElement
@@ -136,6 +191,7 @@ const statusCfg = computed<Record<string, { label: string; icon: any; cls: strin
   retrying: { label: t('detail.logs.status.retrying'), icon: RefreshCw, cls: 'bg-warning/10 text-warning border-warning/20' },
   downloaded: { label: t('detail.logs.status.downloaded'), icon: Check, cls: 'bg-primary/10 text-primary border-primary/20' },
   renaming: { label: t('detail.logs.status.organizing'), icon: FileText, cls: 'bg-primary/10 text-primary border-primary/20' },
+  needs_review: { label: t('detail.logs.status.needsReview'), icon: AlertTriangle, cls: 'bg-warning/10 text-warning border-warning/20' },
   downloading: { label: t('detail.logs.status.active'), icon: Download, cls: 'bg-primary/10 text-primary border-primary/20' },
   completed: { label: t('detail.logs.status.finished'), icon: Check, cls: 'bg-success/10 text-success border-success/20' },
   organized: { label: t('detail.logs.status.organized'), icon: Check, cls: 'bg-success/10 text-success border-success/20' },
@@ -541,6 +597,7 @@ onUnmounted(() => {
                   <span>{{ groupName }}</span>
                 </label>
                 <span class="text-[10px] font-black uppercase tracking-widest opacity-30 bg-base-200 px-3 py-1 rounded-full">{{ groupEps.length }} {{ t('detail.logs.episodes') }}</span>
+                <span v-if="groupEps.some(ep => ep.status === 'needs_review')" class="badge badge-warning badge-sm">{{ t('detail.logs.status.needsReview') }}</span>
               </div>
               <div class="collapse-content overflow-x-auto p-0">
                 <table class="table table-lg w-full">
@@ -566,7 +623,7 @@ onUnmounted(() => {
                       </td>
                       <td class="pl-10">
                         <span class="text-xs font-black font-mono bg-base-200 py-1.5 px-3 rounded-lg group-hover/row:bg-primary group-hover/row:text-primary-content transition-colors">
-                          {{ ep.season > 1 ? 'S' + ep.season : '' }}E{{ ep.number?.toFixed(1).replace('.0', '') }}
+                          {{ ep.season === 0 || ep.season > 1 ? 'S' + ep.season : '' }}E{{ ep.number }}
                         </span>
                       </td>
                       <td class="max-w-md">
@@ -591,7 +648,35 @@ onUnmounted(() => {
                         </label>
                       </td>
                       <td>
-                        <span v-if="ep.is_stalled" class="flex items-center gap-1.5 text-warning font-black uppercase text-[9px] tracking-widest bg-warning/5 px-3 py-1.5 rounded-full border border-warning/10">
+                        <div v-if="ep.status === 'needs_review'" class="min-w-48 max-w-sm space-y-2">
+                          <p class="text-xs whitespace-normal break-words">{{ ep.review_reason || t('detail.review.noReason') }}</p>
+                          <p v-if="ep.source_file" class="text-xs break-all"><span class="font-semibold">{{ t('detail.review.source') }}</span> {{ ep.source_file }}</p>
+                          <p v-if="reviewErrors[ep.id]" role="alert" class="text-xs text-error break-words">{{ reviewErrors[ep.id] }}</p>
+                          <button v-if="ep.can_retry_organize" type="button" class="btn btn-outline btn-warning btn-xs" :disabled="updatingEps.has(ep.id) || bulkActionLoading" @click="retryOrganize(ep)">{{ t(ep.review_kind ? 'detail.review.recheck' : 'detail.review.retry') }}</button>
+                          <form v-if="reviewConfirmation(ep) === 'assign' && assignment && assignment.id === ep.id && assignment.sourceFile === ep.source_file"
+                            @submit.prevent="retryWithAssignment(ep)">
+                            <fieldset class="space-y-2" :disabled="updatingEps.has(ep.id) || bulkActionLoading">
+                              <div class="flex gap-2">
+                                <label class="text-xs">{{ t('detail.review.season') }}
+                                  <input v-model.number="assignment.season" type="number" min="0" max="99" step="1" required class="input input-bordered input-xs block w-20">
+                                </label>
+                                <label class="text-xs">{{ t('detail.review.episode') }}
+                                  <input v-model.number="assignment.number" type="number" min="0" max="2000" step="any" required class="input input-bordered input-xs block w-20">
+                                </label>
+                              </div>
+                              <div class="flex flex-wrap gap-2">
+                                <button type="submit" class="btn btn-outline btn-warning btn-xs" :disabled="!validAssignment">{{ t('detail.review.assignAndRetry') }}</button>
+                                <button type="button" class="btn btn-ghost btn-xs" @click="assignment = null">{{ t('detail.bulk.cancel') }}</button>
+                              </div>
+                            </fieldset>
+                          </form>
+                          <div v-else class="flex flex-wrap gap-2">
+                            <button v-if="reviewConfirmation(ep) === 'assign'" type="button" class="btn btn-outline btn-warning btn-xs" :disabled="updatingEps.has(ep.id) || bulkActionLoading" @click="editAssignment(ep)">{{ t('detail.review.assign') }}</button>
+                            <button v-else-if="reviewConfirmation(ep) === 'movie'" type="button" class="btn btn-outline btn-warning btn-xs h-auto min-h-6 whitespace-normal" :disabled="updatingEps.has(ep.id) || bulkActionLoading" @click="retryOrganize(ep, { confirm_movie: true })">{{ t('detail.review.confirmMovie') }}</button>
+                            <p v-else-if="ep.review_kind === 'episode_identity' || ep.review_kind === 'movie_selection'" class="text-xs text-base-content/70">{{ t('detail.review.missingSource') }}</p>
+                          </div>
+                        </div>
+                        <span v-else-if="ep.is_stalled" class="flex items-center gap-1.5 text-warning font-black uppercase text-[9px] tracking-widest bg-warning/5 px-3 py-1.5 rounded-full border border-warning/10">
                           <AlertTriangle :size="12" /> {{ t('detail.logs.integrity.stalled') }}
                         </span>
                         <span v-else class="text-[10px] font-black opacity-10 tracking-widest uppercase pl-2">{{ t('detail.logs.integrity.verified') }}</span>

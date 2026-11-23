@@ -701,6 +701,14 @@ export default {
   },
   detail: {
     manualMark: '手动标记', noMark: '无', clearMarks: '清除标记',
+    review: {
+      noReason: '未记录复核原因。', retry: '重新整理', failed: '重新整理请求失败。',
+      assign: '指定季集', assignAndRetry: '按此季集重新整理', source: '源文件',
+      confirmMovie: '确认为电影正片并整理',
+      recheck: '重新核验源文件', recheckFailed: '重新核验源文件的请求失败。',
+      missingSource: '请核对原下载任务及其文件。找到可验证的源文件后才能确认此记录。',
+      season: '季号', episode: '集号',
+    },
     bulk: {
       selected: '已选 {count} 集 · 手动标记', deleteRecords: '删记录', deleteFiles: '删文件', blacklist: '加黑名单', cancel: '取消',
       confirmRecords: '确定删除选中的 {count} 条剧集记录？',
@@ -744,7 +752,7 @@ export default {
       ungrouped: "未分组",
       status: {
         submitting: "正在提交", retrying: "等待重试", downloaded: "已下载",
-        organizing: "正在整理", organized: "已入库",
+        organizing: "正在整理", organized: "已入库", needsReview: "待复核",
         pending: "待下载",
         active: "下载中",
         finished: "已完成",

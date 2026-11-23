@@ -179,7 +179,7 @@ func syncMediaDir(dir string) error {
 }
 
 // installMedia 在目标卷准备文件，发布前始终保留源及已有目标。
-func installMedia(ctx context.Context, src, dst string) error {
+func installMedia(ctx context.Context, src, dst string, publish func(string, string) error) error {
 	stage, release, err := newMediaStage(filepath.Dir(dst), lockStageDirectory)
 	if err != nil {
 		return err
@@ -204,7 +204,7 @@ func installMedia(ctx context.Context, src, dst string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return os.Rename(tmp, dst)
+	return publish(tmp, dst)
 }
 
 type mediaReader struct {

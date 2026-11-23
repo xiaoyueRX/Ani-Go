@@ -42,6 +42,12 @@ docker compose up -d ani-go
 curl -fsS http://localhost:20001/api/health
 ```
 
+### Trying a release candidate and rolling back
+
+Record the running image digest or keep the working executable, Compose file and environment settings. On the host, use SQLite’s `.backup` command on the active `DB_PATH` to create a separate snapshot. Run `PRAGMA quick_check` on the snapshot and verify it returns `ok`. The SQLite backup interface includes committed WAL transactions. If Compose uses `latest`, pin `image` to the candidate tag or digest before the trial.
+
+To roll back, stop Ani-Go and preserve the upgraded database and any `-wal` and `-shm` sidecars together in a separate directory. Restore the pre-upgrade snapshot to the original `DB_PATH` with its original ownership and permissions. Start the previously recorded image digest or executable. Check the health endpoint’s version, sign in with the existing account, and verify subscription seasons and organized episode paths. The database snapshot restores application records. Check media files and download-client jobs separately.
+
 ## Standalone installation
 
 On Linux or macOS, the installer fetches the GitHub release archive, verifies it against the release’s `checksums.txt` and installs the executable for the current user. Set `ANIGO_VERSION` on the shell running the installer to select a tag. For example, append `| ANIGO_VERSION=v0.7.0 sh` in place of `| sh` below.
