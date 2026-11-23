@@ -57,6 +57,13 @@ const emit = defineEmits<{
 }>()
 
 const coverSrc = computed(() => proxyImage(props.sub.cover_url))
+function openTitle(event: MouseEvent) {
+  if (props.pending || event.defaultPrevented || event.button !== 0 ||
+      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  emit('click')
+}
+
 const isImageLoaded = ref(false)
 watch(coverSrc, () => { isImageLoaded.value = false })
 
@@ -88,7 +95,8 @@ const progressColor = computed(() => {
   <div
     class="group relative flex flex-col bg-base-100 rounded-[1.2rem] overflow-hidden border border-base-200/60 shadow-sm hover:shadow-2xl hover:shadow-primary hover:border-primary/30 transition-all duration-500 cursor-pointer active:scale-[0.98] h-full"
     :class="{ 'opacity-80 grayscale-[0.4]': !sub.enabled, 'opacity-40 pointer-events-none': pending }"
-    @click="emit('click')"
+    :inert="pending"
+    @click="!pending && emit('click')"
   >
     <!-- Cover Image Wrapper -->
     <div class="relative aspect-[3/3.8] overflow-hidden bg-base-300">
@@ -135,24 +143,6 @@ const progressColor = computed(() => {
          </div>
       </div>
 
-      <!-- Floating Actions (Hover) -->
-      <div class="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 z-10" @click.stop>
-        <button
-          class="w-8 h-8 rounded-full bg-base-100/90 backdrop-blur-md border border-white/20 flex items-center justify-center text-base-content hover:bg-primary hover:text-primary-content hover:scale-110 shadow-xl transition-all active:scale-95"
-          @click="emit('toggle')"
-        >
-          <component :is="sub.enabled ? Pause : Play" :size="14" />
-        </button>
-        <button
-          class="w-8 h-8 rounded-full bg-base-100/90 backdrop-blur-md border border-white/20 flex items-center justify-center text-base-content hover:bg-error hover:text-error-content hover:scale-110 shadow-xl transition-all active:scale-95"
-          @click="emit('delete')"
-          :disabled="deleting"
-        >
-          <span v-if="deleting" class="loading loading-spinner loading-xs"></span>
-          <Trash2 v-else :size="14" />
-        </button>
-      </div>
-      
       <!-- Gradient Overlay & Progress -->
       <div class="absolute bottom-0 left-0 w-full p-3 pt-8 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
          <div class="flex justify-between items-end mb-1.5">
@@ -177,8 +167,35 @@ const progressColor = computed(() => {
     <!-- Content Area -->
     <div class="p-3.5 flex flex-col gap-2.5 flex-1 bg-gradient-to-b from-transparent to-base-200/5">
       <h3 class="font-black text-[13px] leading-tight line-clamp-2 min-h-[2.2rem] group-hover:text-primary transition-colors tracking-tight" :title="sub.title_cn">
-        {{ sub.title_cn }}
+        <button v-if="batchDeleteMode" type="button" class="cursor-pointer text-left"
+                :aria-pressed="!!batchSelected" :disabled="pending" @click.stop="emit('click')">
+          {{ sub.title_cn }}
+        </button>
+        <a v-else :href="pending ? undefined : `/subscriptions/${sub.id}`" @click.stop="openTitle">{{ sub.title_cn }}</a>
       </h3>
+
+      <!-- 标题之后才进入操作按钮，绝对定位保持按钮位于封面右上角。 -->
+      <div class="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 group-focus-within:opacity-100 group-focus-within:translate-x-0 transition-all duration-300 z-10" @click.stop>
+        <button
+          class="w-8 h-8 rounded-full bg-base-100/90 backdrop-blur-md border border-white/20 flex items-center justify-center text-base-content hover:bg-primary hover:text-primary-content hover:scale-110 shadow-xl transition-all active:scale-95"
+          type="button"
+          :aria-label="$t(sub.enabled ? 'detail.actions.suspend' : 'detail.actions.resume')"
+          :disabled="pending"
+          @click="emit('toggle')"
+        >
+          <component :is="sub.enabled ? Pause : Play" :size="14" />
+        </button>
+        <button
+          class="w-8 h-8 rounded-full bg-base-100/90 backdrop-blur-md border border-white/20 flex items-center justify-center text-base-content hover:bg-error hover:text-error-content hover:scale-110 shadow-xl transition-all active:scale-95"
+          type="button"
+          :aria-label="$t('common.delete')"
+          @click="emit('delete')"
+          :disabled="deleting || pending"
+        >
+          <span v-if="deleting" class="loading loading-spinner loading-xs"></span>
+          <Trash2 v-else :size="14" />
+        </button>
+      </div>
       
       <div class="flex items-center gap-1.5 text-[8px] font-black text-primary/80 bg-primary/10 py-1 px-2.5 rounded-md self-start uppercase tracking-widest border border-primary/20">
         <User :size="10" class="text-primary" />
@@ -195,10 +212,12 @@ const progressColor = computed(() => {
       </div>
 
       <!-- Quick Action Footer -->
-      <div class="flex items-center justify-between mt-2 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-500" @click.stop>
+      <div class="flex items-center justify-between mt-2 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0 transition-all duration-500" @click.stop>
          <button
           v-if="sub.enabled && !sub.completed"
           class="btn btn-ghost btn-xs text-primary font-black uppercase tracking-[0.2em] hover:bg-primary/10 px-0 h-auto min-h-0 py-1"
+          type="button"
+          :disabled="pending"
           @click="emit('supplement')"
         >
           <History :size="14" class="mr-2" />
@@ -212,6 +231,12 @@ const progressColor = computed(() => {
 </template>
 
 <style scoped>
+:is(a, button):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+
 @keyframes shimmer {
   100% {
     transform: translateX(100%);
