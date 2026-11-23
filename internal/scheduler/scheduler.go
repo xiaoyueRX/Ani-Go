@@ -566,7 +566,7 @@ func (s *Scheduler) pollOrganizer(ctx context.Context) {
 
 	// 查询数据库中的待整理 Episode 记录
 	var episodes []database.Episode
-	if err := database.DB.Where("status IN ?", []string{"downloaded", "renaming"}).Order("CASE WHEN status = 'renaming' THEN 0 ELSE 1 END").Find(&episodes).Error; err != nil {
+	if err := database.DB.Where(database.OrganizerQueuePredicate).Order("CASE WHEN status = 'renaming' THEN 0 ELSE 1 END").Find(&episodes).Error; err != nil {
 		log.Printf("❌ 查询待整理文件失败: %v", err)
 		return
 	}

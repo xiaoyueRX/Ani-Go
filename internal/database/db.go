@@ -17,6 +17,9 @@ import (
 
 var DB *gorm.DB
 
+// OrganizerQueuePredicate 与部分索引共用固定状态，让 SQLite 能识别队列条件。
+const OrganizerQueuePredicate = "status IN ('downloaded', 'renaming')"
+
 func Init(dbPath string) error {
 	// 普通磁盘路径可能位于首次挂载的空卷内。
 	if dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file:") {
@@ -62,6 +65,11 @@ func Init(dbPath string) error {
 			&NotificationLog{},
 			&ParserCache{},
 		); err != nil {
+			return err
+		}
+		// 整理轮询也负责清理移动后保留的源文件，两次查询只需访问这些待办记录。
+		if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_episode_organizer_work ON episodes(status, deleted_at)
+			WHERE deleted_at IS NULL AND (` + OrganizerQueuePredicate + ` OR move_source_path <> '')`).Error; err != nil {
 			return err
 		}
 		if err := migrateEpisodeLabels(tx, legacyEpisodeStatus); err != nil {
