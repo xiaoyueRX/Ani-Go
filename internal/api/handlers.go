@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1414,7 +1415,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "设置已更新"})
 }
 
-// handleGetLogs 获取系统日志（最近 100 行，过滤认证和心跳噪音）
+// handleGetLogs 读取系统日志尾部，默认返回最近 100 行。
 // GET /api/logs?lines=50
 func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	linesStr := r.URL.Query().Get("lines")
@@ -1435,59 +1436,44 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	// 逆向 Seek 读取尾部 N 行（类 tail -n）
-	const chunkSize = 4096
-	stat, _ := f.Stat()
-	fileSize := stat.Size()
-
-	var tail []byte
-	pos := fileSize
-	buf := make([]byte, chunkSize)
-	linesFound := 0
-
-	for pos > 0 && linesFound <= lines {
-		readSize := int64(chunkSize)
-		if pos < chunkSize {
-			readSize = pos
-			buf = make([]byte, readSize)
-		}
-		pos -= readSize
-		if _, err := f.Seek(pos, 0); err != nil {
-			break
-		}
-		if _, err := f.Read(buf); err != nil {
-			break
-		}
-		tail = append(buf, tail...)
-		linesFound = 0
-		for _, b := range tail {
-			if b == '\n' {
-				linesFound++
-			}
-		}
-		if pos == 0 {
-			break
-		}
-	}
-
-	content := strings.TrimRight(string(tail), "\n")
-	allLines := []string{}
-	if content != "" {
-		allLines = strings.Split(content, "\n")
-	}
-
-	// 提取最后 N 行
-	total := len(allLines)
-	start := 0
-	if total > lines {
-		start = total - lines
-	}
-	recent := allLines[start:]
-
+	recent, total := readLogTail(f, lines)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"lines": recent,
 		"total": total,
 	})
+}
+
+func readLogTail(f *os.File, limit int) ([]string, int) {
+	info, err := f.Stat()
+	if err != nil {
+		return []string{}, 0
+	}
+	var buf [4096]byte
+	var chunks []string
+	breaks := 0
+	for pos := info.Size(); pos > 0 && breaks < limit; {
+		n := min(pos, int64(len(buf)))
+		pos -= n
+		if _, err := f.ReadAt(buf[:n], pos); err != nil {
+			return []string{}, 0
+		}
+		// 每个块保留独立内容，只统计本块的换行，最后一次合并。
+		chunk := string(buf[:n])
+		if len(chunks) == 0 {
+			chunk = strings.TrimRight(chunk, "\n")
+			if chunk == "" {
+				continue
+			}
+		}
+		chunks = append(chunks, chunk)
+		breaks += strings.Count(chunk, "\n")
+	}
+	if len(chunks) == 0 {
+		return []string{}, 0
+	}
+	slices.Reverse(chunks)
+	all := strings.Split(strings.Join(chunks, ""), "\n")
+	return all[max(0, len(all)-limit):], len(all)
 }
 
 // handleGetCustomRegex 获取当前自定义正则规则
