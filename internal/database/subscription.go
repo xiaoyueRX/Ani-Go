@@ -152,6 +152,14 @@ func UpdateSubscription(db *gorm.DB, id uint, changes map[string]interface{}) (S
 		if err := tx.Model(&Subscription{}).Where("id = ?", id).Updates(changes).Error; err != nil {
 			return err
 		}
+		season, setSeason := changes["season"].(int)
+		total, setTotal := changes["total_episodes"].(int)
+		if (setSeason && max(1, season) != max(1, prior.Season)) || (setTotal && total != prior.TotalEpisodes) {
+			_, explicitCompletion := changes["completed"]
+			if _, err := SyncEpisodeProgress(tx, id, !explicitCompletion); err != nil {
+				return err
+			}
+		}
 		if err := tx.First(&updated, id).Error; err != nil {
 			return err
 		}

@@ -199,6 +199,8 @@ curl -fsS -H "Authorization: Bearer $jwt" -H 'Content-Type: application/json' \
 - 搜索发布标题可向 `POST /api/settings/custom-regex/test` 发送 `{"title":"[CityLab] Harbor Story - 01 [1080p]"}` 预览作品名、季集、字幕组和分辨率。该接口只解析输入，适合在创建订阅前供用户校正结果。
 - 同时启用同名多季时，共享 RSS 及历史搜索遇到无法区分季的发布会跳过。资源标题中的明确季标、对应的蜜柑作品 ID 或分季独立的 RSS 可区分归属。
 - `current_episodes` 统计订阅季中已整理的正片集号。已知总集数时只计范围内的整数集号。同集多个版本只计一次，独立的手动标记保存在 `manual_status`。
+- 修改 `season` 或 `total_episodes` 后，更新响应即包含重新计算的进度。总集数已知时同时更新完结状态，总集数未知时保留原状态。同一次更新显式传入的 `completed` 优先。
+- RSS 下载初期，剧集的 `file_size` 可来自订阅源。下载器报告任务大小后，该值更新为任务字节数。整理时绑定到具体文件后，每条记录保留各自的文件大小。
 - 批量创建发送 `{"items":[…]}`，每批 1–20 项，各项可传 `season`，和单条创建采用相同的判重条件。按项读取 `success` 和 `failed`。单条或全量补全异步执行，202 表示已受理。全量补全最多同时处理三个订阅，同一订阅已有扫描时共享该次结果。
 - 批量删除与恢复订阅发送 `{"ids":[1,2]}`。删除剧集向所属订阅的 `episodes/batch-delete` 发送 `{"ids":[1],"delete_files":false}`，单次 1–1000 个剧集 ID。跨订阅选择返回 404。删除共享下载的文件时会返回 409；下载器执行失败返回 502。[删除与文件归属](../internal/api/episodes.go)
 - 写入手动标记时发送 `{"status":"completed"}`，可用值还有 `pending`、`downloading`、`failed`。发送 `{"status":""}` 可清除。成功响应中的 `status` 和 `manual_status` 均回显本次标记。读取订阅详情时，剧集的 `status` 是实际下载或整理状态，`manual_status` 是用户标记。整理进度和完结统计按实际状态计算。

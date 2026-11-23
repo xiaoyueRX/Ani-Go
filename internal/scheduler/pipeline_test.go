@@ -105,6 +105,38 @@ func TestCompletionBindsLegacyPlaceholder(t *testing.T) {
 	}
 }
 
+func TestPollDownloadsRefreshesSizeFromClient(t *testing.T) {
+	const enclosureSize, payloadSize = 2710, 4 << 20
+	for _, tc := range []struct {
+		name, status, sourceFile string
+		progress                 float32
+		clientSize, wantSize     int64
+		wantStatus               string
+	}{
+		{"downloading", "downloading", "", 0.5, payloadSize, payloadSize, "downloading"},
+		{"completion", "downloading", "", 1, payloadSize, payloadSize, "downloaded"},
+		{"awaiting organization", "downloaded", "", 1, payloadSize, payloadSize, "downloaded"},
+		{"unknown client size", "downloading", "", 0, 0, enclosureSize, "downloading"},
+		{"bound batch member", "downloaded", "S01E01.mkv", 1, payloadSize, enclosureSize, "downloaded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := pipelineDB(t)
+			ep := database.Episode{TorrentHash: "hash", Status: tc.status, FileSize: enclosureSize, SourceFile: tc.sourceFile}
+			savePipelineRow(t, db, &ep)
+			task := core.DownloadTask{Hash: ep.TorrentHash, Progress: tc.progress, Size: tc.clientSize}
+			s := Scheduler{downloader: &pipelineDownloader{mockSchedDownloader: mockSchedDownloader{tasks: []core.DownloadTask{task}}}}
+			s.pollDownloads(context.Background())
+			var got database.Episode
+			if err := db.First(&got, ep.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if got.FileSize != tc.wantSize || got.Status != tc.wantStatus {
+				t.Fatalf("大小和状态 = %d, %s；期望 %d, %s", got.FileSize, got.Status, tc.wantSize, tc.wantStatus)
+			}
+		})
+	}
+}
+
 func TestOrganizerLeavesPartialDownloadUntouched(t *testing.T) {
 	db := pipelineDB(t)
 	sub := database.Subscription{TitleCN: "Series", AnimeType: "tv"}

@@ -487,6 +487,11 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 			updates["torrent_hash"] = task.Hash
 		}
 		active := ep.Status == "downloading" || ep.Status == "submitting" || ep.Status == "retrying"
+		awaitingFile := (active || ep.Status == "downloaded") && ep.SourceFile == "" && ep.FinalPath == ""
+		if awaitingFile && len(task.FollowedBy) == 0 && task.Size > 0 && task.Size != ep.FileSize {
+			// RSS 可能只给出种子文件大小；绑定到合集成员之后则要保留该文件自己的大小。
+			updates["file_size"] = task.Size
+		}
 		now := time.Now()
 		done := active && task.IsComplete()
 		if ep.Status == "downloaded" && ep.TorrentHash != task.Hash && !task.IsComplete() {
@@ -502,7 +507,7 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 		if len(updates) == 0 {
 			continue
 		}
-		r := database.DB.Model(&database.Episode{}).Where("id = ? AND status = ?", ep.ID, ep.Status).Updates(updates)
+		r := ep.OrganizationSnapshot(database.DB.WithContext(ctx)).Updates(updates)
 		if r.Error != nil {
 			log.Printf("更新剧集下载状态失败: %v", r.Error)
 			continue

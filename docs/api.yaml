@@ -189,9 +189,9 @@ components:
         cover_url: {type: string}
         description: {type: string}
         anime_type: {type: string}
-        total_episodes: {type: integer}
+        total_episodes: {type: integer, description: 改变总集数或订阅季时立即重算本季进度。}
         enabled: {type: boolean}
-        completed: {type: boolean}
+        completed: {type: boolean, description: 显式提交时优先使用指定的完结状态。}
         filter_json: {type: string}
         custom_path: {type: string, nullable: true, description: 省略时保留已有目录；空字符串或 null 清除覆盖。}
         excluded_keywords: {type: string}
@@ -303,7 +303,7 @@ components:
         torrent_url: {type: string}
         original_name: {type: string}
         final_path: {type: string}
-        file_size: {type: integer, format: int64}
+        file_size: {type: integer, format: int64, description: 字节数。下载初期可来自订阅源，随后使用下载器报告的任务大小，绑定到具体文件后使用该文件大小。}
         is_stalled: {type: boolean}
         group_name: {type: string}
         download_started_at: {type: string}
