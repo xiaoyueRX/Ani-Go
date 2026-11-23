@@ -102,30 +102,17 @@ jobs:
             "$py" -m pip install --disable-pip-version-check --only-binary=:all: psutil==7.2.2
           fi
           "$py" scripts/test_update_runtime.py
-      - name: Download selected RSS episodes with aria2
+      - name: Install aria2
+        id: aria2
         if: ${{ !cancelled() && steps.application.outcome == 'success' }}
+        run: bash scripts/install_ci_aria2.sh
+      - name: Download selected RSS episodes with aria2
+        if: ${{ !cancelled() && steps.aria2.outcome == 'success' }}
+        env:
+          ARIA2C: ${{ steps.aria2.outputs.executable }}
         run: |
-          if [[ "$RUNNER_OS" == Windows ]]; then
-            py=python
-            archive=aria2-1.37.0-win-64bit-build1.zip
-            curl --fail --silent --show-error --location --output "$archive" "https://github.com/aria2/aria2/releases/download/release-1.37.0/$archive"
-            echo "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288  $archive" | sha256sum --check
-            unzip -q "$archive" -d "$RUNNER_TEMP"
-            aria="$(cygpath -u "$RUNNER_TEMP")/${archive%.zip}/aria2c.exe"
-          elif [[ "$RUNNER_OS" == macOS ]]; then
-            py=python3
-            command -v aria2c >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install aria2
-            aria=$(command -v aria2c)
-          else
-            py=python3
-            if ! command -v aria2c >/dev/null; then
-              sudo apt-get update -qq
-              sudo apt-get install -y --no-install-recommends aria2
-            fi
-            aria=$(command -v aria2c)
-          fi
-          file "$aria"
-          "$py" scripts/test_aria2_runtime.py "./anigo$(go env GOEXE)" --aria2c "$aria"
+          if [[ "$RUNNER_OS" == Windows ]]; then py=python; else py=python3; fi
+          "$py" scripts/test_aria2_runtime.py "./anigo$(go env GOEXE)" --aria2c "$ARIA2C"
       - name: Install Transmission
         id: transmission
         if: ${{ !cancelled() && steps.application.outcome == 'success' }}
@@ -178,6 +165,13 @@ jobs:
         env:
           TRANSMISSION_DAEMON: ${{ steps.transmission.outputs.executable }}
         run: python scripts/test_transmission_runtime.py ./anigo.exe --daemon "$TRANSMISSION_DAEMON" --restore-windows-backup "$RUNNER_TEMP/portable-backup"
+      - name: Restore the exported Windows backup and resume E02 with aria2
+        if: ${{ !cancelled() && steps.portable.outcome == 'success' && steps.aria2.outcome == 'success' }}
+        env:
+          ARIA2C: ${{ steps.aria2.outputs.executable }}
+        run: >-
+          python scripts/test_aria2_runtime.py ./anigo.exe --aria2c "$ARIA2C"
+          --restore-windows-backup "$RUNNER_TEMP/portable-backup"
       - name: Test direct ARMv7 execution and downloaders on the ARM64 host
         if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'linux' && matrix.arch == 'arm64' }}
         run: |
@@ -260,6 +254,17 @@ jobs:
         run: >-
           "$PYTHON" scripts/test_transmission_runtime.py "./anigo$(go env GOEXE)"
           --daemon "$TRANSMISSION_DAEMON" --restore-windows-backup "$RUNNER_TEMP/portable-backup"
+      - name: Install aria2 for the destination
+        id: aria2
+        if: ${{ !cancelled() && steps.application.outcome == 'success' }}
+        run: bash scripts/install_ci_aria2.sh
+      - name: Restore the Windows backup and resume E02 with aria2
+        if: ${{ !cancelled() && steps.aria2.outcome == 'success' }}
+        env:
+          ARIA2C: ${{ steps.aria2.outputs.executable }}
+        run: >-
+          "$PYTHON" scripts/test_aria2_runtime.py "./anigo$(go env GOEXE)" --aria2c "$ARIA2C"
+          --restore-windows-backup "$RUNNER_TEMP/portable-backup"
 
   check-container:
     needs: verify

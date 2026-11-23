@@ -78,7 +78,11 @@ class SeedHandler(BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(end_byte - start_byte + 1))
         self.end_headers()
-        self.wfile.write(data[start_byte:end_byte + 1])
+        writer = getattr(self.server, "write_media", None)
+        if writer is not None and path.startswith("/media/"):
+            writer(self.wfile, data, start_byte, end_byte + 1)
+        else:
+            self.wfile.write(data[start_byte:end_byte + 1])
 
 
 @contextmanager
@@ -114,11 +118,12 @@ def web_seed(media_ready=None, *, http_seed=True, payloads=PAYLOADS, member_dire
 
 
 @contextmanager
-def movie_feed(title, *, http_seed=False):
+def movie_feed(title, *, http_seed=False, write_media=None):
     """逐条发布私有单文件种子。启用 http_seed 时，同时在回环提供媒体字节。"""
     with ThreadingHTTPServer((HOST, 0), SeedHandler) as server:
         url = f"http://{HOST}:{server.server_port}"
         server.media, server.media_ready = {}, None
+        server.write_media = write_media
         items = []
 
         def rss():
