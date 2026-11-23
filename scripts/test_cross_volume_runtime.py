@@ -1,4 +1,4 @@
-"""在两个可写文件系统上，验证 qBittorrent 下载、跨卷复制及重启后的独立做种。"""
+"""在两个可写文件系统上验证跨卷复制、媒体卷标恢复及 qBittorrent 重启后的独立做种。"""
 
 import argparse
 import errno
@@ -62,7 +62,28 @@ def organized(detail):
             and detail["subscription"]["current_episodes"] == 1)
 
 
-def run(binary, qb, root, library, feed, publish):
+def wait_for_blocked_episode(service, route, marker, torrent_hash):
+    def check():
+        detail = service.api(route)
+        if len(detail["episodes"]) != 1:
+            raise RuntimeError("Expected exactly one episode for the submitted release")
+        episode, = detail["episodes"]
+        if detail["subscription"]["current_episodes"] != 0 or episode["final_path"] or episode["status"] == "organized":
+            raise RuntimeError("Ani-Go published an episode while the library marker was wrong")
+        if episode["status"] != "downloaded":
+            return None
+        # 等到本次整理确实因为卷标被拒绝，以免将正常的下载到整理间隔误判为保护生效。
+        lines = service.api("logs?lines=100")["lines"]
+        if not any(marker.name in line and Path(FILENAME).stem in line for line in lines):
+            return None
+        if episode["number"] != 1 or episode["torrent_hash"].lower() != torrent_hash:
+            raise RuntimeError("The volume marker rejection belongs to a different episode")
+        return {"id": episode["id"], "status": episode["status"], "current_episodes": detail["subscription"]["current_episodes"]}
+
+    return wait_for("organizer to reject the mismatched library marker", check, bool)
+
+
+def run(binary, qb, root, library, feed, publish, *, check_marker=False):
     primary = QB(qb, root / "primary", root / "下载 Downloads")
     seed = QB(qb, root / "seed", root / "seed media")
     receiver = QB(qb, root / "receiver", root / "received media")
@@ -74,6 +95,10 @@ def run(binary, qb, root, library, feed, publish):
                MIKAN_RSS_MODE="personal", MIKAN_RSS_URL=feed + "/RSS/MyBangumi", MIKAN_DOMAIN=feed,
                MIKAN_MIRROR_DOMAINS=feed, MIKAN_PROXY_DOMAIN=feed, RSS_INTERVAL="1s", ORGANIZER_INTERVAL="1s",
                TV_BASE_PATH=str(library), USE_HARDLINK="true", DISK_MIN_FREE_GB="0", SEED_CLEANUP_ENABLED="false")
+    if check_marker:
+        marker = library / ".anigo-volume-id"
+        marker.write_bytes(b"other-library\r\n")
+        env["TV_VOLUME_ID"] = "test-library"
     port, password = free_port(), secrets.token_urlsafe(32)
 
     def app():
@@ -93,15 +118,24 @@ def run(binary, qb, root, library, feed, publish):
             primary.download_from(seed, torrent_hash, {FILENAME: PAYLOAD})
         wait_for("original seeder to close its Web UI and peer port", lambda: ports_closed(seed), bool)
 
+        source = primary.downloads / FILENAME
+        if check_marker:
+            blocked = wait_for_blocked_episode(service, route, marker, torrent_hash)
+            blocked_source = media_file(source)
+            if list(library.iterdir()) != [marker] or marker.read_bytes() != b"other-library\r\n":
+                raise RuntimeError("The organizer changed the library while its marker was wrong")
+            marker.write_bytes(b"test-library\r\n")
         detail = wait_for("library copy and episode progress", lambda: service.api(route), organized)
         episode, = detail["episodes"]
-        source, copy = primary.downloads / FILENAME, Path(episode["final_path"])
+        copy = Path(episode["final_path"])
         if (episode["number"] != 1 or episode["torrent_hash"].lower() != torrent_hash or episode["file_size"] != len(PAYLOAD)
                 or not copy.resolve().is_relative_to(library.resolve()) or source.samefile(copy)):
             raise RuntimeError("The organized episode is not a separate copy in the selected media library")
         source_file, library_file = media_file(source), media_file(copy)
         if source_file["device"] == library_file["device"]:
             raise RuntimeError("The source and organized media occupy the same device")
+        if check_marker and (episode["id"] != blocked["id"] or source_file != blocked_source):
+            raise RuntimeError("Automatic recovery replaced the waiting episode or changed the completed download")
     wait_for("primary qBittorrent to close before restart", lambda: ports_closed(primary), bool)
 
     # 此时原始种源已退出。私有种子没有 tracker 或 Web Seed，空接收端只连接重新启动的主下载器。
@@ -125,13 +159,19 @@ def run(binary, qb, root, library, feed, publish):
         uploaded = wait_for("primary qBittorrent upload counter", lambda: primary.info(torrent_hash)["uploaded_session"] - before,
                             lambda count: count >= len(PAYLOAD))
         received_file = media_file(receiver.downloads / FILENAME)
-        return {
+        result = {
             "system": platform.system(), "architecture": platform.machine(),
             "qb_version": primary.request("app/version").decode().strip(), "infohash": torrent_hash,
             "link_errno": link_errno, "link_winerror": link_winerror,
             "source": source_file, "library": library_file, "receiver": received_file,
             "origin_offline": True, "anigo_restarted": True, "qb_restarted": True, "uploaded_delta": uploaded,
         }
+        if check_marker:
+            result["volume_marker"] = {
+                "blocked": blocked, "recovered_episode_id": restored["id"],
+                "recovered_progress": detail["subscription"]["current_episodes"],
+            }
+        return result
 
 
 def main():
@@ -141,11 +181,12 @@ def main():
     parser.add_argument("library_parent", type=Path, help="Writable directory on a filesystem distinct from the default temp directory")
     args = parser.parse_args()
     binary, qb = args.binary.resolve(strict=True), str(args.qbittorrent.resolve(strict=True))
-    with (tempfile.TemporaryDirectory(prefix="Ani-Go downloads ") as root,
-          tempfile.TemporaryDirectory(prefix="Ani-Go library ", dir=args.library_parent.resolve(strict=True)) as library,
-          movie_feed(TITLE) as (feed, publish)):
-        result = run(binary, qb, Path(root), Path(library), feed, publish)
-    print("Cross-volume qBittorrent: " + json.dumps(result), flush=True)
+    for check_marker, label in ((False, "Cross-volume qBittorrent"), (True, "Cross-volume marker recovery")):
+        with (tempfile.TemporaryDirectory(prefix="Ani-Go downloads ") as root,
+              tempfile.TemporaryDirectory(prefix="Ani-Go library ", dir=args.library_parent.resolve(strict=True)) as library,
+              movie_feed(TITLE) as (feed, publish)):
+            result = run(binary, qb, Path(root), Path(library), feed, publish, check_marker=check_marker)
+        print(label + ": " + json.dumps(result), flush=True)
 
 
 if __name__ == "__main__":
