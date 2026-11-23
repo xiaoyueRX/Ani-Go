@@ -58,6 +58,15 @@ func TestCreateSubscriptionChecksExplicitTMDBKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	conn, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := conn.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	if err := db.AutoMigrate(&Subscription{}); err != nil {
 		t.Fatal(err)
 	}
