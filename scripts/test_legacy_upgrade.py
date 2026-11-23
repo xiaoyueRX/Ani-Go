@@ -69,7 +69,7 @@ def running(binary, home, env, service):
                     raise RuntimeError("Ani-Go still has its original port open after shutdown")
 
 
-def verify_records(service, expected, plugin_enabled, *, candidate):
+def verify_records(service, expected, plugin_enabled, *, candidate, settings=SETTINGS, manifest=PLUGIN):
     if service.api("me").get("username") != "admin":
         raise RuntimeError("The previous session cannot identify the administrator")
     rows = service.api("subscriptions")
@@ -80,10 +80,10 @@ def verify_records(service, expected, plugin_enabled, *, candidate):
         if detail.get(key) != value:
             raise RuntimeError(f"The legacy subscription differs in {key}")
     saved = service.api("settings")
-    if any(saved.get(key) != value for key, value in SETTINGS.items()):
+    if any(saved.get(key) != value for key, value in settings.items()):
         raise RuntimeError("The backup schedule or retention count changed")
     plugins = service.api("plugins/custom")
-    if len(plugins) != 1 or any(plugins[0].get(key) != value for key, value in PLUGIN.items()):
+    if len(plugins) != 1 or any(plugins[0].get(key) != value for key, value in manifest.items()):
         raise RuntimeError("The legacy webhook manifest changed")
     if plugins[0]["enabled"] != plugin_enabled:
         raise RuntimeError("The legacy webhook lost its enabled state")
@@ -129,7 +129,51 @@ def prepare_legacy(service, password, media, backups):
     _, downloaded = service.request("/api/backup/download/" + quote(name, safe=""))
     if not downloaded or downloaded != (backups / name).read_bytes():
         raise RuntimeError("The legacy backup download differs from the file on disk")
-    return expected
+    return expected, backups / name
+
+
+def restore_legacy_json(binary, target, archive, expected, legacy_token, legacy_password):
+    home, backups = target / "home", target / "backups"
+    home.mkdir(parents=True)
+    backups.mkdir()
+    shutil.copy2(archive, backups / archive.name)
+    service = Service(free_port())
+    old_session = Service(service.port)
+    old_session.token = legacy_token
+    password = secrets.token_urlsafe(24)
+    env = process_environment(home, backups, service.port, password, OFFLINE)
+    with running(binary, home, env, service):
+        service.login(password)
+        if service.api("subscriptions") or service.api("plugins/custom"):
+            raise RuntimeError("The JSON restore target is not empty")
+        old_session.api("me", status=401)
+        service.api("backup/restore", "POST", {"name": archive.name})
+        rows = service.api("subscriptions")
+        if len(rows) != 1:
+            raise RuntimeError("Legacy JSON did not restore exactly one subscription")
+        restored = dict(expected, id=rows[0]["id"])
+        verify_records(service, restored, False, candidate=True)
+        service.api("backup/restore", "POST", {"name": archive.name})
+        verify_records(service, restored, False, candidate=True)
+        old_session.api("me", status=401)
+        service.api("login", "POST", {"username": "admin", "password": legacy_password}, status=401)
+
+        restored["title_en"] = "Edited after restore"
+        service.api(f"subscriptions/{restored['id']}", "PUT", {"title_en": restored["title_en"]})
+        settings = dict(SETTINGS, BACKUP_KEEP_COUNT="11")
+        service.api("settings", "PUT", {"settings": settings})
+        manifest = dict(PLUGIN, name="恢复后的通知")
+        service.api("plugins/save", "POST", manifest)
+        service.api(PLUGIN_TOGGLE, "POST", {"enabled": True})
+
+    with running(binary, home, env, service):
+        verify_records(service, restored, True, candidate=True, settings=settings, manifest=manifest)
+        old_session.api("me", status=401)
+        service.login(password)
+        service.verify_web()
+    verify_database(Path(env["ANI_DB_PATH"]), restored["id"])
+    print("Restored legacy JSON twice into a fresh candidate database. Its own account, edited subscription, "
+          "settings and webhook survived restart.", flush=True)
 
 
 def run(legacy, candidate, root):
@@ -146,7 +190,7 @@ def run(legacy, candidate, root):
     database = Path(env["ANI_DB_PATH"])
     print(f"Official {LEGACY_VERSION} executable SHA-256 {sha256(binary)}", flush=True)
     with running(binary, home, env, service):
-        expected = prepare_legacy(service, password, media, backups)
+        expected, archive = prepare_legacy(service, password, media, backups)
         legacy_token = service.token
 
     snapshot = root / "cold backup"
@@ -191,6 +235,8 @@ def run(legacy, candidate, root):
         service.login(password)
         service.verify_web()
     print(f"Restored {LEGACY_VERSION} in a separate directory and verified the original login and records.", flush=True)
+
+    restore_legacy_json(binary, root / "JSON restore", archive, expected, legacy_token, password)
 
 
 def main():
