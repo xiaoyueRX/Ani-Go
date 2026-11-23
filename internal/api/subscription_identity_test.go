@@ -239,3 +239,47 @@ func TestTMDBSubscriptionEditRejectsDuplicateAfterEnrichment(t *testing.T) {
 		t.Fatalf("冲突未回滚：metadata_id=%q tmdb_id=%q description=%q 错误=%v", saved.MetadataID, saved.TMDBID, saved.Description, err)
 	}
 }
+
+func TestTMDBKindGuardOnEdit(t *testing.T) {
+	setupTestDB(t)
+	mux := http.NewServeMux()
+	(&Server{}).registerRoutes(mux)
+	film := database.Subscription{TitleCN: "原片", AnimeType: "Movie", Season: 1, MetadataProvider: "TMDB", MetadataID: "movie/123", TMDBID: "movie/123", TotalEpisodes: 7, Description: "人工简介"}
+	occupied := database.Subscription{TitleCN: "已订剧", AnimeType: "TV", Season: 1, MetadataProvider: "TMDB", MetadataID: "tv/456"}
+	for _, s := range []*database.Subscription{&film, &occupied} {
+		if err := database.DB.Create(s).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	const route = "/api/subscriptions/1"
+	for _, tc := range []struct {
+		body   string
+		status int
+	}{
+		{`{"metadata_id":"tv/456","total_episodes":3,"description":"无效更新"}`, 400},
+		{`{"anime_type":"TV","description":"不能只改分类"}`, 400},
+		{`{"metadata_id":"tv/456","anime_type":"Scripted","total_episodes":2,"description":"冲突"}`, 409},
+	} {
+		panelCall(t, mux, "PUT", route, tc.body, tc.status)
+		var saved database.Subscription
+		if err := database.DB.First(&saved, film.ID).Error; err != nil || saved.MetadataID != film.MetadataID || saved.TMDBID != film.TMDBID || saved.AnimeType != film.AnimeType ||
+			saved.TotalEpisodes != film.TotalEpisodes || saved.Description != film.Description || !saved.UpdatedAt.Equal(film.UpdatedAt) {
+			t.Fatalf("失败的编辑更改了订阅：%+v，%v", saved, err)
+		}
+	}
+	panelCall(t, mux, "PUT", route, `{"metadata_id":"tv/457","anime_type":"TV"}`, 200)
+	var saved database.Subscription
+	if err := database.DB.First(&saved, film.ID).Error; err != nil || saved.MetadataID != "tv/457" || saved.TMDBID != "" || saved.AnimeType != "TV" ||
+		saved.TotalEpisodes != film.TotalEpisodes || saved.Description != film.Description {
+		t.Fatalf("同步更正未保留人工字段：%+v，%v", saved, err)
+	}
+	panelCall(t, mux, "POST", "/api/subscriptions", `{"title_cn":"空闲号的别名","metadata_provider":"TMDB","metadata_id":"tv/457"}`, 409)
+	// 历史来源和分类矛盾时仍可编辑无关字段，也可一起纠正。
+	if err := database.DB.Model(&film).Update("anime_type", "Movie").Error; err != nil {
+		t.Fatal(err)
+	}
+	panelCall(t, mux, "PUT", route, `{"description":"仍可编辑"}`, 200)
+	panelCall(t, mux, "PUT", route, `{"metadata_provider":"tmdb"}`, 400)
+	panelCall(t, mux, "PUT", route, `{"metadata_id":"tv/457"}`, 400)
+	panelCall(t, mux, "PUT", route, `{"anime_type":"Series"}`, 200)
+}

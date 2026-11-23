@@ -668,6 +668,10 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	sub, err := database.UpdateSubscription(database.DB.WithContext(r.Context()), uint(id), updates)
+	if errors.Is(err, database.ErrTMDBKindMismatch) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
 	if errors.Is(err, database.ErrSubscriptionExists) {
 		writeJSON(w, http.StatusConflict, errorResponse{Error: err.Error()})
 		return

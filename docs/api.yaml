@@ -1300,7 +1300,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Subscription'}
-        '400': {description: 无效的请求}
+        '400': {description: 请求无效，或 TMDB 编号的显式前缀与作品分类冲突。可同时提交匹配的 metadata_id 与 anime_type。}
         '409': {description: 片名与季号或来源标识已由其他订阅使用，原记录保留。}
         '404': {description: 订阅不存在}
         '500': {description: 更新失败}

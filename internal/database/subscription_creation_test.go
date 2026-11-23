@@ -52,3 +52,35 @@ func TestCreateSubscriptionAcrossSQLiteConnections(t *testing.T) {
 		t.Fatalf("成功 %d 次、保存 %d 项，错误 %v", created, count, err)
 	}
 }
+
+func TestCreateSubscriptionChecksExplicitTMDBKind(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "kinds.sqlite")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&Subscription{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		title, source, id, kind string
+		reject                  bool
+	}{
+		{"电影带剧集编号", "TMDB", "tv/456", "Film", true},
+		{"剧集带电影编号", "tmdb", "MOVIE/456", "Miniseries", true},
+		{"裸号电影", "TMDB", "21", "劇場版", false},
+		{"未知分类", "TMDB", "movie/22", "OVA", false},
+		{"其他来源", "BGM.tv", "movie/23", "TV", false},
+	} {
+		t.Run(tc.title, func(t *testing.T) {
+			sub := Subscription{TitleCN: tc.title, MetadataProvider: tc.source, MetadataID: tc.id, AnimeType: tc.kind}
+			err := CreateSubscription(db, &sub)
+			var count int64
+			if dbErr := db.Model(&Subscription{}).Where("title_cn = ?", tc.title).Count(&count).Error; dbErr != nil {
+				t.Fatal(dbErr)
+			}
+			if tc.reject && (err == nil || sub.ID != 0 || count != 0) || !tc.reject && (err != nil || count != 1) {
+				t.Fatalf("创建结果：错误 %v，编号 %d，记录数 %d", err, sub.ID, count)
+			}
+		})
+	}
+}

@@ -10,9 +10,24 @@ import (
 )
 
 var ErrSubscriptionExists = errors.New("该番剧已在订阅列表中")
+var ErrTMDBKindMismatch = errors.New("TMDB 编号前缀与作品分类不一致，请同时提交匹配的 anime_type 和 metadata_id")
+
+// 仅在写入明确的 TMDB 来源和分类时检查前缀，裸号与历史跨库映射沿用原规则。
+func (s Subscription) hasTMDBKindMismatch() bool {
+	localKind := core.TMDBMediaType(s.AnimeType)
+	if localKind == "" || !strings.EqualFold(s.MetadataProvider, "TMDB") {
+		return false
+	}
+	id := strings.Trim(strings.TrimSpace(s.MetadataID), "/")
+	kind, number := core.ParseTMDBID(id)
+	return number != "" && strings.HasPrefix(strings.ToLower(id), kind+"/") && kind != localKind
+}
 
 // CreateSubscription 对手动、批量和 MCP 订阅请求使用同一套查重规则。
 func CreateSubscription(db *gorm.DB, sub *Subscription) error {
+	if sub.hasTMDBKindMismatch() {
+		return ErrTMDBKindMismatch
+	}
 	created := *sub
 	err := db.Transaction(func(tx *gorm.DB) error {
 		// 先写入以取得 SQLite 写锁，再检查重复订阅。
@@ -191,6 +206,11 @@ func UpdateSubscription(db *gorm.DB, id uint, changes map[string]interface{}) (S
 		}
 		if err := tx.First(&updated, id).Error; err != nil {
 			return err
+		}
+		_, setID := changes["metadata_id"]
+		_, setProvider := changes["metadata_provider"]
+		if (setID || setProvider || setKind) && updated.hasTMDBKindMismatch() {
+			return ErrTMDBKindMismatch
 		}
 		updatedWork, _ := updated.TMDBIdentity()
 		priorWork, _ := prior.TMDBIdentity()
