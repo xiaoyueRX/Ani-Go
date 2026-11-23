@@ -165,6 +165,16 @@ jobs:
           if [[ "$RUNNER_OS" == Windows ]]; then py=python; else py=python3; fi
           file "$QB"
           "$py" scripts/test_qb_runtime.py "./anigo$(go env GOEXE)" --qbittorrent "$QB"
+      - name: Copy across volumes and seed after restarting qBittorrent
+        if: ${{ !cancelled() && steps.qb.outcome == 'success' && (matrix.os == 'windows' || matrix.os == 'darwin') }}
+        env:
+          QB: ${{ steps.qb.outputs.executable }}
+        run: |
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            pwsh -NoProfile -File scripts/test_cross_volume_windows.ps1 -AniGo "$(cygpath -aw ./anigo.exe)" -QB "$(cygpath -aw "$QB")"
+          else
+            bash scripts/test_cross_volume_macos.sh ./anigo "$QB"
+          fi
       - name: Export a complete Windows backup after organizing a real download
         id: portable
         if: ${{ !cancelled() && github.event_name == 'pull_request' && matrix.runner == 'windows-2025' && steps.qb.outcome == 'success' }}
