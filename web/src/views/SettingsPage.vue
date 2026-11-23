@@ -987,16 +987,12 @@ async function testDownloader(type: DownloaderType | 'current') {
     const { data } = await request.post('/downloader/test', payload)
     if (data.success) {
       window.showToast?.(data.message || '下载器连接正常', 'success')
-      saved.value = true
-      setTimeout(() => { saved.value = false }, 3000)
     } else {
       window.showToast?.(data.error || '下载器连接失败', 'error')
-      error.value = data.error || '下载器连接失败'
     }
   } catch (e: any) {
     const msg = e.response?.data?.error || '下载器测试请求失败'
     window.showToast?.(msg, 'error')
-    error.value = msg
   } finally {
     testingDownloaderKey.value = null
   }

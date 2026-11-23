@@ -122,3 +122,19 @@ for (const [type, hostKey, userKey, credentialKey] of [
     assert.ok(!payload.type && !payload.host && !payload.password && !payload.secret)
   })
 }
+
+test('a successful settings probe replaces the connection error without reporting a settings save', async () => {
+  const { component: c, notices } = view('views/SettingsPage', {
+    post: async (_path, body) => ({ data: body.secret === 'correct'
+      ? { success: true, message: 'Connected' }
+      : { success: false, error: 'Authentication failed' } }),
+  })
+  c.setVal('ARIA2_SECRET', 'incorrect')
+  await c.testDownloader('aria2')
+  assert.deepEqual(notices.at(-1), { message: 'Authentication failed', type: 'error' })
+
+  c.setVal('ARIA2_SECRET', 'correct')
+  await c.testDownloader('aria2')
+  assert.deepEqual(notices.at(-1), { message: 'Connected', type: 'success' })
+  assert.deepEqual({ error: c.error.value, saved: c.saved.value }, { error: '', saved: false })
+})
