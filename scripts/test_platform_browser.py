@@ -4,6 +4,7 @@ import argparse
 from contextlib import closing
 import os
 from pathlib import Path
+import secrets
 import shutil
 import socket
 import sqlite3
@@ -17,7 +18,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from test_platform_runtime import COMMUNITY, HOST, TITLE, restored_instance
+from test_platform_runtime import COMMUNITY, HOST, TITLE, restored_instance, start
 
 
 def open_browser(name):
@@ -314,6 +315,60 @@ def check_library_files(browser, service, home):
         raise RuntimeError("The file check changed the stored progress, episode history or media files")
 
 
+def check_filter_layout(browser, command, root, offline):
+    # 用同一浏览器和独立空库，保留先前登录、备份恢复和媒体核对的数据。
+    with socket.socket() as available:
+        available.bind((HOST, 0))
+        port = available.getsockname()[1]
+    with start(command, root / "filter", root / "filter-backups", port, secrets.token_urlsafe(24), offline) as service:
+        titles = ["Grid XZ"] + [f"Grid X {i}" for i in range(14)] + [f"Grid Y {i}" for i in range(5)]
+        reply = service.api("subscriptions/batch", "POST", {"items": [{"title_cn": title} for title in titles]}, status=201)
+        if reply["failed"] or len(reply["success"]) != len(titles):
+            raise RuntimeError("Could not create the isolated filter sample")
+        base = f"http://{HOST}:{port}"
+        browser.get(base + "/login")
+        browser.execute_script("localStorage.setItem('token', arguments[0]);"
+                               "localStorage.setItem('ani-go-setup-wizard-dismissed', 'true')", service.token)
+        browser.get(base + "/subscriptions")
+        wait = WebDriverWait(browser, 20)
+        field = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[placeholder="搜索追番标题、字幕组或年份..."]')))
+
+        def expect_titles(expected):
+            wait.until(lambda b: set(b.execute_script(
+                "return Array.from(document.querySelectorAll('h3[title]'), h => h.title)")) == set(expected))
+
+        samples = []
+        for key in ("X", "Z"):
+            expect_titles(titles)
+            matches = [title for title in titles if key in title]
+            # 旧网格每移除一张卡就读 body.offsetHeight。透传原生 getter，仅在这次筛选期间计数。
+            browser.execute_script("""
+                const getter = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight').get;
+                let reads = 0;
+                Object.defineProperty(document.body, 'offsetHeight', {
+                    configurable: true, get() { reads++; return getter.call(this); }
+                });
+                window.finishFilterProbe = () => {
+                    delete document.body.offsetHeight;
+                    delete window.finishFilterProbe;
+                    return reads;
+                };
+            """)
+            try:
+                field.send_keys(key)
+                expect_titles(matches)
+            finally:
+                reads = browser.execute_script("return window.finishFilterProbe()")
+            samples.append((len(titles) - len(matches), reads))
+            field.send_keys(Keys.BACKSPACE)
+        expect_titles(titles)
+        (few, few_reads), (many, many_reads) = samples
+        print(f"Filter removed {few}/{many} cards; document body height reads: {few_reads}/{many_reads}.", flush=True)
+        # 允许固定的浏览器开销；多移除的卡片不应每两张就引入一次额外的整页几何读取。
+        if 2 * (many_reads - few_reads) >= many - few:
+            raise RuntimeError("Document layout reads scaled with the number of filtered-out cards")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
@@ -335,6 +390,7 @@ def main():
                 check_filtered_batch_selection(browser, service, saved)
                 check_restored_plugin(browser, service)
                 check_library_files(browser, service, home)
+                check_filter_layout(browser, command, root, offline)
                 print(f"Passed: {browser.name} {browser.capabilities.get('browserVersion')}, login, "
                       "subscription save, restored plugin activation, present and missing library files, "
                       "unchanged 2/2 progress and organized history.")
