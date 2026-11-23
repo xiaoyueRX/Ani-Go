@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -477,30 +478,16 @@ func (m *BackupManager) RestoreBackup(ctx context.Context, fileName string) erro
 				return fmt.Errorf("%w：剧集缺少订阅（%d）", ErrInvalidArchive, ep.ID)
 			}
 			// 合集文件以任务与相对路径识别，用户确认的季集号之后可能变化。
-			fileBound := ep.TorrentHash != "" && filepath.IsLocal(ep.SourceFile) && filepath.Clean(ep.SourceFile) != "."
-			if fileBound && ep.ReservationKey != nil && *ep.ReservationKey == database.EpisodeFileReservationKey(ep.SubscriptionID, ep.TorrentHash, ep.SourceFile) {
-				key := database.EpisodeFileReservationKey(parent, ep.TorrentHash, ep.SourceFile)
-				ep.ReservationKey = &key
-			} else {
-				ep.ReservationKey = nil
+			sourcePath := ep.SourceFile
+			fileBound, err := restoreMemberPath(&ep, parent)
+			if err != nil {
+				return err
 			}
 			ep.SubscriptionID = parent
 			if ep.RecoverLegacyStatus() {
 				legacyProgress[parent] = true
 			}
-			model := tx.Unscoped().Model(&database.Episode{}).Where("subscription_id = ?", parent)
-			hashCondition := "COALESCE(torrent_hash, '') = ?"
-			if magnet.IsHexInfoHash(ep.TorrentHash) {
-				hashCondition += " COLLATE NOCASE"
-			}
-			q := model.Session(&gorm.Session{}).Where(hashCondition, ep.TorrentHash).Where("COALESCE(source_file, '') = ?", ep.SourceFile)
-			if !fileBound {
-				q = q.Where("season = ? AND number = ?", ep.Season, ep.Number)
-			}
-			if ep.TorrentHash == "" {
-				q = q.Where("COALESCE(torrent_url, '') = ? AND COALESCE(original_name, '') = ?", ep.TorrentURL, ep.OriginalName)
-			}
-			id, err := matchArchiveRow(model, q, ep.ID, ep.CreatedAt, claimedEpisodes)
+			id, err := matchArchiveEpisode(tx, ep, sourcePath, fileBound, claimedEpisodes)
 			if err != nil {
 				return err
 			}
@@ -543,6 +530,81 @@ func (m *BackupManager) RestoreBackup(ctx context.Context, fileName string) erro
 		return ctx.Err()
 	}
 	return errors.New("恢复备份失败，请检查数据库后重试")
+}
+
+// UnrepresentableMemberError 表示快照中已核实的字面文件名在目标系统上有不同的路径含义。
+type UnrepresentableMemberError struct{ EpisodeID uint }
+
+func (e *UnrepresentableMemberError) Error() string {
+	return fmt.Sprintf("剧集记录 %d 的源文件名含有字面反斜杠，Windows 无法表示该文件名，数据未恢复", e.EpisodeID)
+}
+
+func (*UnrepresentableMemberError) Unwrap() error { return ErrInvalidArchive }
+
+// 只有快照的成员键能证明反斜杠是路径分隔符还是文件名的一部分。
+func restoreMemberPath(ep *database.Episode, parent uint) (bool, error) {
+	original := ep.SourceFile
+	fileBound := ep.TorrentHash != "" && filepath.IsLocal(original) && filepath.Clean(original) != "."
+	if ep.TorrentHash != "" && ep.ReservationKey != nil {
+		portable := original
+		if !ep.MatchesFileReservation(portable) && strings.Contains(original, `\`) && !strings.ContainsAny(original, "/:") {
+			portable = strings.ReplaceAll(original, `\`, "/")
+		}
+		if portable != "." && fs.ValidPath(portable) && ep.MatchesFileReservation(portable) {
+			local, err := filepath.Localize(portable)
+			if err == nil {
+				key := database.EpisodeFileReservationKey(parent, ep.TorrentHash, local)
+				ep.SourceFile, ep.ReservationKey = local, &key
+				return true, nil
+			}
+			if filepath.Separator == '\\' && strings.Contains(portable, `\`) {
+				return false, &UnrepresentableMemberError{EpisodeID: ep.ID}
+			}
+		}
+	}
+	ep.ReservationKey = nil
+	return fileBound, nil
+}
+
+func matchArchiveEpisode(tx *gorm.DB, ep database.Episode, original string, fileBound bool, claimed map[uint]bool) (uint, error) {
+	model := tx.Unscoped().Model(&database.Episode{}).Where("subscription_id = ?", ep.SubscriptionID)
+	hashCondition := "COALESCE(torrent_hash, '') = ?"
+	if magnet.IsHexInfoHash(ep.TorrentHash) {
+		hashCondition += " COLLATE NOCASE"
+	}
+	task := model.Session(&gorm.Session{}).Where(hashCondition, ep.TorrentHash)
+	q := task.Session(&gorm.Session{}).Where("COALESCE(source_file, '') = ?", ep.SourceFile)
+	if ep.ReservationKey != nil {
+		// 成员身份不能被碰巧相同的主键、创建时间或另一成员的字面反斜杠覆盖。
+		q = q.Where("reservation_key IS NULL OR reservation_key = ?", *ep.ReservationKey)
+		if original != ep.SourceFile {
+			// 旧版可能照抄了外系统拼写。缺少原键时还须核对创建时间、根目录和文件大小。
+			q = task.Session(&gorm.Session{}).Where(`(source_file = ? AND (reservation_key IS NULL OR reservation_key = ?)) OR
+				(source_file = ? AND (reservation_key = ? OR (reservation_key IS NULL AND ? AND created_at = ? AND COALESCE(download_root, '') = ? AND COALESCE(file_size, 0) = ?)))`,
+				ep.SourceFile, *ep.ReservationKey, original, *ep.ReservationKey, !ep.CreatedAt.IsZero(), ep.CreatedAt, ep.DownloadRoot, ep.FileSize)
+			var candidates []uint
+			if err := q.Session(&gorm.Session{}).Limit(2).Pluck("id", &candidates).Error; err != nil {
+				return 0, err
+			}
+			if len(candidates) > 1 {
+				return 0, fmt.Errorf("%w：剧集记录 %d 同时匹配多条历史文件记录", ErrInvalidArchive, ep.ID)
+			}
+		}
+		return matchArchiveRow(q, q, ep.ID, ep.CreatedAt, claimed)
+	}
+	if strings.Contains(original, `\`) {
+		// 无法证明分隔符含义时保留归档拼写，不覆盖已经核实的本机成员。
+		const noFileClaim = "reservation_key IS NULL OR reservation_key NOT LIKE '%/file/%'"
+		model = model.Session(&gorm.Session{}).Where(noFileClaim)
+		q = q.Where(noFileClaim)
+	}
+	if !fileBound {
+		q = q.Where("season = ? AND number = ?", ep.Season, ep.Number)
+	}
+	if ep.TorrentHash == "" {
+		q = q.Where("COALESCE(torrent_url, '') = ? AND COALESCE(original_name, '') = ?", ep.TorrentURL, ep.OriginalName)
+	}
+	return matchArchiveRow(model, q, ep.ID, ep.CreatedAt, claimed)
 }
 
 // 源文件核验时间与待清理路径只属于本机，恢复同一份文件时沿用本地记录。

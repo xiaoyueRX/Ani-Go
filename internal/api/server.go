@@ -604,6 +604,11 @@ func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "备份文件不存在"})
 		return
 	}
+	var memberErr *backup.UnrepresentableMemberError
+	if errors.As(err, &memberErr) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: memberErr.Error()})
+		return
+	}
 	if errors.Is(err, backup.ErrInvalidArchive) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "备份格式或完整性校验失败，数据未恢复"})
 		return

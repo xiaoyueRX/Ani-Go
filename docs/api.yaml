@@ -2814,7 +2814,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MessageResponse'}
         '400':
-          description: 请求无效、快照版本不支持、摘要校验失败或记录归属不明确
+          description: 请求无效、快照版本不支持、摘要校验失败、记录归属不明确，或 Windows 无法表示已核实成员名中的字面反斜杠。恢复事务回滚。
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}

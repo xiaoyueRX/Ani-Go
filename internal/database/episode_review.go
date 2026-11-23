@@ -20,7 +20,16 @@ const (
 
 // EpisodeFileReservationKey 以任务和相对路径区分同一分集的多个发行版本。
 func EpisodeFileReservationKey(subscriptionID uint, torrentHash, sourceFile string) string {
-	file := magnet.CanonicalTaskID(torrentHash) + "\x00" + filepath.ToSlash(sourceFile)
+	return fileReservationKey(subscriptionID, torrentHash, filepath.ToSlash(sourceFile))
+}
+
+// MatchesFileReservation 用源系统原本参与哈希的路径字节校验备份中的成员身份。
+func (ep Episode) MatchesFileReservation(sourcePath string) bool {
+	return ep.ReservationKey != nil && *ep.ReservationKey == fileReservationKey(ep.SubscriptionID, ep.TorrentHash, sourcePath)
+}
+
+func fileReservationKey(subscriptionID uint, torrentHash, sourcePath string) string {
+	file := magnet.CanonicalTaskID(torrentHash) + "\x00" + sourcePath
 	return fmt.Sprintf("%d/file/%x", subscriptionID, sha256.Sum256([]byte(file)))
 }
 
