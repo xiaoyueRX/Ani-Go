@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -85,55 +86,64 @@ func TestQBittorrent_ConcurrentLogin(t *testing.T) {
 func TestQBittorrentAvailabilityAfterRestart(t *testing.T) {
 	for _, rejected := range []int{http.StatusUnauthorized, http.StatusForbidden} {
 		t.Run(http.StatusText(rejected), func(t *testing.T) {
-			var restarted atomic.Bool
-			var logins, staleProbes atomic.Int32
-			bothStale := make(chan struct{})
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				session := "original"
-				if restarted.Load() {
-					session = "restarted"
-				}
-				switch r.URL.Path {
-				case "/api/v2/auth/login":
-					logins.Add(1)
-					http.SetCookie(w, &http.Cookie{Name: "SID", Value: session, Path: "/"})
-					_, _ = w.Write([]byte("Ok."))
-				case "/api/v2/app/version":
-					sid, err := r.Cookie("SID")
-					if err != nil || sid.Value != session {
-						if restarted.Load() {
-							if staleProbes.Add(1) == 2 {
-								close(bothStale)
-							}
-							select {
-							case <-bothStale:
-							case <-r.Context().Done():
-							}
-						}
-						w.WriteHeader(rejected)
+			// 真实超时保证缺少探测时处理器也能退出。
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			deadline := ctx.Done()
+			// 监听回环套接字期间虚拟时钟不前进，两次登录会取得相同时间。
+			synctest.Test(t, func(t *testing.T) {
+				var restarted atomic.Bool
+				var logins, staleProbes atomic.Int32
+				bothStale := make(chan struct{})
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					session := "original"
+					if restarted.Load() {
+						session = "restarted"
 					}
-				default:
-					http.NotFound(w, r)
+					switch r.URL.Path {
+					case "/api/v2/auth/login":
+						logins.Add(1)
+						http.SetCookie(w, &http.Cookie{Name: "SID", Value: session, Path: "/"})
+						_, _ = w.Write([]byte("Ok."))
+					case "/api/v2/app/version":
+						sid, err := r.Cookie("SID")
+						if err != nil || sid.Value != session {
+							if restarted.Load() {
+								if staleProbes.Add(1) == 2 {
+									close(bothStale)
+								}
+								select {
+								case <-bothStale:
+								case <-r.Context().Done():
+								case <-deadline:
+									t.Error("等待两个旧会话探测超时")
+								}
+							}
+							w.WriteHeader(rejected)
+						}
+					default:
+						http.NotFound(w, r)
+					}
+				}))
+				defer server.Close()
+				qb := NewQBittorrent(server.URL, "admin", "pass", "")
+				if !qb.IsAvailable(t.Context()) {
+					t.Fatal("首次连接失败")
 				}
-			}))
-			defer server.Close()
-			qb := NewQBittorrent(server.URL, "admin", "pass", "")
-			if !qb.IsAvailable(t.Context()) {
-				t.Fatal("首次连接失败")
-			}
-			restarted.Store(true)
-			results := make(chan bool, 2)
-			for range 2 {
-				go func() { results <- qb.IsAvailable(t.Context()) }()
-			}
-			first, second := <-results, <-results
-			if !first || !second || !qb.IsAvailable(t.Context()) || logins.Load() != 2 {
-				t.Fatalf("重启后应重新登录一次并复用新会话，实际共登录 %d 次", logins.Load())
-			}
-			server.Close()
-			if qb.IsAvailable(t.Context()) {
-				t.Fatal("连接已关闭的客户端应当离线")
-			}
+				restarted.Store(true)
+				results := make(chan bool, 2)
+				for range 2 {
+					go func() { results <- qb.IsAvailable(t.Context()) }()
+				}
+				first, second := <-results, <-results
+				if !first || !second || !qb.IsAvailable(t.Context()) || logins.Load() != 2 {
+					t.Fatalf("重启后应重新登录一次并复用新会话，实际共登录 %d 次", logins.Load())
+				}
+				server.Close()
+				if qb.IsAvailable(t.Context()) {
+					t.Fatal("连接已关闭的客户端应当离线")
+				}
+			})
 		})
 	}
 }
