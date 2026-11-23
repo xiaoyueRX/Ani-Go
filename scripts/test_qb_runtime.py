@@ -2,7 +2,7 @@
 
 import argparse
 import base64
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import hashlib
 import http.cookiejar
 import json
@@ -85,6 +85,8 @@ class QB:
                 except URLError:
                     return False
             wait_for("private qBittorrent Web UI", login, bool, timeout=45)
+            # 四个私有种子必须能同时上传，避免默认三个上传名额把新一集排在队尾。
+            self.request("app/setPreferences", {"json": json.dumps({"queueing_enabled": False})})
             yield self
         finally:
             if proc.poll() is None:
@@ -98,7 +100,7 @@ class QB:
                     proc.kill()
                     proc.wait()
 
-    def download_from(self, source, infohash, expected=None):
+    def download_from(self, source, infohash, expected=None, *, save_path=None):
         # 私有种子没有 tracker 和 Web Seed，唯一的种源由原生 Web API 显式添加。
         def transfer():
             task = self.info(infohash)
@@ -109,7 +111,7 @@ class QB:
         if expected is None:
             expected = {Path(TITLE) / NAMES[i]: PAYLOADS[i] for i in (0, 2)}
         for name, data in expected.items():
-            if (self.downloads / name).read_bytes() != data:
+            if ((save_path or self.downloads) / name).read_bytes() != data:
                 raise RuntimeError("qBittorrent received incorrect media bytes")
 
 
@@ -168,6 +170,48 @@ def verify_movie(service, home, central, seed):
         print("Movie RSS: the standalone trailer remained in review at 0/1; the unnumbered feature was organized at 1/1.", flush=True)
 
 
+def verify_new_episode(service, route, restored_home, central, seed, receiver, feed, publish, history):
+    downloads = restored_home / "迁移后 Downloads"
+    downloads.mkdir()
+    service.api(route, "PUT", {"custom_path": str(downloads)})
+    filename, payload = NAMES[1], PAYLOADS[1]
+    release = Path(filename).stem
+
+    with seed.running():
+        # 首轮已验证大包的 E01 和 E03。另发独立种子补入相同订阅缺少的 E02。
+        (seed.downloads / filename).write_bytes(payload)
+        new_hash, torrent_path = publish(release, payload)
+        seed.add(feed, torrent_path)
+        wait_for("seed to verify E02", lambda: seed.info(new_hash), lambda row: row.get("progress") == 1)
+        task = wait_for("restored subscription to submit E02", lambda: central.info(new_hash), bool)
+        if not Path(task["save_path"]).samefile(downloads):
+            raise RuntimeError("The restored subscription did not send its new path to qBittorrent")
+        central.download_from(seed, new_hash, {filename: payload}, save_path=downloads)
+
+    uploaded_before = central.info(new_hash)["uploaded_session"]
+    receiver.add(feed, torrent_path)
+    wait_for("new E02 receiver", lambda: receiver.info(new_hash), bool)
+    receiver.download_from(central, new_hash, {filename: payload})
+    uploaded = wait_for("confirmed E02 upload", lambda: central.info(new_hash)["uploaded_session"] - uploaded_before,
+                        lambda count: count >= len(payload))
+
+    detail = wait_for("restored subscription to organize E02", lambda: service.api(route),
+                      lambda data: data["subscription"]["current_episodes"] == 3)
+    rows = sorted(detail["episodes"], key=lambda row: row["number"])
+    if [row["number"] for row in rows] != [1, 2, 3] or any(row["status"] != "organized" for row in rows):
+        raise RuntimeError("The restored subscription did not retain exactly three organized episodes")
+    for row in (rows[0], rows[2]):
+        original = central.downloads / TITLE / NAMES[int(row["number"]) - 1]
+        if row["final_path"] != history.get(row["id"]) or not Path(row["final_path"]).samefile(original):
+            raise RuntimeError("Changing the download directory moved or replaced an earlier episode")
+    target = Path(rows[1]["final_path"]).resolve()
+    if (rows[1]["torrent_hash"].lower() != new_hash or not target.is_relative_to((restored_home / "剧集").resolve())
+            or not target.samefile(downloads / filename) or target.read_bytes() != payload):
+        raise RuntimeError("E02 was not hard-linked from the new download directory into the restored library")
+    print(f"Post-restore qBittorrent: source_jwt=401 target_jwt=200 old_final_paths=2/2 "
+          f"new_download_directory=verified episode=2 uploaded_bytes={uploaded}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
@@ -176,7 +220,8 @@ def main():
     program = shutil.which(args.qbittorrent)
     if not program:
         parser.error("qBittorrent executable not found")
-    with tempfile.TemporaryDirectory(prefix="Ani-Go qB ") as folder, web_seed(http_seed=False) as (url, infohash):
+    with (tempfile.TemporaryDirectory(prefix="Ani-Go qB ") as folder, web_seed(http_seed=False) as (url, infohash),
+          ExitStack() as restarted_client):
         root = Path(folder)
         home = root / "app"
         central = QB(program, root / "primary", root / "downloads")
@@ -192,8 +237,9 @@ def main():
                    RSS_INTERVAL="1s", ORGANIZER_INTERVAL="1s", MIKAN_RSS_MODE="personal", MIKAN_DOMAIN=url,
                    MIKAN_MIRROR_DOMAINS=url, MIKAN_PROXY_DOMAIN=url, MIKAN_RSS_URL=url+"/RSS/Bangumi?bangumiId=42",
                    DISK_MIN_FREE_GB="0", USE_HARDLINK="true", SEED_CLEANUP_ENABLED="false")
-        with start([str(args.binary.resolve(strict=True))], home, root/"backups", free_port(),
-                   secrets.token_urlsafe(24), "http://127.0.0.1:9", env_overrides=env) as service:
+        command, backups, port = [str(args.binary.resolve(strict=True))], root / "backups", free_port()
+        offline = "http://127.0.0.1:9"
+        with start(command, home, backups, port, secrets.token_urlsafe(24), offline, env_overrides=env) as service:
             with central.running():
                 version = central.request("app/version").decode().strip()
                 print(f"Connected to qBittorrent {version} on {sys.platform}", flush=True)
@@ -213,8 +259,26 @@ def main():
                 print("Selected S01E01 and S01E03 arrived from the seed and were hard-linked into the library.", flush=True)
             if service.api("downloader/test", "POST", {})["success"]:
                 raise RuntimeError("Ani-Go reported a stopped qBittorrent client online")
-            with central.running(), receiver.running():
-                if not service.api("downloader/test", "POST", {})["success"]:
+            # 同一源实例先观察离线再重连。该 qB 进程随后继续为恢复目标和独立对端服务。
+            restarted_client.enter_context(central.running())
+            if not service.api("downloader/test", "POST", {})["success"]:
+                raise RuntimeError("The source Ani-Go instance did not reconnect to qBittorrent")
+            history = {row["id"]: row["final_path"] for row in service.api(route)["episodes"]}
+            service.api("backup/create", "POST", {"include_episodes": True})
+            archive, = service.api("backup/list")
+        restored_home = root / "恢复 实例"
+        with movie_feed(TITLE) as (feed, publish):
+            # 个人 RSS 给已恢复的订阅补入一个新发行，原合集的独立 RSS 仍可轮询。
+            env["MIKAN_RSS_URL"] = feed + "/RSS/MyBangumi"
+            with (start(command, restored_home, backups, port, secrets.token_urlsafe(24), offline, env_overrides=env) as restored,
+                  receiver.running()):
+                if restored.api("subscriptions"):
+                    raise RuntimeError("The restored instance must start with an empty database")
+                restored.api("backup/restore", "POST", {"name": archive["name"]})
+                service.api("me", status=401)
+                if restored.api("me").get("username") != "admin":
+                    raise RuntimeError("Restoring the archive changed the target session")
+                if not restored.api("downloader/test", "POST", {})["success"]:
                     raise RuntimeError("Ani-Go did not reconnect to qBittorrent")
                 wait_for("completed torrent restored after restart", lambda: central.info(infohash), lambda row: row.get("progress") == 1)
                 receiver.add(url)
@@ -223,7 +287,8 @@ def main():
                 receiver.download_from(central, infohash)
                 uploaded = wait_for("confirmed qBittorrent upload", lambda: central.info(infohash)["uploaded_session"],
                                     lambda count: count >= len(PAYLOADS[0]) + len(PAYLOADS[2]))
-                queue = service.api("downloads")
+                verify_new_episode(restored, route, restored_home, central, seed, receiver, feed, publish, history)
+                queue = restored.api("downloads")
                 if sum(row["hash"].lower() == infohash for row in queue) != 1:
                     raise RuntimeError("Duplicate or missing qBittorrent task in Ani-Go")
         print(f"Passed: qBittorrent {version}; selected S01E01 and S01E03, restarted, uploaded {uploaded} bytes to a fresh peer.")
