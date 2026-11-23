@@ -105,14 +105,18 @@ function closeDrawer() {
       <!-- Logo Brand Section -->
       <div class="px-6 py-6 border-b border-base-200/60">
         <div class="flex items-center gap-3 group cursor-pointer" @click="router.push('/schedule')">
-          <div class="relative">
+          <div class="relative shrink-0">
             <img src="/logo.png" alt="Ani-Go" class="w-10 h-10 rounded-xl object-cover shadow-md shadow-primary/20 group-hover:scale-105 transition-transform" />
             <div class="absolute -inset-0.5 rounded-xl bg-primary/20 blur-sm -z-10 group-hover:opacity-100 opacity-50 transition-opacity"></div>
           </div>
-          <div class="flex flex-col">
+          <div class="flex min-w-0 flex-col">
             <div class="flex items-center gap-1.5">
-              <span class="text-xl font-black text-primary italic tracking-tight">Ani-Go</span>
-              <span v-if="currentVersion" class="badge badge-primary badge-xs font-mono font-bold">{{ currentVersion }}</span>
+              <span class="shrink-0 text-xl font-black text-primary italic tracking-tight">Ani-Go</span>
+              <span v-if="currentVersion" :title="currentVersion" class="min-w-0">
+                <span class="badge badge-primary badge-xs max-w-full font-mono font-bold">
+                  <span class="truncate">{{ currentVersion }}</span>
+                </span>
+              </span>
             </div>
             <span class="text-[9px] font-bold text-base-content/40 uppercase tracking-[0.2em]">Anime Sync Engine</span>
           </div>
@@ -177,10 +181,14 @@ function closeDrawer() {
         <button class="btn btn-square btn-ghost btn-sm rounded-xl" @click="isDrawerOpen = true">
           <Menu :size="20" />
         </button>
-        <div class="flex items-center gap-2 cursor-pointer" @click="router.push('/schedule')">
-          <img src="/logo.png" alt="Ani-Go" class="w-7 h-7 rounded-lg object-cover shadow-sm" />
-          <span class="text-lg font-black text-primary italic">Ani-Go</span>
-          <span v-if="currentVersion" class="badge badge-neutral badge-xs font-mono font-bold opacity-60">{{ currentVersion }}</span>
+        <div class="flex min-w-0 items-center gap-2 cursor-pointer" @click="router.push('/schedule')">
+          <img src="/logo.png" alt="Ani-Go" class="w-7 h-7 shrink-0 rounded-lg object-cover shadow-sm" />
+          <span class="shrink-0 text-lg font-black text-primary italic">Ani-Go</span>
+          <span v-if="currentVersion" :title="currentVersion" class="min-w-0">
+            <span class="badge badge-neutral badge-xs max-w-full font-mono font-bold opacity-60">
+              <span class="truncate">{{ currentVersion }}</span>
+            </span>
+          </span>
         </div>
         <div class="dropdown dropdown-end">
           <label tabindex="0" class="btn btn-ghost btn-circle btn-sm avatar online">
@@ -244,7 +252,7 @@ function closeDrawer() {
           </a>
           <template v-if="currentVersion">
             <span class="opacity-30">•</span>
-            <span class="font-mono">{{ currentVersion }}</span>
+            <span class="max-w-full break-all font-mono">{{ currentVersion }}</span>
           </template>
         </div>
       </footer>
