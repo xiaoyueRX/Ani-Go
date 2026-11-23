@@ -44,7 +44,7 @@ After remounting a library or restoring a backup, open the subscription details 
 
 If one edition is missing and the downloader still has its completed task and selected source file, use the restore action on that edition. The download and the existing library parent directory must share a filesystem that supports hard links. Confirm the mounted library before proceeding if you have no volume ID. Ani-Go links the original file at its recorded path and checks that edition again. The torrent, history and manual flags are preserved. For different filesystems, you can copy the verified source to the recorded library path yourself and run the check again.
 
-With aria2, the task must still be available in the current session. Active seeds and retained completed tasks can supply the required member list. When seeding ends immediately, even a normal aria2 restart may discard a completed task. If Ani-Go reports that it cannot verify the original download, check the source file and its recorded library path manually.
+With aria2, the task must still be available in the current session. Active seeds and retained completed tasks can supply the required member list. When seeding ends immediately, even a normal aria2 restart may discard a completed task. If Ani-Go reports that it cannot verify the original download, check the source file and its recorded library path manually. If you have the original `.torrent`, add it back to aria2 with its original download directory, enable integrity checking and resuming, and turn off overwriting and automatic renaming. Once aria2 has verified the existing file, retry the restore action.
 
 ## Backups and restore
 
