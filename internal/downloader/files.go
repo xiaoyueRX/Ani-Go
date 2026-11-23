@@ -124,20 +124,20 @@ func (a *Aria2) CompletedFiles(ctx context.Context, task core.DownloadTask) (Fil
 	if task.ClientID == "" {
 		return result, fmt.Errorf("Aria2 缺少文件所属任务 GID")
 	}
-	raw, err := a.call(ctx, "aria2.getFiles", []any{task.ClientID})
+	keys := []string{"gid", "status", "totalLength", "completedLength", "files", "bitfield", "numPieces", "pieceLength"}
+	raw, err := a.call(ctx, "aria2.tellStatus", []any{task.ClientID, keys})
 	if err != nil {
 		return result, err
 	}
-	var files []struct {
-		Path      string
-		Length    *int64 `json:"length,string"`
-		Completed *int64 `json:"completedLength,string"`
-		Selected  *bool  `json:"selected,string"`
-	}
-	if err := json.Unmarshal(raw, &files); err != nil {
+	var manifest aria2FileManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return result, err
 	}
-	for _, f := range files {
+	if !strings.EqualFold(manifest.GID, task.ClientID) {
+		return result, fmt.Errorf("Aria2 未返回指定任务的文件清单")
+	}
+	archived := manifest.confirmsSelectedBytes()
+	for _, f := range manifest.Files {
 		if f.Selected == nil || f.Length == nil {
 			return result, fmt.Errorf("Aria2 文件选择状态或大小未知")
 		}
@@ -149,7 +149,8 @@ func (a *Aria2) CompletedFiles(ctx context.Context, task core.DownloadTask) (Fil
 		if err != nil {
 			return result, err
 		}
-		if err := result.add(task.SavePath, name, *f.Length, f.Completed != nil && *f.Completed == *f.Length); err != nil {
+		complete := f.Completed != nil && (*f.Completed == *f.Length || archived && *f.Completed == 0)
+		if err := result.add(task.SavePath, name, *f.Length, complete); err != nil {
 			return result, err
 		}
 	}

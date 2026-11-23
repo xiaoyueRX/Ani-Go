@@ -15,10 +15,10 @@ func TestAriaSelectedFilesRequireCompletedLocalFile(t *testing.T) {
 	var completed = "3"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req aria2Req
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Method != "aria2.getFiles" || len(req.Params) != 1 || req.Params[0] != "gid" {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Method != "aria2.tellStatus" || len(req.Params) != 2 || req.Params[0] != "gid" {
 			t.Errorf("unexpected RPC %+v %v", req, err)
 		}
-		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":[{"path":"/download/Show/E01.mkv","length":"3","completedLength":"%s","selected":"true"},{"path":"/download/Show/E02.mkv","length":"600","completedLength":"0","selected":"false"}]}`, req.ID, completed)
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"gid":"gid","status":"active","files":[{"path":"/download/Show/E01.mkv","length":"3","completedLength":"%s","selected":"true"},{"path":"/download/Show/E02.mkv","length":"600","completedLength":"0","selected":"false"}]}}`, req.ID, completed)
 	}))
 	defer server.Close()
 	client := NewAria2(server.URL, "")
