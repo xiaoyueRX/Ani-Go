@@ -213,6 +213,7 @@ def check_library_files(browser, service, home):
     button.click()
 
     report = wait.until(EC.visibility_of_element_located((By.XPATH, "//details[summary[contains(., '库文件核对')]]")))
+    # SafariDriver 会为列表项添加尾随空格，按钮也可能由换行分隔。逐项比对完整文字。
     rows = sorted(" ".join(item.text.split()) for item in report.find_elements(By.TAG_NAME, "li"))
     expected = sorted([f"{present.name} · 文件存在，大小与记录一致", f"{missing.name} · 当前路径未找到文件 从下载原件补回"])
     if rows != expected:
