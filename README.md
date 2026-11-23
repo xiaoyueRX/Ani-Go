@@ -33,6 +33,8 @@ Compose 默认拉取 GHCR 的 `latest` 镜像，跟随通过 CI 的 `main` 提�
 
 ### 独立二进制
 
+1.0 的官方目标为 Windows 和 Linux 的 x86-64（`amd64`）与 ARM64，以及 Apple Silicon Mac（`darwin-arm64`）。使用 Intel 或 AMD 64 位处理器的 Linux NAS 选择 `linux-amd64`。
+
 从 Releases 下载与操作系统和 CPU 架构匹配的压缩包，可用同一发行页的 `checksums.txt` 校验。在解压目录中配置 `.env`，运行 `./anigo`（Windows 为 `anigo.exe`）。以后从同一工作目录启动，以便继续读取配置和相对路径下的数据库。Linux 和 macOS 也可运行仓库的安装脚本下载并校验发行包。[安装脚本](install.sh) · [下载发行包](https://github.com/xiaoyueRX/Ani-Go/releases/latest)
 
 ## 从订阅到入库

@@ -3,6 +3,7 @@
 import hashlib
 import io
 import os
+import platform
 from pathlib import Path
 import subprocess
 import tarfile
@@ -16,6 +17,7 @@ set -eu
 for arg do
     case "$arg" in https://*) url=$arg ;; esac
 done
+printf '%s\\n' "$url" >> "$FETCH_LOG"
 case $url in
     https://github.com/xiaoyueRX/Ani-Go/releases/latest)
         [ -z "${OFFLINE:-}" ] || exit 22
@@ -41,11 +43,16 @@ class InstallerTest(unittest.TestCase):
         (path / "uname").write_text(
             '#!/bin/sh\ncase "$1" in -s) echo "$TEST_OS";; -m) echo "$TEST_ARCH";; esac\n'
         )
+        (path / "sysctl").write_text(
+            '#!/bin/sh\n[ "$1" = -n ] && [ "$2" = sysctl.proc_translated ] || exit 1\n'
+            '[ -n "${TEST_TRANSLATED:-}" ] || exit 1\nprintf "%s\\n" "$TEST_TRANSLATED"\n'
+        )
+        self.fetch_log = self.root / "fetch.log"
         for command in path.iterdir():
             command.chmod(0o755)
         self.env = {
             "HOME": str(self.root), "PATH": f"{path}:{os.environ['PATH']}",
-            "FIXTURES": str(self.root / "releases"), "TEST_OS": "Linux", "TEST_ARCH": "x86_64",
+            "FIXTURES": str(self.root / "releases"), "FETCH_LOG": str(self.fetch_log), "TEST_OS": "Linux", "TEST_ARCH": "x86_64",
         }
         self.program = self.root / ".local/bin/anigo"
         self.state = self.root / ".anigo"
@@ -73,6 +80,7 @@ class InstallerTest(unittest.TestCase):
             capture_output=True, text=True, timeout=10,
         )
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
+        return result
 
     def test_upgrade_recovery_and_uninstall(self):
         self.release("v1.0.0")
@@ -108,13 +116,79 @@ class InstallerTest(unittest.TestCase):
 
     def test_platform_archives(self):
         for system, arch, package in [
-            ("Linux", "armv7l", "linux-armv7"), ("Linux", "aarch64", "linux-arm64"),
-            ("Darwin", "x86_64", "darwin-amd64"), ("Darwin", "arm64", "darwin-arm64"),
+            ("Linux", "x86_64", "linux-amd64"), ("Linux", "aarch64", "linux-arm64"),
+            ("Darwin", "arm64", "darwin-arm64"),
         ]:
             with self.subTest(platform=package):
                 self.release("v1.1.0", package)
-                self.install(TEST_OS=system, TEST_ARCH=arch)
+                self.install(TEST_OS=system, TEST_ARCH=arch, ANIGO_VERSION="latest")
                 self.install("--uninstall")
+
+    def test_retired_architectures_keep_pinned_releases(self):
+        for system, arch, package, label, translated in [
+            ("Darwin", "x86_64", "darwin-amd64", "Intel Mac", ""),
+            ("Darwin", "amd64", "darwin-amd64", "Intel Mac", "0"),
+            ("Linux", "armv7l", "linux-armv7", "ARMv7", ""),
+            ("Linux", "armhf", "linux-armv7", "ARMv7", ""),
+        ]:
+            with self.subTest(arch=arch):
+                env = dict(TEST_OS=system, TEST_ARCH=arch, TEST_TRANSLATED=translated)
+                self.release("v0.7.0", package)
+                self.install(ANIGO_VERSION="0.7.0", **env)
+                program = self.program.resolve()
+                self.assertEqual(program.parent.name, "v0.7.0")
+                (self.state / ".env").write_text("user config")
+                (self.state / "ani-go.db").write_text("user data")
+                self.fetch_log.unlink()
+                for version in ("", "latest", "v1.0.0-rc.1", "1.0.0", "v2.1.0"):
+                    result = self.install(ANIGO_VERSION=version, success=False, **env)
+                    self.assertIn(label, result.stderr)
+                    self.assertIn("ANIGO_VERSION=v0.7.0", result.stderr)
+                    self.assertFalse(self.fetch_log.exists())
+                    self.assertEqual(self.program.resolve(), program)
+                    self.assertEqual(subprocess.check_output([self.program], text=True).strip(), "v0.7.0")
+                    self.assertEqual((self.state / ".env").read_text(), "user config")
+                    self.assertEqual((self.state / "ani-go.db").read_text(), "user data")
+                self.release("v0.8.0", "linux-amd64")
+                result = self.install(ANIGO_VERSION="v0.8.0", success=False, **env)
+                self.assertIn(f"ani-go-v0.8.0-{package}.tar.gz", result.stderr)
+                self.assertEqual(self.fetch_log.read_text().splitlines(), [
+                    "https://github.com/xiaoyueRX/Ani-Go/releases/download/v0.8.0/checksums.txt",
+                ])
+                self.assertEqual(self.program.resolve(), program)
+                self.install("--uninstall", **env)
+                self.assertFalse(self.program.is_symlink())
+
+    def test_rosetta_selects_apple_silicon(self):
+        env = dict(TEST_OS="Darwin", TEST_ARCH="x86_64", TEST_TRANSLATED="1")
+        for version, tag in [("", "v1.1.0"), ("latest", "v1.1.0"), ("0.7.0", "v0.7.0")]:
+            with self.subTest(version=version):
+                self.release(tag, "darwin-arm64")
+                self.install(ANIGO_VERSION=version, **env)
+                self.assertIn(f"ani-go-{tag}-darwin-arm64.tar.gz", self.fetch_log.read_text())
+                self.install("--uninstall", **env)
+                self.fetch_log.unlink()
+
+    @unittest.skipUnless(platform.system() == "Darwin" and platform.machine() == "arm64", "requires Apple Silicon")
+    def test_native_rosetta_shell_selects_arm64(self):
+        rosetta = ["/usr/bin/arch", "-x86_64"]
+        if subprocess.run([*rosetta, "/usr/bin/true"], capture_output=True).returncode:
+            self.skipTest("Rosetta is unavailable")
+        for name in ("uname", "sysctl"):
+            (self.root / "commands" / name).unlink()
+        self.release("v1.1.0", "darwin-arm64")
+        result = subprocess.run([*rosetta, "/bin/sh", str(INSTALLER)], cwd=self.root, env=self.env,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("ani-go-v1.1.0-darwin-arm64.tar.gz", self.fetch_log.read_text())
+
+    def test_linux_32_bit_x86_is_unsupported(self):
+        for arch in ("i386", "i686"):
+            with self.subTest(arch=arch):
+                result = self.install(TEST_OS="Linux", TEST_ARCH=arch, success=False)
+                self.assertIn("32 位 x86", result.stderr)
+                self.assertFalse(self.state.exists())
+                self.assertFalse(self.fetch_log.exists())
 
 
 if __name__ == "__main__":

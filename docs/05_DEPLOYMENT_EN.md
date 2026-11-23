@@ -66,6 +66,8 @@ To roll back, stop Ani-Go and preserve the upgraded database and any `-wal` and 
 
 ## Standalone installation
 
+The 1.0 macOS archive runs on Apple Silicon. Linux and Windows each support x86-64 (`amd64`) and ARM64. Intel Mac and 32-bit ARMv7 Linux systems can pin a historical release that provides their archive, such as `v0.7.0`. Older installations may still show an update notification. To move to 1.0, restore the backup on a supported system and transfer your media files separately. [v0.7.0 downloads](https://github.com/xiaoyueRX/Ani-Go/releases/tag/v0.7.0)
+
 On Linux or macOS, the installer fetches the GitHub release archive, verifies it against the release’s `checksums.txt` and installs the executable for the current user. Set `ANIGO_VERSION` on the shell running the installer to select a tag. For example, append `| ANIGO_VERSION=v0.7.0 sh` in place of `| sh` below.
 
 ```sh

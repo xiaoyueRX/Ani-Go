@@ -33,6 +33,8 @@ The Compose file pulls the GHCR `latest` image, which follows commits to `main` 
 
 ### Standalone binary
 
+The 1.0 release targets x86-64 (`amd64`) and ARM64 on Windows and Linux, and Apple Silicon (`darwin-arm64`) on macOS. For a Linux NAS with a 64-bit Intel or AMD processor, choose `linux-amd64`.
+
 Download the archive matching your operating system and CPU architecture. Use `checksums.txt` from the same release to verify it. In the extracted directory, configure `.env` and run `./anigo` (on Windows, `anigo.exe`). Use the same working directory on subsequent starts so the program can find its configuration and database at their relative paths. On Linux and macOS, the repository installer can also download and verify a release archive. [Installer](install.sh) · [Release downloads](https://github.com/xiaoyueRX/Ani-Go/releases/latest)
 
 ## Track your first series

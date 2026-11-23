@@ -31,11 +31,9 @@ jobs:
         include:
           - { os: windows, arch: amd64, runner: windows-2025 }
           - { os: windows, arch: arm64, runner: windows-11-arm }
-          - { os: darwin, arch: amd64, runner: macos-15-intel }
           - { os: darwin, arch: arm64, runner: macos-15 }
           - { os: linux, arch: amd64, runner: ubuntu-24.04 }
           - { os: linux, arch: arm64, runner: ubuntu-24.04-arm }
-          - { os: linux, arch: armv7, runner: ubuntu-24.04 }
     defaults:
       run:
         shell: bash
@@ -52,7 +50,6 @@ jobs:
           go-version-file: go.mod
       - name: Build and start the native application
         id: application
-        if: matrix.arch != 'armv7'
         env:
           TARGET_OS: ${{ matrix.os }}
           TARGET_ARCH: ${{ matrix.arch }}
@@ -172,23 +169,9 @@ jobs:
         run: >-
           python scripts/test_aria2_runtime.py ./anigo.exe --aria2c "$ARIA2C"
           --restore-windows-backup "$RUNNER_TEMP/portable-backup"
-      - name: Test direct ARMv7 execution and downloaders on the ARM64 host
-        if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'linux' && matrix.arch == 'arm64' }}
-        run: |
-          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o anigo-armv7 .
-          python3 scripts/fetch_legacy_runtime.py --os linux --arch armv7 --output "$RUNNER_TEMP/anigo-v0.7.0-armv7"
-          python3 scripts/probe_armv7_runtime.py ./anigo-armv7 --downloaders --legacy "$RUNNER_TEMP/anigo-v0.7.0-armv7"
       - name: Exercise the macOS installer
         if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'darwin' }}
         run: python3 scripts/test_install.py
-      - name: Build and start the ARMv7 application with QEMU
-        if: matrix.arch == 'armv7'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends qemu-user
-          qemu-arm --version
-          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o anigo .
-          python3 scripts/test_platform_runtime.py --runner qemu-arm ./anigo
 
   restore-windows-backup:
     name: Restore Windows backup on ${{ matrix.runner }}
@@ -208,7 +191,6 @@ jobs:
           - { runner: ubuntu-24.04, target: linux/amd64 }
           - { runner: ubuntu-24.04-arm, target: linux/arm64 }
           - { runner: macos-15, target: darwin/arm64 }
-          - { runner: macos-15-intel, target: darwin/amd64 }
           - { runner: windows-11-arm, target: windows/arm64 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

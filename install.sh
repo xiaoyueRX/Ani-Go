@@ -44,12 +44,31 @@ esac
 case $(uname -m) in
   arm64|aarch64) arch=arm64 ;;
   x86_64|amd64) arch=amd64 ;;
+  i[3-6]86|x86) die 'Ani-Go 不提供 32 位 x86 发行包。' ;;
   armv7*|armhf) [ "$os" = linux ] || die 'armv7 发行包仅支持 Linux'; arch=armv7 ;;
   *) die "暂不支持的架构: $(uname -m)" ;;
 esac
 
 fetch() { curl -fsSL --retry 2 --connect-timeout 10 --max-time 180 "$@"; }
 version=${ANIGO_VERSION:-}
+[ "$version" != latest ] || version=
+legacy_platform=
+case $os-$arch in
+  darwin-amd64)
+    # Rosetta 中 uname 显示 x86_64，宿主可直接运行 Apple Silicon 原生程序。
+    if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || :)" = 1 ]; then
+      arch=arm64
+    else
+      legacy_platform='Intel Mac'
+    fi ;;
+  linux-armv7) legacy_platform='32 位 ARMv7 Linux' ;;
+esac
+if [ -n "$legacy_platform" ]; then
+  case $version in
+    0.*|v0.*) ;; # 仅允许显式固定历史版本，并照常核验官方校验清单。
+    *) die "Ani-Go 从 1.0 起不再为 $legacy_platform 提供发行包。需要历史版本时可指定 ANIGO_VERSION=v0.7.0。" ;;
+  esac
+fi
 if [ -z "$version" ]; then
   release_url=$(fetch -I -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest") || release_url=
   case $release_url in
@@ -74,8 +93,8 @@ trap 'exit 1' HUP INT TERM
 
 printf '正在下载 %s 并核验 SHA-256…\n' "$asset"
 fetch "$release/checksums.txt" -o "$tmp/checksums.txt" || die '无法下载官方校验清单。'
+expected=$(awk -v name="$asset" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1; n++ } END { if (n != 1) exit 1 }' "$tmp/checksums.txt") || die "该版本的官方清单中缺少唯一匹配的发行包: $asset"
 fetch "$release/$asset" -o "$tmp/archive" || die "无法下载发行包: $release/$asset"
-expected=$(awk -v name="$asset" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1; n++ } END { if (n != 1) exit 1 }' "$tmp/checksums.txt") || die '官方清单中缺少唯一匹配的发行包。'
 if command -v sha256sum >/dev/null 2>&1; then
   actual=$(sha256sum < "$tmp/archive")
 else
