@@ -449,6 +449,20 @@ def check_cold_rollback_tab(browser, candidate, legacy, root):
         del env["ANIGO_ADMIN_PASSWORD"]
         return env
 
+    def navigate(path):
+        def visible_link(driver):
+            return next((link for link in driver.find_elements(By.CSS_SELECTOR, f'a[href="{path}"]')
+                         if link.is_displayed()), None)
+
+        if not visible_link(browser):
+            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "header button"))).click()
+        wait.until(visible_link).click()
+
+    def check_session():
+        if (not browser.execute_script("return localStorage.getItem('token') === arguments[0]", service.token)
+                or service.api("me").get("username") != "admin"):
+            raise RuntimeError("The open tab lost the administrator session")
+
     ensure_windows_console()
     with running(legacy, live / "home", environment(live), service):
         saved, _ = prepare_legacy(service, password, live / "media", live / "backups")
@@ -464,7 +478,8 @@ def check_cold_rollback_tab(browser, candidate, legacy, root):
         fill_login_field(browser, user, "admin")
         fill_login_field(browser, browser.find_element(By.ID, "login-password"), password)
         browser.find_element(By.CSS_SELECTOR, 'form button[type="submit"]').click()
-        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, f'h3[title="{saved["title_cn"]}"]')))
+        saved_card = EC.visibility_of_element_located((By.CSS_SELECTOR, f'h3[title="{saved["title_cn"]}"]'))
+        wait.until(saved_card)
         if not browser.execute_script("""
             window.rollbackSourceDocument = true;
             return document.querySelector('script[type=module]').getAttribute('src') === arguments[0]
@@ -472,6 +487,33 @@ def check_cold_rollback_tab(browser, candidate, legacy, root):
         """, candidate_entry, unloaded):
             raise RuntimeError("Expected the candidate subscription page with its downloads module still cold")
         service.token = browser.execute_script("return localStorage.getItem('token')")
+        if not browser.execute_script("""
+            window.addEventListener('vite:preloadError', () => { window.offlineModuleFailed = true }, { once: true });
+            return !performance.getEntriesByType('resource').some(e => new URL(e.name).pathname.includes('/SettingsPage-'))
+        """):
+            raise RuntimeError("The settings route must be cold before disconnecting")
+
+    navigate("/settings")
+    wait.until(lambda b: b.execute_script("return window.offlineModuleFailed && window.rollbackSourceDocument"
+                                          " && location.pathname === '/subscriptions'"))
+    with running(candidate, live / "home", environment(live), service):
+        navigate("/settings")
+        settings_page = EC.visibility_of_element_located((By.XPATH, "//main//h1[normalize-space(.)='系统设置']"))
+        wait.until(lambda b: urlsplit(b.current_url).path == "/settings" and settings_page(b),
+                   "Retrying the failed settings navigation did not work after reconnecting")
+        check_session()
+        document_changed = browser.execute_script("return !window.rollbackSourceDocument")
+        browser.back()
+        wait.until(lambda b: urlsplit(b.current_url).path == "/subscriptions" and saved_card(b))
+        browser.forward()
+        wait.until(lambda b: urlsplit(b.current_url).path == "/settings" and settings_page(b))
+        browser.back()
+        wait.until(lambda b: urlsplit(b.current_url).path == "/subscriptions" and saved_card(b))
+        if not browser.execute_script("window.rollbackSourceDocument = true;"
+                                      "return !performance.getEntriesByName(location.origin + arguments[0]).length", unloaded):
+            raise RuntimeError("The downloads module must still be cold before the rollback")
+        print(f"Passed: retry reached settings after the same version reconnected, new document={document_changed}; "
+              "Back and Forward preserved both destinations.", flush=True)
 
     with running(legacy, cold / "home", environment(cold), service):
         official_entry, official_chunk = downloads_assets(service)
@@ -481,13 +523,7 @@ def check_cold_rollback_tab(browser, candidate, legacy, root):
                 or unloaded == official_chunk or "text/html" not in fallback_mime):
             raise RuntimeError("The cold rollback must remove the candidate module and serve the official frontend")
         print(f"Rollback from {candidate_entry} to {official_entry}: {unloaded} now returns {fallback_mime}.", flush=True)
-        def visible_downloads_link(driver):
-            return next((link for link in driver.find_elements(By.CSS_SELECTOR, 'a[href="/downloads"]')
-                         if link.is_displayed()), None)
-
-        if not visible_downloads_link(browser):
-            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "header button"))).click()
-        wait.until(visible_downloads_link).click()
+        navigate("/downloads")
         try:
             wait.until(lambda b: b.execute_script("""
                 return location.pathname === '/downloads' && !window.rollbackSourceDocument
@@ -499,9 +535,7 @@ def check_cold_rollback_tab(browser, candidate, legacy, root):
             status = browser.execute_script("return [location.pathname, !!window.rollbackSourceDocument,"
                                             " document.querySelector('script[type=module]')?.getAttribute('src')]")
             raise RuntimeError(f"The open tab did not reach the official downloads page after the cold rollback: {status}") from None
-        if (not browser.execute_script("return localStorage.getItem('token') === arguments[0]", service.token)
-                or service.api("me").get("username") != "admin"):
-            raise RuntimeError("The original browser login did not survive the cold rollback")
+        check_session()
         print(f"Passed: {browser.name} kept its browser login and opened {official_chunk} in a new document.", flush=True)
 
 
