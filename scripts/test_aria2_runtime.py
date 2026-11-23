@@ -60,11 +60,27 @@ def real_client(binary, root):
         except (OSError, HTTPException):
             return None
 
+    def rpc_closed():
+        with socket.socket() as probe:
+            probe.settimeout(1)
+            return probe.connect_ex((HOST, client.port)) != 0
+
+    def stop():
+        # Windows 包管理器有时启动包装进程，由真正持有工作目录的 aria2 自身退出。
+        try:
+            if not rpc_closed():
+                client.rpc("shutdown")
+            proc.wait(timeout=20)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        wait_for("aria2 RPC listener to close", rpc_closed, bool, timeout=10)
+
     def restart(service):
         nonlocal proc
         client.rpc("saveSession")
-        client.rpc("shutdown")
-        proc.wait(timeout=20)
+        stop()
         if service.api("downloader/test", "POST", {})["success"]:
             raise RuntimeError("Ani-Go reported aria2 online after its process exited")
         proc = launch("--max-overall-download-limit=48K")
@@ -78,13 +94,7 @@ def real_client(binary, root):
         details = wait_for("aria2 RPC", version, bool)
         yield client, details["version"], restart
     finally:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
+        stop()
 
 
 def verify(service, aria, restart, media_ready, url, infohash, home, downloads):
@@ -176,7 +186,7 @@ def main():
             with start([str(args.binary.resolve(strict=True))], home, root / "backups", free_port(),
                        secrets.token_urlsafe(24), offline, env_overrides=overrides) as service:
                 verify(service, aria, restart, media_ready, url, infohash, home, downloads)
-            print(f"Passed: aria2 {version}, RSS, file selection, interrupted download and session recovery, Web Seed and library content.")
+    print(f"Passed: aria2 {version}, RSS, file selection, interrupted download and session recovery, Web Seed and library content.")
 
 
 if __name__ == "__main__":

@@ -9,15 +9,20 @@ from pathlib import Path
 import secrets
 import shutil
 import socket
+import struct
 import subprocess
 import tempfile
 from threading import Event
+import time
 
 from test_platform_runtime import HOST, start
-from torrent_fixture import PAYLOADS, create_pack_subscription, free_port, verify_library, wait_for, web_seed
+from torrent_fixture import PAYLOADS, PIECE_SIZE, create_pack_subscription, free_port, verify_library, wait_for, web_seed
 
 
 WANTED = [True, False, True]
+# 4.0.5 的 HTTP Web Seed 在未选文件与下一选中文件共用分片时可能停滞。
+# 各集在分片边界结束，使多个版本都能验证同一套选集、恢复和做种流程。
+ALIGNED_PAYLOADS = [data[:len(data) // PIECE_SIZE * PIECE_SIZE] for data in PAYLOADS]
 
 
 class Transmission:
@@ -93,8 +98,46 @@ def daemon(binary, config_dir, rpc):
 def check_wanted(record):
     if [f["wanted"] for f in record["fileStats"]] != WANTED:
         raise RuntimeError("Transmission did not retain the selected episodes 1 and 3")
-    if [entry["length"] for entry in record["files"]] != [len(data) for data in PAYLOADS]:
+    if [entry["length"] for entry in record["files"]] != [len(data) for data in ALIGNED_PAYLOADS]:
         raise RuntimeError("Transmission file sizes differ from the Web Seed content")
+
+
+def verify_peer_upload(port, infohash):
+    # 使用独立回环对等端通过 BEP 3 请求首集首个分片，验证客户端仍能上传原文件。
+    def read_exact(peer, size):
+        data = bytearray()
+        while len(data) < size:
+            chunk = peer.recv(size - len(data))
+            if not chunk:
+                raise RuntimeError("Transmission closed the peer connection prematurely")
+            data.extend(chunk)
+        return data
+
+    protocol = b"\x13BitTorrent protocol"
+    torrent_hash = bytes.fromhex(infohash)
+    with socket.create_connection((HOST, port), timeout=10) as peer:
+        peer.settimeout(20)
+        peer.sendall(protocol + bytes(8) + torrent_hash + b"-AG0001-" + secrets.token_bytes(12))
+        handshake = read_exact(peer, 68)
+        if handshake[:20] != protocol or handshake[28:48] != torrent_hash:
+            raise RuntimeError("Transmission returned an invalid peer handshake")
+        peer.sendall(struct.pack("!IB", 1, 2))  # interested
+        deadline = time.monotonic() + 35
+        while time.monotonic() < deadline:
+            length = struct.unpack("!I", read_exact(peer, 4))[0]
+            if not length:
+                continue
+            if length > (1 << 20):
+                raise RuntimeError("Unexpected peer message size")
+            message = read_exact(peer, length)
+            if message[0] == 1:  # unchoke
+                peer.sendall(struct.pack("!IBIII", 13, 6, 0, 0, PIECE_SIZE))
+            elif message[0] == 7:  # piece
+                if message[1:9] != bytes(8) or message[9:] != ALIGNED_PAYLOADS[0][:PIECE_SIZE]:
+                    raise RuntimeError("Transmission uploaded different content for piece zero")
+                print(f"Verified {PIECE_SIZE} uploaded bytes from Transmission after library organization.")
+                return
+        raise RuntimeError("Transmission did not upload the requested block to the loopback peer")
 
 
 def verified_pieces(record):
@@ -147,15 +190,23 @@ def verify(binary, transmission_bin, root, offline, url, infohash, media_ready):
             check_wanted(restored)
             print(f"Restored the original infohash, file selection and {saved_pieces.bit_count()} verified pieces offline.")
             media_ready.set()
-            seeded = wait_for("seeding after recovery", torrent, lambda t: t["status"] == 6 and t["leftUntilDone"] == 0)
+            try:
+                seeded = wait_for("seeding after recovery", torrent, lambda t: t["status"] == 6 and t["leftUntilDone"] == 0)
+            except RuntimeError as exc:
+                row = torrent()
+                if row:
+                    raise RuntimeError(f"{exc} (Transmission {version}, status={row['status']}, "
+                                       f"remaining={row['leftUntilDone']}, fileStats={row['fileStats']})") from exc
+                raise
             check_wanted(seeded)
-            verify_library(service, route, home, downloads)
+            verify_library(service, route, home, downloads, ALIGNED_PAYLOADS)
             if torrent()["status"] != 6:
                 raise RuntimeError("Transmission stopped seeding after library organization")
+            verify_peer_upload(settings["peer-port"], infohash)
             queue = service.api("downloads")
             if len(queue) != 1 or queue[0]["hash"] != infohash or not queue[0]["complete"]:
                 raise RuntimeError("Ani-Go did not reconnect to the original completed torrent")
-    print(f"Passed: Transmission {version}, RSS, selection, mid-download restart, library and seeding.")
+    print(f"Passed: Transmission {version}, RSS, selection, mid-download restart, library and verified peer upload.")
 
 
 def main():
@@ -170,7 +221,7 @@ def main():
         blocked.bind((HOST, 0))
         offline = f"http://{HOST}:{blocked.getsockname()[1]}"
         media_ready = Event()
-        with web_seed(media_ready) as (url, infohash):
+        with web_seed(media_ready, payloads=ALIGNED_PAYLOADS) as (url, infohash):
             verify(str(args.binary.resolve(strict=True)), str(Path(daemon_path).resolve()), Path(folder), offline, url, infohash, media_ready)
 
 

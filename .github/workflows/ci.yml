@@ -97,25 +97,25 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == Windows ]]; then
             py=python
-            if ! command -v aria2c >/dev/null; then
-              archive=aria2-1.37.0-win-64bit-build1.zip
-              curl --fail --silent --show-error --location --output "$archive" "https://github.com/aria2/aria2/releases/download/release-1.37.0/$archive"
-              echo "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288  $archive" | sha256sum --check
-              unzip -q "$archive" -d "$RUNNER_TEMP"
-              export PATH="$(cygpath -u "$RUNNER_TEMP")/${archive%.zip}:$PATH"
-            fi
+            archive=aria2-1.37.0-win-64bit-build1.zip
+            curl --fail --silent --show-error --location --output "$archive" "https://github.com/aria2/aria2/releases/download/release-1.37.0/$archive"
+            echo "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288  $archive" | sha256sum --check
+            unzip -q "$archive" -d "$RUNNER_TEMP"
+            aria="$(cygpath -u "$RUNNER_TEMP")/${archive%.zip}/aria2c.exe"
           elif [[ "$RUNNER_OS" == macOS ]]; then
             py=python3
             command -v aria2c >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install aria2
+            aria=$(command -v aria2c)
           else
             py=python3
             if ! command -v aria2c >/dev/null; then
               sudo apt-get update -qq
               sudo apt-get install -y --no-install-recommends aria2
             fi
+            aria=$(command -v aria2c)
           fi
-          file "$(command -v aria2c)"
-          "$py" scripts/test_aria2_runtime.py "./anigo$(go env GOEXE)"
+          file "$aria"
+          "$py" scripts/test_aria2_runtime.py "./anigo$(go env GOEXE)" --aria2c "$aria"
       - name: Resume selected RSS episodes and seed with Transmission
         if: ${{ !cancelled() && steps.application.outcome == 'success' }}
         run: |
@@ -143,6 +143,42 @@ jobs:
           fi
           file "$daemon"
           "$py" scripts/test_transmission_runtime.py "./anigo$(go env GOEXE)" --daemon "$daemon"
+      - name: Transfer selected episodes between real qBittorrent peers
+        if: ${{ !cancelled() && steps.application.outcome == 'success' }}
+        run: |
+          py=python3
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            py=python
+            installer=qbittorrent_5.3.0_x64_setup.exe
+            curl --fail --silent --show-error --location --output "$installer" "https://github.com/qbittorrent/qBittorrent/releases/download/release-5.3.0/$installer"
+            echo "aff5b3bdc00d6e5773d6099ba30f9696dd3dfd1669ab0f64ce5c4e7168486436  $installer" | sha256sum --check
+            pwsh -NoProfile -Command '$p = Start-Process .\qbittorrent_5.3.0_x64_setup.exe -ArgumentList /S -Wait -PassThru; exit $p.ExitCode'
+            qb=$(pwsh -NoProfile -Command 'Join-Path $env:ProgramFiles qBittorrent/qbittorrent.exe' | tr -d '\r')
+            qb=$(cygpath -u "$qb")
+          elif [[ "$RUNNER_OS" == macOS ]]; then
+            dmg=qbittorrent-5.2.3.dmg
+            curl --fail --silent --show-error --location --output "$dmg" "https://github.com/qbittorrent/qBittorrent/releases/download/release-5.2.3/$dmg"
+            echo "9e37f6c7ff848c7bdd3c10167614c0cb78c00e2ddcc323f1ad3ac6c008a0481f  $dmg" | shasum -a 256 --check
+            volume="$RUNNER_TEMP/qb-volume"
+            mkdir "$volume"
+            hdiutil attach -readonly -nobrowse -mountpoint "$volume" "$dmg"
+            trap 'hdiutil detach "$volume"' EXIT
+            qb=$(find "$volume" -path '*/Contents/MacOS/qbittorrent' -type f -print -quit)
+            lipo -archs "$qb"
+          else
+            if ! command -v qbittorrent-nox >/dev/null; then
+              sudo apt-get update -qq
+              sudo apt-get install -y --no-install-recommends qbittorrent-nox
+            fi
+            qb=$(command -v qbittorrent-nox)
+          fi
+          file "$qb"
+          "$py" scripts/test_qb_runtime.py "./anigo$(go env GOEXE)" --qbittorrent "$qb"
+      - name: Probe direct ARMv7 execution on the ARM64 host
+        if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'linux' && matrix.arch == 'arm64' }}
+        run: |
+          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o anigo-armv7 .
+          python3 scripts/probe_armv7_runtime.py ./anigo-armv7
       - name: Exercise the macOS installer
         if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'darwin' }}
         run: python3 scripts/test_install.py

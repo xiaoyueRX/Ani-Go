@@ -1,21 +1,21 @@
-"""用 runner 自带的 Edge 或 Safari 验收内嵌网页的登录回跳、刷新和保存。"""
+"""用原生浏览器验收重启后恢复的订阅、社区插件、登录回跳和表单保存。"""
 
 import argparse
 import os
 from pathlib import Path
-import secrets
 import shutil
 import socket
 import tempfile
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from test_platform_runtime import HOST, start
+from test_platform_runtime import COMMUNITY, HOST, TITLE, restored_instance
 
 
 def open_browser(name):
@@ -33,19 +33,68 @@ def open_browser(name):
     return webdriver.Edge(service=webdriver.EdgeService(driver), options=options)
 
 
-def check_form(browser, service, password):
+def login_diagnostic(browser, base, target, log, offset):
+    href, ready, session = browser.execute_script(
+        "return [location.href, document.readyState, !!localStorage.getItem('token')]"
+    )
+    location = urlsplit(href)
+    safe_path = location.path if location.path in ("/login", "/subscriptions/new", "/schedule", "/") else "/[other path]"
+    safe_url = base + safe_path if location.netloc == urlsplit(base).netloc else "[different origin]"
+    query = parse_qs(location.query)
+    if query == {"redirect": [target]}:
+        safe_url += "?redirect=" + quote(target, safe="")
+    elif query == {"source": ["ci"]}:
+        safe_url += "?source=ci"
+    elif location.query:
+        safe_url += "?[redacted]"
+    if location.fragment:
+        safe_url += "#form" if location.fragment == "form" else "#[redacted]"
+    # 日志只分类：其中可能有用户名。只取浏览器提交之后新增的记录。
+    with log.open("rb") as stream:
+        stream.seek(offset)
+        lines = stream.read().decode("utf-8", errors="replace").splitlines()
+    outcome = "no login result"
+    for line in lines:
+        if "登录成功" in line:
+            outcome = "accepted"
+        elif "登录失败" in line:
+            outcome = "unknown user" if "不存在" in line else "credential rejected"
+        elif "JWT 签发失败" in line:
+            outcome = "token signing failed"
+    alert = " ".join(e.text for e in browser.find_elements(By.CSS_SELECTOR, '[role="alert"]') if e.is_displayed())
+    public_errors = {"请输入用户名和密码", "登录失败", "用户名或密码错误", "Please enter username and password", "Login failed",
+                     "Token 生成失败", "账户数据暂时不可用"}
+    error = alert if alert in public_errors else ("other error" if alert else "none")
+    title = browser.title if browser.title in {"Ani-Go", "Ani-Go - 全自动番剧追番管理系统"} else "[other page title]"
+    return (f"final URL={safe_url}, title={title}, document={ready}, session present={session}, "
+            f"WebDriver URL matches DOM={browser.current_url == href}, login API={outcome}, visible error={error}")
+
+
+def check_form(browser, service, password, log):
     base = f"http://{HOST}:{service.port}"
     target = "/subscriptions/new?source=ci#form"
     title = "Browser smoke Archive"
     wait = WebDriverWait(browser, 20)
     browser.get(base + target)
-    wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'form input[autocomplete="username"]'))).send_keys("admin")
+    username = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'form input[autocomplete="username"]')))
     login = urlsplit(browser.current_url)
     if login.path != "/login" or parse_qs(login.query).get("redirect") != [target]:
         raise RuntimeError("The login redirect did not preserve the protected URL")
-    browser.find_element(By.CSS_SELECTOR, 'form input[autocomplete="current-password"]').send_keys(password)
-    browser.find_element(By.CSS_SELECTOR, 'form button[type="submit"]').click()
-    wait.until(EC.url_to_be(base + target), "Login did not return to the subscription form")
+    secret = browser.find_element(By.CSS_SELECTOR, 'form input[autocomplete="current-password"]')
+    for field, value in ((username, "admin"), (secret, password)):
+        field.clear()
+        field.send_keys(value)
+    offset = log.stat().st_size
+    if not browser.execute_script("return arguments[0].value === 'admin' && arguments[1].value === arguments[2]", username, secret, password):
+        raise RuntimeError("Browser login fields differ from the supplied credentials; " + login_diagnostic(browser, base, target, log, offset))
+    wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'form button[type="submit"]'))).click()
+    try:
+        wait.until(lambda b: b.execute_script("return window.location.href") == base + target
+                   or any(e.is_displayed() for e in b.find_elements(By.CSS_SELECTOR, '[role="alert"]')))
+    except TimeoutException:
+        raise RuntimeError("Login did not return to the subscription form; " + login_diagnostic(browser, base, target, log, offset)) from None
+    if browser.execute_script("return window.location.href") != base + target:
+        raise RuntimeError("Browser login failed; " + login_diagnostic(browser, base, target, log, offset))
     title_input = (By.CSS_SELECTOR, 'form input[type="text"][required]')
     wait.until(EC.visibility_of_element_located(title_input))
     browser.refresh()
@@ -54,11 +103,36 @@ def check_form(browser, service, password):
     heading = (By.XPATH, f"//h1[normalize-space()='{title}']")
     wait.until(EC.visibility_of_element_located(heading), "The saved subscription title is missing from its detail page")
 
-    rows = service.api("subscriptions")
-    if len(rows) != 1 or rows[0].get("title_cn") != title:
+    rows = [r for r in service.api("subscriptions") if r.get("title_cn") == title]
+    if len(rows) != 1:
         raise RuntimeError("The subscription created through the browser was not saved exactly once")
     if browser.current_url != base + f"/subscriptions/{rows[0]['id']}":
         raise RuntimeError("The rendered detail page and the saved subscription ID disagree")
+
+
+def check_restored_plugin(browser, service):
+    base = f"http://{HOST}:{service.port}"
+    wait = WebDriverWait(browser, 20)
+    browser.get(base + "/subscriptions")
+    title = wait.until(EC.element_to_be_clickable((By.XPATH, f"//h3[normalize-space()='{TITLE}']")))
+    browser.execute_script("arguments[0].scrollIntoView({block: 'center'})", title)
+    title.click()
+    wait.until(EC.visibility_of_element_located((By.XPATH, f"//h1[normalize-space()='{TITLE}']")))
+
+    browser.get(base + "/settings?tab=plugins")
+    toggle = (By.XPATH, "//h4[normalize-space()='Cloud Tasks']"
+                        "/ancestor::div[.//input[@type='checkbox']][1]//input[@type='checkbox']")
+    control = wait.until(EC.element_to_be_clickable(toggle))
+    if control.is_selected():
+        raise RuntimeError("Restored community plugin unexpectedly appears enabled in settings")
+    browser.execute_script("arguments[0].scrollIntoView({block: 'center'})", control)
+    control.click()
+    wait.until(EC.element_located_selection_state_to_be(toggle, True), "Plugin did not enable after click")
+    browser.refresh()
+    wait.until(EC.element_located_selection_state_to_be(toggle, True), "Plugin enablement did not survive reloading settings")
+    custom = service.api("plugins/custom")
+    if not any(p["id"] == COMMUNITY and p["enabled"] and p["status"] == "active" for p in custom):
+        raise RuntimeError("The API did not confirm the restored plugin was activated through the browser")
 
 
 def main():
@@ -67,7 +141,6 @@ def main():
     parser.add_argument("--browser", choices=("edge", "safari"), required=True)
     args = parser.parse_args()
     command = [str(args.binary.resolve(strict=True))]
-    password = secrets.token_urlsafe(32)
     with tempfile.TemporaryDirectory(prefix="Ani-Go browser ") as directory, socket.socket() as blocked:
         root = Path(directory)
         blocked.bind((HOST, 0))
@@ -75,11 +148,13 @@ def main():
         with socket.socket() as free:
             free.bind((HOST, 0))
             port = free.getsockname()[1]
-        with start(command, root, root / "backups", port, password, offline) as service:
+        with restored_instance(command, root, port, offline) as (service, password, home):
             with open_browser(args.browser) as browser:
                 browser.set_page_load_timeout(30)
-                check_form(browser, service, password)
-                print(f"Passed: {browser.name} {browser.capabilities.get('browserVersion')}, login redirect, reload and subscription save.")
+                check_form(browser, service, password, home / "data" / "ani-go.log")
+                check_restored_plugin(browser, service)
+                print(f"Passed: {browser.name} {browser.capabilities.get('browserVersion')}, login, "
+                      "subscription save, restored subscription and plugin activation after reload.")
 
 
 if __name__ == "__main__":

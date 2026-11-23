@@ -13,6 +13,7 @@ from urllib.parse import unquote, urlsplit
 from test_platform_runtime import HOST
 
 
+PIECE_SIZE = 16 * 1024
 TITLE = "Harbor Archive"
 NAMES = [f"{TITLE} S01E{episode:02}.mkv" for episode in (1, 2, 3)]
 PAYLOADS = [hashlib.shake_256(name.encode()).digest(size)
@@ -79,10 +80,10 @@ class SeedHandler(BaseHTTPRequestHandler):
 
 
 @contextmanager
-def web_seed(media_ready=None, *, http_seed=True):
-    piece = 16 * 1024
-    content = b"".join(PAYLOADS)
-    files = [{b"length": len(data), b"path": [name.encode()]} for name, data in zip(NAMES, PAYLOADS)]
+def web_seed(media_ready=None, *, http_seed=True, payloads=PAYLOADS):
+    piece = PIECE_SIZE
+    content = b"".join(payloads)
+    files = [{b"length": len(data), b"path": [name.encode()]} for name, data in zip(NAMES, payloads)]
     info = {b"name": TITLE.encode(), b"files": files, b"piece length": piece, b"private": 1,
             b"pieces": b"".join(hashlib.sha1(content[i:i+piece]).digest() for i in range(0, len(content), piece))}
     infohash = hashlib.sha1(bencode(info)).hexdigest()
@@ -93,7 +94,7 @@ def web_seed(media_ready=None, *, http_seed=True):
             torrent[b"url-list"] = [(url + "/media/").encode()]
         server.torrent = bencode(torrent)
         server.media_ready = media_ready
-        server.media = {f"/media/{TITLE}/{name}": data for name, data in zip(NAMES, PAYLOADS)} if http_seed else {}
+        server.media = {f"/media/{TITLE}/{name}": data for name, data in zip(NAMES, payloads)} if http_seed else {}
         server.rss = f"""<rss version="2.0"><channel><title>{TITLE}</title><item>
         <title>[Fixture] {TITLE} [01-03] [1080p]</title><link>{url}/Home/Episode/{infohash}</link>
         <enclosure url="{url}/pack.torrent" length="{len(server.torrent)}" type="application/x-bittorrent"/>
@@ -135,7 +136,7 @@ def create_pack_subscription(service, url, downloads):
     return route
 
 
-def verify_library(service, route, home, downloads):
+def verify_library(service, route, home, downloads, payloads=PAYLOADS):
     detail = wait_for("selected episodes to be organized", lambda: service.api(route),
                       lambda data: sum(row["status"] == "organized" for row in data["episodes"]) >= 2)
     rows = sorted(detail["episodes"], key=lambda row: row["number"])
@@ -152,7 +153,7 @@ def verify_library(service, route, home, downloads):
         i = int(row["number"]) - 1
         target = Path(row["final_path"]).resolve()
         source = downloads / TITLE / NAMES[i]
-        if not target.is_relative_to(library) or target not in targets or row["file_size"] != len(PAYLOADS[i]):
+        if not target.is_relative_to(library) or target not in targets or row["file_size"] != len(payloads[i]):
             raise RuntimeError(f"Incorrect library path or size for episode {i+1}")
-        if source.read_bytes() != PAYLOADS[i] or target.read_bytes() != PAYLOADS[i]:
+        if source.read_bytes() != payloads[i] or target.read_bytes() != payloads[i]:
             raise RuntimeError(f"Web Seed, download and library differ for episode {i+1}")

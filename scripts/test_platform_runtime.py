@@ -19,6 +19,10 @@ from urllib.parse import quote
 HOST = "127.0.0.1"
 TITLE = "平台验收 Archive"
 CUSTOM_PATH = "下载 目录"
+COMMUNITY = "cloud-tasks-example"
+COMMUNITY_URL = "https://plugin.invalid/actions"
+COMMUNITY_API = "plugins/" + COMMUNITY
+CLOUD_CREDENTIAL = "plugins/cloud-115/panel/credential"
 
 
 class WebEntry(HTMLParser):
@@ -139,15 +143,75 @@ def verify_subscription(service, custom_path):
             raise RuntimeError(f"Restored subscription differs in {field}")
 
 
-def run(command, root, port, offline):
+def register_plugins(service, retired_token):
+    example = Path(__file__).resolve().parents[1] / "examples/plugins/cloud-tasks.json"
+    manifest = json.loads(example.read_text(encoding="utf-8"))
+    # 发行程序只准许公开 HTTPS 面板。样例无事件；所有动作测试只走本地验证。
+    manifest["url"] = "https://127.0.0.1/actions"
+    service.api("plugins/save", "POST", manifest, status=400)
+    manifest["url"] = "https://plugin.invalid/old"
+    service.api("plugins/save", "POST", manifest)
+    credential = COMMUNITY_API + "/panel/credential"
+    if service.api(credential, "PUT", {"access_token": retired_token}) != {"configured": True, "source": "stored"}:
+        raise RuntimeError("The community panel did not accept its own credential")
+    manifest["url"] = COMMUNITY_URL
+    service.api("plugins/save", "POST", manifest)
+    if service.api(credential) != {"configured": False, "source": "none"}:
+        raise RuntimeError("A replacement endpoint inherited the retired panel credential")
+    service.api(COMMUNITY_API + "/toggle", "POST", {"enabled": False})
+    service.api("plugins/cloud-115/toggle", "POST", {"enabled": True})
+    if service.api(CLOUD_CREDENTIAL) != {"configured": True, "source": "environment"}:
+        raise RuntimeError("The built-in panel did not use the source instance's deployment credential")
+
+
+def verify_restored_plugins(service):
+    custom = service.api("plugins/custom")
+    if len(custom) != 1 or custom[0]["id"] != COMMUNITY or custom[0]["url"] != COMMUNITY_URL:
+        raise RuntimeError("Restored community plugin manifest is missing or points at another endpoint")
+    if custom[0]["origin"] != "community" or custom[0]["enabled"] or custom[0]["status"] != "inactive":
+        raise RuntimeError("Restored community plugin lost its origin or disabled state")
+    service.api(COMMUNITY_API + "/panel/actions/list", "POST", {}, status=409)
+    if service.api(CLOUD_CREDENTIAL) != {"configured": False, "source": "none"}:
+        raise RuntimeError("The source machine's 115 credential appeared in the restored instance")
+
+
+def exercise_restored_plugins(service, home, offline):
+    service.api(COMMUNITY_API + "/toggle", "POST", {"enabled": True})
+    if service.api(COMMUNITY_API + "/panel/credential") != {"configured": False, "source": "none"}:
+        raise RuntimeError("The restored community panel acquired another endpoint's credential")
+    service.api(COMMUNITY_API + "/panel/actions/list", "POST", {"page": 1}, status=409)
+
+    # 通过内置迁移插件完成一次本地用户操作，并经公开插件列表观察处理事件后的状态。
+    fixture = home / "data" / "ani.v2.json"
+    title = "原生迁移验收"
+    entry = {"id": "native", "title": title, "url": offline + "/local", "enable": False}
+    fixture.write_text(json.dumps([entry]), encoding="utf-8")
+    result = service.api("migrate", "POST", {"source_path": "data/ani.v2.json"})
+    imported = [row for row in service.api("subscriptions") if row["title_cn"] == title]
+    if result["stats"]["Subscriptions"] != 1 or len(imported) != 1 or imported[0]["enabled"]:
+        raise RuntimeError("The restored migration plugin did not import the disabled fixture subscription")
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if any(p["id"] == "data-migrate" and "最近导入" in p["description"] for p in service.api("plugins")):
+            return
+        time.sleep(0.1)
+    raise RuntimeError("The restored migration plugin did not receive its import event")
+
+
+@contextmanager
+def restored_instance(command, root, port, offline):
+    """将源实例的备份恢复到新数据目录，交给调用者操作已重启的服务。"""
     password = secrets.token_urlsafe(32)
+    retired_token, deployment_token = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     backups = root / "共享 备份"
     backups.mkdir()
     custom_path = root / CUSTOM_PATH
     custom_path.mkdir()
+    source = root / "原始 实例"
     target = root / "恢复 实例"
-    with start(command, root / "原始 实例", backups, port, password, offline) as service:
+    with start(command, source, backups, port, password, offline, {"CLOUD115_ACCESS_TOKEN": deployment_token}) as service:
         service.verify_web()
+        register_plugins(service, retired_token)
         sub = service.api("subscriptions", "POST", {
             "title_cn": TITLE, "season": 2, "bangumi_id": "42", "rss_url": offline + "/rss", "custom_path": str(custom_path),
         }, status=201)
@@ -162,15 +226,23 @@ def run(command, root, port, offline):
             raise RuntimeError("Downloaded backup differs from the file on disk")
         if len(json.loads(data)["subscriptions"]) != 1:
             raise RuntimeError("Backup does not contain the source subscription")
+        if any(token.encode() in data for token in (retired_token, deployment_token)):
+            raise RuntimeError("Backup contains a retired or environment-only plugin credential")
     with start(command, target, backups, port, password, offline) as service:
-        if service.api("subscriptions"):
+        if service.api("subscriptions") or service.api("plugins/custom"):
             raise RuntimeError("Restore target must start with an empty database")
         service.api("backup/restore", "POST", {"name": name})
         verify_subscription(service, custom_path)
+        verify_restored_plugins(service)
     with start(command, target, backups, port, password, offline) as service:
         service.verify_web()
         verify_subscription(service, custom_path)
-    print("Passed: embedded web, login, subscription, backup, restore into an empty database, and restart.")
+        verify_restored_plugins(service)
+        yield service, password, target
+    for home in (source, target):
+        log = (home / "data" / "ani-go.log").read_bytes()
+        if any(token.encode() in log for token in (retired_token, deployment_token)):
+            raise RuntimeError("Application log contains a plugin credential")
 
 
 def main():
@@ -191,7 +263,11 @@ def main():
             with socket.socket() as available:
                 available.bind((HOST, 0))
                 port = available.getsockname()[1]
-            run(command, root, port, f"http://{HOST}:{blocked.getsockname()[1]}")
+            offline = f"http://{HOST}:{blocked.getsockname()[1]}"
+            with restored_instance(command, root, port, offline) as (service, _, home):
+                exercise_restored_plugins(service, home, offline)
+    print("Passed: embedded web, login, clean restore and restart, community panel state, "
+          "credential isolation and migration event.")
 
 
 if __name__ == "__main__":
