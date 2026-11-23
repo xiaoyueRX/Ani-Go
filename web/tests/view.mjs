@@ -8,10 +8,10 @@ import * as vue from 'vue'
 const require = createRequire(import.meta.url)
 
 // 在隔离上下文执行 Vue 组件，保留响应式状态，只替代浏览器和外部 HTTP。
-export function view(path, request, { route = {}, storage = new Map(), props = {}, router = { push() {}, replace() {} }, translate = key => key, translationExists = () => false, globals = {} } = {}) {
+export function view(path, request, { route = {}, storage = new Map(), props = {}, router = { push() {}, replace() {} }, translate = key => key, translationExists = () => false, globals = {}, inlineTemplate = false } = {}) {
   const source = readFileSync(new URL('../src/' + path + '.vue', import.meta.url), 'utf8')
   const { descriptor } = parse(source, { filename: path + '.vue' })
-  const script = compileScript(descriptor, { id: path }).content
+  const script = compileScript(descriptor, { id: path, inlineTemplate }).content
   const { outputText } = ts.transpileModule(script, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true,
   } })

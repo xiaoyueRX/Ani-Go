@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { 
   Image, Check, Pause, Play, AlertTriangle, 
   Trash2, User, History 
@@ -57,6 +57,7 @@ const emit = defineEmits<{
 }>()
 
 const isImageLoaded = ref(false)
+watch(() => props.sub.cover_url, () => { isImageLoaded.value = false })
 
 const progress = computed(() => {
   if (props.sub.total_episodes <= 0) return null
@@ -79,7 +80,7 @@ const progressColor = computed(() => {
     <!-- Cover Image Wrapper -->
     <div class="relative aspect-[3/3.8] overflow-hidden bg-base-300">
       <!-- Loading Skeleton -->
-      <div v-if="!isImageLoaded" class="absolute inset-0 skeleton rounded-none"></div>
+      <div v-if="sub.cover_url && !isImageLoaded" class="absolute inset-0 skeleton rounded-none"></div>
       
       <img
         v-if="sub.cover_url"
