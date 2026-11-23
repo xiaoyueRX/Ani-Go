@@ -233,6 +233,17 @@ func TestOrganizer_SameFileAndConflictHandling(t *testing.T) {
 	if string(content1) != string(initialContent) {
 		t.Fatalf("文件内容不匹配")
 	}
+	// 支持硬链接的卷必须给下载端和媒体库保留同一文件，做种时不额外占用空间。
+	if err := os.Link(srcFile, filepath.Join(tmpDir, "hardlink-probe")); err == nil {
+		src, err := os.Stat(srcFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dst, err := os.Stat(path1)
+		if err != nil || !os.SameFile(src, dst) {
+			t.Fatalf("媒体库文件未与下载源建立硬链接: %s, %v", path1, err)
+		}
+	}
 
 	// 2. 第二次整理（SameFile 场景）：目标路径与源文件已指向同一物理硬链接
 	path2, err := org.Organize(ctx, srcFile, anime, ep)

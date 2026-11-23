@@ -18,6 +18,65 @@ jobs:
     uses: ./.github/workflows/check.yml
     with:
       revision: ${{ github.sha }}
+      upload-web: true
+
+  platform:
+    name: Runtime ${{ matrix.os }}/${{ matrix.arch }} (${{ matrix.runner }})
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows, arch: amd64, runner: windows-2025 }
+          - { os: windows, arch: arm64, runner: windows-11-arm }
+          - { os: darwin, arch: amd64, runner: macos-15-intel }
+          - { os: darwin, arch: arm64, runner: macos-15 }
+          - { os: linux, arch: amd64, runner: ubuntu-24.04 }
+          - { os: linux, arch: arm64, runner: ubuntu-24.04-arm }
+          - { os: linux, arch: armv7, runner: ubuntu-24.04 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: web/dist
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Build and start the native application
+        if: matrix.arch != 'armv7'
+        env:
+          TARGET_OS: ${{ matrix.os }}
+          TARGET_ARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        run: |
+          go version
+          test "$(go env GOHOSTOS)/$(go env GOHOSTARCH)" = "$TARGET_OS/$TARGET_ARCH"
+          binary="anigo$(go env GOEXE)"
+          go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o "$binary" .
+          if [[ "$TARGET_OS" == windows ]]; then py=python; else py=python3; fi
+          "$py" scripts/test_platform_runtime.py "./$binary"
+      - name: Native Go tests
+        if: matrix.arch != 'armv7'
+        run: go test -count=1 -timeout=5m ./...
+      - name: Exercise the macOS installer
+        if: matrix.os == 'darwin'
+        run: python3 scripts/test_install.py
+      - name: Build and start the ARMv7 application with QEMU
+        if: matrix.arch == 'armv7'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-user
+          qemu-arm --version
+          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o anigo .
+          python3 scripts/test_platform_runtime.py --runner qemu-arm ./anigo
 
   check-container:
     needs: verify
