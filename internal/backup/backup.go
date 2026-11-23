@@ -104,7 +104,7 @@ func NewBackupManager(cfg *config.Config) *BackupManager {
 
 // CreateBackup 创建备份
 func (m *BackupManager) CreateBackup(ctx context.Context, includeEpisodes bool) error {
-	// 一次只在内存中构造一份快照。到期、停机或请求取消时可直接退出等待。
+	// 一次只发布一份快照。到期、停机或请求取消时可直接退出等待。
 	m.createOnce.Do(func() { m.createGate = make(chan struct{}, 1) })
 	select {
 	case m.createGate <- struct{}{}:
@@ -116,57 +116,6 @@ func (m *BackupManager) CreateBackup(ctx context.Context, includeEpisodes bool) 
 		return err
 	}
 	if err := os.MkdirAll(m.backupDir, 0700); err != nil {
-		return err
-	}
-	var settings []database.Setting
-	var subs []database.Subscription
-	var episodes []database.Episode
-	err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Find(&settings).Error; err != nil {
-			return err
-		}
-		if err := tx.Find(&subs).Error; err != nil {
-			return err
-		}
-		if includeEpisodes {
-			return tx.Find(&episodes).Error
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("读取备份快照失败: %w", err)
-	}
-	settingsMap := make(map[string]string, len(settings))
-	for _, s := range settings {
-		settingsMap[s.Key] = s.Value
-	}
-	if raw, ok := settingsMap[pluginStatusKey]; ok {
-		if _, err := decodePluginStatus(raw); err != nil {
-			return err
-		}
-	}
-	if _, ok := settingsMap[customPluginsKey]; !ok {
-		// 新完整快照显式声明空清单，以便区分没有导出插件配置的历史备份。
-		settingsMap[customPluginsKey] = "[]"
-	}
-	if err := m.filterBackupPanelCredentials(settingsMap); err != nil {
-		return err
-	}
-
-	// 构建备份数据
-	backup := BackupData{
-		Timestamp:     time.Now().Format(time.RFC3339),
-		Version:       "v0.5.0",
-		Settings:      settingsMap,
-		Subscriptions: subs,
-		Episodes:      episodes,
-	}
-
-	backup.FormatVersion = archiveFormat
-	backup.SHA256, err = archiveDigest(archiveBody[map[string]string, []database.Subscription, []database.Episode]{
-		backup.Timestamp, backup.Version, backup.Settings, backup.Subscriptions, backup.Episodes,
-	})
-	if err != nil {
 		return err
 	}
 	// 旧文件仍可读取；新名称用亚秒时间及随机后缀支持并发。
@@ -182,9 +131,13 @@ func (m *BackupManager) CreateBackup(ctx context.Context, includeEpisodes bool) 
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	enc := json.NewEncoder(tmp)
-	enc.SetIndent("", "  ")
-	if err = enc.Encode(backup); err == nil {
+	var counts snapshotCounts
+	err = database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		counts, err = m.writeSnapshot(tx, tmp, includeEpisodes, now)
+		return err
+	})
+	if err == nil {
 		err = tmp.Sync()
 	}
 	closeErr := tmp.Close()
@@ -205,10 +158,10 @@ func (m *BackupManager) CreateBackup(ctx context.Context, includeEpisodes bool) 
 
 	m.cleanOldBackups(fileName)
 	log.Printf("✅ 备份创建成功: %s (%d 个订阅, %d 个设置项%s)",
-		fileName, len(subs), len(settingsMap),
+		fileName, counts.subscriptions, counts.settings,
 		func() string {
 			if includeEpisodes {
-				return fmt.Sprintf(", %d 个剧集", len(episodes))
+				return fmt.Sprintf(", %d 个剧集", counts.episodes)
 			} else {
 				return ""
 			}
