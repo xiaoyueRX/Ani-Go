@@ -1,4 +1,4 @@
-import { isNavigationFailure, NavigationFailureType, type RouteLocationNormalized, type Router, type RouterHistory } from 'vue-router'
+import { isNavigationFailure, NavigationFailureType, type RouteLocationNormalized, type RouteRecordNormalized, type Router, type RouterHistory } from 'vue-router'
 
 const recoveryKey = 'ani-go-route-asset-recovery'
 
@@ -36,7 +36,8 @@ export function installAssetRecovery(router: Router) {
   const history = router.options.history
   let nextTraversal: Traversal | undefined
   let intent: { route: RouteLocationNormalized; pop?: Traversal; checked?: boolean } | undefined
-  let outageTarget: string | undefined
+  // 静态路由记录在各个 URL 参数间共享；同一标签的内存仅随路由种类增长。
+  const routeFailures = new WeakMap<RouteRecordNormalized, { unavailable: boolean }>()
   let checking: Promise<EntryState> | undefined
   let lastEntry: EntryState = 'unverified'
   let checkedUntil = 0
@@ -71,14 +72,14 @@ export function installAssetRecovery(router: Router) {
     nextTraversal = delta && typeof position === 'number' ? { path, position, delta } : undefined
   })
   router.beforeEach(to => {
-    if (outageTarget !== to.fullPath) outageTarget = undefined
     intent = { route: to, pop: nextTraversal?.path === to.fullPath ? nextTraversal : undefined }
     nextTraversal = undefined
   })
-  router.afterEach((_to, _from, failure) => {
+  router.afterEach((to, _from, failure) => {
     if (!failure || isNavigationFailure(failure, NavigationFailureType.duplicated)) intent = undefined
     if (!failure) {
-      outageTarget = undefined
+      const record = to.matched.at(-1)
+      if (record) routeFailures.delete(record)
       try { sessionStorage.removeItem(recoveryKey) } catch { /* 浏览器可能禁用会话存储。 */ }
     }
   })
@@ -87,14 +88,15 @@ export function installAssetRecovery(router: Router) {
     const active = intent
     if (!active || active.route !== to || active.checked || !failures.has(error)) return
     active.checked = true
+    const record = to.matched.at(-1)
+    if (!record) return
+    const failedRoute = routeFailures.get(record) ?? { unavailable: false }
+    routeFailures.set(record, failedRoute)
     const entry = await checkEntry()
+    if (entry === 'unavailable') failedRoute.unavailable = true
     if (active !== intent) return
-    if (entry === 'unavailable') {
-      outageTarget = to.fullPath
-      return
-    }
-    // 浏览器会记住失败的动态导入。只有用户再次打开停服时失败的目标才恢复同一版本。
-    if (entry !== 'changed' && !(entry === 'same' && outageTarget === to.fullPath)) return
+    // 浏览器会记住失败的动态导入。只有用户再次打开停服时失败的页面才恢复同一版本。
+    if (entry !== 'changed' && !(entry === 'same' && failedRoute.unavailable)) return
     const href = router.resolve(to.fullPath).href
     if (new URL(href, location.origin).origin !== location.origin) return
     try {

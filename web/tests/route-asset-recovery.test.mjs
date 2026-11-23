@@ -52,8 +52,11 @@ function browser(t, currentPath = '/subscriptions') {
     resolve: href => ({ href }),
   }
   installAssetRecovery(router)
+  const records = new Map()
   function begin(fullPath) {
-    const to = { fullPath }
+    const path = new URL(fullPath, location.origin).pathname.replace(/^\/subscriptions\/\d+$/, '/subscriptions/:id')
+    if (!records.has(path)) records.set(path, { path })
+    const to = { fullPath, matched: [records.get(path)] }
     hooks.before?.(to)
     return to
   }
@@ -192,7 +195,7 @@ for (const unavailable of ['offline', '503']) {
   })
 }
 
-test('整站仍不可用时反复点击保留当前文档，改往别处会取消原目标重试', async t => {
+test('整站仍不可用时保留文档，去暖页取消旧跳转，主动返回后才恢复', async t => {
   const b = browser(t), path = '/settings'
   b.fail(b.begin(path))
   b.offline()
@@ -202,14 +205,14 @@ test('整站仍不可用时反复点击保留当前文档，改往别处会取�
   await settle()
   assert.deepEqual(b.loads, [])
   b.fail(b.begin(path))
-  b.begin('/downloads')
+  const warm = b.begin('/downloads')
+  b.hooks.after(warm)
   b.respond(b.old)
   await settle()
   assert.deepEqual(b.loads, [])
   b.fail(b.begin(path))
-  b.respond(b.old)
   await settle()
-  assert.deepEqual(b.loads, [])
+  assert.deepEqual(b.loads, [['assign', path]])
 })
 
 test('仅模块反复出错或首页返回无效响应，重复用户导航也不刷新', async t => {
@@ -227,5 +230,47 @@ test('仅模块反复出错或首页返回无效响应，重复用户导航也�
   b.fail(b.begin(path))
   await settle()
   assert.equal(b.calls.length, 2)
+  assert.deepEqual(b.loads, [])
+})
+
+for (const retry of ['/settings?tab=downloads#rate', '/subscriptions/29?sort=desc#files']) {
+  test('并行失败的两个入口经暖页后仍可主动重试，同一路由保留新参数：' + retry, async t => {
+    const b = browser(t)
+    b.fail(b.begin('/settings?tab=plugins#old'))
+    b.fail(b.begin('/subscriptions/12?sort=asc#episode'))
+    assert.equal(b.calls.length, 1)
+    b.offline()
+    await settle()
+    b.hooks.after(b.begin('/downloads'))
+    assert.deepEqual(b.loads, [])
+    b.fail(b.begin(retry))
+    b.respond(b.old)
+    await settle()
+    assert.deepEqual(b.loads, [['assign', retry]])
+  })
+}
+
+test('对应页面成功进入后，不保留该静态路由先前的停服标记', async t => {
+  const b = browser(t)
+  b.fail(b.begin('/subscriptions/1?sort=asc'))
+  b.offline()
+  await settle()
+  b.hooks.after(b.begin('/subscriptions/2'))
+  b.hooks.after(b.begin('/downloads'))
+  b.fail(b.begin('/subscriptions/3#episodes'))
+  b.respond(b.old)
+  await settle()
+  assert.deepEqual(b.loads, [])
+})
+
+test('站点检查迟于对应页面成功时，不会重新标记已经打开的模块', async t => {
+  const b = browser(t)
+  b.fail(b.begin('/subscriptions/1'))
+  b.hooks.after(b.begin('/subscriptions/2'))
+  b.offline()
+  await settle()
+  b.fail(b.begin('/subscriptions/3'))
+  b.respond(b.old)
+  await settle()
   assert.deepEqual(b.loads, [])
 })
