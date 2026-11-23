@@ -207,6 +207,48 @@ func TestWindowsBinaryUpdate(t *testing.T) {
 	}
 }
 
+// 下载目录被短暂扫描时，旧版仍应在原安装路径恢复并正常退出。
+func TestWindowsRollbackAfterTemporarySharingViolation(t *testing.T) {
+	dir := t.TempDir()
+	stage := filepath.Join(dir, ".anigo-update-test")
+	if err := os.Mkdir(stage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(stage, "previous-anigo.exe")
+	running, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := copyExecutable(running, old); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "anigo.exe")
+	if err := os.WriteFile(target, []byte("invalid program"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path, err := windows.UTF16PtrFromString(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := windows.CreateFile(path, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+		nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlocked := make(chan error, 1)
+	time.AfterFunc(750*time.Millisecond, func() { unlocked <- windows.CloseHandle(handle) })
+	err = runReplacement(old, target, "v0.0.2", "http://127.0.0.1:1", []string{"-test.run=^$"})
+	if closeErr := <-unlocked; closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("临时占用解除后未能恢复旧程序: %v", err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("回滚文件未被移回安装路径: %v", err)
+	}
+}
+
 // 把父服务和它创建的监管/替换进程收在独立 Job 中，失败断言也能清理。
 func runWindowsFixture(t *testing.T, cmd *exec.Cmd) {
 	t.Helper()
