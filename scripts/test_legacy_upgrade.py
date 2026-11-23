@@ -1,4 +1,4 @@
-"""在独立数据目录中从官方 v0.7.0 手动升级，验证旧账号、订阅、设置和插件。"""
+"""验证官方 v0.7.0 的原位升级、冷备回退及 JSON 备份向全新候选实例的恢复。"""
 
 import argparse
 from contextlib import closing, contextmanager
@@ -236,7 +236,8 @@ def run(legacy, candidate, root):
         service.verify_web()
     print(f"Restored {LEGACY_VERSION} in a separate directory and verified the original login and records.", flush=True)
 
-    restore_legacy_json(binary, root / "JSON restore", archive, expected, legacy_token, password)
+    restore_legacy_json(binary, root / "JSON restore", snapshot / archive.relative_to(data),
+                        expected, legacy_token, password)
 
 
 def main():
