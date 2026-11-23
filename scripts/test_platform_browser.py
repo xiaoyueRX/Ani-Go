@@ -213,10 +213,10 @@ def check_library_files(browser, service, home):
     button.click()
 
     report = wait.until(EC.visibility_of_element_located((By.XPATH, "//details[summary[contains(., '库文件核对')]]")))
-    rows = sorted(item.text for item in report.find_elements(By.TAG_NAME, "li"))
-    expected = sorted([f"{present.name} · 文件存在，大小与记录一致", f"{missing.name} · 当前路径未找到文件"])
+    rows = sorted(" ".join(item.text.split()) for item in report.find_elements(By.TAG_NAME, "li"))
+    expected = sorted([f"{present.name} · 文件存在，大小与记录一致", f"{missing.name} · 当前路径未找到文件 从下载原件补回"])
     if rows != expected:
-        raise RuntimeError(f"Library file check returned unexpected rows: {rows!r}")
+        raise RuntimeError(f"Library file check returned unexpected rows or repair actions: {rows!r}")
     if not original_progress_visible(browser):
         raise RuntimeError("The file check changed the rendered progress or organized status")
     if library_history(dbpath, sub["id"]) != before or present.read_bytes() != contents or missing.exists():
