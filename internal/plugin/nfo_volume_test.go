@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,27 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/event"
 	"github.com/xiaoyueRX/Ani-Go/internal/organizer"
 )
+
+func TestUnguardedSidecarInWriteOnlyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0300); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	if _, err := os.ReadDir(dir); !errors.Is(err, os.ErrPermission) {
+		t.Skip("this environment permits listing the directory")
+	}
+	target := filepath.Join(dir, "series.nfo")
+	for _, content := range []string{"first", "updated"} {
+		if err := writeSidecar(target, []byte(content), nil); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(target)
+		if err != nil || string(got) != content {
+			t.Fatalf("read published metadata: got %q, error %v", got, err)
+		}
+	}
+}
 
 func markedLibrary(t *testing.T) (library, source string) {
 	t.Helper()

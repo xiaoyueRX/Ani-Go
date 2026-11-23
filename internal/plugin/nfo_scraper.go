@@ -566,30 +566,32 @@ func (p *NFOScraperPlugin) downloadPoster(ctx context.Context, targetDir, coverU
 type openLibraryDirectory func(target string) (*os.Root, error)
 
 func writeSidecar(target string, data []byte, openDir openLibraryDirectory) (err error) {
+	parent := filepath.Dir(target)
+	stageName := ".anigo-nfo-" + rand.Text()
+	stagePath, destination := filepath.Join(parent, stageName), target
+	openFile, removeFile, renameFile := os.OpenFile, os.Remove, os.Rename
 	var dir *os.Root
 	if openDir != nil {
 		dir, err = openDir(target)
-	} else {
-		parent := filepath.Dir(target)
-		if err = os.MkdirAll(parent, 0755); err == nil {
-			dir, err = os.OpenRoot(parent)
+		if err != nil {
+			return err
 		}
-	}
-	if err != nil {
+		defer dir.Close()
+		// 保护开启时，暂存、清理、发布都通过原卷上同一个父目录句柄。
+		openFile, removeFile, renameFile = dir.OpenFile, dir.Remove, dir.Rename
+		stagePath, destination = stageName, filepath.Base(target)
+	} else if err := os.MkdirAll(parent, 0755); err != nil {
 		return err
 	}
-	defer dir.Close()
 
-	// 文件句柄、重命名和失败后的清理均使用同一个父目录。掉盘不会把操作转向底层同名目录。
-	name := ".anigo-nfo-" + rand.Text()
-	stage, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	stage, err := openFile(stagePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if err != nil {
 			stage.Close()
-			dir.Remove(name)
+			removeFile(stagePath)
 		}
 	}()
 	if _, err = stage.Write(data); err != nil {
@@ -622,5 +624,5 @@ func writeSidecar(target string, data []byte, openDir openLibraryDirectory) (err
 			return fmt.Errorf("发布副文件前媒体目录已更换: %s", target)
 		}
 	}
-	return dir.Rename(name, filepath.Base(target))
+	return renameFile(stagePath, destination)
 }
