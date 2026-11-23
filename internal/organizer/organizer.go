@@ -248,45 +248,10 @@ func (o *TVOrganizer) selectTemplate(anime core.Anime) (template string, automat
 	return o.tvTemplate, o.tvTemplate == config.DefaultTVTemplate && os.Getenv("TV_TEMPLATE") == ""
 }
 
-func (o *TVOrganizer) getBasePath(animeType string) string {
-	normType := normalizeAnimeType(animeType)
-	var basePath string
-	switch normType {
-	case "movie":
-		basePath = o.movieBasePath
-		if database.DB != nil {
-			var movieBaseSetting database.Setting
-			if err := database.DB.Where("key = ?", "MOVIE_BASE_PATH").First(&movieBaseSetting).Error; err == nil && movieBaseSetting.Value != "" {
-				basePath = movieBaseSetting.Value
-			}
-		}
-		if basePath == "" {
-			basePath = "./TV/Media/剧场版"
-		}
-	case "ova":
-		basePath = o.ovaBasePath
-		if database.DB != nil {
-			var ovaBaseSetting database.Setting
-			if err := database.DB.Where("key = ?", "OVA_BASE_PATH").First(&ovaBaseSetting).Error; err == nil && ovaBaseSetting.Value != "" {
-				basePath = ovaBaseSetting.Value
-			}
-		}
-		if basePath == "" {
-			basePath = "./TV/Media/OVA"
-		}
-	default:
-		basePath = o.tvBasePath
-		if database.DB != nil {
-			var baseSetting database.Setting
-			if err := database.DB.Where("key = ?", "TV_BASE_PATH").First(&baseSetting).Error; err == nil && baseSetting.Value != "" {
-				basePath = baseSetting.Value
-			}
-		}
-		if basePath == "" {
-			basePath = "./TV/Media/番剧"
-		}
-	}
-	return basePath
+func (o *TVOrganizer) getBasePath(kind string) string {
+	// 常规整理保留原有的启动配置回退；显式补回操作会检查数据库读取错误。
+	volume, _ := o.RestoreVolume(kind, database.DB)
+	return volume.Root
 }
 
 func (o *TVOrganizer) isHardLinkEnabled() bool {
