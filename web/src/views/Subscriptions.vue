@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
+import { listEntry, listView, saveListView, type ListFilter, type ListSort } from '../utils/subscriptionListHistory'
 import request from '../utils/request'
 import { 
   Search, Plus, AlertTriangle, 
@@ -32,9 +33,40 @@ const subs = ref<Subscription[]>([])
 const loading = ref(true)
 const error = ref('')
 const deletingId = ref<number | null>(null)
-const filterText = ref('')
-const filterType = ref<'all' | 'active' | 'completed' | 'stalled' | 'recycle'>('all')
-const sortBy = ref<'created_at' | 'title' | 'progress' | 'year'>('created_at')
+const session = localStorage.getItem('token')
+const previousEntry = window.history?.state?.subscriptionListEntry
+const entry = listEntry(window.history)
+const saved = listView(entry, session)
+const filterText = ref(saved?.search ?? '')
+const filterType = ref<ListFilter>(saved?.filter ?? 'all')
+const sortBy = ref<ListSort>(saved?.sort ?? 'created_at')
+
+function openDetail(id: number) {
+  router.push({ name: 'subscription-detail', params: { id }, state: { subscriptionListOrigin: entry ?? null } })
+}
+
+onBeforeRouteLeave(to => {
+  if (!entry || !session || localStorage.getItem('token') !== session) return
+  const id = to.name === 'subscription-detail' ? Number(to.params.id) : 0
+  const card = id ? document.querySelector(`[data-subscription-id="${id}"]`) : null
+  saveListView(entry, session, {
+    search: filterText.value, filter: filterType.value, sort: sortBy.value, y: window.scrollY,
+    card: card ? { id, top: card.getBoundingClientRect().top } : undefined,
+  })
+})
+
+async function restoreScroll(ready: Promise<unknown>) {
+  await ready
+  await nextTick()
+  if (window.history.state?.subscriptionListEntry !== entry || localStorage.getItem('token') !== session) return
+  if (saved && (error.value || filterText.value !== saved.search || filterType.value !== saved.filter || sortBy.value !== saved.sort)) return
+  window.scrollTo({ top: saved?.y ?? 0, behavior: 'instant' })
+  if (!saved?.card) return
+  const bounds = document.querySelector(`[data-subscription-id="${saved.card.id}"]`)?.getBoundingClientRect()
+  if (bounds && (bounds.bottom <= 0 || bounds.top >= window.innerHeight)) {
+    window.scrollBy({ top: bounds.top - saved.card.top, behavior: 'instant' })
+  }
+}
 
 // 回收站状态
 const deletedSubs = ref<Subscription[]>([])
@@ -437,8 +469,13 @@ function setupEventStream() {
 
 
 onMounted(() => {
-  fetchSubscriptions()
-  fetchDeletedSubscriptions()
+  const active = fetchSubscriptions()
+  const deleted = fetchDeletedSubscriptions()
+  if (previousEntry) {
+    void restoreScroll(filterType.value === 'recycle' ? Promise.all([active, deleted]) : active)
+  } else {
+    window.scrollTo?.({ top: 0, behavior: 'instant' })
+  }
   setupEventStream()
   refreshTimer = setInterval(() => {
     fetchSubscriptions()
@@ -839,11 +876,12 @@ onUnmounted(() => {
           v-for="sub in filteredSubs"
           :key="sub.id"
           :sub="sub"
+          :data-subscription-id="sub.id"
           :deleting="deletingId === sub.id"
           :pending="isPending(sub.id)"
           :batch-delete-mode="batchDeleteMode && !isPending(sub.id)"
           :batch-selected="batchDeleteSelected.has(sub.id)"
-          @click="batchDeleteMode ? (!isPending(sub.id) && toggleBatchSelect(sub.id)) : router.push(`/subscriptions/${sub.id}`)"
+          @click="batchDeleteMode ? (!isPending(sub.id) && toggleBatchSelect(sub.id)) : openDetail(sub.id)"
           @toggle="toggleEnabled(sub)"
           @delete="isPending(sub.id) ? null : handleDelete(sub)"
           @supplement="triggerSupplement(sub)"

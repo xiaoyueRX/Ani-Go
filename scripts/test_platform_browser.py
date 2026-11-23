@@ -151,7 +151,13 @@ def check_subscription_grid(browser, service, saved):
     search = (By.CSS_SELECTOR, 'input[placeholder="搜索追番标题、字幕组或年份..."]')
 
     def card_titles(driver):
-        return [" ".join(h.text.split()) for h in driver.find_elements(By.CSS_SELECTOR, "h3[title]")]
+        # 在同一次浏览器调用中读取可见标题，避免列表更新使逐个远程读取的元素失效。
+        titles = driver.execute_script("""
+            return Array.from(document.querySelectorAll('h3[title]'))
+                .filter(h => h.checkVisibility({opacityProperty: true, visibilityProperty: true}))
+                .map(h => h.innerText)
+        """)
+        return [" ".join(title.split()) for title in titles]
 
     def filter_by_title():
         field = wait.until(EC.element_to_be_clickable(search))
@@ -177,8 +183,9 @@ def check_subscription_grid(browser, service, saved):
     if urlsplit(browser.current_url).path != f"/subscriptions/{saved['id']}":
         raise RuntimeError("Opening the filtered card did not navigate to its subscription")
     browser.back()
-    # 返回列表时可能重建搜索框。用实际输入重新筛选，再清空并核对恢复的卡片。
-    field = filter_by_title()
+    field = wait.until(EC.element_to_be_clickable(search))
+    wait.until(lambda b: field.get_attribute("value") == title and card_titles(b) == [title],
+               "Returning to this grid entry must preserve its filter and selected card")
     field.send_keys(Keys.BACKSPACE * len(title))
     wait.until(lambda b: field.get_attribute("value") == "" and {title, TITLE}.issubset(card_titles(b)),
                "Clearing title search did not restore both cards")

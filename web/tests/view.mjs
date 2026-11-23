@@ -20,9 +20,10 @@ export function view(path, request, { route = {}, storage = new Map(), props = {
   const window = { showToast: (message, type) => notices.push({ message, type }), location: {} }
   const modules = {
     vue: { ...vue, onMounted: fn => mounted.push(fn), onUnmounted() {} },
-    'vue-router': { useRouter: () => router, useRoute: () => ({ params: {}, query: {}, ...route }) },
+    'vue-router': { onBeforeRouteLeave() {}, useRouter: () => router, useRoute: () => ({ params: {}, query: {}, ...route }) },
     'vue-i18n': { useI18n: () => ({ t: translate, te: translationExists, locale: vue.ref('en') }) },
     '../utils/request': request,
+    '../utils/subscriptionListHistory': require('../src/utils/subscriptionListHistory.ts'),
     '../utils/setupDownloader': require('../src/utils/setupDownloader.ts'),
     '../utils/dialogSession': require('../src/utils/dialogSession.ts'),
     '../utils/loginRedirect': require('../src/utils/loginRedirect.ts'),

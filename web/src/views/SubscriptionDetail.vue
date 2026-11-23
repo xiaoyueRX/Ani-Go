@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { listView } from '../utils/subscriptionListHistory'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
 import { 
@@ -61,6 +62,10 @@ type FileReportRow = Omit<FileVerification, 'status'> & {
 
 const route = useRoute()
 const router = useRouter()
+function returnToList() {
+  if (listView(window.history.state?.subscriptionListOrigin, localStorage.getItem('token'))) router.back()
+  else router.push('/subscriptions')
+}
 const id = Number(route.params.id)
 
 const { t, locale } = useI18n({ useScope: 'global' })
@@ -532,7 +537,7 @@ onUnmounted(() => {
   <div class="space-y-10 pb-20">
     <!-- Header -->
     <div class="flex items-center justify-between">
-      <button class="btn btn-ghost border-base-300 rounded-2xl px-6 hover:bg-base-200 transition-all active:scale-95 group" @click="router.push('/subscriptions')">
+      <button class="btn btn-ghost border-base-300 rounded-2xl px-6 hover:bg-base-200 transition-all active:scale-95 group" @click="returnToList">
         <ChevronLeft :size="20" class="group-hover:-translate-x-1 transition-transform" />
         <span class="text-xs font-black uppercase tracking-widest">{{ t('detail.back') }}</span>
       </button>
