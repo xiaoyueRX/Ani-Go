@@ -9,7 +9,7 @@ import tempfile
 from urllib.parse import parse_qs, quote, urlsplit
 
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import SessionNotCreatedException, TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -20,7 +20,15 @@ from test_platform_runtime import COMMUNITY, HOST, TITLE, restored_instance
 
 def open_browser(name):
     if name == "safari":
-        return webdriver.Safari(service=webdriver.SafariService("/usr/bin/safaridriver"))
+        # 首次启动时 Safari 有时还未向 Web Inspector 注册。Selenium 会关闭失败的驱动，
+        # 用一份新驱动再建立一次会话。测试页面尚未打开，后续页面操作始终只执行一次。
+        for attempt in range(2):
+            try:
+                return webdriver.Safari(service=webdriver.SafariService("/usr/bin/safaridriver"))
+            except SessionNotCreatedException as exc:
+                if attempt or "waiting for its RWIApplication to appear and become ready" not in (exc.msg or ""):
+                    raise
+                print("Safari launch timed out before a WebDriver session existed; starting a fresh driver.", flush=True)
 
     driver = shutil.which("msedgedriver")
     if not driver and os.environ.get("EDGEWEBDRIVER"):
