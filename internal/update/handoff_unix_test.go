@@ -5,6 +5,7 @@ package update
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -97,29 +98,38 @@ func TestSupervisorKeepsPIDAcrossUpdates(t *testing.T) {
 	finished := make(chan error, 1)
 	go func() { finished <- cmd.Wait() }()
 	defer syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	defer client.CloseIdleConnections()
+	const updateTimeout = 12 * time.Second
+	healthClient := &http.Client{Timeout: 500 * time.Millisecond}
+	defer healthClient.CloseIdleConnections()
 	url := "http://" + address
 	await := func(v string) {
 		t.Helper()
-		deadline := time.Now().Add(12 * time.Second)
+		deadline := time.Now().Add(updateTimeout)
 		for time.Now().Before(deadline) {
 			select {
 			case err := <-finished:
 				t.Fatalf("监管主进程提前退出: %v", err)
 			default:
 			}
-			if versionHealthy(client, url+"/api/health", v) {
-				return
+			if versionHealthy(healthClient, url+"/api/health", v) {
+				// 监管进程确认新版本后才会移除回滚文件。
+				backups, err := fs.Glob(os.DirFS(filepath.Dir(fixture)), ".anigo-update-*/previous-anigo")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(backups) == 0 {
+					return
+				}
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		t.Fatalf("未看到新版本 %s", v)
+		t.Fatalf("监管进程未确认新版本 %s", v)
 	}
 	await("v1.0.1")
-	// 监管进程先确认第一次启动成功，再提交第二次升级。
-	time.Sleep(350 * time.Millisecond)
-	res, err := client.Post(url+"/next", "text/plain", nil)
+	// 升级请求要写入整个程序文件，应使用独立于健康探针的超时。
+	updateClient := &http.Client{Timeout: updateTimeout}
+	defer updateClient.CloseIdleConnections()
+	res, err := updateClient.Post(url+"/next", "text/plain", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
