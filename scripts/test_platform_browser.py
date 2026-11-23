@@ -139,6 +139,50 @@ def check_form(browser, service, password, log):
         raise RuntimeError("The subscription created through the browser was not saved exactly once")
     if browser.current_url != base + f"/subscriptions/{rows[0]['id']}":
         raise RuntimeError("The rendered detail page and the saved subscription ID disagree")
+    return rows[0]
+
+
+def check_subscription_grid(browser, service, saved):
+    base = f"http://{HOST}:{service.port}"
+    title = saved["title_cn"]
+    if saved.get("cover_url"):
+        raise RuntimeError("The saved subscription must have no cover for this check")
+    wait = WebDriverWait(browser, 20)
+    search = (By.CSS_SELECTOR, 'input[placeholder="搜索追番标题、字幕组或年份..."]')
+
+    def card_titles(driver):
+        return [" ".join(h.text.split()) for h in driver.find_elements(By.CSS_SELECTOR, "h3[title]")]
+
+    def filter_by_title():
+        field = wait.until(EC.element_to_be_clickable(search))
+        field.clear()
+        field.send_keys(title)
+        wait.until(lambda b: card_titles(b) == [title], "Title search did not isolate the saved subscription")
+        return field
+
+    browser.get(base + "/subscriptions")
+    wait.until(lambda b: {title, TITLE}.issubset(card_titles(b)), "Both subscription cards must be visible")
+    heading = (By.XPATH, f"//h3[normalize-space(.)='{title}']")
+    card = browser.find_element(*heading).find_element(
+        By.XPATH, "ancestor::div[contains(concat(' ',normalize-space(@class),' '),' group ')][1]")
+    icon = card.find_element(By.CSS_SELECTOR, "svg.lucide-image")
+    if not icon.is_displayed() or card.find_elements(By.CSS_SELECTOR, "img, .skeleton"):
+        raise RuntimeError("A subscription without a cover should show a static image icon without a loading skeleton")
+
+    filter_by_title()
+    match = wait.until(EC.element_to_be_clickable(heading))
+    browser.execute_script("arguments[0].scrollIntoView({block: 'center'})", match)
+    match.click()
+    wait.until(EC.visibility_of_element_located((By.XPATH, f"//h1[normalize-space(.)='{title}']")))
+    if urlsplit(browser.current_url).path != f"/subscriptions/{saved['id']}":
+        raise RuntimeError("Opening the filtered card did not navigate to its subscription")
+    browser.back()
+    # 返回列表时可能重建搜索框。用实际输入重新筛选，再清空并核对恢复的卡片。
+    field = filter_by_title()
+    field.send_keys(Keys.BACKSPACE * len(title))
+    wait.until(lambda b: field.get_attribute("value") == "" and {title, TITLE}.issubset(card_titles(b)),
+               "Clearing title search did not restore both cards")
+    print("Verified coverless card, title filter, detail navigation and clearing the filter.", flush=True)
 
 
 def check_restored_plugin(browser, service):
@@ -240,7 +284,8 @@ def main():
         with restored_instance(command, root, port, offline) as (service, password, home):
             with open_browser(args.browser) as browser:
                 browser.set_page_load_timeout(30)
-                check_form(browser, service, password, home / "data" / "ani-go.log")
+                saved = check_form(browser, service, password, home / "data" / "ani-go.log")
+                check_subscription_grid(browser, service, saved)
                 check_restored_plugin(browser, service)
                 check_library_files(browser, service, home)
                 print(f"Passed: {browser.name} {browser.capabilities.get('browserVersion')}, login, "
