@@ -334,7 +334,7 @@ func TestBuiltInPlugins_AllComponents(t *testing.T) {
 		t.Fatalf("GeekNamingPlugin Init 失败: %v", err)
 	}
 	pathTest := "Anime Name : Special <Season> 1 / Episode 01.mkv"
-	sanitized := sanitizePathForMediaServer(pathTest)
+	sanitized := core.SanitizePathForMediaServer(pathTest)
 	if sanitized == "" || sanitized == pathTest {
 		t.Errorf("路径清洗未生效: %s -> %s", pathTest, sanitized)
 	}

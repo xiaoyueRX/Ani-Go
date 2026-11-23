@@ -262,7 +262,7 @@ const tabs = computed(() => [
         { label: t('settings.options.hardlinkDirect'), value: 'true' },
         { label: t('settings.options.hardlinkCopy'), value: 'false' },
       ]},
-      { label: t('settings.fields.tvTemplate'), key: 'TV_TEMPLATE', placeholder: '{title_cn}{year}/Season {season}/{title_en} [tmdbid={tmdb_id}] S{season:02}E{ep:02}{ext}' },
+      { label: t('settings.fields.tvTemplate'), key: 'TV_TEMPLATE', placeholder: '{title_cn} ({year})/Season {season}/{title_en} S{season:02}E{ep:02}{ext}' },
       { label: t('settings.fields.movieTemplate'), key: 'MOVIE_TEMPLATE', placeholder: '{title_cn} ({year})/{title_en}{ext}' },
       { label: t('settings.fields.otherTemplate'), key: 'OTHER_TEMPLATE', placeholder: '{title_cn}{year}/Specials/{title_en} S00E{ep:02}{ext}' },
     ]}

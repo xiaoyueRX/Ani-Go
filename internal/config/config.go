@@ -91,7 +91,7 @@ type BGMTVConfig struct {
 
 // 内置命名模板同时用于识别旧设置中保存的默认模板。
 const (
-	DefaultTVTemplate    = "{title_cn}{year}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}"
+	DefaultTVTemplate    = "{title_cn} ({year})/Season {season}/{title_en} S{season:02}E{ep:02}{ext}"
 	DefaultMovieTemplate = "{title_cn}{year}/{title_en}{ext}"
 )
 

@@ -132,7 +132,7 @@ func TestSelectTemplate_MediaTypeTemplates(t *testing.T) {
 		{animeType: "", want: "other-template"},
 	}
 	for _, tt := range tests {
-		if got := org.selectTemplate(core.Anime{Type: tt.animeType}); got != tt.want {
+		if got, _ := org.selectTemplate(core.Anime{Type: tt.animeType}); got != tt.want {
 			t.Errorf("类型 %s 模板 = %q, 期望 %q", tt.animeType, got, tt.want)
 		}
 	}

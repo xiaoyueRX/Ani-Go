@@ -34,6 +34,7 @@ type TVOrganizer struct {
 }
 
 const (
+	legacyTVTemplate        = "{title_cn}{year}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}"
 	fallbackTVTemplate      = "{title_cn}{year}/Season {season}/{title_en} [tmdbid={tmdb_id}] S{season:02}E{ep:02}{ext}"
 	fallbackMovieTemplate   = "{title_cn} ({year})/{title_en}{ext}"
 	fallbackSpecialTemplate = "{title_cn}{year}/Specials/{title_en} S00E{ep:02}{ext}"
@@ -173,48 +174,50 @@ func normalizeAnimeType(t string) string {
 	}
 }
 
-// selectTemplate 根据类型选择模板
-func (o *TVOrganizer) selectTemplate(anime core.Anime) string {
-	normType := normalizeAnimeType(anime.Type)
-	switch normType {
+func savedTemplate(key string) string {
+	if database.DB != nil {
+		var setting database.Setting
+		if err := database.DB.Where("key = ?", key).First(&setting).Error; err == nil {
+			return setting.Value
+		}
+	}
+	return ""
+}
+
+// selectTemplate 同时区分自动的剧集布局和用户明确保存的模板。
+func (o *TVOrganizer) selectTemplate(anime core.Anime) (template string, automaticTV bool) {
+	switch normalizeAnimeType(anime.Type) {
 	case "movie":
-		if database.DB != nil {
-			var setting database.Setting
-			if err := database.DB.Where("key = ?", "MOVIE_TEMPLATE").First(&setting).Error; err == nil && setting.Value != "" {
-				return setting.Value
-			}
+		if saved := savedTemplate("MOVIE_TEMPLATE"); saved != "" {
+			return saved, false
 		}
 		if o.movieTemplate != "" {
-			return o.movieTemplate
+			return o.movieTemplate, false
 		}
-		return fallbackMovieTemplate
+		return fallbackMovieTemplate, false
 	case "tv":
-		if database.DB != nil {
-			var setting database.Setting
-			if err := database.DB.Where("key = ?", "TV_TEMPLATE").First(&setting).Error; err == nil && setting.Value != "" {
-				return setting.Value
-			}
+		if saved := savedTemplate("TV_TEMPLATE"); saved != "" {
+			return saved, false
 		}
-		if o.tvTemplate != "" {
-			return o.tvTemplate
+		if o.tvTemplate == "" {
+			return fallbackTVTemplate, false
 		}
-		return fallbackTVTemplate
 	default:
-		// OVA, Special, 或未指定类型 (other)
-		if database.DB != nil {
-			var setting database.Setting
-			if err := database.DB.Where("key = ?", "OTHER_TEMPLATE").First(&setting).Error; err == nil && setting.Value != "" {
-				return setting.Value
-			}
+		if saved := savedTemplate("OTHER_TEMPLATE"); saved != "" {
+			return saved, false
 		}
 		if o.otherTemplate != "" {
-			return o.otherTemplate
+			return o.otherTemplate, false
 		}
-		if o.tvTemplate != "" {
-			return o.tvTemplate
+		if o.tvTemplate == "" {
+			return fallbackSpecialTemplate, false
 		}
-		return fallbackSpecialTemplate
+		// 特别篇可以继承启动配置中的 TV 模板。
+		if o.tvTemplate == config.DefaultTVTemplate && savedTemplate("TV_TEMPLATE") == o.tvTemplate {
+			return o.tvTemplate, false
+		}
 	}
+	return o.tvTemplate, o.tvTemplate == config.DefaultTVTemplate && os.Getenv("TV_TEMPLATE") == ""
 }
 
 func (o *TVOrganizer) getBasePath(animeType string) string {
@@ -269,15 +272,19 @@ func (o *TVOrganizer) isHardLinkEnabled() bool {
 	return useHardLink
 }
 
+type tvSeriesRoots struct {
+	current, legacy string
+}
+
 // namingInput 为预览和实际整理构造相同的初始路径，并向钩子保留原始语言元数据。
-func (o *TVOrganizer) namingInput(filePath string, anime core.Anime, episode core.Episode) core.NamingHookInput {
-	template := o.selectTemplate(anime)
+func (o *TVOrganizer) namingInput(filePath string, anime core.Anime, episode core.Episode) (core.NamingHookInput, tvSeriesRoots) {
+	template, automaticTV := o.selectTemplate(anime)
 	values := o.buildVarValues(anime, episode)
 	values.Ext = filepath.Ext(filePath)
 	renderValues := values
 	renderLayout := template
-	switch template {
-	case config.DefaultTVTemplate, config.DefaultMovieTemplate, fallbackTVTemplate, fallbackMovieTemplate, fallbackSpecialTemplate:
+	if automaticTV || template == legacyTVTemplate || template == config.DefaultMovieTemplate ||
+		template == fallbackTVTemplate || template == fallbackMovieTemplate || template == fallbackSpecialTemplate {
 		// 内置目录名优先中文，文件名优先英文。自定义模板中的语言占位符保持原义。
 		renderValues.TitleCN = firstTitle(anime.TitleCN, anime.TitleJP, anime.TitleEN)
 		renderValues.TitleEN = firstTitle(anime.TitleEN, anime.TitleCN, anime.TitleJP)
@@ -285,10 +292,16 @@ func (o *TVOrganizer) namingInput(filePath string, anime core.Anime, episode cor
 			renderLayout = strings.Replace(template, " [tmdbid={tmdb_id}]", "", 1)
 		}
 	}
+	var roots tvSeriesRoots
+	if automaticTV && anime.Year > 0 {
+		rootLayout, _, _ := strings.Cut(template, "/")
+		legacyLayout, _, _ := strings.Cut(legacyTVTemplate, "/")
+		roots = tvSeriesRoots{current: renderTemplate(rootLayout, renderValues), legacy: renderTemplate(legacyLayout, renderValues)}
+	}
 	return core.NamingHookInput{
 		Anime: anime, Episode: episode, Template: template, VarValues: values,
 		RenderedPath: renderTemplate(renderLayout, renderValues),
-	}
+	}, roots
 }
 
 func firstTitle(candidates ...string) string {
