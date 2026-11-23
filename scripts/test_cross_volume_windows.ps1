@@ -8,9 +8,8 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
     throw 'This fixture requires a GitHub-hosted Windows runner'
 }
 
-$python = (Get-Command python -CommandType Application).Source
 $probe = Join-Path $PSScriptRoot 'test_cross_volume_runtime.py'
-$sourcePath = & $python -c 'import tempfile; print(tempfile.gettempdir())'
+$sourcePath = python -c 'import tempfile; print(tempfile.gettempdir())'
 if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the Python temporary directory' }
 
 function Get-PathVolume([string]$Path) {
@@ -29,7 +28,7 @@ function Invoke-Probe([string]$Parent, [string]$Type) {
     [void](New-Item -ItemType Directory -Path $folder)
     try {
         Write-Host "Cross-volume fixture: source=$($sourceVolume.UniqueId) destination=$($volume.UniqueId) type=$Type"
-        & $python $probe $AniGo $QB $folder
+        python $probe $AniGo $QB $folder
         if ($LASTEXITCODE -ne 0) { throw "Cross-volume test exited $LASTEXITCODE" }
     } finally {
         [IO.Directory]::Delete($folder, $true)
