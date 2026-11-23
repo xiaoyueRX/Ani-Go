@@ -54,13 +54,6 @@ const stalledSubsCount = computed(() => subs.value.filter(s => s.stalled_episode
 const batchDeleteMode = ref(false)
 const batchDeleteSelected = ref<Set<number>>(new Set())
 
-function toggleSelectAllBatch() {
-  if (batchDeleteSelected.value.size === filteredSubs.value.length) {
-    batchDeleteSelected.value = new Set()
-  } else {
-    batchDeleteSelected.value = new Set(filteredSubs.value.map(s => s.id))
-  }
-}
 const undoBarVisible = ref(false)
 const remainingSeconds = ref(15)
 const UNDO_TIMEOUT_SECONDS = 15
@@ -208,6 +201,21 @@ const filteredSubs = computed(() => {
 
   return list
 })
+
+// 回收站只支持还原，等待删除的订阅也不能再次选中。
+const selectableVisibleSubs = computed(() => filterType.value === 'recycle'
+  ? []
+  : filteredSubs.value.filter(sub => !isPending(sub.id)))
+const allVisibleSelected = computed(() => selectableVisibleSubs.value.length > 0
+  && selectableVisibleSubs.value.every(sub => batchDeleteSelected.value.has(sub.id)))
+
+function toggleSelectAllBatch() {
+  const deselect = allVisibleSelected.value
+  for (const { id } of selectableVisibleSubs.value) {
+    if (deselect) batchDeleteSelected.value.delete(id)
+    else batchDeleteSelected.value.add(id)
+  }
+}
 
 async function fetchSubscriptions() {
   error.value = ''
@@ -457,10 +465,10 @@ onUnmounted(() => {
       </div>
       
       <div class="flex items-center gap-2 overflow-x-auto no-scrollbar max-w-full pb-1">
-        <template v-if="batchDeleteMode">
+        <template v-if="batchDeleteMode && filterType !== 'recycle'">
           <div class="flex items-center gap-2.5 flex-none">
-            <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-3 text-xs font-bold" @click="toggleSelectAllBatch">
-              {{ batchDeleteSelected.size === filteredSubs.length && filteredSubs.length > 0 ? $t('subs.unselectAll') : $t('subs.selectAll') }}
+            <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-3 text-xs font-bold" :disabled="selectableVisibleSubs.length === 0" @click="toggleSelectAllBatch">
+              {{ allVisibleSelected ? $t('subs.unselectAll') : $t('subs.selectAll') }}
             </button>
             <span class="text-xs font-bold opacity-60 whitespace-nowrap">{{ $t('subs.selectedCount', { count: batchDeleteSelected.size }) }}</span>
             <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-3" @click="exitBatchDeleteMode">
@@ -472,7 +480,7 @@ onUnmounted(() => {
             </button>
           </div>
         </template>
-        <button v-if="!batchDeleteMode"
+        <button v-if="!batchDeleteMode && filterType !== 'recycle'"
           class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap"
           @click="enterBatchDeleteMode">
           <Trash2 :size="16" class="opacity-50" />
