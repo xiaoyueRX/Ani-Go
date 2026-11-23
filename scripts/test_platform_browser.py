@@ -4,6 +4,7 @@ import argparse
 from contextlib import closing
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import socket
@@ -18,7 +19,9 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from test_platform_runtime import COMMUNITY, HOST, TITLE, restored_instance, start
+from test_legacy_upgrade import LEGACY_VERSION, OFFLINE, ensure_windows_console, prepare_legacy, running
+from test_platform_runtime import COMMUNITY, HOST, TITLE, Service, WebEntry, process_environment, restored_instance, start
+from torrent_fixture import free_port
 
 
 def open_browser(name):
@@ -419,10 +422,94 @@ def check_filter_layout(browser, command, root, offline):
         check_mobile_header(browser, service)
 
 
+def downloads_assets(service):
+    _, html = service.request("/")
+    index = WebEntry()
+    index.feed(html.decode())
+    if not index.bundle:
+        raise RuntimeError("The running frontend has no entry module")
+    _, entry = service.request(index.bundle)
+    chunks = set(re.findall(rb"\bDownloads-[\w-]+\.js\b", entry))
+    if len(chunks) != 1:
+        raise RuntimeError("Expected one lazy downloads module in the running frontend")
+    return index.bundle, "/assets/" + chunks.pop().decode()
+
+
+def check_cold_rollback_tab(browser, candidate, legacy, root):
+    # 保留同一来源和浏览器标签，用官方冷备恢复升级前的数据库和签名密钥。
+    service = Service(free_port())
+    base = f"http://{HOST}:{service.port}"
+    live, cold = root / "live", root / "cold"
+    password = secrets.token_urlsafe(24)
+    for name in ("home", "backups", "media"):
+        (live / name).mkdir(parents=True)
+
+    def environment(data):
+        env = process_environment(data / "home", data / "backups", service.port, password, OFFLINE)
+        del env["ANIGO_ADMIN_PASSWORD"]
+        return env
+
+    ensure_windows_console()
+    with running(legacy, live / "home", environment(live), service):
+        saved, _ = prepare_legacy(service, password, live / "media", live / "backups")
+    shutil.copytree(live, cold)
+    wait = WebDriverWait(browser, 20)
+    with running(candidate, live / "home", environment(live), service):
+        candidate_entry, unloaded = downloads_assets(service)
+        browser.get(base + "/login")
+        browser.execute_script("localStorage.setItem('lang','zh');"
+                               "localStorage.setItem('ani-go-setup-wizard-dismissed','true')")
+        browser.get(base + "/subscriptions")
+        user = wait.until(EC.element_to_be_clickable((By.ID, "login-username")))
+        fill_login_field(browser, user, "admin")
+        fill_login_field(browser, browser.find_element(By.ID, "login-password"), password)
+        browser.find_element(By.CSS_SELECTOR, 'form button[type="submit"]').click()
+        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, f'h3[title="{saved["title_cn"]}"]')))
+        if not browser.execute_script("""
+            window.rollbackSourceDocument = true;
+            return document.querySelector('script[type=module]').getAttribute('src') === arguments[0]
+                && !performance.getEntriesByName(location.origin + arguments[1]).length
+        """, candidate_entry, unloaded):
+            raise RuntimeError("Expected the candidate subscription page with its downloads module still cold")
+        service.token = browser.execute_script("return localStorage.getItem('token')")
+
+    with running(legacy, cold / "home", environment(cold), service):
+        official_entry, official_chunk = downloads_assets(service)
+        # v0.7.0 对已消失的 JS 地址回退到 HTML 首页。HTTP 200 在这里也会导致模块拒载。
+        fallback_mime, _ = service.request(unloaded)
+        if (service.api("version")["version"] != LEGACY_VERSION or candidate_entry == official_entry
+                or unloaded == official_chunk or "text/html" not in fallback_mime):
+            raise RuntimeError("The cold rollback must remove the candidate module and serve the official frontend")
+        print(f"Rollback from {candidate_entry} to {official_entry}: {unloaded} now returns {fallback_mime}.", flush=True)
+        def visible_downloads_link(driver):
+            return next((link for link in driver.find_elements(By.CSS_SELECTOR, 'a[href="/downloads"]')
+                         if link.is_displayed()), None)
+
+        if not visible_downloads_link(browser):
+            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "header button"))).click()
+        wait.until(visible_downloads_link).click()
+        try:
+            wait.until(lambda b: b.execute_script("""
+                return location.pathname === '/downloads' && !window.rollbackSourceDocument
+                    && document.querySelector('script[type=module]')?.getAttribute('src') === arguments[0]
+                    && document.querySelector('main h1')?.innerText.trim() === '下载队列'
+                    && performance.getEntriesByName(location.origin + arguments[1]).length > 0
+            """, official_entry, official_chunk))
+        except TimeoutException:
+            status = browser.execute_script("return [location.pathname, !!window.rollbackSourceDocument,"
+                                            " document.querySelector('script[type=module]')?.getAttribute('src')]")
+            raise RuntimeError(f"The open tab did not reach the official downloads page after the cold rollback: {status}") from None
+        if (not browser.execute_script("return localStorage.getItem('token') === arguments[0]", service.token)
+                or service.api("me").get("username") != "admin"):
+            raise RuntimeError("The original browser login did not survive the cold rollback")
+        print(f"Passed: {browser.name} kept its browser login and opened {official_chunk} in a new document.", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--browser", choices=("edge", "safari"), required=True)
+    parser.add_argument("--legacy", type=Path, help="Official v0.7.0 executable for the open-tab rollback check")
     args = parser.parse_args()
     command = [str(args.binary.resolve(strict=True))]
     with tempfile.TemporaryDirectory(prefix="Ani-Go browser ") as directory, socket.socket() as blocked:
@@ -441,6 +528,8 @@ def main():
                 check_restored_plugin(browser, service)
                 check_library_files(browser, service, home)
                 check_filter_layout(browser, command, root, offline)
+                if args.legacy:
+                    check_cold_rollback_tab(browser, Path(command[0]), args.legacy.resolve(strict=True), root / "rollback")
                 print(f"Passed: {browser.name} {browser.capabilities.get('browserVersion')}, login, "
                       "subscription save, restored plugin activation, present and missing library files, "
                       "unchanged 2/2 progress and organized history.")

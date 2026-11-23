@@ -85,7 +85,8 @@ jobs:
             sudo /usr/bin/safaridriver --enable
           fi
           "$python" -m pip install --disable-pip-version-check -r scripts/requirements-browser.txt
-          "$python" scripts/test_platform_browser.py "./anigo$(go env GOEXE)" --browser "$browser"
+          "$python" scripts/test_platform_browser.py "./anigo$(go env GOEXE)" --browser "$browser" \
+            --legacy "$RUNNER_TEMP/anigo-v0.7.0$(go env GOEXE)"
       - name: Native Go tests
         if: ${{ !cancelled() && steps.application.outcome == 'success' }}
         run: go test -count=1 -timeout=5m ./...
