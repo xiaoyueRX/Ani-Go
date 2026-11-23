@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"errors"
+	"gorm.io/gorm"
 	"log"
 	"net/http"
 	"strings"
@@ -101,7 +103,11 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		// 校验 Token 版本
 		var user database.User
-		if err := database.DB.Where("username = ? AND token_version = ?", claims.Username, claims.TokenVersion).First(&user).Error; err != nil {
+		if err := database.DB.WithContext(r.Context()).Where("username = ? AND token_version = ?", claims.Username, claims.TokenVersion).First(&user).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				http.Error(w, `{"error":"账户数据暂时不可用"}`, http.StatusServiceUnavailable)
+				return
+			}
 			log.Printf("⚠️  Token 版本不匹配或用户已失效: %s", claims.Username)
 			http.Error(w, `{"error":"登录已过期，请重新登录"}`, http.StatusUnauthorized)
 			return

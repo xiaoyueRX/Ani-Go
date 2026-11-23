@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { loginDestination } from '../utils/loginRedirect'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
 import { 
@@ -8,10 +9,11 @@ import {
 } from 'lucide-vue-next'
 
 const router = useRouter()
+const route = useRoute()
 const { t, locale } = useI18n()
-const username = ref('')
+const username = ref(localStorage.getItem('remembered_username') || '')
 const password = ref('')
-const remember = ref(false)
+const remember = ref(!!username.value)
 const error = ref('')
 const loading = ref(false)
 
@@ -20,19 +22,8 @@ function toggleLanguage() {
   localStorage.setItem('lang', locale.value)
 }
 
-onMounted(() => {
-  const saved = localStorage.getItem('remembered_user')
-  if (saved) {
-    try {
-      const u = JSON.parse(saved)
-      username.value = u.username || ''
-      password.value = u.password || ''
-      remember.value = true
-    } catch { /* ignore */ }
-  }
-})
-
 async function handleLogin() {
+  if (loading.value) return
   if (!username.value || !password.value) {
     error.value = t('login.errorEmpty')
     return
@@ -46,15 +37,13 @@ async function handleLogin() {
     })
     localStorage.setItem('token', data.token)
     if (remember.value) {
-      localStorage.setItem('remembered_user', JSON.stringify({
-        username: username.value, password: password.value,
-      }))
+      localStorage.setItem('remembered_username', username.value)
     } else {
-      localStorage.removeItem('remembered_user')
+      localStorage.removeItem('remembered_username')
     }
-    router.push('/')
+    await router.replace(loginDestination(router, route.query.redirect))
   } catch (e: any) {
-    error.value = e.response?.data?.message || t('login.errorFailed')
+    error.value = e.response?.data?.error || t('login.errorFailed')
   } finally {
     loading.value = false
   }
@@ -93,7 +82,7 @@ async function handleLogin() {
 
           <!-- Error Message -->
           <Transition name="fade">
-            <div v-if="error" class="bg-error/10 border border-error/20 text-error rounded-2xl p-4 mb-6 flex items-center gap-3 text-sm font-bold">
+            <div v-if="error" role="alert" class="bg-error/10 border border-error/20 text-error rounded-2xl p-4 mb-6 flex items-center gap-3 text-sm font-bold">
               <AlertTriangle :size="18" class="shrink-0" />
               <span>{{ error }}</span>
             </div>
@@ -102,13 +91,13 @@ async function handleLogin() {
           <!-- Form -->
           <form @submit.prevent="handleLogin" class="space-y-5">
             <div class="space-y-1.5">
-               <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ $t('login.username') }}</label>
+               <label for="login-username" class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ $t('login.username') }}</label>
                <div class="relative group">
                   <div class="absolute inset-y-0 left-5 flex items-center text-base-content/20 group-focus-within:text-primary transition-colors">
                      <User :size="20" />
                   </div>
                   <input 
-                    v-model="username" 
+                    id="login-username" v-model="username"
                     type="text" 
                     :placeholder="$t('login.usernamePlaceholder')" 
                     class="w-full bg-white/5 border border-white/5 focus:border-primary/30 focus:bg-white/10 focus:ring-4 focus:ring-primary/10 rounded-[1.5rem] pl-14 pr-6 py-4 transition-all outline-none font-bold placeholder:text-base-content/20"
@@ -118,13 +107,13 @@ async function handleLogin() {
             </div>
 
             <div class="space-y-1.5">
-               <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ $t('login.password') }}</label>
+               <label for="login-password" class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ $t('login.password') }}</label>
                <div class="relative group">
                   <div class="absolute inset-y-0 left-5 flex items-center text-base-content/20 group-focus-within:text-primary transition-colors">
                      <Lock :size="20" />
                   </div>
                   <input 
-                    v-model="password" 
+                    id="login-password" v-model="password"
                     type="password" 
                     :placeholder="$t('login.passwordPlaceholder')" 
                     class="w-full bg-white/5 border border-white/5 focus:border-primary/30 focus:bg-white/10 focus:ring-4 focus:ring-primary/10 rounded-[1.5rem] pl-14 pr-6 py-4 transition-all outline-none font-bold placeholder:text-base-content/20"
@@ -138,7 +127,6 @@ async function handleLogin() {
                   <input v-model="remember" type="checkbox" class="checkbox checkbox-primary rounded-lg border-white/10" />
                   <span class="text-xs font-bold text-base-content/40 group-hover:text-base-content transition-colors">{{ $t('login.remember') }}</span>
                </label>
-               <a href="#" class="text-[10px] font-black uppercase tracking-widest text-primary hover:underline underline-offset-4">{{ $t('login.forgot') }}</a>
             </div>
 
             <button 
@@ -163,9 +151,9 @@ async function handleLogin() {
       
       <!-- Bottom Links -->
       <div class="mt-8 flex justify-center gap-6 opacity-30">
-         <a href="#" class="text-[10px] font-black uppercase tracking-widest hover:opacity-100 transition-opacity">GitHub</a>
-         <a href="#" class="text-[10px] font-black uppercase tracking-widest hover:opacity-100 transition-opacity">Documentation</a>
-         <a href="#" class="text-[10px] font-black uppercase tracking-widest hover:opacity-100 transition-opacity">Support</a>
+         <a href="https://github.com/xiaoyueRX/Ani-Go" target="_blank" rel="noopener noreferrer" class="text-[10px] font-black uppercase tracking-widest hover:opacity-100 transition-opacity">GitHub</a>
+         <a :href="locale === 'zh' ? 'https://github.com/xiaoyueRX/Ani-Go/blob/HEAD/docs/05_DEPLOYMENT.md' : 'https://github.com/xiaoyueRX/Ani-Go/blob/HEAD/docs/05_DEPLOYMENT_EN.md'" target="_blank" rel="noopener noreferrer" class="text-[10px] font-black uppercase tracking-widest hover:opacity-100 transition-opacity">Documentation</a>
+         <a href="https://github.com/xiaoyueRX/Ani-Go/issues" target="_blank" rel="noopener noreferrer" class="text-[10px] font-black uppercase tracking-widest hover:opacity-100 transition-opacity">Support</a>
       </div>
     </div>
   </div>

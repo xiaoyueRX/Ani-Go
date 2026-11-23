@@ -355,16 +355,19 @@ func (tm *TemplateManager) Add(id string, text string) error {
 	return nil
 }
 
+// ErrInvalidTemplate 表示模板请求本身无法解析。
+var ErrInvalidTemplate = errors.New("无效的通知模板")
+
 // SetTemplate 设置并持久化指定事件与渠道的自定义模板（channel 为空或 "default" 时表示该事件的默认模板）
 func (tm *TemplateManager) SetTemplate(eventType, channel, tmplStr string) error {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
-		return fmt.Errorf("事件类型不能为空")
+		return fmt.Errorf("%w: 事件类型不能为空", ErrInvalidTemplate)
 	}
 	normCh := normalizeChannel(channel)
 	parsed, err := parseSafeTemplate(eventType+":"+displayChannel(normCh), tmplStr)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrInvalidTemplate, err)
 	}
 
 	tm.mu.Lock()

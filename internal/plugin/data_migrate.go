@@ -24,7 +24,7 @@ func (p *DataMigratePlugin) GetInfo() PluginInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	desc := "支持从 AutoBangumi 或 ani-rss 的 SQLite 数据库文件中导入历史订阅、剧集状态和下载记录。"
+	desc := "导入 AutoBangumi SQLite 的订阅、剧集和下载历史，或 ani-rss 订阅清单及 ZIP 备份中的订阅和进度。"
 	if p.lastMigratedAt != nil {
 		desc += " [最近导入: " + p.lastMigratedAt.Format("2006-01-02 15:04:05") + "]"
 	}
@@ -41,6 +41,11 @@ func (p *DataMigratePlugin) GetInfo() PluginInfo {
 		Type:        "builtin",
 		Events:      []string{"data.migrate"},
 	}
+}
+
+// Dependencies 声明迁移统计监听所需的事件总线。
+func (*DataMigratePlugin) Dependencies() []core.ServiceType {
+	return []core.ServiceType{core.ServiceEventBus}
 }
 
 // Init 启用数据迁移插件（基于 PluginContext 与 OnDispose 模式，自动注销事件监听）
@@ -74,7 +79,7 @@ func (p *DataMigratePlugin) Init(bus core.EventBus, ctx core.Context) error {
 		})
 	}
 
-	pctx.Logf("数据导入与迁移插件已启用 (支持 AutoBangumi / ani-rss SQLite 迁移)")
+	pctx.Logf("数据导入与迁移插件已启用 (支持 AutoBangumi SQLite 与 ani-rss JSON、ZIP 迁移)")
 	return nil
 }
 

@@ -17,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
 )
 
 const (
@@ -264,7 +266,7 @@ func (s *Server) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 		return
@@ -314,10 +316,9 @@ func (s *Server) HandleSSE(w http.ResponseWriter, r *http.Request) {
 
 	// 发送初始 endpoint 事件 (符合 MCP SSE 规范)
 	endpointURL := fmt.Sprintf("/mcp/messages?session_id=%s", sessionID)
-	if _, err := fmt.Fprintf(w, "event: endpoint\ndata: %s\n\n", endpointURL); err != nil {
+	if err := httpx.WriteSSEFrame(w, fmt.Sprintf("event: endpoint\ndata: %s\n\n", endpointURL)); err != nil {
 		return
 	}
-	flusher.Flush()
 	log.Printf("🔌 [MCP] 新 SSE 会话建立: %s -> %s", sessionID, endpointURL)
 
 	hbInterval := s.heartbeatInterval
@@ -340,18 +341,16 @@ func (s *Server) HandleSSE(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// 保持连接的心跳，若底层写入失败则立即退出释放资源
-			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
+			if err := httpx.WriteSSEFrame(w, ": ping\n\n"); err != nil {
 				return
 			}
-			flusher.Flush()
 		case msg, ok := <-session.msgChan:
 			if !ok {
 				return
 			}
-			if _, err := fmt.Fprintf(w, "event: message\ndata: %s\n\n", msg); err != nil {
+			if err := httpx.WriteSSEFrame(w, fmt.Sprintf("event: message\ndata: %s\n\n", msg)); err != nil {
 				return
 			}
-			flusher.Flush()
 		}
 	}
 }

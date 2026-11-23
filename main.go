@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/signal"
-	"strings"
+	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -33,6 +35,9 @@ import (
 var version = "v0.7.0"
 
 func main() {
+	if update.RunHandoff(os.Args[1:]) {
+		return
+	}
 	printBanner()
 
 	// 加载 .env
@@ -48,7 +53,9 @@ func main() {
 	var logFile *os.File
 	if cfg.Server.LogPath != "" {
 		var err error
-		logFile, err = os.OpenFile(cfg.Server.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err = os.MkdirAll(filepath.Dir(cfg.Server.LogPath), 0700); err == nil {
+			logFile, err = os.OpenFile(cfg.Server.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		}
 		if err == nil {
 			log.SetOutput(io.MultiWriter(os.Stdout, logFile))
 		} else {
@@ -61,29 +68,19 @@ func main() {
 		log.Fatalf("❌ 数据库初始化失败: %v", err)
 	}
 
-	// 自动创建默认管理员 admin/admin（Bcrypt 哈希存储）
+	// 初次创建管理员并使用 Bcrypt 存储口令。
 	if err := database.InitDefaultUser(auth.HashPassword); err != nil {
 		log.Fatalf("❌ 默认用户创建失败: %v", err)
 	}
 
 	// 初始化 JWT 密钥（从数据库加载或生成新密钥并持久化，重启不丢失）
-	if err := auth.InitSecretFromDB(
-		func(key string) (string, bool) {
-			var s database.Setting
-			if err := database.DB.Where("key = ?", key).First(&s).Error; err != nil {
-				return "", false
-			}
-			return s.Value, true
-		},
-		func(key, value string) {
-			database.DB.Save(&database.Setting{Key: key, Value: value})
-		},
-	); err != nil {
+	if err := auth.InitSecretFromDB(database.DB); err != nil {
 		log.Fatalf("❌ JWT Secret 初始化失败: %v", err)
 	}
 	log.Println("✅ JWT 密钥已从数据库加载或自动生成 (持久化存储)")
 
 	// 从数据库设置表合并 Web UI 中保存的配置（env var 优先，数据库作回退）
+	startupDefaults := *cfg
 	cfg.MergeFromSettings(func(key string) (string, bool) {
 		var s database.Setting
 		res := database.DB.Where("key = ?", key).Limit(1).Find(&s)
@@ -101,15 +98,24 @@ func main() {
 
 	printConfig(cfg)
 
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 	// 初始化事件总线
 	bus := event.New()
 	log.Println("✅ 事件总线已初始化")
 
 	// 初始化系统自更新管理器
 	updateMgr := update.InitManager(version)
+	updateMgr.SetListenAddress(cfg.Server.Host, cfg.Server.Port)
+	updateDone := make(chan struct{})
 	go func() {
-		time.Sleep(5 * time.Second)
-		if info, err := updateMgr.CheckUpdate(context.Background()); err == nil && info.HasUpdate {
+		defer close(updateDone)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+		if info, err := updateMgr.CheckUpdate(ctx); err == nil && info.HasUpdate {
 			log.Printf("✨ [版本检测] 发现云端新版本: %s (当前: %s) | 支持在 Web 界面一键平滑升级", info.LatestVersion, info.CurrentVersion)
 		}
 	}()
@@ -124,47 +130,14 @@ func main() {
 	})
 
 	// 初始化资源源
-	mikanSource, yucSource, multiSource := app.InitSources(cfg)
+	sourceConfig := *cfg
+	sourceConfig.Sources = startupDefaults.Sources
+	mikanSource, yucSource, multiSource := app.InitSources(&sourceConfig)
 	log.Println("✅ 资源站初始化完成")
 
 	// 根据配置选择默认下载器（支持 qBittorrent / Transmission）
-	var dl core.Downloader
-	switch cfg.Downloaders.Default {
-	case "transmission":
-		dl = downloader.NewTransmission(
-			cfg.Downloaders.Transmission.Host,
-			cfg.Downloaders.Transmission.Username,
-			cfg.Downloaders.Transmission.Password,
-		)
-		if cfg.Downloaders.Transmission.Enabled {
-			log.Printf("✅ Transmission 下载器已就绪 (地址: %s)", cfg.Downloaders.Transmission.Host)
-		} else {
-			log.Println("⚠️  Transmission 未配置，下载功能不可用")
-		}
-	case "aria2":
-		dl = downloader.NewAria2(
-			cfg.Downloaders.Aria2.Host,
-			cfg.Downloaders.Aria2.Secret,
-		)
-		if cfg.Downloaders.Aria2.Enabled {
-			log.Printf("✅ Aria2 下载器已就绪 (地址: %s)", cfg.Downloaders.Aria2.Host)
-		} else {
-			log.Println("⚠️  Aria2 未配置，下载功能不可用")
-		}
-	default:
-		qb := downloader.NewQBittorrent(
-			cfg.Downloaders.QBittorrent.Host,
-			cfg.Downloaders.QBittorrent.Username,
-			cfg.Downloaders.QBittorrent.Password,
-			cfg.Downloaders.QBittorrent.Category,
-		)
-		dl = qb
-		if cfg.Downloaders.QBittorrent.Enabled {
-			log.Printf("✅ qBittorrent 下载器已就绪 (地址: %s)", cfg.Downloaders.QBittorrent.Host)
-		} else {
-			log.Println("⚠️  qBittorrent 未配置，下载功能不可用")
-		}
-	}
+	dl := downloader.NewConfigured(cfg.Downloaders)
+	log.Printf("⬇️ 当前下载器: %s", dl.Name())
 
 	// 初始化元数据提供者
 	primaryMetadata := app.InitMetadata(cfg)
@@ -182,8 +155,10 @@ func main() {
 	})
 
 	// 初始化插件管理器
-	pluginMgr := plugin.NewManager(bus)
-	pluginMgr.Load()
+	serviceCtx, stopServices := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopServices()
+	services := core.NewContext(serviceCtx)
+	pluginMgr := plugin.NewManager(bus, services)
 
 	// 初始化文件整理器
 	org := organizer.New(
@@ -209,27 +184,12 @@ func main() {
 	notifyMgr.SetReloader(notifier.BuildAllNotifiersFromSettingsAndEnv)
 	// 绑定通知中心与消息通知推送插件的生命周期
 	plugin.DefaultExtendedNotifiersPlugin.SetController(notifyMgr)
-	notifyMgr.SetEnabled(pluginMgr.IsPluginEnabled("extended-notifiers"))
-	// 从配置与数据库创建通知器并热加载
-	notifyMgr.Reload()
-	names := []string{}
-	for _, n := range notifyMgr.Notifiers() {
-		names = append(names, n.Name())
-	}
-	if len(names) > 0 {
-		log.Printf("🔔 已配置 %d 个通知渠道: %v", len(names), names)
-	}
 	defer notifyMgr.Stop()
 
 	dynamicDL := downloader.NewDynamicDownloader(dl)
 
 	// 启动调度器
-	sched := scheduler.New(cfg, multiSource, dynamicDL, org, bus, primaryMetadata, aiClient)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go sched.Start(ctx)
+	sched := scheduler.New(cfg, multiSource, dynamicDL, org, bus, primaryMetadata, aiClient, &startupDefaults)
 
 	// 初始化自然语言任务解析器（正则 + AI 回退）
 	var taskParser core.TaskParser
@@ -241,8 +201,43 @@ func main() {
 		log.Println("🧠 任务解析器已就绪（仅正则模式）")
 	}
 
+	// 在装载插件前，发布实际由本进程使用的服务实例。
+	services.SetService(core.ServiceEventBus, bus)
+	services.SetService(core.ServiceConfig, cfg)
+	services.SetService(core.ServiceDB, database.DB)
+	services.SetService(core.ServiceSource, multiSource)
+	services.SetService(core.ServiceMetadata, primaryMetadata)
+	if aiClient != nil {
+		services.SetService(core.ServiceAI, app.PluginAI(aiClient, cfg.AI.Protocol))
+	}
+	services.SetService(core.ServiceDownloader, dynamicDL)
+	services.SetService(core.ServiceOrganizer, org)
+	services.SetService(core.ServiceNotifier, notifyMgr)
+	services.SetService(core.ServiceScheduler, sched)
+	services.SetService(core.ServiceBackupManager, sched.GetBackupManager())
+	services.SetService(core.ServiceTaskParser, taskParser)
+	if err := pluginMgr.Load(); err != nil {
+		log.Printf("插件配置暂时不可用，可在插件中心重新加载: %v", err)
+	}
+	// 备份仅接受本次构建实际内置的面板和快照中声明的社区授权。
+	sched.GetBackupManager().SetBuiltinPanelManifests(pluginMgr.GetPluginList())
+	if !notifyMgr.IsEnabled() {
+		notifyMgr.Reload()
+	}
+	var names []string
+	for _, notifier := range notifyMgr.Notifiers() {
+		names = append(names, notifier.Name())
+	}
+	if len(names) > 0 {
+		log.Printf("🔔 已配置 %d 个通知渠道: %v", len(names), names)
+	}
+	schedulerDone := sched.StartAsync(ctx)
+
 	// 启动 HTTP API 服务（含 JWT 鉴权中间件 + 嵌入式前端静态文件）
+	httpStopped := make(chan struct{})
 	api.StartServer(ctx, cfg.Server.Host, cfg.Server.Port, version, cfg.Server.AllowedOrigins, dynamicDL, sched.TriggerSupplement, pluginMgr, taskParser, mikanSource.(*source.MikanSource), yucSource.(*source.YucWikiSource), multiSource, staticHandler(), cfg.Server.LogPath, notifyMgr, primaryMetadata, bus, api.ServerOptions{
+		Stopped:            httpStopped,
+		ReloadIntervals:    sched.ReloadIntervals,
 		SmartSearchEnabled: cfg.AI.SmartSearchEnabled,
 		AIChat:             aiClient,
 		BackupManager:      sched.GetBackupManager(),
@@ -251,21 +246,29 @@ func main() {
 
 	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("✅ Ani-Go 启动成功 — Phase 3 全栈引擎运行中")
-	fmt.Printf("   Web UI: http://%s:%d\n", cfg.Server.Host, cfg.Server.Port)
-	fmt.Printf("   API: http://%s:%d/api/login\n", cfg.Server.Host, cfg.Server.Port)
-	fmt.Println("   默认账号: admin / admin")
+	address := net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port))
+	fmt.Printf("   Web UI: http://%s\n", address)
+	fmt.Printf("   API: http://%s/api/login\n", address)
 	fmt.Println("   前端已嵌入二进制 (go:embed) | 单文件部署")
 	fmt.Println("   定时任务: RSS 轮询 | 文件整理")
 	fmt.Println("   按 Ctrl+C 退出")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	// 等待退出信号
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	<-ctx.Done()
 
 	fmt.Println("\n👋 Ani-Go 正在关闭...")
 	cancel()
+	<-updateDone
+	<-schedulerDone
+	<-httpStopped
+	drainCtx, stopDrain := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := bus.Close(drainCtx); err != nil {
+		log.Printf("事件总线未在关停期限内排空: %v", err)
+	}
+	stopDrain()
+	pluginMgr.StopAll()
+	stopServices()
 	if logFile != nil {
 		logFile.Close()
 	}
@@ -322,75 +325,6 @@ func printBanner() {
     ╚═══════════════════════════════════════════════════════════════╝
 `)
 	fmt.Printf("  Version: %s | Port: 20001 | GitHub: github.com/xiaoyueRX/Ani-Go\n\n", version)
-}
-
-func setupNotifier(cfg *config.Config) *notifier.MultiNotifier {
-	mn := notifier.NewMultiNotifier()
-
-	if cfg.Notifier.TelegramBotToken != "" && cfg.Notifier.TelegramChatID != "" {
-		mn.Add(notifier.NewTelegramNotifier(cfg.Notifier.TelegramBotToken, cfg.Notifier.TelegramChatID))
-	}
-	if cfg.Notifier.DiscordWebhook != "" {
-		mn.Add(notifier.NewWebhookNotifier(cfg.Notifier.DiscordWebhook, notifier.WebhookDiscord))
-	}
-	if cfg.Notifier.WecomWebhook != "" {
-		mn.Add(notifier.NewWebhookNotifier(cfg.Notifier.WecomWebhook, notifier.WebhookWecom))
-	}
-	if cfg.Notifier.FeishuWebhook != "" {
-		mn.Add(notifier.NewWebhookNotifier(cfg.Notifier.FeishuWebhook, notifier.WebhookFeishu))
-	}
-	if cfg.Notifier.DingTalkWebhook != "" {
-		mn.Add(notifier.NewWebhookNotifier(cfg.Notifier.DingTalkWebhook, notifier.WebhookDingTalk))
-	}
-	if cfg.Notifier.OneBotHost != "" && (cfg.Notifier.OneBotUserID != 0 || cfg.Notifier.OneBotGroupID != 0) {
-		mn.Add(notifier.NewOneBotNotifier(cfg.Notifier.OneBotHost, cfg.Notifier.OneBotToken, cfg.Notifier.OneBotUserID, cfg.Notifier.OneBotGroupID))
-	}
-	if cfg.Notifier.SlackWebhook != "" {
-		mn.Add(notifier.NewSlackNotifier(cfg.Notifier.SlackWebhook))
-	}
-	if cfg.Notifier.MatrixHomeserver != "" && cfg.Notifier.MatrixToken != "" && cfg.Notifier.MatrixRoomID != "" {
-		mn.Add(notifier.NewMatrixNotifier(cfg.Notifier.MatrixHomeserver, cfg.Notifier.MatrixToken, cfg.Notifier.MatrixRoomID))
-	}
-	if cfg.Notifier.ServerChanKey != "" {
-		mn.Add(notifier.NewPushNotifier(notifier.PushServerChan, "https://sctapi.ftqq.com/"+cfg.Notifier.ServerChanKey+".send", "", ""))
-	}
-	if cfg.Notifier.BarkDeviceKey != "" {
-		mn.Add(notifier.NewPushNotifier(notifier.PushBark, "https://api.day.app/push", cfg.Notifier.BarkDeviceKey, ""))
-	}
-	if cfg.Notifier.PushoverToken != "" && cfg.Notifier.PushoverUser != "" {
-		mn.Add(notifier.NewPushNotifier(notifier.PushPushover, "https://api.pushover.net/1/messages.json", cfg.Notifier.PushoverToken, cfg.Notifier.PushoverUser))
-	}
-	if cfg.Notifier.GotifyURL != "" && cfg.Notifier.GotifyToken != "" {
-		mn.Add(notifier.NewPushNotifier(notifier.PushGotify, cfg.Notifier.GotifyURL+"/message?token="+cfg.Notifier.GotifyToken, "", ""))
-	}
-	if cfg.Notifier.NtfyURL != "" {
-		mn.Add(notifier.NewPushNotifier(notifier.PushNtfy, cfg.Notifier.NtfyURL, "", ""))
-	}
-	if cfg.Notifier.EmailSMTPHost != "" && cfg.Notifier.EmailUsername != "" && cfg.Notifier.EmailTo != "" {
-		to := strings.Split(cfg.Notifier.EmailTo, ",")
-		for i := range to {
-			to[i] = strings.TrimSpace(to[i])
-		}
-		mn.Add(notifier.NewEmailNotifier(cfg.Notifier.EmailSMTPHost, cfg.Notifier.EmailSMTPPort, cfg.Notifier.EmailUsername, cfg.Notifier.EmailPassword, cfg.Notifier.EmailFrom, to))
-	}
-	if cfg.Notifier.LINEChannelToken != "" && cfg.Notifier.LINEUserID != "" {
-		mn.Add(notifier.NewLINENotifier(cfg.Notifier.LINEChannelToken, cfg.Notifier.LINEUserID))
-	}
-	if cfg.Notifier.WhatsAppPhoneID != "" && cfg.Notifier.WhatsAppToken != "" && cfg.Notifier.WhatsAppTo != "" {
-		mn.Add(notifier.NewWhatsAppNotifier(cfg.Notifier.WhatsAppPhoneID, cfg.Notifier.WhatsAppToken, cfg.Notifier.WhatsAppTo))
-	}
-
-	// Add Signal
-	if os.Getenv("SIGNAL_API_URL") != "" {
-		mn.Add(notifier.NewSignalNotifier())
-	}
-
-	// Add WeChat Official Account
-	if os.Getenv("WECHAT_APP_ID") != "" {
-		mn.Add(notifier.NewWeChatNotifier())
-	}
-
-	return mn
 }
 
 func printConfig(cfg *config.Config) {

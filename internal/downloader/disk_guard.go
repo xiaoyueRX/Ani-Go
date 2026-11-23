@@ -57,15 +57,14 @@ func parseValidDiskThreshold(raw string) (float64, bool) {
 
 // CheckDiskSpaceGuard 检查目标路径磁盘空间是否满足安全阈值
 func CheckDiskSpaceGuard(path string) error {
-	minGB := resolveMinFreeDiskGB()
-
-	if minGB <= 0 {
-		return nil // 用户显式设为 <= 0 关闭急停熔断
-	}
-
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
-		return nil // 未指定下载路径时，由下载器自身默认机制处理，不实施本地路径熔断
+		return nil // 下载器默认目录可能不在本机。
+	}
+
+	minGB := resolveMinFreeDiskGB()
+	if minGB <= 0 {
+		return nil // 用户显式设为 <= 0 关闭急停熔断。
 	}
 
 	freeBytes, err := GetDiskFreeSpace(trimmed)

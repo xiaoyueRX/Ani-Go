@@ -224,10 +224,24 @@ func TestDownloader_InputValidationAndEmptyGuards(t *testing.T) {
 }
 
 func TestConvertAria2Status_BittorrentInfoName(t *testing.T) {
-	var st aria2Status
-	if err := json.Unmarshal([]byte(`{"gid":"1234567890abcdef","status":"active","infoHash":"abc123hash","bittorrent":{"info":{"name":"[SubGroup] Anime Title S01E01 [1080p]"}}}`), &st); err != nil {
-		t.Fatal(err)
+	st := aria2Status{
+		GID:    "1234567890abcdef",
+		Status: "active",
+		Bittorrent: &struct {
+			InfoHash string `json:"infoHash"`
+			Info     *struct {
+				Name string `json:"name"`
+			} `json:"info"`
+		}{
+			InfoHash: "abc123hash",
+			Info: &struct {
+				Name string `json:"name"`
+			}{
+				Name: "[SubGroup] Anime Title S01E01 [1080p]",
+			},
+		},
 	}
+
 	task := convertAria2Status(st)
 	if task.Name != "[SubGroup] Anime Title S01E01 [1080p]" {
 		t.Errorf("期望从 Bittorrent.Info.Name 提取任务名, 实际得到: %q", task.Name)

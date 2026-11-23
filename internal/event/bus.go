@@ -1,5 +1,4 @@
-// Package event 实现事件总线（发布/订阅模式）
-// 用于各模块之间的解耦异步通知，具备协程上限保护、零泄漏计时器与崩溃隔离
+// Package event 为每个订阅单独排队，异步投递核心业务事件。
 package event
 
 import (
@@ -12,172 +11,197 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 )
 
-// defaultMaxWorkers 默认并发事件处理协程上限，防止海量突发事件触发协程风暴
-const defaultMaxWorkers = 128
-
-// defaultHandlerTimeout 默认单个事件处理器最长执行时间
+const queueCapacity = 256
 const defaultHandlerTimeout = 5 * time.Second
 
-// SubscriptionID 全局递增计数器
 var subCounter atomic.Uint64
 
-// sub 订阅条目，包含唯一 ID 和处理函数
 type sub struct {
-	id core.SubscriptionID
-	fn core.EventHandler
+	id      core.SubscriptionID
+	fn      core.EventHandler
+	running bool
+	pending chan core.Event
 }
 
-// Bus 事件总线实现
 type Bus struct {
-	mu             sync.RWMutex
-	handlers       map[string][]sub
-	workerSem      chan struct{}
+	mu             sync.Mutex
+	handlers       map[string][]*sub
+	workers        int
+	idle           chan struct{}
+	closed         bool
 	handlerTimeout time.Duration
-	activeWg       sync.WaitGroup
-	closed         atomic.Bool
+	warnings       *time.Timer
+	fullDeliveries uint64
+	latePublishes  uint64
+}
+
+// PublishResult 按订阅报告接纳和拒绝的投递数，Closed 表示发布时总线已经关闭。
+type PublishResult struct {
+	Accepted, Full int
+	Closed         bool
 }
 
 var _ core.EventBus = (*Bus)(nil)
 
-// New 创建事件总线实例
 func New() *Bus {
-	return &Bus{
-		handlers:       make(map[string][]sub),
-		workerSem:      make(chan struct{}, defaultMaxWorkers),
-		handlerTimeout: defaultHandlerTimeout,
-	}
+	return &Bus{handlers: make(map[string][]*sub), handlerTimeout: defaultHandlerTimeout}
 }
 
-// SetHandlerTimeout 设置单个事件处理器的超时时间（主要用于单元测试与调试）
 func (b *Bus) SetHandlerTimeout(timeout time.Duration) {
-	if timeout > 0 {
-		b.handlerTimeout = timeout
+	if timeout <= 0 {
+		return
 	}
+	b.mu.Lock()
+	b.handlerTimeout = timeout
+	b.mu.Unlock()
 }
 
-// Publish 发布一个事件，通知所有订阅了该事件类型的处理器
-// 保证非阻塞返回、零丢失事件与异常隔离
+// Publish 非阻塞；饱和与关闭后的拒绝按秒汇总记录，不记录负载。
 func (b *Bus) Publish(event core.Event) {
-	if b.closed.Load() {
+	result := b.TryPublish(event)
+	if result.Full == 0 && !result.Closed {
 		return
 	}
-
-	b.mu.RLock()
-	subs := b.handlers[event.Type]
-	if len(subs) == 0 {
-		b.mu.RUnlock()
-		return
+	b.mu.Lock()
+	b.fullDeliveries += uint64(result.Full)
+	if result.Closed {
+		b.latePublishes++
 	}
-	// 深拷贝切片快照，彻底根绝迭代过程中并发 Unsubscribe 导致的数据竞争与切片截断
-	handlers := make([]sub, len(subs))
-	copy(handlers, subs)
-	b.mu.RUnlock()
+	if b.warnings == nil {
+		b.warnings = time.AfterFunc(time.Second, func() {
+			b.mu.Lock()
+			full, late := b.fullDeliveries, b.latePublishes
+			b.fullDeliveries, b.latePublishes, b.warnings = 0, 0, nil
+			b.mu.Unlock()
+			log.Printf("事件总线拒绝投递：队满 %d 次，关闭后发布 %d 次", full, late)
+		})
+	}
+	b.mu.Unlock()
+}
 
-	for _, h := range handlers {
-		s := h
+func (b *Bus) TryPublish(event core.Event) PublishResult {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return PublishResult{Closed: true}
+	}
+	var result PublishResult
+	for _, s := range b.handlers[event.Type] {
+		if !s.running {
+			if b.workers == 0 {
+				b.idle = make(chan struct{})
+			}
+			s.running = true
+			b.workers++
+			go b.drain(s, event, b.handlerTimeout)
+			result.Accepted++
+			continue
+		}
+		if s.pending == nil {
+			s.pending = make(chan core.Event, queueCapacity)
+		}
 		select {
-		case b.workerSem <- struct{}{}:
-			go func() {
-				defer func() { <-b.workerSem }()
-				b.runHandler(s, event)
-			}()
+		case s.pending <- event:
+			result.Accepted++
 		default:
-			// 信号量已满时的弹性降级：独立启动协程执行，确保 100% 零丢事件
-			go b.runHandler(s, event)
+			result.Full++
+		}
+	}
+	return result
+}
+
+func (b *Bus) drain(s *sub, event core.Event, timeout time.Duration) {
+	for {
+		b.runHandler(s, event, timeout)
+		b.mu.Lock()
+		select {
+		case event = <-s.pending:
+			timeout = b.handlerTimeout
+			b.mu.Unlock()
+		default:
+			s.running = false
+			s.pending = nil
+			b.workers--
+			if b.workers == 0 {
+				close(b.idle)
+				b.idle = nil
+			}
+			b.mu.Unlock()
+			return
 		}
 	}
 }
 
-// runHandler 执行单个订阅者的处理逻辑，提供 Panic 恢复与安全定时器回收
-func (b *Bus) runHandler(s sub, event core.Event) {
-	b.activeWg.Add(1)
-	defer b.activeWg.Done()
-
+func (b *Bus) runHandler(s *sub, event core.Event, timeout time.Duration) {
+	timer := time.AfterFunc(timeout, func() {
+		log.Printf("事件处理仍在运行（%s，订阅 %d，已超过 %v）", event.Type, s.id, timeout)
+	})
+	defer timer.Stop()
 	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("⚠️  EventBus 处理器 panic (事件: %s, subID: %d): %v", event.Type, s.id, r)
+		if issue := recover(); issue != nil {
+			log.Printf("事件回调异常（%s，订阅 %d）", event.Type, s.id)
 		}
 	}()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("⚠️  EventBus 处理器内部 panic (事件: %s, subID: %d): %v", event.Type, s.id, r)
-			}
-		}()
-		s.fn(event)
-	}()
-
-	timer := time.NewTimer(b.handlerTimeout)
-	select {
-	case <-done:
-		// 正常完成，显式释放并排空 Timer，防止海量事件下 time.Timer 残留导致堆内存溢出
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-	case <-timer.C:
-		log.Printf("⚠️  EventBus 处理器执行超时 (事件: %s, subID: %d, 阈值: %v)", event.Type, s.id, b.handlerTimeout)
-	}
+	s.fn(event)
 }
 
-// Subscribe 订阅指定事件类型，返回唯一 SubscriptionID
 func (b *Bus) Subscribe(eventType string, handler core.EventHandler) core.SubscriptionID {
 	if handler == nil {
 		return 0
 	}
-	id := core.SubscriptionID(subCounter.Add(1))
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.handlers[eventType] = append(b.handlers[eventType], sub{id: id, fn: handler})
+	if b.closed {
+		return 0
+	}
+	id := core.SubscriptionID(subCounter.Add(1))
+	b.handlers[eventType] = append(b.handlers[eventType], &sub{id: id, fn: handler})
 	return id
 }
 
-// Unsubscribe 通过 SubscriptionID 取消订阅
 func (b *Bus) Unsubscribe(eventType string, id core.SubscriptionID) {
 	if id == 0 {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	handlers := b.handlers[eventType]
-	for i, h := range handlers {
-		if h.id == id {
-			// 分配新切片以防正在迭代旧切片底层的并发 Publish 发生脏读
-			newHandlers := make([]sub, 0, len(handlers)-1)
-			newHandlers = append(newHandlers, handlers[:i]...)
-			newHandlers = append(newHandlers, handlers[i+1:]...)
-			if len(newHandlers) == 0 {
-				delete(b.handlers, eventType)
-			} else {
-				b.handlers[eventType] = newHandlers
-			}
-			return
+	entries := b.handlers[eventType]
+	for i, s := range entries {
+		if s.id != id {
+			continue
 		}
+		copy(entries[i:], entries[i+1:])
+		entries[len(entries)-1] = nil
+		if len(entries) == 1 {
+			delete(b.handlers, eventType)
+		} else {
+			b.handlers[eventType] = entries[:len(entries)-1]
+		}
+		return
 	}
 }
 
-// Wait 等待当前所有正在执行的事件处理协程完成
 func (b *Bus) Wait() {
-	b.activeWg.Wait()
+	b.mu.Lock()
+	idle := b.idle
+	b.mu.Unlock()
+	if idle != nil {
+		<-idle
+	}
 }
 
-// Close 安全关闭事件总线并等待在途任务完成或超时
+// Close 关闭入口，等待已接纳的回调真实退出。调用者超时后可以再次等待。
 func (b *Bus) Close(ctx context.Context) error {
-	b.closed.Store(true)
-	done := make(chan struct{})
-	go func() {
-		b.Wait()
-		close(done)
-	}()
-
+	b.mu.Lock()
+	b.closed = true
+	clear(b.handlers)
+	idle := b.idle
+	b.mu.Unlock()
+	if idle == nil {
+		return nil
+	}
 	select {
-	case <-done:
+	case <-idle:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

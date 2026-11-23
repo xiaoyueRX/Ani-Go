@@ -27,9 +27,9 @@ COPY --from=frontend-builder /src/web/dist ./web/dist
 # Go 原生交叉编译：amd64 / arm64 / armv7 等
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
-ARG APP_VERSION=v0.6.0
+ARG APP_VERSION
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w -X main.version=${APP_VERSION}" -trimpath -o /anigo .
+    go build -ldflags="-s -w ${APP_VERSION:+-X main.version=$APP_VERSION}" -trimpath -o /anigo .
 
 # ---- Stage 3: 极简运行环境 ----
 FROM alpine:3.21
@@ -38,9 +38,7 @@ FROM alpine:3.21
 RUN apk add --no-cache tzdata ca-certificates
 
 ENV TZ=Asia/Shanghai \
-    PORT=20001 \
-    PUID=1000 \
-    PGID=1000
+    PORT=20001
 
 WORKDIR /app
 COPY --from=backend-builder /anigo /app/anigo
@@ -57,6 +55,6 @@ USER 1000:1000
 EXPOSE 20001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:20001/api/health || exit 1
+    CMD wget -qO /dev/null "http://127.0.0.1:${PORT:-20001}/api/health" || exit 1
 
 ENTRYPOINT ["/app/anigo"]

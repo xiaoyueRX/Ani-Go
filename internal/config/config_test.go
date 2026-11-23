@@ -495,3 +495,23 @@ func TestMergeFromSettings_EnvTakesPrecedenceOverDB(t *testing.T) {
 	}
 }
 
+func TestLegacyWizardDownloaderSetting(t *testing.T) {
+	for _, key := range []string{"DEFAULT_DOWNLOADER", "DOWNLOADER_DEFAULT", "DOWNLOADER_TYPE"} {
+		t.Setenv(key, "")
+	}
+	settings := map[string]string{"DOWNLOADER_TYPE": "aria2"}
+	read := func(key string) (string, bool) {
+		value, ok := settings[key]
+		return value, ok
+	}
+	cfg := defaults()
+	cfg.MergeFromSettings(read)
+	if cfg.Downloaders.Default != "aria2" {
+		t.Fatalf("旧向导设置没有生效，实际为 %q", cfg.Downloaders.Default)
+	}
+	settings["DEFAULT_DOWNLOADER"] = "transmission"
+	cfg.MergeFromSettings(read)
+	if cfg.Downloaders.Default != "transmission" {
+		t.Fatalf("新的活动下载器应优先，实际为 %q", cfg.Downloaders.Default)
+	}
+}

@@ -1,27 +1,31 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import request from '../utils/request'
+import SearchPluginDialog, { type SearchPluginTarget } from '../components/SearchPluginDialog.vue'
+import SubscriptionReviewDialog, { type ReviewRelease } from '../components/SubscriptionReviewDialog.vue'
 import { 
   ChevronLeft, Search, Timer, Calendar,
   AlertTriangle, X, Antenna, Sparkles, Info, 
   Check, Plus, User, Copy, ExternalLink, Trash2, 
   HardDrive, History, Filter, Clock, Download,
-  CheckSquare, Square, ListChecks
+  CheckSquare, Square, ListChecks, CloudUpload
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 interface TorrentItem {
   title: string
   url: string
   magnet: string
+  alternate_magnet?: string
   size: number
   pub_date: string
   source: string
   bangumi_id: string
   info_hash: string
+  episode_url?: string
   cover_url?: string
   aired_time?: string
   aired_date?: string
@@ -64,6 +68,56 @@ const directDownloading = ref<Record<string, boolean>>({})
 const batchMode = ref(false)
 const selectedItems = ref<TorrentItem[]>([])
 const batchProcessing = ref(false)
+
+interface SearchPlugin {
+  id: string
+  name: string
+  enabled: boolean
+  status: string
+  origin: string
+  is_builtin: boolean
+  url?: string
+  panel?: { actions: { id: string; label: string; placement?: string; input?: { format?: string }; result: string }[] }
+}
+const pluginTargets = ref<SearchPluginTarget[]>([])
+const pluginSelection = ref<{ item: { title: string; magnet: string }; targets: SearchPluginTarget[] } | null>(null)
+let catalogRequest = 0
+let searchRequest: AbortController | undefined
+let activeView = true
+
+async function loadPluginTargets() {
+  const generation = ++catalogRequest
+  try {
+    const { data } = await request.get<SearchPlugin[]>('/plugins')
+    if (generation !== catalogRequest) return
+    pluginTargets.value = data.filter(p => p.enabled && p.status === 'active').flatMap(p =>
+      (p.panel?.actions ?? []).filter(a => a.placement === 'search_result' && a.input?.format === 'magnet' && a.result === 'message')
+        .map(a => ({ id: p.id, name: p.name, official: p.is_builtin === true && p.origin === 'official',
+          action: a.id, label: a.label, url: p.url ?? '' })))
+  } catch {
+    if (generation === catalogRequest) pluginTargets.value = []
+  }
+}
+
+function sourceLink(item: TorrentItem) {
+  for (const candidate of [item.episode_url, item.url]) {
+    if (!candidate) continue
+    try {
+      const url = new URL(candidate)
+      if (url.protocol === 'https:' || url.protocol === 'http:') return url.href
+    } catch { /* Try the other URL supplied by this source. */ }
+  }
+  return ''
+}
+
+function resourceMagnet(item: TorrentItem) {
+  return item.magnet || item.alternate_magnet || ''
+}
+
+function choosePlugin(item: TorrentItem) {
+  const magnet = resourceMagnet(item)
+  if (magnet && pluginTargets.value.length) pluginSelection.value = { item: { title: item.title, magnet }, targets: pluginTargets.value }
+}
 
 // 搜索历史与热门标签
 const SEARCH_HISTORY_KEY = 'anigo_search_history'
@@ -119,25 +173,38 @@ async function loadSubscribedList() {
 onMounted(async () => {
   loadSearchHistory()
   loadSubscribedList()
+  void loadPluginTargets()
+  window.addEventListener?.('focus', loadPluginTargets)
+
+  const q = route.query.q
+  if (typeof q === 'string' && q.trim()) {
+    query.value = q
+    void handleSearch()
+  }
 
   // 检查 AI 是否已配置
   try {
-    const { data } = await request.get('/settings')
-    const settings = data as Record<string, string>
-    aiConfigured.value = !!(settings.AI_ENDPOINT && settings.AI_API_KEY && settings.AI_MODEL)
+    const { data } = await request.get('/search/capabilities')
+    aiConfigured.value = data.smart_search === true
   } catch (e) {
     aiConfigured.value = false
   }
-  
-  const q = route.query.q as string
-  if (q) {
-    query.value = q
-    handleSearch()
-  }
+
+})
+
+onUnmounted(() => {
+  ++catalogRequest
+  activeView = false
+  searchRequest?.abort()
+  groupRequest?.abort()
+  window.removeEventListener('focus', loadPluginTargets)
 })
 
 // 字幕组选择弹窗
+const reviewItems = ref<TorrentItem[]>([])
 const showGroupModal = ref(false)
+const groupSubmitting = ref(false)
+let groupRequest: AbortController | undefined
 const selectedItem = ref<TorrentItem | null>(null)
 const subgroups = ref<SubgroupInfo[]>([])
 const subgroupSearch = ref('')
@@ -161,7 +228,16 @@ function proxyImage(url: string | undefined): string {
 
 async function handleSearch() {
   const q = query.value.trim()
-  if (!q) return
+  if (!q || batchProcessing.value) return
+  searchRequest?.abort()
+  const current = new AbortController()
+  searchRequest = current
+  exitBatchMode()
+  results.value = []
+  expandedQueries.value = []
+  usedAI.value = false
+  aiError.value = ''
+  lastSearchTime.value = ''
   saveSearchHistory(q)
   loading.value = true
   error.value = ''
@@ -170,13 +246,15 @@ async function handleSearch() {
   const start = Date.now()
   try {
     if (smartSearch.value) {
-      const { data } = await request.post('/search/smart', { query: q, limit: 60 }, { timeout: 45000 })
+      const { data } = await request.post('/search/smart', { query: q, limit: 60 }, { timeout: 45000, signal: current.signal })
+      if (current.signal.aborted) return
       results.value = data.items || []
       expandedQueries.value = data.expanded_queries || [q]
       usedAI.value = !!data.used_ai
       aiError.value = data.ai_error || ''
     } else {
-      const { data } = await request.get('/search', { params: { q }, timeout: 30000 })
+      const { data } = await request.get('/search', { params: { q }, timeout: 30000, signal: current.signal })
+      if (current.signal.aborted) return
       results.value = data || []
       expandedQueries.value = [q]
       usedAI.value = false
@@ -185,13 +263,14 @@ async function handleSearch() {
     lastSearchTime.value = new Date().toLocaleTimeString()
     searchDuration.value = Date.now() - start
   } catch (e: any) {
+    if (current.signal.aborted) return
     if (e.code === 'ECONNABORTED') {
       error.value = t('search.error.timeout') || '检索超时'
     } else {
       error.value = e.response?.data?.error || t('search.error.failed') || '检索失败'
     }
   } finally {
-    loading.value = false
+    if (current === searchRequest) loading.value = false
   }
 }
 
@@ -201,6 +280,17 @@ function quickSearch(keyword: string) {
 }
 
 function clearQuery() {
+  if (batchProcessing.value) return
+  searchRequest?.abort()
+  searchRequest = undefined
+  loading.value = false
+  results.value = []
+  error.value = ''
+  expandedQueries.value = []
+  aiError.value = ''
+  usedAI.value = false
+  lastSearchTime.value = ''
+  exitBatchMode()
   query.value = ''
   if (searchInputRef.value) {
     searchInputRef.value.focus()
@@ -278,16 +368,20 @@ function getItemKey(item: TorrentItem): string {
   return item.info_hash || item.magnet || item.url || item.title
 }
 
+function canDownload(item: TorrentItem) {
+  return Boolean(item.magnet || (item.url && (!item.url.includes('/Home/Bangumi/') || item.info_hash)))
+}
+
+function queueDownload(item: TorrentItem) {
+  return request.post('/downloads', { title: item.title, url: item.url, magnet: item.magnet, info_hash: item.info_hash })
+}
+
 async function directDownload(item: TorrentItem) {
   const key = getItemKey(item)
+  if (!canDownload(item) || directDownloading.value[key]) return
   directDownloading.value[key] = true
   try {
-    await request.post('/downloads', {
-      title: item.title,
-      url: item.url,
-      magnet: item.magnet,
-      info_hash: item.info_hash,
-    })
+    await queueDownload(item)
     window.showToast?.(t('search.action.downloadDirectSuccess') || '已添加到下载队列', 'success')
   } catch (e: any) {
     window.showToast?.(t('search.action.downloadDirectFailed', { error: e.response?.data?.error || e.message }) || '添加下载失败', 'error')
@@ -303,6 +397,7 @@ function isItemSelected(item: TorrentItem): boolean {
 
 function toggleItemSelection(item: TorrentItem) {
   const key = getItemKey(item)
+  if (batchProcessing.value || !canDownload(item)) return
   const idx = selectedItems.value.findIndex(i => getItemKey(i) === key)
   if (idx >= 0) {
     selectedItems.value.splice(idx, 1)
@@ -311,67 +406,75 @@ function toggleItemSelection(item: TorrentItem) {
   }
 }
 
+const visibleDownloads = computed(() => filteredResults.value.filter(canDownload))
+const allVisibleSelected = computed(() => visibleDownloads.value.length > 0 && visibleDownloads.value.every(isItemSelected))
+
 function toggleSelectAll() {
-  // 排除番剧主词条卡片，只选择真实的下载资源
-  const downloadable = filteredResults.value.filter(item => !(item.url && item.url.includes("/Home/Bangumi/") && !item.magnet && !item.info_hash))
-  if (selectedItems.value.length >= downloadable.length && downloadable.length > 0) {
-    selectedItems.value = []
-  } else {
-    selectedItems.value = [...downloadable]
+  if (batchProcessing.value) return
+  const selected = new Map(selectedItems.value.map(item => [getItemKey(item), item]))
+  const remove = allVisibleSelected.value
+  for (const item of visibleDownloads.value) {
+    if (remove) selected.delete(getItemKey(item))
+    else selected.set(getItemKey(item), item)
   }
+  selectedItems.value = [...selected.values()]
 }
 
 function exitBatchMode() {
+  if (batchProcessing.value) return
   batchMode.value = false
   selectedItems.value = []
 }
 
-async function batchDirectDownload() {
-  if (selectedItems.value.length === 0) return
+async function submitBatch(operation: 'download' | 'subscribe') {
+  if (batchProcessing.value || !selectedItems.value.length) return
+  const items = [...selectedItems.value]
+  if (operation === 'subscribe') {
+    reviewItems.value = items
+    return
+  }
+  const failed: TorrentItem[] = []
   batchProcessing.value = true
-  let successCount = 0
-  for (const item of selectedItems.value) {
+  for (const item of items) {
+    if (!activeView) break
     try {
-      await request.post('/downloads', {
-        title: item.title,
-        url: item.url,
-        magnet: item.magnet,
-        info_hash: item.info_hash,
-      })
-      successCount++
-    } catch {}
+      await queueDownload(item)
+    } catch {
+      failed.push(item)
+    }
   }
   batchProcessing.value = false
-  window.showToast?.(t('search.action.batchDownloadSuccess', { count: successCount }) || `成功添加 ${successCount} 个下载任务`, 'success')
-  exitBatchMode()
+  if (!activeView) return
+  if (failed.length) {
+    selectedItems.value = failed
+    window.showToast?.(t('search.action.batchIncomplete', { succeeded: items.length - failed.length, failed: failed.length }), 'error')
+  } else {
+    window.showToast?.(t('search.action.batchDownloadSuccess', { count: items.length }), 'success')
+    exitBatchMode()
+  }
 }
 
-async function batchSubscribe() {
-  if (selectedItems.value.length === 0) return
-  batchProcessing.value = true
-  let successCount = 0
-  for (const item of selectedItems.value) {
-    try {
-      await request.post('/subscriptions', {
-        title_cn: item.title,
-        bangumi_id: item.bangumi_id,
-        filter_json: JSON.stringify({ source_url: item.url }),
-        cover_url: item.cover_url || '',
-      })
-      subscribed.value.add(item.title)
-      successCount++
-    } catch {}
-  }
-  batchProcessing.value = false
-  window.showToast?.(t('search.action.batchSubscribeSuccess', { count: successCount }) || `成功添加 ${successCount} 个订阅`, 'success')
-  exitBatchMode()
+function markReviewedItems(items: ReviewRelease[]) {
+  const accepted = new Set(items.map(item => item.title))
+  for (const title of accepted) subscribed.value.add(title)
+  selectedItems.value = selectedItems.value.filter(item => !accepted.has(item.title))
+  if (batchMode.value && !selectedItems.value.length) exitBatchMode()
+}
+
+function closeGroups() {
+  groupRequest?.abort()
+  showGroupModal.value = false
 }
 
 async function openSubscribe(item: TorrentItem) {
-  if (!item.bangumi_id) {
-    await subscribe(item, '')
+  if (groupSubmitting.value) return
+  closeGroups()
+  if (!item.bangumi_id || item.source !== 'Mikan') {
+    reviewItems.value = [item]
     return
   }
+  const current = new AbortController()
+  groupRequest = current
   selectedItem.value = item
   subgroups.value = []
   subgroupSearch.value = ''
@@ -381,13 +484,13 @@ async function openSubscribe(item: TorrentItem) {
   try {
     const { data } = await request.get('/mikan/groups', {
       params: { bangumi_id: item.bangumi_id },
-      timeout: 15000,
+      timeout: 15000, signal: current.signal,
     })
-    subgroups.value = data || []
+    if (!current.signal.aborted) subgroups.value = data || []
   } catch (e: any) {
-    groupError.value = e.code === 'ECONNABORTED' ? (t('schedule.error.timeout') || '超时') : (t('schedule.error.failed') || '获取字幕组失败')
+    if (!current.signal.aborted) groupError.value = t(e.code === 'ECONNABORTED' ? 'schedule.error.timeout' : 'schedule.error.failed')
   } finally {
-    groupLoading.value = false
+    if (groupRequest === current) groupLoading.value = false
   }
 }
 
@@ -397,41 +500,54 @@ declare global {
   }
 }
 
+async function saveSubscription(item: TorrentItem, rssUrl: string, subgroupName?: string) {
+  await request.post('/subscriptions', {
+    title_cn: item.title,
+    bangumi_id: item.source === 'Mikan' ? undefined : item.bangumi_id,
+    mikan_id: item.source === 'Mikan' ? item.bangumi_id : undefined,
+    rss_url: rssUrl || undefined,
+    subgroup_name: subgroupName || undefined,
+    filter_json: JSON.stringify({ source_url: item.url }),
+    cover_url: item.cover_url || '',
+  })
+  subscribed.value.add(item.title)
+}
+
 async function subscribe(item: TorrentItem, rssUrl: string, subgroupName?: string) {
+  if (groupSubmitting.value) return
+  groupSubmitting.value = true
   try {
-    await request.post('/subscriptions', {
-      title_cn: item.title,
-      bangumi_id: item.bangumi_id,
-      rss_url: rssUrl || undefined,
-      subgroup_name: subgroupName || undefined,
-      filter_json: JSON.stringify({ source_url: item.url }),
-      cover_url: item.cover_url || '',
-    })
-    subscribed.value.add(item.title)
+    await saveSubscription(item, rssUrl, subgroupName)
     window.showToast?.(t('search.subscribed', { title: item.title }) || `成功订阅: ${item.title}`, 'success')
     showGroupModal.value = false
   } catch (e: any) {
     window.showToast?.(t('search.subscribeFailed', { error: e.response?.data?.error || e.message }) || '订阅失败', 'error')
+  } finally {
+    groupSubmitting.value = false
   }
 }
 
 async function copyMagnet(item: TorrentItem) {
-  if (!item.magnet) {
-    window.showToast?.('无可用磁力链接', 'error')
-    return
-  }
+  const magnet = resourceMagnet(item)
+  if (!magnet) return
+  let copied = false
   try {
-    await navigator.clipboard.writeText(item.magnet)
-    window.showToast?.(t('search.action.magnetCopied') || '磁力链接已复制到剪贴板', 'success')
+    await navigator.clipboard.writeText(magnet)
+    copied = true
   } catch {
     const input = document.createElement('textarea')
-    input.value = item.magnet
-    document.body.appendChild(input)
-    input.select()
-    document.execCommand('copy')
-    document.body.removeChild(input)
-    window.showToast?.(t('search.action.magnetCopied') || '磁力链接已复制到剪贴板', 'success')
+    input.value = magnet
+    try {
+      document.body.appendChild(input)
+      input.select()
+      copied = document.execCommand('copy')
+    } catch {
+      copied = false
+    } finally {
+      input.remove()
+    }
   }
+  window.showToast?.(t(copied ? 'search.action.magnetCopied' : 'search.action.copyFailed'), copied ? 'success' : 'error')
 }
 
 function formatSize(size: number): string {
@@ -441,21 +557,15 @@ function formatSize(size: number): string {
 }
 
 function formatPubDate(d?: string): string {
-  if (!d) return ''
-  try {
-    const date = new Date(d)
-    if (isNaN(date.getTime())) return d
-    const now = Date.now()
-    const diffHours = (now - date.getTime()) / (1000 * 60 * 60)
-    if (diffHours < 1) return '刚刚'
-    if (diffHours < 24) return `${Math.floor(diffHours)}小时前`
-    if (diffHours < 48) return '昨天'
-    const days = Math.floor(diffHours / 24)
-    if (days <= 30) return `${days}天前`
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-  } catch {
-    return d
-  }
+  if (!d || d.startsWith('0001-01-01')) return ''
+  const date = new Date(d)
+  if (Number.isNaN(date.getTime())) return ''
+  const hours = (Date.now() - date.getTime()) / 3600000
+  if (hours >= 0 && hours < 1) return t('search.time.now')
+  if (hours >= 1 && hours < 24) return t('search.time.hours', { count: Math.floor(hours) })
+  if (hours >= 24 && hours < 48) return t('search.time.yesterday')
+  if (hours >= 48 && hours < 744) return t('search.time.days', { count: Math.floor(hours / 24) })
+  return date.toLocaleDateString(locale.value)
 }
 
 function sourceBadge(source: string): string {
@@ -479,18 +589,22 @@ function sourceBadge(source: string): string {
             <Search :size="20" />
           </div>
           <h1 class="text-2xl sm:text-3xl font-black tracking-tight italic">{{ $t('search.title') }}</h1>
-          <span v-if="results.length > 0" class="badge badge-neutral text-xs font-mono font-bold">{{ results.length }} 条结果</span>
+          <span v-if="results.length > 0" class="badge badge-neutral text-xs font-mono font-bold">{{ t('search.resultsCount', { count: results.length }) }}</span>
         </div>
         <p class="text-xs text-base-content/60 font-medium">{{ $t('search.subtitle') }}</p>
       </div>
       
-      <button 
-        class="btn btn-ghost btn-sm border border-base-200/80 rounded-xl gap-2 px-4 hover:bg-base-200 transition-all self-start sm:self-auto" 
-        @click="router.push('/schedule')"
-      >
-        <ChevronLeft :size="16" />
-        <span class="text-xs font-bold">{{ $t('search.back') }}</span>
-      </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <router-link to="/subscriptions/new" class="btn btn-outline btn-sm rounded-xl gap-2">
+          <Plus :size="16" aria-hidden="true" />
+          {{ $t('search.addManually') }}
+        </router-link>
+        <button class="btn btn-ghost btn-sm border border-base-200/80 rounded-xl gap-2 px-4 hover:bg-base-200 transition-all"
+          @click="router.push('/schedule')">
+          <ChevronLeft :size="16" />
+          <span class="text-xs font-bold">{{ $t('search.back') }}</span>
+        </button>
+      </div>
     </div>
 
     <!-- Modern Search Interface -->
@@ -628,7 +742,7 @@ function sourceBadge(source: string): string {
           </select>
 
           <button 
-            @click="batchMode = !batchMode" 
+            @click="batchMode ? exitBatchMode() : (batchMode = true)" :disabled="batchProcessing"
             class="btn btn-xs sm:btn-sm rounded-xl font-bold gap-1.5 whitespace-nowrap"
             :class="batchMode ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60'"
           >
@@ -640,13 +754,13 @@ function sourceBadge(source: string): string {
 
       <!-- Subgroup Quick Filter Chips -->
       <div v-if="extractedSubgroups.length > 0" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-base-200/60 text-xs">
-        <span class="text-[10px] font-black uppercase text-base-content/40 shrink-0">字幕组:</span>
+        <span class="text-[10px] font-black uppercase text-base-content/40 shrink-0">{{ t('search.filterGroups') }}</span>
         <button 
           @click="selectSubgroup('all')" 
           class="btn btn-xs rounded-lg font-bold whitespace-nowrap"
           :class="selectedSubgroup === 'all' ? 'btn-neutral' : 'btn-ghost opacity-60 border border-base-200'"
         >
-          全部
+          {{ t('search.allGroups') }}
         </button>
         <button 
           v-for="[group, count] in extractedSubgroups" 
@@ -665,20 +779,20 @@ function sourceBadge(source: string): string {
       <div v-if="batchMode && filteredResults.length > 0" class="sticky top-4 z-40 max-w-5xl mx-auto w-full bg-base-100/95 backdrop-blur-md p-3 sm:p-4 rounded-2xl border border-primary/30 shadow-xl flex flex-wrap items-center justify-between gap-3 animate-in slide-in-from-top-2 duration-200">
         <div class="flex items-center gap-3">
           <button 
-            @click="toggleSelectAll" 
+            @click="toggleSelectAll" :disabled="batchProcessing || !visibleDownloads.length"
             class="btn btn-ghost btn-xs sm:btn-sm rounded-xl gap-1.5 text-xs font-bold border border-base-300"
           >
-            <component :is="selectedItems.length === filteredResults.length ? CheckSquare : Square" :size="14" class="text-primary" />
-            <span>{{ selectedItems.length === filteredResults.length ? $t('search.action.deselectAll') : $t('search.action.selectAll') }}</span>
+            <component :is="allVisibleSelected ? CheckSquare : Square" :size="14" class="text-primary" />
+            <span>{{ allVisibleSelected ? $t('search.action.deselectAll') : $t('search.action.selectAll') }}</span>
           </button>
           <span class="badge badge-primary badge-sm font-bold font-mono">
             {{ $t('search.action.selectedCount', { count: selectedItems.length }) }}
           </span>
         </div>
 
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <button 
-            @click="batchDirectDownload" 
+            @click="submitBatch('download')"
             :disabled="selectedItems.length === 0 || batchProcessing"
             class="btn btn-primary btn-xs sm:btn-sm rounded-xl gap-1.5 text-xs font-bold shadow-sm"
           >
@@ -688,7 +802,7 @@ function sourceBadge(source: string): string {
           </button>
 
           <button 
-            @click="batchSubscribe" 
+            @click="submitBatch('subscribe')"
             :disabled="selectedItems.length === 0 || batchProcessing"
             class="btn btn-secondary btn-xs sm:btn-sm rounded-xl gap-1.5 text-xs font-bold shadow-sm"
           >
@@ -698,7 +812,7 @@ function sourceBadge(source: string): string {
           </button>
 
           <button 
-            @click="exitBatchMode" 
+            @click="exitBatchMode" :disabled="batchProcessing"
             class="btn btn-ghost btn-xs sm:btn-sm rounded-xl text-xs font-bold"
           >
             {{ $t('search.action.batchCancel') }}
@@ -716,10 +830,10 @@ function sourceBadge(source: string): string {
         :class="{ 'ring-2 ring-primary/40': isItemSelected(item) }"
       >
         <!-- Batch Checkbox -->
-        <div v-if="batchMode && !(item.url && item.url.includes('/Home/Bangumi/') && !item.magnet)" class="shrink-0 flex items-center sm:self-center">
+        <div v-if="batchMode && canDownload(item)" class="shrink-0 flex items-center sm:self-center">
           <input 
             type="checkbox" 
-            :checked="isItemSelected(item)" 
+            :checked="isItemSelected(item)" :disabled="batchProcessing" :aria-label="t('search.action.selectResult', { title: item.title })"
             @change="toggleItemSelection(item)"
             class="checkbox checkbox-primary checkbox-sm rounded-lg cursor-pointer"
           />
@@ -750,7 +864,7 @@ function sourceBadge(source: string): string {
             
             <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <span v-if="item.url && item.url.includes('/Home/Bangumi/') && !item.magnet" class="text-[10px] font-black uppercase tracking-wider py-0.5 px-2.5 rounded-md bg-primary text-primary-content shadow-sm">
-                番剧主词条
+                {{ t('search.seriesEntry') }}
               </span>
               <span v-else class="text-[10px] font-black uppercase tracking-wider py-0.5 px-2 rounded-md border" :class="sourceBadge(item.source)">
                 {{ item.source }}
@@ -759,7 +873,7 @@ function sourceBadge(source: string): string {
                 <HardDrive :size="10" />
                 {{ formatSize(item.size) }}
               </span>
-              <span v-if="item.pub_date" class="text-[10px] font-bold font-mono bg-base-200 text-base-content/60 py-0.5 px-2 rounded-md flex items-center gap-1">
+              <span v-if="formatPubDate(item.pub_date)" class="text-[10px] font-bold font-mono bg-base-200 text-base-content/60 py-0.5 px-2 rounded-md flex items-center gap-1">
                 <Calendar :size="10" />
                 {{ formatPubDate(item.pub_date) }}
               </span>
@@ -774,7 +888,7 @@ function sourceBadge(source: string): string {
         <div class="flex items-center gap-2 shrink-0 self-end sm:self-center w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-base-200/50 flex-wrap">
           <!-- 立即下载 (无需订阅) -->
           <button 
-            v-if="item.magnet || item.url"
+            v-if="canDownload(item)"
             @click="directDownload(item)"
             :disabled="directDownloading[getItemKey(item)]"
             class="btn btn-ghost btn-sm rounded-xl gap-1.5 text-xs font-bold hover:bg-base-200 border border-base-200 text-primary"
@@ -785,8 +899,13 @@ function sourceBadge(source: string): string {
             <span class="text-[11px]">{{ $t('search.action.downloadDirect') }}</span>
           </button>
 
+          <button v-if="resourceMagnet(item) && pluginTargets.length" type="button" @click="choosePlugin(item)"
+            class="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-200" :aria-label="t('search.plugin.open')" :title="t('search.plugin.open')">
+            <CloudUpload :size="15" /><span class="text-[11px] hidden sm:inline">{{ t('search.plugin.open') }}</span>
+          </button>
+
           <button 
-            v-if="item.magnet"
+            v-if="resourceMagnet(item)"
             @click="copyMagnet(item)"
             class="btn btn-ghost btn-sm rounded-xl gap-1.5 text-xs font-bold hover:bg-base-200 border border-base-200"
             :title="$t('search.action.copyMagnet')"
@@ -796,8 +915,8 @@ function sourceBadge(source: string): string {
           </button>
 
           <a 
-            v-if="item.url" 
-            :href="item.url" 
+            v-if="sourceLink(item)"
+            :href="sourceLink(item)"
             target="_blank" 
             rel="noopener noreferrer"
             class="btn btn-ghost btn-sm btn-square rounded-xl hover:bg-base-200 border border-base-200"
@@ -890,7 +1009,7 @@ function sourceBadge(source: string): string {
                 <h3 class="text-xl font-black tracking-tight">{{ $t('search.modal.title') }}</h3>
                 <p class="text-[11px] font-bold text-base-content/50">{{ $t('search.modal.subtitle') }}</p>
               </div>
-              <button class="btn btn-ghost btn-circle btn-sm" @click="showGroupModal = false">
+              <button class="btn btn-ghost btn-circle btn-sm" :disabled="groupSubmitting" @click="closeGroups">
                 <X :size="18" />
               </button>
             </div>
@@ -904,7 +1023,7 @@ function sourceBadge(source: string): string {
               <input 
                 v-model="subgroupSearch" 
                 type="text" 
-                placeholder="搜索字幕组..." 
+                :placeholder="t('search.filterGroups')"
                 class="input input-bordered input-sm w-full rounded-xl pl-8 text-xs font-medium"
               />
               <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
@@ -929,10 +1048,10 @@ function sourceBadge(source: string): string {
                 <p class="text-xs font-medium text-base-content/40 max-w-xs mx-auto">{{ $t('search.modal.emptyDesc') }}</p>
               </div>
               <div class="flex flex-col gap-2 pt-2">
-                <button class="btn btn-primary rounded-xl font-bold text-xs" @click="selectedItem && subscribe(selectedItem, '')">
+                <button class="btn btn-primary rounded-xl font-bold text-xs" :disabled="groupSubmitting" @click="selectedItem && subscribe(selectedItem, '')">
                   {{ $t('search.modal.proceed') }}
                 </button>
-                <button class="btn btn-ghost btn-sm rounded-xl text-xs" @click="showGroupModal = false">{{ $t('search.modal.cancel') }}</button>
+                <button class="btn btn-ghost btn-sm rounded-xl text-xs" :disabled="groupSubmitting" @click="closeGroups">{{ $t('search.modal.cancel') }}</button>
               </div>
             </div>
 
@@ -940,7 +1059,7 @@ function sourceBadge(source: string): string {
               <button 
                 v-for="g in filteredSubgroups" :key="g.rss_url"
                 class="w-full bg-base-200/40 hover:bg-primary/10 hover:border-primary/30 border border-base-200 rounded-2xl p-3.5 flex items-center justify-between transition-all group/item text-left"
-                @click="selectedItem && subscribe(selectedItem, g.rss_url, g.name)"
+                :disabled="groupSubmitting" @click="selectedItem && subscribe(selectedItem, g.rss_url, g.name)"
               >
                 <div class="flex items-center gap-3 min-w-0">
                   <div class="w-8 h-8 rounded-xl bg-base-200 flex items-center justify-center text-base-content/40 group-hover/item:bg-primary group-hover/item:text-primary-content transition-colors shrink-0">
@@ -953,15 +1072,19 @@ function sourceBadge(source: string): string {
             </div>
 
             <div v-if="subgroups.length > 0" class="pt-2 flex justify-between items-center text-xs">
-              <button class="btn btn-ghost btn-xs text-base-content/50" @click="selectedItem && subscribe(selectedItem, '')">
-                跳过字幕组，直接通用追番
+              <button class="btn btn-ghost btn-xs text-base-content/50" :disabled="groupSubmitting" @click="selectedItem && subscribe(selectedItem, '')">
+                {{ t('search.modal.proceed') }}
               </button>
-              <button class="btn btn-ghost btn-xs" @click="showGroupModal = false">{{ $t('search.modal.cancel') }}</button>
+              <button class="btn btn-ghost btn-xs" :disabled="groupSubmitting" @click="closeGroups">{{ $t('search.modal.cancel') }}</button>
             </div>
           </div>
         </div>
       </div>
     </Transition>
+    <SubscriptionReviewDialog v-if="reviewItems.length" :items="reviewItems"
+      @saved="markReviewedItems" @close="reviewItems = []" />
+    <SearchPluginDialog v-if="pluginSelection" :item="pluginSelection.item" :targets="pluginSelection.targets"
+      @close="pluginSelection = null; loadPluginTargets()" />
   </div>
 </template>
 

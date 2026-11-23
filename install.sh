@@ -1,128 +1,121 @@
 #!/bin/sh
-#
-# Ani-Go 独立单文件二进制一键安装脚本
-# 自动从 GitHub Releases 下载对应操作系统与架构的最新二进制包并安装到系统 PATH 中。
-#
-# 快速安装命令：
-#   curl -fsSL https://raw.githubusercontent.com/xiaoyueRX/Ani-Go/main/install.sh | sh
-#
-# 指定版本安装：
-#   ANIGO_VERSION=v0.5.1 curl -fsSL https://raw.githubusercontent.com/xiaoyueRX/Ani-Go/main/install.sh | sh
-#
-# 卸载：
-#   curl -fsSL https://raw.githubusercontent.com/xiaoyueRX/Ani-Go/main/install.sh | sh -s -- --uninstall
-#
+# 安装 GitHub Releases 中的 Linux 或 macOS 二进制包。
+# curl -fsSL https://raw.githubusercontent.com/xiaoyueRX/Ani-Go/main/install.sh | sh
+# curl -fsSL https://raw.githubusercontent.com/xiaoyueRX/Ani-Go/main/install.sh | ANIGO_VERSION=v0.7.0 sh
 set -eu
 
-REPO="xiaoyueRX/Ani-Go"
-INSTALL_DIR="${ANIGO_INSTALL_DIR:-$HOME/.anigo}"
-BIN_DIR="${ANIGO_BIN_DIR:-$HOME/.local/bin}"
+repo=xiaoyueRX/Ani-Go
+install_dir=${ANIGO_INSTALL_DIR:-"$HOME/.anigo"}
+bin_dir=${ANIGO_BIN_DIR:-"$HOME/.local/bin"}
 
-if [ "${1:-}" = "--uninstall" ]; then
-  rm -f "$BIN_DIR/anigo"
-  rm -rf "$INSTALL_DIR"
-  echo "✅ Ani-Go 已成功卸载 (清理了 $INSTALL_DIR 与 $BIN_DIR/anigo)。"
-  exit 0
-fi
+die() { printf '%s\n' "$*" >&2; exit 1; }
 
-# 1. 检测系统与硬件架构
-os="$(uname -s)"
-arch="$(uname -m)"
-
-case "$os" in
-  Darwin) os="darwin" ;;
-  Linux)  os="linux" ;;
-  *) echo "❌ 暂不支持的操作系统: '$os'" >&2; exit 1 ;;
+case ${1:-} in
+  --uninstall)
+    [ "$#" -eq 1 ] || die '用法: sh install.sh [--uninstall]'
+    if [ -d "$install_dir" ]; then
+      install_dir=$(cd "$install_dir" && pwd -P)
+      case $(readlink "$bin_dir/anigo" 2>/dev/null || :) in
+        "$install_dir"/current/anigo|"$install_dir"/versions/v*/anigo) rm -f "$bin_dir/anigo" ;;
+      esac
+      previous=$(readlink "$install_dir/current" 2>/dev/null || :)
+      case $previous in
+        "$install_dir"/versions/v*) rm -f "$install_dir/current" ;;
+      esac
+      for dest in "$install_dir"/versions/v*; do
+        [ -d "$dest" ] && [ ! -L "$dest" ] && [ -f "$dest/anigo" ] || continue
+        [ -f "$dest/.anigo-installed" ] || [ "$dest" = "$previous" ] || continue
+        rm -f "$dest/anigo" "$dest/.env.example" "$dest/LICENSE" "$dest/README.md" "$dest/.anigo-installed"
+        rmdir "$dest" 2>/dev/null || :
+      done
+      rmdir "$install_dir/versions" 2>/dev/null || :
+    fi
+    printf '已卸载安装器管理的程序，配置和运行数据保留在 %s。\n' "$install_dir"
+    exit 0 ;;
+  '') [ "$#" -eq 0 ] || die '用法: sh install.sh [--uninstall]' ;;
+  *) die '用法: sh install.sh [--uninstall]' ;;
 esac
 
-case "$arch" in
-  arm64|aarch64) arch="arm64" ;;
-  x86_64|amd64)  arch="amd64" ;;
-  armv7*|armhf)  arch="armv7" ;;
-  *) echo "❌ 暂不支持的架构: '$arch'" >&2; exit 1 ;;
+case $(uname -s) in
+  Darwin) os=darwin ;;
+  Linux) os=linux ;;
+  *) die "暂不支持的操作系统: $(uname -s)" ;;
+esac
+case $(uname -m) in
+  arm64|aarch64) arch=arm64 ;;
+  x86_64|amd64) arch=amd64 ;;
+  armv7*|armhf) [ "$os" = linux ] || die 'armv7 发行包仅支持 Linux'; arch=armv7 ;;
+  *) die "暂不支持的架构: $(uname -m)" ;;
 esac
 
-# 2. 解析目标版本号 (默认抓取最新版本)
-version="${ANIGO_VERSION:-}"
+fetch() { curl -fsSL --retry 2 --connect-timeout 10 --max-time 180 "$@"; }
+version=${ANIGO_VERSION:-}
 if [ -z "$version" ]; then
-  version="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" 2>/dev/null \
-    | sed -n 's#.*/releases/tag/##p' || true)"
+  release_url=$(fetch -I -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest") || release_url=
+  case $release_url in
+    "https://github.com/$repo/releases/tag/"*) version=${release_url##*/} ;;
+  esac
+  if [ -z "$version" ]; then
+    metadata=$(fetch "https://api.github.com/repos/$repo/releases/latest") || die '无法查询最新发行版，请检查网络或设置 ANIGO_VERSION。'
+    version=$(printf '%s' "$metadata" | sed -n 's/.*"tag_name" *: *"\([^"]*\)".*/\1/p')
+  fi
 fi
+case $version in v*) ;; *) version=v$version ;; esac
+case $version in *[!a-zA-Z0-9.+-]*) die '发行版标签无效' ;; esac
+printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' || die '发行版标签无效'
 
-if [ -z "$version" ]; then
-  version="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1 || true)"
-fi
+pkg=ani-go-$version-$os-$arch
+asset=$pkg.tar.gz
+release=https://github.com/$repo/releases/download/$version
+tmp=$(mktemp -d)
+stage=
+trap 'rm -rf "$tmp"; if [ -n "$stage" ]; then rm -rf "$stage"; fi' 0
+trap 'exit 1' HUP INT TERM
 
-# 默认回退版本
-if [ -z "$version" ]; then
-  version="v0.6.0"
-fi
-
-case "$version" in v*) ;; *) version="v$version" ;; esac
-
-# 3. 下载并解压发布包
-pkg_name="ani-go-${version}-${os}-${arch}"
-archive_name="${pkg_name}.tar.gz"
-url="https://github.com/$REPO/releases/download/${version}/${archive_name}"
-
-echo "🚀 正在为 ${os}/${arch} 下载 Ani-Go ${version}..."
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-
-if ! curl -fSL "$url" -o "$tmp/$archive_name" 2>/dev/null; then
-  # 国内加速镜像备用尝试
-  mirror_url="https://mirror.ghproxy.com/${url}"
-  echo "ℹ️  从主源下载失败，正在尝试国内镜像源下载..."
-  curl -fSL "$mirror_url" -o "$tmp/$archive_name" || {
-    echo "❌ 下载失败: 找不到对应架构的发布包 ($url)" >&2
-    exit 1
-  }
-fi
-
-dest="$INSTALL_DIR/versions/$version"
-rm -rf "$dest"
-mkdir -p "$dest"
-tar -xzf "$tmp/$archive_name" -C "$dest" --strip-components=1 || tar -xzf "$tmp/$archive_name" -C "$dest"
-
-# 兼容解压后二进制在子目录或根目录的情况
-if [ ! -f "$dest/anigo" ] && [ -f "$dest/$pkg_name/anigo" ]; then
-  mv "$dest/$pkg_name"/* "$dest/"
-  rm -rf "$dest/$pkg_name"
-fi
-
-# 4. 创建可执行软链接
-mkdir -p "$BIN_DIR"
-if [ -f "$dest/anigo" ]; then
-  chmod +x "$dest/anigo"
-  ln -sf "$dest/anigo" "$BIN_DIR/anigo"
-  ln -sfn "$dest" "$INSTALL_DIR/current"
+printf '正在下载 %s 并核验 SHA-256…\n' "$asset"
+fetch "$release/checksums.txt" -o "$tmp/checksums.txt" || die '无法下载官方校验清单。'
+fetch "$release/$asset" -o "$tmp/archive" || die "无法下载发行包: $release/$asset"
+expected=$(awk -v name="$asset" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1; n++ } END { if (n != 1) exit 1 }' "$tmp/checksums.txt") || die '官方清单中缺少唯一匹配的发行包。'
+if command -v sha256sum >/dev/null 2>&1; then
+  actual=$(sha256sum < "$tmp/archive")
 else
-  echo "❌ 安装失败: 未能在解压包中找到 anigo 可执行文件" >&2
-  exit 1
+  actual=$(shasum -a 256 < "$tmp/archive") || die '需要 sha256sum 或 shasum。'
 fi
+[ "${actual%% *}" = "$expected" ] || die '发行包校验失败，已保留原安装。'
 
-# 如果没有 .env 则自动提供默认示例
-if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$dest/.env.example" ]; then
-  cp "$dest/.env.example" "$INSTALL_DIR/.env"
+mkdir -p "$install_dir/versions" "$bin_dir"
+install_dir=$(cd "$install_dir" && pwd -P)
+bin_dir=$(cd "$bin_dir" && pwd -P)
+dest=$install_dir/versions/$version
+[ ! -L "$dest" ] || die "安装路径是符号链接: $dest"
+for link in "$bin_dir/anigo" "$install_dir/current"; do
+  [ -L "$link" ] || [ ! -e "$link" ] || die "目标路径已经存在: $link"
+done
+stage=$(mktemp -d "$install_dir/versions/.install.XXXXXXXX")
+tar -xzf "$tmp/archive" -C "$stage"
+program=$stage/$pkg/anigo
+[ -s "$program" ] && [ -f "$program" ] && [ ! -L "$program" ] || die '发行包中缺少 anigo。'
+chmod 755 "$program"
+mkdir -p "$dest"
+for file in .env.example README.md LICENSE; do
+  if [ -f "$stage/$pkg/$file" ]; then
+    mv -f "$stage/$pkg/$file" "$dest/$file"
+  fi
+done
+mv -f "$program" "$dest/anigo"
+: > "$dest/.anigo-installed"
+if [ ! -e "$install_dir/.env" ] && [ -f "$dest/.env.example" ]; then
+  (umask 077; set -C; cat "$dest/.env.example" > "$install_dir/.env") || [ -f "$install_dir/.env" ]
 fi
-
-echo ""
-echo "🎉 Ani-Go 安装成功！"
-echo "  📂 安装目录: $dest"
-echo "  🔗 执行软链: $BIN_DIR/anigo"
-echo "  ⚙️  配置模板: $INSTALL_DIR/.env"
-
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *)
-    echo ""
-    echo "⚠️  注意: $BIN_DIR 尚未加入到系统 PATH。请将以下内容加入 ~/.bashrc 或 ~/.zshrc:"
-    echo "    export PATH=\"$BIN_DIR:\$PATH\""
-    ;;
+# 旧版安装器的两个链接曾直接指向同一发行目录，升级时记录其归属。
+previous=$(readlink "$install_dir/current" 2>/dev/null || :)
+case $previous in
+  "$install_dir"/versions/v*)
+    if [ "${previous%/*}" = "$install_dir/versions" ] && [ ! -L "$previous" ] && [ -f "$previous/anigo" ] &&
+       [ "$(readlink "$bin_dir/anigo" 2>/dev/null || :)" = "$previous/anigo" ]; then
+      : > "$previous/.anigo-installed"
+    fi ;;
 esac
-
-echo ""
-echo "💡 启动方式:"
-echo "  anigo"
-echo ""
+ln -sfn "$dest" "$install_dir/current"
+ln -sfn "$install_dir/current/anigo" "$bin_dir/anigo"
+printf '已安装 Ani-Go %s。\n配置目录: %s\n程序: %s/anigo\n启动时请先进入配置目录，让程序读取 .env 和原有数据库。\n' "$version" "$install_dir" "$bin_dir"

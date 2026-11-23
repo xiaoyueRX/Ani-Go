@@ -25,12 +25,11 @@ type animetoshoChannel struct {
 }
 
 type animetoshoItem struct {
-	Title       string              `xml:"title"`
-	Link        string              `xml:"link"`
-	GUID        string              `xml:"guid"`
-	PubDate     string              `xml:"pubDate"`
-	Description string              `xml:"description"`
-	Enclosure   animetoshoEnclosure `xml:"enclosure"`
+	Title     string              `xml:"title"`
+	Link      string              `xml:"link"`
+	GUID      string              `xml:"guid"`
+	PubDate   string              `xml:"pubDate"`
+	Enclosure animetoshoEnclosure `xml:"enclosure"`
 }
 
 type animetoshoEnclosure struct {
@@ -96,38 +95,26 @@ func (at *AnimeToshoSource) SearchAnime(ctx context.Context, title string) ([]co
 }
 
 func (at *AnimeToshoSource) FetchHistory(ctx context.Context, bangumiID string, filter core.Filter) ([]core.TorrentItem, error) {
-	if filter.SearchTitle == "" {
-		return nil, nil
-	}
-	return at.SearchAnime(ctx, filter.SearchTitle)
+	return searchHistoryTitles(ctx, filter.Titles, at.SearchAnime)
 }
 
 func (at *AnimeToshoSource) parseRSS(r io.Reader) ([]core.TorrentItem, error) {
-	body, err := io.ReadAll(r)
-	if err != nil {
-		return nil, fmt.Errorf("读取 AnimeTosho RSS 失败: %w", err)
-	}
-
 	var rss animetoshoRSS
-	if err := xml.Unmarshal(body, &rss); err != nil {
+	if err := xml.NewDecoder(r).Decode(&rss); err != nil {
 		return nil, fmt.Errorf("解析 AnimeTosho RSS 失败: %w", err)
 	}
 
 	items := make([]core.TorrentItem, 0, len(rss.Channel.Items))
 	for _, item := range rss.Channel.Items {
 		pubAt, _ := parsePubDate(item.PubDate)
-		torrentURL := item.Enclosure.URL
-		if torrentURL == "" {
-			torrentURL = item.Link
-		}
-
-		items = append(items, core.TorrentItem{
+		result := core.TorrentItem{
 			Title:       item.Title,
-			URL:         torrentURL,
 			Size:        item.Enclosure.Length,
 			PublishedAt: pubAt,
 			SourceName:  "AnimeTosho",
-		})
+		}
+		setSupplementalLinks(&result, item.Enclosure.URL, item.Link, "")
+		items = append(items, result)
 	}
 
 	return items, nil

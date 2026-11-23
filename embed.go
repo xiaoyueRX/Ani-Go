@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"io/fs"
 	"log"
 	"net/http"
+	"path"
 	"strings"
+	"time"
 )
 
-//go:embed web/dist
+//go:embed all:web/dist
 var distFS embed.FS
 
 // staticFS 去除 "web/dist" 前缀后的静态文件系统
@@ -27,47 +30,38 @@ func init() {
 // 优先匹配精确文件，未找到时回退到 index.html（Vue Router History 模式）
 func staticHandler() http.Handler {
 	fileServer := http.FileServer(http.FS(staticFS))
-
+	index, indexErr := fs.ReadFile(staticFS, "index.html")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		if path == "" || path == "/" {
-			path = "/index.html"
-		}
-
-		cleanPath := strings.TrimPrefix(path, "/")
-		f, err := staticFS.Open(cleanPath)
-		if err != nil {
-			indexData, indexErr := fs.ReadFile(staticFS, "index.html")
-			if indexErr != nil {
-				http.Error(w, "内部错误", http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			w.Write(indexData)
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "仅支持 GET 或 HEAD", http.StatusMethodNotAllowed)
 			return
 		}
-		stat, statErr := f.Stat()
-		f.Close()
-		if statErr != nil || stat.IsDir() {
-			indexData, indexErr := fs.ReadFile(staticFS, "index.html")
-			if indexErr != nil {
-				http.Error(w, "内部错误", http.StatusInternalServerError)
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		asset := strings.HasPrefix(name, "assets/")
+		if name != "" && name != "index.html" {
+			if info, err := fs.Stat(staticFS, name); err == nil && info.Mode().IsRegular() {
+				if asset {
+					// Vite 构建资源的名称包含内容哈希。
+					w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
+				} else {
+					w.Header().Set("Cache-Control", "no-cache")
+				}
+				fileServer.ServeHTTP(w, r)
 				return
 			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			w.Write(indexData)
+			if asset || (!strings.Contains(name, "/") && path.Ext(name) != "") ||
+				name == "api" || strings.HasPrefix(name, "api/") || name == "mcp" || strings.HasPrefix(name, "mcp/") {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		if indexErr != nil {
+			http.Error(w, "前端入口不可用", http.StatusInternalServerError)
 			return
 		}
-
-		// index.html 禁止缓存（确保新版本立即生效）
-		if path == "/index.html" || path == "/" {
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		} else {
-			// 静态资源（js/css/图片）允许缓存 7 天
-			w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
-		}
-		fileServer.ServeHTTP(w, r)
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(index))
 	})
 }

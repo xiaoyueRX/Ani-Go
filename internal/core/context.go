@@ -15,10 +15,10 @@ type universalContext struct {
 
 // NewContext 创建新的万能上下文
 func NewContext(ctx context.Context) Context {
-	return &universalContext{
+	return TrackServices(&universalContext{
 		Context:  ctx,
 		services: make(map[ServiceType]interface{}),
-	}
+	})
 }
 
 // GetService 根据类型获取服务实例
@@ -33,6 +33,10 @@ func (c *universalContext) GetService(t ServiceType) (interface{}, bool) {
 func (c *universalContext) SetService(t ServiceType, svc interface{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if svc == nil {
+		delete(c.services, t)
+		return
+	}
 	c.services[t] = svc
 }
 

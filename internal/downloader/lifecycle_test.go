@@ -176,7 +176,7 @@ func TestIsTaskReadyForSeedCleanup(t *testing.T) {
 			Progress: tc.progress,
 			Status:   tc.status,
 		}
-		got := IsDownloadComplete(task)
+		got := isTaskReadyForSeedCleanup(task)
 		if got != tc.expected {
 			t.Errorf("[%s] 期望 %v, 得到 %v", tc.name, tc.expected, got)
 		}

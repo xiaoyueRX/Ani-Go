@@ -3,22 +3,38 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
 	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 )
+
+const (
+	customPluginsKey = "custom_plugins"
+	pluginStatusKey  = "plugin_status"
+)
+
+var ErrInvalidArchive = errors.New("无效的 Ani-Go 备份")
 
 // BackupData 备份数据结构
 type BackupData struct {
+	FormatVersion int                     `json:"format_version,omitempty"`
+	SHA256        string                  `json:"sha256,omitempty"`
 	Timestamp     string                  `json:"timestamp"`
 	Version       string                  `json:"version"`
 	Settings      map[string]string       `json:"settings"`
@@ -36,11 +52,31 @@ type BackupConfig struct {
 
 // BackupManager 备份管理器
 type BackupManager struct {
-	cfg        *config.Config
-	cron       *cron.Cron
-	backupDir  string
-	keepCount  int
-	includeEps bool
+	cfg                   *config.Config
+	cron                  *cron.Cron
+	backupDir             string
+	keepCount             int
+	includeEps            bool
+	lifecycleMu           sync.Mutex
+	entry                 cron.EntryID
+	cronSpec              string
+	scheduleCtx           context.Context
+	cancel                context.CancelFunc
+	activeKeep            atomic.Int64
+	createOnce            sync.Once
+	createGate            chan struct{}
+	builtinCredentialKeys atomic.Value // 保存只读的 map[string]bool
+}
+
+// SetBuiltinPanelManifests 记录当前程序中可接收授权的本地面板。115 使用独立的历史设置键。
+func (m *BackupManager) SetBuiltinPanelManifests(manifests []plugin.PluginInfo) {
+	var builtins []plugin.PluginInfo
+	for _, p := range manifests {
+		if p.IsBuiltIn && p.ID != plugin.Cloud115ID {
+			builtins = append(builtins, p)
+		}
+	}
+	m.builtinCredentialKeys.Store(plugin.PanelCredentialSettingKeys(builtins))
 }
 
 // NewBackupManager 创建备份管理器
@@ -64,169 +100,193 @@ func NewBackupManager(cfg *config.Config) *BackupManager {
 	}
 }
 
-// Start 启动定时备份
-func (m *BackupManager) Start() error {
-	cronExpr := m.cfg.Scheduler.BackupCron
-	if cronExpr == "" {
-		cronExpr = "0 0 * * *" // 默认每日凌晨
-	}
-
-	// cron 表达式验证（简单检查）
-	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-	if _, err := parser.Parse(cronExpr); err != nil {
-		// 尝试标准 5 字段格式
-		if _, err2 := cron.ParseStandard(cronExpr); err2 != nil {
-			log.Printf("⚠️ 备份 cron 表达式无效: %s, 使用默认值", cronExpr)
-			cronExpr = "0 0 * * *"
-		} else {
-			// 如果是标准 5 字段，给 m.cron (带秒的) 用，需要在前面补 0
-			cronExpr = "0 " + cronExpr
-		}
-	}
-
-	_, err := m.cron.AddFunc(cronExpr, func() {
-		log.Println("⏰ 触发定时备份任务...")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-
-		if err := m.CreateBackup(ctx, m.includeEps); err != nil {
-			log.Printf("❌ 定时备份失败: %v", err)
-			return
-		}
-		m.cleanOldBackups()
-	})
-	if err != nil {
-		return fmt.Errorf("添加定时任务失败: %w", err)
-	}
-
-	m.cron.Start()
-	log.Printf("✅ 定时备份已启动: cron=%s, 目录=%s, 保留=%d份", cronExpr, m.backupDir, m.keepCount)
-	return nil
-}
-
-// Stop 停止定时备份
-func (m *BackupManager) Stop() {
-	m.cron.Stop()
-	log.Println("⏰ 定时备份已停止")
-}
-
 // CreateBackup 创建备份
 func (m *BackupManager) CreateBackup(ctx context.Context, includeEpisodes bool) error {
-	// 确保备份目录存在
-	if err := os.MkdirAll(m.backupDir, 0755); err != nil {
-		return fmt.Errorf("创建备份目录失败: %w", err)
+	// 一次只在内存中构造一份快照。到期、停机或请求取消时可直接退出等待。
+	m.createOnce.Do(func() { m.createGate = make(chan struct{}, 1) })
+	select {
+	case m.createGate <- struct{}{}:
+		defer func() { <-m.createGate }()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-
-	backup := BackupData{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Version:   "v0.5.0",
-		Settings:  make(map[string]string),
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	// 所有表从同一个 SQLite 快照读取，避免备份中的剧集引用快照外的订阅。
-	if err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var settings []database.Setting
+	if err := os.MkdirAll(m.backupDir, 0700); err != nil {
+		return err
+	}
+	var settings []database.Setting
+	var subs []database.Subscription
+	var episodes []database.Episode
+	err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Find(&settings).Error; err != nil {
 			return err
 		}
-		for _, setting := range settings {
-			backup.Settings[setting.Key] = setting.Value
-		}
-		if err := tx.Find(&backup.Subscriptions).Error; err != nil {
+		if err := tx.Find(&subs).Error; err != nil {
 			return err
 		}
 		if includeEpisodes {
-			return tx.Find(&backup.Episodes).Error
+			return tx.Find(&episodes).Error
 		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("读取备份快照失败: %w", err)
 	}
+	settingsMap := make(map[string]string, len(settings))
+	for _, s := range settings {
+		settingsMap[s.Key] = s.Value
+	}
+	if raw, ok := settingsMap[pluginStatusKey]; ok {
+		if _, err := decodePluginStatus(raw); err != nil {
+			return err
+		}
+	}
+	if _, ok := settingsMap[customPluginsKey]; !ok {
+		// 新完整快照显式声明空清单，以便区分没有导出插件配置的历史备份。
+		settingsMap[customPluginsKey] = "[]"
+	}
+	if err := m.filterBackupPanelCredentials(settingsMap); err != nil {
+		return err
+	}
 
-	// 生成文件名：anigo_backup_20260830_full.json
-	timestamp := time.Now().Format("20060102_150405.000000000")
+	// 构建备份数据
+	backup := BackupData{
+		Timestamp:     time.Now().Format(time.RFC3339),
+		Version:       "v0.5.0",
+		Settings:      settingsMap,
+		Subscriptions: subs,
+		Episodes:      episodes,
+	}
+
+	backup.FormatVersion = archiveFormat
+	backup.SHA256, err = archiveDigest(archiveBody[map[string]string, []database.Subscription, []database.Episode]{
+		backup.Timestamp, backup.Version, backup.Settings, backup.Subscriptions, backup.Episodes,
+	})
+	if err != nil {
+		return err
+	}
+	// 旧文件仍可读取；新名称用亚秒时间及随机后缀支持并发。
+	now := time.Now()
+	timestamp := now.Format("20060102_150405")
 	suffix := "full"
 	if !includeEpisodes {
 		suffix = "config"
 	}
-	fileName := fmt.Sprintf("anigo_backup_%s_%s.json", timestamp, suffix)
-	filePath := filepath.Join(m.backupDir, fileName)
-
-	// 写入文件
-	data, err := json.MarshalIndent(backup, "", "  ")
-	if err != nil {
-		return fmt.Errorf("序列化备份数据失败: %w", err)
-	}
-
-	tmp, err := os.CreateTemp(m.backupDir, ".anigo-backup-")
+	// 临时文件仅所有者可读写，完整落盘后发布最终名称。
+	tmp, err := os.CreateTemp(m.backupDir, ".anigo-backup-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+	enc := json.NewEncoder(tmp)
+	enc.SetIndent("", "  ")
+	if err = enc.Encode(backup); err == nil {
+		err = tmp.Sync()
+	}
+	closeErr := tmp.Close()
+	if err != nil {
 		return err
 	}
-	if err := tmp.Close(); err != nil {
+	if closeErr != nil {
+		return closeErr
+	}
+	random := strings.TrimPrefix(filepath.Base(tmp.Name()), ".anigo-backup-")
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp.Name(), filePath); err != nil {
-		return fmt.Errorf("保存备份文件失败: %w", err)
+	fileName := fmt.Sprintf("anigo_backup_%s_%09d%s_%s.json", timestamp, now.Nanosecond(), random, suffix)
+	if err := os.Rename(tmp.Name(), filepath.Join(m.backupDir, fileName)); err != nil {
+		return err
 	}
-	log.Printf("✅ 备份创建成功: %s (%d 个订阅, %d 个设置项, %d 个剧集)", fileName, len(backup.Subscriptions), len(backup.Settings), len(backup.Episodes))
+
+	m.cleanOldBackups(fileName)
+	log.Printf("✅ 备份创建成功: %s (%d 个订阅, %d 个设置项%s)",
+		fileName, len(subs), len(settingsMap),
+		func() string {
+			if includeEpisodes {
+				return fmt.Sprintf(", %d 个剧集", len(episodes))
+			} else {
+				return ""
+			}
+		}())
 
 	return nil
 }
 
-// 兼容历史日期和秒级文件名，仅轮转本程序生成的备份。
-var backupNamePattern = regexp.MustCompile(`^anigo_backup_[0-9]{8}(_[0-9]{6}(\.[0-9]{9})?)?_(config|full)\.json$`)
-
-func (m *BackupManager) cleanOldBackups() {
+// cleanOldBackups 清理旧备份文件
+func (m *BackupManager) cleanOldBackups(newest string) {
+	keep := int(m.activeKeep.Load())
+	if keep == 0 {
+		keep = m.keepCount
+	}
+	if keep <= 0 {
+		return
+	}
 	files, err := m.ListBackups()
 	if err != nil {
-		log.Printf("读取备份目录失败: %v", err)
+		log.Printf("读取备份清单失败: %v", err)
 		return
 	}
-	if len(files) <= m.keepCount {
-		return
-	}
-	for _, file := range files[m.keepCount:] {
-		if err := os.Remove(filepath.Join(m.backupDir, file.Name)); err != nil {
-			log.Printf("删除旧备份 %s 失败: %v", file.Name, err)
+	for _, file := range files {
+		// NAS 可能只有秒级修改时间；始终保留本次发布的快照。
+		if file.Name == newest {
+			continue
+		}
+		if keep > 1 {
+			keep--
+			continue
+		}
+		if err := m.DeleteBackup(file.Name); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("删除旧备份失败: %v", err)
 		}
 	}
 }
 
-// ListBackups 列出所有备份文件
+// 兼容历史时间戳文件名和具有随机后缀的新文件名。
+var backupName = regexp.MustCompile(`^anigo_backup_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?_(?:full|config)\.json$`)
+
+func (m *BackupManager) protectExistingBackups() error {
+	files, err := m.ListBackups()
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		if err := os.Chmod(filepath.Join(m.backupDir, file.Name), 0600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListBackups 仅列出本程序生成的普通备份文件。
 func (m *BackupManager) ListBackups() ([]BackupFileInfo, error) {
 	entries, err := os.ReadDir(m.backupDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return []BackupFileInfo{}, nil
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			_ = os.MkdirAll(m.backupDir, 0755)
-			return []BackupFileInfo{}, nil
-		}
-		return nil, fmt.Errorf("读取备份目录失败: %w", err)
+		return nil, err
 	}
-
-	var files []BackupFileInfo
+	files := []BackupFileInfo{}
 	for _, entry := range entries {
-		if entry.Type().IsRegular() && backupNamePattern.MatchString(entry.Name()) {
-			info, err := entry.Info()
-			if os.IsNotExist(err) {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-			files = append(files, BackupFileInfo{
-				Name:    entry.Name(),
-				Size:    info.Size(),
-				ModTime: info.ModTime(),
-			})
+		if !entry.Type().IsRegular() || !backupName.MatchString(entry.Name()) {
+			continue
 		}
+		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, BackupFileInfo{Name: entry.Name(), Size: info.Size(), ModTime: info.ModTime()})
 	}
-
-	// 按修改时间排序（最新在前）
 	sort.Slice(files, func(i, j int) bool {
+		if files[i].ModTime.Equal(files[j].ModTime) {
+			return files[i].Name > files[j].Name
+		}
 		return files[i].ModTime.After(files[j].ModTime)
 	})
 
@@ -240,154 +300,323 @@ type BackupFileInfo struct {
 	ModTime time.Time `json:"mod_time"`
 }
 
+// 只保留清单所声明的 ID 与完整接收地址对应的授权。旧备份可能遗留已删除目标的凭据行。
+func (m *BackupManager) filterBackupPanelCredentials(settings map[string]string) error {
+	var keys, builtins map[string]bool
+	if raw, ok := settings[customPluginsKey]; ok {
+		var manifests []plugin.PluginInfo
+		if json.Unmarshal([]byte(raw), &manifests) != nil || manifests == nil {
+			return fmt.Errorf("%w：插件清单格式无效", ErrInvalidArchive)
+		}
+		for _, p := range manifests {
+			if strings.TrimSpace(p.ID) == "" {
+				return fmt.Errorf("%w：插件清单缺少 ID", ErrInvalidArchive)
+			}
+		}
+		keys = plugin.PanelCredentialSettingKeys(manifests)
+		builtins, _ = m.builtinCredentialKeys.Load().(map[string]bool)
+	}
+	for key := range settings {
+		if strings.EqualFold(key, "jwt_secret") || (plugin.IsPanelCredentialSetting(key) && !keys[key] && !builtins[key]) {
+			delete(settings, key)
+		}
+	}
+	return nil
+}
+
+func decodePluginStatus(raw string) (map[string]*bool, error) {
+	var states map[string]*bool
+	if json.Unmarshal([]byte(raw), &states) != nil || states == nil {
+		return nil, fmt.Errorf("%w：插件开关格式无效", ErrInvalidArchive)
+	}
+	for _, enabled := range states {
+		if enabled == nil {
+			return nil, fmt.Errorf("%w：插件开关必须为布尔值", ErrInvalidArchive)
+		}
+	}
+	return states, nil
+}
+
+// 历史快照可能只记录内置开关；本机未随快照恢复的社区插件应保留当前选择。
+func mergeLegacyPluginStatus(tx *gorm.DB, states map[string]*bool) (string, error) {
+	for id := range states {
+		if !plugin.IsOfficialPluginID(id) {
+			delete(states, id)
+		}
+	}
+	var current database.Setting
+	result := tx.Where("key = ?", pluginStatusKey).Limit(1).Find(&current)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected != 0 {
+		local, err := decodePluginStatus(current.Value)
+		if err != nil {
+			return "", err
+		}
+		for id, enabled := range local {
+			if !plugin.IsOfficialPluginID(id) {
+				states[id] = enabled
+			}
+		}
+	}
+	value, err := json.Marshal(states)
+	return string(value), err
+}
+
+func (m *BackupManager) restoreBackupSettings(tx *gorm.DB, settings map[string]string) error {
+	if err := m.filterBackupPanelCredentials(settings); err != nil {
+		return err
+	}
+	_, full := settings[customPluginsKey]
+	if raw, ok := settings[pluginStatusKey]; ok {
+		states, err := decodePluginStatus(raw)
+		if err != nil {
+			return err
+		}
+		if !full {
+			settings[pluginStatusKey], err = mergeLegacyPluginStatus(tx, states)
+			if err != nil {
+				return err
+			}
+		}
+	} else if full {
+		settings[pluginStatusKey] = "{}"
+	}
+	if full {
+		var keys []string
+		if err := tx.Model(&database.Setting{}).Pluck("key", &keys).Error; err != nil {
+			return err
+		}
+		for _, key := range keys {
+			if plugin.IsPanelCredentialSetting(key) || key == plugin.Cloud115TokenKey {
+				if err := tx.Where("key = ?", key).Delete(&database.Setting{}).Error; err != nil {
+					return err
+				}
+			}
+		}
+	}
+	for key, value := range settings {
+		setting := database.Setting{Key: key, Value: value}
+		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "key"}}, DoUpdates: clause.AssignmentColumns([]string{"value"})}).Create(&setting).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RestoreBackup 从备份恢复
 func (m *BackupManager) RestoreBackup(ctx context.Context, fileName string) error {
-	cleanName := filepath.Base(fileName)
-	if cleanName != fileName || cleanName == "." || cleanName == "/" || cleanName == "\\" {
-		return fmt.Errorf("非法的文件名: %s", fileName)
+	path := m.GetBackupPath(fileName)
+	if path == "" {
+		return os.ErrNotExist
 	}
-	filePath := filepath.Join(m.backupDir, cleanName)
-
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("读取备份文件失败: %w", err)
+		return err
 	}
-
+	if err := verifyArchive(data); err != nil {
+		return err
+	}
 	var backup BackupData
 	if err := json.Unmarshal(data, &backup); err != nil {
-		return fmt.Errorf("解析备份数据失败: %w", err)
+		return ErrInvalidArchive
 	}
-
-	return database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for key, value := range backup.Settings {
-			if err := tx.Save(&database.Setting{Key: key, Value: value}).Error; err != nil {
-				return fmt.Errorf("恢复设置 %s: %w", key, err)
-			}
+	if _, err := time.Parse(time.RFC3339, backup.Timestamp); err != nil || backup.Settings == nil {
+		return ErrInvalidArchive
+	}
+	// SQL 参数可能包含私有 RSS 地址与凭据；恢复失败时仅对外返回不带数据值的诊断。
+	db := database.DB.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard})
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := m.restoreBackupSettings(tx, backup.Settings); err != nil {
+			return err
 		}
 		ids := make(map[uint]uint, len(backup.Subscriptions))
-		used := make(map[uint]bool, len(backup.Subscriptions))
+		claimedSubs := make(map[uint]bool, len(backup.Subscriptions))
 		for _, sub := range backup.Subscriptions {
-			oldID := sub.ID
-			if oldID == 0 || ids[oldID] != 0 {
-				return fmt.Errorf("备份中订阅 ID 无效或重复: %d", oldID)
+			sourceID := sub.ID
+			if _, duplicate := ids[sourceID]; duplicate || sourceID == 0 {
+				return fmt.Errorf("%w：订阅编号无效（%d）", ErrInvalidArchive, sourceID)
 			}
-			id, err := restoreSubscription(tx, sub, used)
+			model := tx.Unscoped().Model(&database.Subscription{})
+			q := model.Session(&gorm.Session{}).Where("season = ? AND COALESCE(rss_url, '') = ? AND COALESCE(subgroup_name, '') = ?", sub.Season, sub.RSSURL, sub.SubgroupName)
+			q = q.Where("COALESCE(source_name, '') = ? AND COALESCE(subgroup_id, '') = ?", sub.SourceName, sub.SubgroupID).
+				Where("COALESCE(filter_json, '') = ? AND COALESCE(excluded_keywords, '') = ?", sub.FilterJSON, sub.ExcludedKeywords).
+				Where("COALESCE(NULLIF(allowed_subgroups, ''), '[]') = COALESCE(NULLIF(?, ''), '[]')", sub.AllowedSubgroups)
+			switch {
+			case sub.MikanID != "":
+				q = q.Where("mikan_id = ?", sub.MikanID)
+			case sub.MetadataID != "" && sub.MetadataProvider != "":
+				q = q.Where("LOWER(metadata_provider) = LOWER(?) AND metadata_id = ?", sub.MetadataProvider, sub.MetadataID)
+			default:
+				q = q.Where("title_cn = ? AND COALESCE(bangumi_id, '') = ? AND COALESCE(mikan_id, '') = ? AND COALESCE(metadata_id, '') = ? AND LOWER(COALESCE(metadata_provider, '')) = LOWER(?)", sub.TitleCN, sub.BangumiID, sub.MikanID, sub.MetadataID, sub.MetadataProvider)
+			}
+			id, err := matchArchiveRow(model, q, sourceID, sub.CreatedAt, claimedSubs)
 			if err != nil {
-				return fmt.Errorf("恢复订阅 %d: %w", oldID, err)
+				return err
 			}
-			ids[oldID], used[id] = id, true
+			err = saveArchiveRow(tx, &sub, &sub.Model, id, backup.FormatVersion == archiveFormat)
+			if err != nil {
+				return err
+			}
+			ids[sourceID] = sub.ID
+			claimedSubs[sub.ID] = true
 		}
+		legacyProgress := make(map[uint]bool)
+		claimedEpisodes := make(map[uint]bool, len(backup.Episodes))
+		episodeIDs := make(map[uint]bool, len(backup.Episodes))
 		for _, ep := range backup.Episodes {
-			parentID, ok := ids[ep.SubscriptionID]
-			if !ok {
-				return fmt.Errorf("剧集 %d 引用了缺失的备份订阅 %d", ep.ID, ep.SubscriptionID)
+			if ep.ID == 0 || episodeIDs[ep.ID] {
+				return fmt.Errorf("%w：剧集编号无效（%d）", ErrInvalidArchive, ep.ID)
 			}
-			ep.SubscriptionID = parentID
-			if err := restoreEpisode(tx, ep); err != nil {
-				return fmt.Errorf("恢复剧集 %d: %w", ep.ID, err)
+			episodeIDs[ep.ID] = true
+			parent, ok := ids[ep.SubscriptionID]
+			if !ok {
+				return fmt.Errorf("%w：剧集缺少订阅（%d）", ErrInvalidArchive, ep.ID)
+			}
+			ep.SubscriptionID = parent
+			if ep.RecoverLegacyStatus() {
+				legacyProgress[parent] = true
+			}
+			ep.ReservationKey = nil
+			model := tx.Unscoped().Model(&database.Episode{}).Where("subscription_id = ?", parent)
+			q := model.Session(&gorm.Session{}).Where("season = ? AND number = ? AND COALESCE(torrent_hash, '') = ? AND COALESCE(source_file, '') = ?", ep.Season, ep.Number, ep.TorrentHash, ep.SourceFile)
+			if ep.TorrentHash == "" {
+				q = q.Where("COALESCE(torrent_url, '') = ? AND COALESCE(original_name, '') = ?", ep.TorrentURL, ep.OriginalName)
+			}
+			id, err := matchArchiveRow(model, q, ep.ID, ep.CreatedAt, claimedEpisodes)
+			if err != nil {
+				return err
+			}
+			err = saveArchiveRow(tx, &ep, &ep.Model, id, backup.FormatVersion == archiveFormat)
+			if err != nil {
+				return err
+			}
+			claimedEpisodes[ep.ID] = true
+		}
+		for _, id := range ids {
+			if _, err := database.SyncEpisodeProgress(tx.Unscoped(), id, legacyProgress[id]); err != nil {
+				return err
 			}
 		}
 		return nil
 	})
-}
-
-// 本地主键只用于在身份一致的候选中消歧，不能单独用来覆盖订阅。
-func restoreSubscription(tx *gorm.DB, sub database.Subscription, used map[uint]bool) (uint, error) {
-	if sub.AllowedSubgroups == "" {
-		sub.AllowedSubgroups = "[]"
-	}
-	query := tx.Unscoped().Where("COALESCE(bangumi_id, '') = ? AND season = ?", sub.BangumiID, sub.Season).
-		Where("COALESCE(source_name, '') = ? AND COALESCE(subgroup_id, '') = ? AND COALESCE(subgroup_name, '') = ?", sub.SourceName, sub.SubgroupID, sub.SubgroupName).
-		Where("COALESCE(rss_url, '') = ? AND COALESCE(filter_json, '') = ? AND COALESCE(excluded_keywords, '') = ?", sub.RSSURL, sub.FilterJSON, sub.ExcludedKeywords).
-		Where("COALESCE(NULLIF(allowed_subgroups, ''), '[]') = ?", sub.AllowedSubgroups)
-	if sub.MetadataID != "" {
-		query = query.Where("metadata_id = ? AND metadata_provider = ?", sub.MetadataID, sub.MetadataProvider)
-	} else if sub.BangumiID == "" {
-		query = query.Where("title_cn = ? AND COALESCE(title_jp, '') = ? AND COALESCE(title_en, '') = ? AND COALESCE(year, 0) = ?", sub.TitleCN, sub.TitleJP, sub.TitleEN, sub.Year)
-	}
-	var candidates []database.Subscription
-	if err := query.Find(&candidates).Error; err != nil {
-		return 0, err
-	}
-	var chosen uint
-	matches := 0
-	for _, candidate := range candidates {
-		if used[candidate.ID] {
-			continue
-		}
-		chosen = candidate.ID
-		matches++
-		if chosen == sub.ID {
-			matches = 1
-			break
-		}
-	}
-	if matches > 1 {
-		return 0, fmt.Errorf("订阅 %q 匹配多个本地记录", sub.TitleCN)
-	}
-	sub.ID = chosen
-	if err := tx.Unscoped().Save(&sub).Error; err != nil {
-		return 0, err
-	}
-	return sub.ID, nil
-}
-
-func restoreEpisode(tx *gorm.DB, ep database.Episode) error {
-	query := tx.Unscoped()
-	if ep.TorrentHash == "" {
-		query = query.Where("COALESCE(torrent_hash, '') = '' AND subscription_id = ? AND season = ? AND number = ? AND COALESCE(original_name, '') = ?", ep.SubscriptionID, ep.Season, ep.Number, ep.OriginalName)
-	} else {
-		query = query.Where("torrent_hash = ?", ep.TorrentHash)
-	}
-	var existing []database.Episode
-	if err := query.Limit(2).Find(&existing).Error; err != nil {
+	if err == nil || errors.Is(err, ErrInvalidArchive) {
 		return err
 	}
-	ep.ID = 0
-	if len(existing) > 0 {
-		if len(existing) != 1 || existing[0].SubscriptionID != ep.SubscriptionID {
-			return fmt.Errorf("剧集记录归属冲突")
-		}
-		ep.ID = existing[0].ID
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
-	if ep.Status == "completed" {
-		ep.ManualStatus = "completed"
-		ep.Status = "downloading"
-		if ep.FinalPath != "" {
-			ep.Status = "organized"
-		}
-	}
-	write := tx.Unscoped()
-	if ep.TorrentHash == "" {
-		// NULL 哈希可在不同剧集上共存；空字符串会触发全局唯一索引。
-		write = write.Omit("TorrentHash")
-	}
-	return write.Save(&ep).Error
+	return errors.New("恢复备份失败，请检查数据库后重试")
 }
 
-// DeleteBackup 删除指定备份文件
+// 同库按主键和创建时间原地恢复。跨库按来源匹配，原创建时间可区分重复条目。
+func matchArchiveRow(model, identity *gorm.DB, sourceID uint, created time.Time, claimed map[uint]bool) (uint, error) {
+	if !created.IsZero() && !claimed[sourceID] {
+		var count int64
+		if err := model.Session(&gorm.Session{}).Where("id = ? AND created_at = ?", sourceID, created).Count(&count).Error; err != nil {
+			return 0, err
+		}
+		if count > 0 {
+			return sourceID, nil
+		}
+	}
+	var candidates []struct {
+		ID        uint
+		CreatedAt time.Time
+	}
+	if err := identity.Select("id, created_at").Find(&candidates).Error; err != nil {
+		return 0, err
+	}
+	var match, exact uint
+	var available, exactCount int
+	for _, candidate := range candidates {
+		if claimed[candidate.ID] {
+			continue
+		}
+		available++
+		match = candidate.ID
+		if !created.IsZero() && candidate.CreatedAt.Equal(created) {
+			exactCount++
+			exact = candidate.ID
+		}
+	}
+	if exactCount == 1 {
+		return exact, nil
+	}
+	if available > 1 {
+		return 0, fmt.Errorf("%w：备份记录匹配不唯一（%d）", ErrInvalidArchive, sourceID)
+	}
+	return match, nil
+}
+
+// 新格式区分实际零值和历史版本中尚不存在的字段。必要时纠正 ORM 插入默认值。
+func saveArchiveRow[T comparable](tx *gorm.DB, row *T, model *gorm.Model, matched uint, exact bool) error {
+	if matched != 0 {
+		model.ID = matched
+		return tx.Unscoped().Session(&gorm.Session{SkipHooks: true}).Save(row).Error
+	}
+	id, err := unusedBackupID(tx, row, model.ID)
+	if err != nil {
+		return err
+	}
+	model.ID = id
+	original := *row
+	if err := tx.Create(row).Error; err != nil {
+		return err
+	}
+	if !exact {
+		return nil
+	}
+	inserted := *row
+	assigned := *model
+	*row = original
+	model.ID = assigned.ID
+	if model.CreatedAt.IsZero() {
+		model.CreatedAt = assigned.CreatedAt
+	}
+	if model.UpdatedAt.IsZero() {
+		model.UpdatedAt = assigned.UpdatedAt
+	}
+	if inserted == *row {
+		return nil
+	}
+	return tx.Unscoped().Model(row).Select("*").UpdateColumns(row).Error
+}
+
+// unusedBackupID 在同一事务中检查旧主键，跨库冲突时让 SQLite 分配新主键。
+func unusedBackupID(tx *gorm.DB, model any, id uint) (uint, error) {
+	if id == 0 {
+		return 0, nil
+	}
+	var count int64
+	if err := tx.Unscoped().Model(model).Where("id = ?", id).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	if count != 0 {
+		return 0, nil
+	}
+	return id, nil
+}
+
+// DeleteBackup 删除指定备份文件。
 func (m *BackupManager) DeleteBackup(fileName string) error {
-	cleanName := filepath.Base(fileName)
-	if cleanName != fileName || cleanName == "." || cleanName == "/" || cleanName == "\\" {
-		return fmt.Errorf("非法的文件名: %s", fileName)
+	path := m.GetBackupPath(fileName)
+	if path == "" {
+		return os.ErrNotExist
 	}
-	filePath := filepath.Join(m.backupDir, cleanName)
-	if err := os.Remove(filePath); err != nil {
-		return fmt.Errorf("删除备份文件失败: %w", err)
-	}
-	log.Printf("🗑️ 已删除备份: %s", cleanName)
-	return nil
+	return os.Remove(path)
 }
 
-// GetBackupPath 获取备份文件完整路径
+// GetBackupPath 仅返回已存在的普通备份文件。
 func (m *BackupManager) GetBackupPath(fileName string) string {
-	cleanName := filepath.Base(fileName)
-	if cleanName != fileName || cleanName == "." || cleanName == "/" || cleanName == "\\" {
+	if !backupName.MatchString(fileName) {
 		return ""
 	}
-	filePath := filepath.Join(m.backupDir, cleanName)
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	path := filepath.Join(m.backupDir, fileName)
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
 		return ""
 	}
-	return filePath
+	return path
 }

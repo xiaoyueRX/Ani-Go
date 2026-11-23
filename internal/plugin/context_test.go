@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -189,7 +190,7 @@ func (p *errorInitPlugin) Stop(bus core.EventBus) error {
 
 // 测试 Manager 对插件详细健康状态 (PluginState) 与错误信息的追踪
 func TestPluginManager_DetailedHealthAndErrorTracking(t *testing.T) {
-	setupTestDB(t)
+	db := setupTestDB(t)
 	bus := newTestBus()
 	mgr := NewManager(bus)
 
@@ -257,7 +258,11 @@ func TestPluginManager_DetailedHealthAndErrorTracking(t *testing.T) {
 		Enabled:   true,
 	}
 	mgr.allowPrivateWebhookForTest = false // 拦截私网地址
-	mgr.customPlugins = append(mgr.customPlugins, invalidWebhook)
+	data, err := json.Marshal([]PluginInfo{invalidWebhook})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storePluginConfig(t, db, "custom_plugins", string(data))
 
 	mgr.Load()
 

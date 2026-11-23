@@ -54,7 +54,8 @@ type trTorrent struct {
 	RateDownload   int64   `json:"rateDownload"`
 	RateUpload     int64   `json:"rateUpload"`
 	TotalSize      int64   `json:"totalSize"`
-	DownloadedEver int64   `json:"downloadedEver"`
+	SizeWhenDone   *int64  `json:"sizeWhenDone"`
+	LeftUntilDone  *int64  `json:"leftUntilDone"`
 	UploadedEver   int64   `json:"uploadedEver"`
 	UploadRatio    float64 `json:"uploadRatio"`
 	SecondsSeeding int64   `json:"secondsSeeding"`
@@ -62,22 +63,27 @@ type trTorrent struct {
 
 // 状态常量
 const (
-	trStatusStopped       = 0
-	trStatusCheckWait     = 1
-	trStatusCheck         = 2
-	trStatusDownloadWait  = 3
-	trStatusDownload      = 4
-	trStatusSeedWait      = 5
-	trStatusSeed          = 6
+	trStatusStopped      = 0
+	trStatusCheckWait    = 1
+	trStatusCheck        = 2
+	trStatusDownloadWait = 3
+	trStatusDownload     = 4
+	trStatusSeedWait     = 5
+	trStatusSeed         = 6
 )
 
 func trStatusString(status int) string {
 	switch status {
-	case trStatusStopped: return "stopped"
-	case trStatusCheckWait, trStatusCheck: return "checking"
-	case trStatusDownloadWait, trStatusDownload: return "downloading"
-	case trStatusSeedWait, trStatusSeed: return "seeding"
-	default: return "unknown"
+	case trStatusStopped:
+		return "stopped"
+	case trStatusCheckWait, trStatusCheck:
+		return "checking"
+	case trStatusDownloadWait, trStatusDownload:
+		return "downloading"
+	case trStatusSeedWait, trStatusSeed:
+		return "seeding"
+	default:
+		return "unknown"
 	}
 }
 
@@ -192,9 +198,14 @@ func (t *Transmission) callWithRetry(ctx context.Context, method string, args ma
 
 // Add 添加种子（支持 magnet URL 和 torrent URL）
 func (t *Transmission) Add(ctx context.Context, item core.TorrentItem, savePath string) error {
+	_, err := t.AddWithID(ctx, item, savePath)
+	return err
+}
+
+func (t *Transmission) AddWithID(ctx context.Context, item core.TorrentItem, savePath string) (string, error) {
 	// 磁盘空间熔断保护：在向下载器投递前执行熔断检查
 	if err := CheckDiskSpaceGuard(savePath); err != nil {
-		return err
+		return "", err
 	}
 
 	args := map[string]interface{}{
@@ -209,13 +220,22 @@ func (t *Transmission) Add(ctx context.Context, item core.TorrentItem, savePath 
 		args["download-dir"] = savePath
 	}
 
-	_, err := t.call(ctx, "torrent-add", args)
+	resp, err := t.call(ctx, "torrent-add", args)
 	if err != nil {
-		return fmt.Errorf("Transmission 添加种子失败: %w", err)
+		return "", fmt.Errorf("Transmission 添加种子失败: %w", err)
 	}
 
 	log.Printf("📥 [Transmission] 已添加下载: %s", item.Title)
-	return nil
+	var ids map[string]struct {
+		Hash string `json:"hashString"`
+	}
+	_ = json.Unmarshal(resp.Arguments, &ids)
+	for _, field := range []string{"torrent-added", "torrent-duplicate"} {
+		if h := ids[field].Hash; h != "" {
+			return h, nil
+		}
+	}
+	return item.InfoHash, nil
 }
 
 // List 获取所有下载任务
@@ -223,7 +243,7 @@ func (t *Transmission) List(ctx context.Context) ([]core.DownloadTask, error) {
 	args := map[string]interface{}{
 		"fields": []string{
 			"id", "hashString", "name", "downloadDir", "status", "percentDone",
-			"rateDownload", "rateUpload", "totalSize", "downloadedEver",
+			"rateDownload", "rateUpload", "totalSize", "sizeWhenDone", "leftUntilDone",
 			"uploadedEver", "uploadRatio", "secondsSeeding",
 		},
 	}
@@ -241,19 +261,32 @@ func (t *Transmission) List(ctx context.Context) ([]core.DownloadTask, error) {
 
 	tasks := make([]core.DownloadTask, 0, len(result.Torrents))
 	for _, tr := range result.Torrents {
+		size := tr.TotalSize
+		if tr.SizeWhenDone != nil {
+			size = *tr.SizeWhenDone
+		}
+		remaining := tr.LeftUntilDone
+		if size <= 0 || remaining != nil && (*remaining < 0 || *remaining > size) {
+			remaining = nil
+		}
+		done := int64(float64(size) * tr.PercentDone)
+		if remaining != nil {
+			done = size - *remaining
+		}
 		tasks = append(tasks, core.DownloadTask{
-			Hash:        tr.HashString,
-			Name:        tr.Name,
-			SavePath:    tr.DownloadDir,
-			Status:      trStatusString(tr.Status),
-			Progress:    float32(tr.PercentDone),
-			SpeedDown:   tr.RateDownload,
-			SpeedUp:     tr.RateUpload,
-			Size:        tr.TotalSize,
-			Done:        tr.DownloadedEver,
-			Uploaded:    tr.UploadedEver,
-			Ratio:       tr.UploadRatio,
-			SeedingTime: tr.SecondsSeeding,
+			Hash:           tr.HashString,
+			Name:           tr.Name,
+			SavePath:       tr.DownloadDir,
+			Status:         trStatusString(tr.Status),
+			Progress:       downloadProgress(tr.PercentDone, remaining),
+			RemainingBytes: remaining,
+			SpeedDown:      tr.RateDownload,
+			SpeedUp:        tr.RateUpload,
+			Size:           size,
+			Done:           done,
+			Uploaded:       tr.UploadedEver,
+			Ratio:          tr.UploadRatio,
+			SeedingTime:    tr.SecondsSeeding,
 		})
 	}
 	return tasks, nil

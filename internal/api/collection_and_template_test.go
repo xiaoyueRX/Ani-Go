@@ -205,3 +205,29 @@ func TestTestExtendedNotifier_WeChatAndSignal(t *testing.T) {
 		t.Errorf("未配置 Signal 参数时应报错")
 	}
 }
+
+func TestInvalidNotificationMaintenanceInput(t *testing.T) {
+	s, db := setupTestServerForNewFeatures(t)
+	entry := database.NotificationLog{Channel: "test"}
+	if err := db.Create(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"days=seven", "days=-1", "days=", "days=4&days=0"} {
+		r := httptest.NewRecorder()
+		s.handleClearNotificationLogs(r, httptest.NewRequest(http.MethodDelete, "/api/notifications/logs?"+query, nil))
+		if r.Code != http.StatusBadRequest {
+			t.Errorf("%s: HTTP %d", query, r.Code)
+		}
+	}
+	var count int64
+	if err := db.Unscoped().Model(&entry).Where("id = ?", entry.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("无效天数改变了投递记录: %d, %v", count, err)
+	}
+	for _, body := range []string{"", "{}", `{"event_type":"  "}`} {
+		r := httptest.NewRecorder()
+		s.handleResetNotificationTemplate(r, httptest.NewRequest(http.MethodPost, "/api/notifications/templates/reset", bytes.NewBufferString(body)))
+		if r.Code != http.StatusBadRequest {
+			t.Errorf("缺少事件的模板重置: HTTP %d", r.Code)
+		}
+	}
+}

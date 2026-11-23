@@ -1,86 +1,13 @@
-# Ani-Go Project Transfer Context
+# Development handoff index
 
-> This file helps quickly restore working context after migrating from a Windows dev machine to the home server PVE LXC cloud VS Code environment.
+[简体中文](TRANSFER_CONTEXT.md)
 
-## Quick Recovery (3 Steps)
+The original handoff supported an early move from a Windows workstation to a NAS development environment. Machine-specific network settings, paths and test results belonged to that installation. Use the following starting points for a fresh checkout.
 
-```bash
-git clone https://github.com/xiaoyueRX/Ani-Go.git
-cd Ani-Go
-cp .env.example .env
-# Edit .env and fill in actual configuration
-```
-
-## Current Status
-
-- **Branch**: main
-- **Phase 0**: Complete ✅
-- **Phase 1 (Core Engine MVP)**: Complete ✅ — Mikan RSS parser, qBittorrent client, scheduler, organizer, EventBus, 8 regex title parsing patterns
-- **Phase 2 (Historical Completion + Metadata)**: Complete ✅ — Mikan HTML parser (goquery), TMDB/BGM.tv providers, mirror/proxy architecture for GFW, supplement scheduler
-- **Phase 3 (Web UI + RESTful API + Docker)**: Complete ✅ — Vue3 frontend, RESTful API, go:embed frontend embedding, multi-stage Docker build, GitHub Actions CI/CD
-- **Phase 4 (AI + Multi-Downloader + Plugins + Multiple Sources)**: Complete ✅ — AI 4-protocol, qBittorrent/Transmission/Aria2, plugin system, dead torrent detection, Nyaa/ACGRIP/AnimeTosho + MultiSource
-- **Phase 5 (Multi-Platform Messaging + Task Parser)**: Complete ✅ — 16-platform notification, natural language task parser (regex + AI), EventBus auto-push
-- **Phase 6 (Data Migration)**: Complete ✅ — AutoBangumi SQLite import
-- **Phase 7 (Frontend Polish + Search Fix + Schedule + Mirror Speed Test)**: Complete ✅ — Mikan search fix, IconSax icons, UI polish, settings restructure, new season schedule (yuc.wiki + poster images + auto-refresh), search→subscribe flow (group selection + RSS resolution), PWA support, remember password, episode status management, Mikan mirror speed test (auto speed test on startup + manual speed test in settings)
-- **Phase 8 (i18n + Batch Operations + Comprehensive Audit)**: Complete ✅
-- **Phase 9 (v0.5.0 Stability Hardening + Plugin Management Loop)**: Complete ✅
-- **Phase 10 (v0.5.3 Notification Matrix + Downloader Hot-Swap + Regex Sandbox + Zero-Defect Audit)**: Complete ✅ — Unified 16-channel v2.NotifyManager with hot reload & plugin lifecycle, DynamicDownloader runtime hot-swap, 10-slot custom regex sandbox, line-by-line audit with all 10 bugs eliminated, go test -race 100% PASS
-- **Phase 11 (v0.5.4 Notification Delivery Logs & Analytics + Batch Download Controls & Modal + Live RSS Inspector)**: Complete ✅ — Async queue persistence with `NotificationLog` & delivery rate metrics dashboard, downloads center new modal & pause/resume all controls, 15s RSS feed inspector & parser debugger, go test -race 100% PASS
-- **Phase 12 (v0.6.0 Next-Gen Microkernel Architecture + Native MCP Server + 3-tier Disambiguation + Multi-Arch Docker)**: Complete ✅ — Microkernel 5-step pipeline constitution with physical power-cut isolation, native SSE+Bearer MCP Server with dynamic tool mounting, airdate matcher resolving 95% title ambiguities, Dockerfile upgraded to `golang:1.25-alpine` with successful GitHub Actions multi-arch builds & 7 platform binary releases, go test -race 100% PASS
-- **Tests**: All package unit tests and race detection (`go test -race ./...`) 100% PASS
-
-## Tech Stack
-
-- Go 1.25+
-- SQLite (pure Go driver `github.com/glebarez/sqlite`, no CGO)
-- GORM ORM
-- goquery (HTML parsing, Go equivalent of Jsoup)
-- Architecture: Interface-driven (Source / Downloader / MetadataProvider / Organizer / Notifier / EventBus)
-- Frontend: Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5
-- JWT auth with `golang-jwt/jwt/v5`, Bcrypt password hashing
-
-## Key Files
-
-| File | Description |
-|------|-------------|
-| `main.go` | Entry point, prints banner, loads config, initializes all modules |
-| `embed.go` | `//go:embed web/dist` frontend static file embedding |
-| `internal/core/interfaces.go` | 7 core interfaces + event constants + data types |
-| `internal/config/config.go` | Config loading (env vars take priority) + DB fallback (MergeFromSettings) |
-| `internal/database/db.go` | GORM initialization + AutoMigrate |
-| `internal/database/models.go` | 7 ORM models (Subscription, Episode, DownloadRecord, Setting, User, NotificationLog, ParserCache) |
-| `internal/source/mikan.go` | Mikan RSS parser + HTML detail page crawler |
-| `internal/source/multi.go` | Multi-source aggregator (Nyaa/ACGRIP/AnimeTosho) |
-| `internal/scheduler/scheduler.go` | Scheduled tasks: RSS polling, file organization, supplement scanning |
-| `internal/api/server.go` | HTTP API server with JWT auth middleware |
-| `internal/api/handlers.go` | RESTful API handlers: subscription CRUD, downloads, settings, parse, migration |
-| `internal/downloader/qbittorrent.go` | qBittorrent Web API client |
-| `internal/downloader/transmission.go` | Transmission RPC client |
-| `internal/downloader/aria2.go` | Aria2 JSON-RPC client |
-| `internal/metadata/tmdb.go` | TMDB API v3 metadata provider |
-| `internal/metadata/bangumi.go` | BGM.tv metadata provider |
-| `internal/notifier/` | 18-platform notification implementations |
-| `internal/ai/` | AI 4-protocol adapter (OpenAI/Google/Anthropic/Ollama) |
-| `internal/parser/` | Natural language task parser (regex + AI fallback) |
-| `internal/plugin/` | Plugin system (built-in lifecycle + custom Webhook; script type not implemented) |
-| `internal/migrate/` | AutoBangumi data migration |
-| `AGENTS.md` / `AGENTS_EN.md` | AI assistant guidelines (CN/EN) |
-| `CLAUDE.md` | Claude Code guidance |
-| `docs/DEVELOPMENT_PLAN.md` | Full development roadmap (CN/EN) |
-| `docs/PROJECT_CONTEXT.md` | Project core memory (CN/EN) |
-
-## Key Constraints
-
-- Tokens/passwords strictly must NOT be hardcoded; must use env vars
-- File encoding: UTF-8 without BOM
-- Database driver: must use `github.com/glebarez/sqlite`
-- Go source comments in Chinese, documentation bilingual (CN + EN)
-- New features must implement corresponding interfaces
-- GFW environment: use `GOPROXY=https://goproxy.cn,direct`, mirror domains configured for Mikan/BGM/TMDB
-
-## Server Environment
-
-- PVE 9.1 → fnOS Docker host
-- Storage: `/vol2/1000/TV/Media/番剧` (TV) / `/vol2/1000/TV/Media/剧场版` (Movie)
-- Network: Lucky v2.27.2 reverse proxy, HTTPS ports 16601/50929
-- Cross-subnet LAN broadcast prohibited; must go through Lucky reverse proxy or internal tunnel
+| Task | Starting point |
+| --- | --- |
+| Build and run for the first time | [Quick start](../README_EN.md#build-from-source), [repository conventions](../AGENTS_EN.md) |
+| Check the deployed version, mounts or credentials | [Deployment](05_DEPLOYMENT_EN.md), [example environment](../.env.example) |
+| Investigate a subscription, download or organization issue | [Pipeline](01_ARCHITECTURE_EN.md), [episode matching](04_AUTOPARSER_SPEC.md) |
+| Develop an extension or connect a client | [Plugin authoring](02_PLUGIN_SPEC_EN.md), [MCP](03_MCP_SPEC_EN.md) |
+| Trace project decisions and current scope | [Project background](PROJECT_CONTEXT_EN.md), [milestones](DEVELOPMENT_PLAN_EN.md), [release history](../CHANGELOG.md) |

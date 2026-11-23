@@ -94,6 +94,10 @@ func NewNFOScraperPlugin() *NFOScraperPlugin {
 	}
 }
 
+func (*NFOScraperPlugin) Dependencies() []core.ServiceType {
+	return []core.ServiceType{core.ServiceEventBus}
+}
+
 func (p *NFOScraperPlugin) GetInfo() PluginInfo {
 	return PluginInfo{
 		ID:          "nfo_scraper",
@@ -192,6 +196,10 @@ func (p *NFOScraperPlugin) handleFileOrganized(ev core.Event, pctx PluginContext
 	}
 
 	anime := extractAnimeFromPayload(payload)
+	// 有来源信息时，只有 Bangumi.tv 的条目标识能写入 Bangumi 节点。
+	if anime.Provider != "" && !strings.EqualFold(anime.Provider, "BGM.tv") {
+		anime.ID = ""
+	}
 	episode := extractEpisodeFromPayload(payload)
 	runCtx := pctx.Context()
 

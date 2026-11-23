@@ -22,6 +22,10 @@ type MetadataMappingPlugin struct {
 	activePctx PluginContext
 }
 
+func (*MetadataMappingPlugin) Dependencies() []core.ServiceType {
+	return []core.ServiceType{core.ServiceEventBus}
+}
+
 func (p *MetadataMappingPlugin) GetInfo() PluginInfo {
 	return PluginInfo{
 		ID:          "metadata-mapping",
@@ -163,7 +167,7 @@ func (p *MetadataMappingPlugin) mapOne(parentCtx context.Context, subID uint, pc
 	}
 
 	var sub database.Subscription
-	if err := gormDB.First(&sub, subID).Error; err != nil || sub.BangumiID == "" {
+	if err := gormDB.First(&sub, subID).Error; err != nil || sub.BGMSubjectID() == "" {
 		return
 	}
 	if sub.TMDBID != "" && sub.IMDBID != "" {
@@ -199,7 +203,7 @@ func (p *MetadataMappingPlugin) mapOne(parentCtx context.Context, subID uint, pc
 	mapper := metadata.NewMapper(tmdbProvider)
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
-	tmdb, imdb := mapper.MapBangumiToExternal(ctx, sub.BangumiID, sub.TitleCN, sub.Year)
+	tmdb, imdb := mapper.MapBangumiToExternal(ctx, sub.BGMSubjectID(), sub.TitleCN, sub.Year)
 
 	if !p.isActive(parentCtx) {
 		return

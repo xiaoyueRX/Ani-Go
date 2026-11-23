@@ -21,6 +21,34 @@ type GovernanceDeps struct {
 	Version       string
 }
 
+// 插件列表与启停回执使用同一份运行状态；启用开关本身不能证明已启动。
+func formatPluginStatus(p plugin.PluginInfo) string {
+	switch p.Status {
+	case plugin.StateActive:
+		return "🟢 运行中 (active)"
+	case plugin.StateInactive:
+		return "⚪ 已停用 (inactive)"
+	case plugin.StateLoading:
+		return "🟡 加载中 (loading)"
+	case plugin.StateDisposing:
+		return "🟠 正在销毁 (disposing)"
+	case plugin.StateSuspended:
+		status := "🟡 已挂起 (suspended)"
+		if len(p.MissingDependencies) > 0 {
+			missing := make([]string, 0, len(p.MissingDependencies))
+			for _, dep := range p.MissingDependencies {
+				missing = append(missing, string(dep))
+			}
+			status += "，正在等待服务 " + strings.Join(missing, ", ")
+		}
+		return status
+	case plugin.StateError:
+		return strings.TrimSpace("🔴 异常 (error) " + p.Error)
+	default:
+		return "状态未知"
+	}
+}
+
 // RegisterGovernanceTools 注册系统与插件治理工具
 func (s *Server) RegisterGovernanceTools(deps GovernanceDeps) {
 	// 1. list_plugins
@@ -44,24 +72,11 @@ func (s *Server) RegisterGovernanceTools(deps GovernanceDeps) {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("🧩 插件列表 (共 %d 个)：\n\n", len(plugins)))
 		for _, p := range plugins {
-			var status string
-			if p.Status == plugin.StateError || (p.Enabled && p.Error != "") {
-				status = fmt.Sprintf("🔴 异常隔离 (Error: %s)", p.Error)
-			} else if p.Status == plugin.StateLoading {
-				status = "🟡 加载中 (Loading)"
-			} else if p.Status == plugin.StateDisposing {
-				status = "🟠 正在销毁 (Disposing)"
-			} else if p.Enabled || p.Status == plugin.StateActive {
-				status = "🟢 已启用"
-			} else {
-				status = "⚪ 已停用 (零协程/零资源消耗)"
-			}
-
 			pluginType := "内建功能"
 			if !p.IsBuiltIn {
 				pluginType = "Webhook 联动"
 			}
-			sb.WriteString(fmt.Sprintf("• **%s** (`%s`) - %s [%s]\n", p.Name, p.ID, status, pluginType))
+			sb.WriteString(fmt.Sprintf("• **%s** (`%s`) - %s [%s]\n", p.Name, p.ID, formatPluginStatus(p), pluginType))
 			if p.Description != "" {
 				sb.WriteString(fmt.Sprintf("  描述: %s\n", p.Description))
 			}
@@ -116,25 +131,20 @@ func (s *Server) RegisterGovernanceTools(deps GovernanceDeps) {
 			return ErrorResult("参数不合法: 需要提供有效的 plugin_id 和布尔型 enabled"), nil
 		}
 
-		if enabled {
-			err = deps.PluginManager.Enable(pluginID)
-		} else {
-			err = deps.PluginManager.Disable(pluginID)
-		}
-
-		if err != nil {
+		if err := deps.PluginManager.TogglePlugin(pluginID, enabled); err != nil {
 			return ErrorResult(fmt.Sprintf("切换插件状态失败: %v", err)), nil
 		}
 
-		action := "启用"
-		if !enabled {
-			action = "停用"
+		for _, p := range deps.PluginManager.List() {
+			if p.ID == pluginID {
+				message := fmt.Sprintf("插件 %s 的当前状态为 %s", pluginID, formatPluginStatus(p))
+				if p.Status == plugin.StateError {
+					return ErrorResult(message), nil
+				}
+				return TextResult(message), nil
+			}
 		}
-		st, lastErr := deps.PluginManager.GetPluginStatus(pluginID)
-		if enabled && (st == plugin.StateError || lastErr != "") {
-			return TextResult(fmt.Sprintf("⚠️ 已标记启用插件 %s，但遇到初始化异常: %s (状态: %s)", pluginID, lastErr, st)), nil
-		}
-		return TextResult(fmt.Sprintf("✅ 已成功%s插件: %s (当前状态: %s)", action, pluginID, st)), nil
+		return ErrorResult("插件已不在当前清单中"), nil
 	})
 
 	// 3. get_system_status

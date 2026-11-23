@@ -1,198 +1,22 @@
-# Ani-Go 开发日程与计划
+# Ani-Go 开发里程碑与当前工作
 
-## 🎯 核心定位与技术栈
-- **开发语言**：Go 语言（单二进制、启动快、内存占用低）
-- **部署方式**：Docker 一键部署，镜像体积控制在 ~20MB；支持 Windows, Mac, Linux, Docker, Go 二进制等多种部署方法。
-- **开源计划**：发布到 GitHub，采用 MIT License
-- **学习导向**：面向编程小白，通过 AI 辅助边做边学；代码必须模块化、注释清晰、概念可解释。
+[English](DEVELOPMENT_PLAN_EN.md) · [版本发布记录](../CHANGELOG.md)
 
-## 📥 订阅与资源获取
-- **Mikan 个人 RSS 自动订阅**：只需填入一个个人 RSS URL（带 Token），系统自动解析并同步 Mikan 网页端的所有订阅。
-- **手动搜索订阅**：Web UI 内置 Mikan 搜索功能，可手动搜番、选字幕组、一键订阅。
-- **多资源站支持**：以 Mikan 为主，后续扩展 Nyaa、ACG.RIP、Anime Tosho 等。
-- **字幕组识别与过滤**：能识别同一番剧的不同字幕组资源，支持设置优先级或手动指定下载某个字幕组。
+## 已发布的里程碑
 
-## ⬇️ 下载与文件整理
-- **多下载器支持**：qBittorrent（必须）、Transmission、Aria2，后续可扩展 115 网盘等。
-- **历史全量补全（核心痛点）**：自动检测已下载集数 < 总集数时，爬取 Mikan 番剧详情页获取全量历史种子，按字幕组过滤、去重后批量下发下载。
-- **智能文件整理**：自动创建完整目录结构（如 `番剧名 (年份)/Season 1/`、`Specials/`、剧场版独立目录等）。
-- **路径与命名完全自定义**：提供模板变量系统（如 `{title_cn}`, `{title_en}`, `{year}`, `{season:02}`, `{ep:02}`, `{ext}` 等），用户可自行配置以完美适配现有 fnOS/Jellyfin 目录结构。
-- **媒体库兼容**：整理后的文件与目录必须能被 Jellyfin / fnOS 直接刮削识别，无需二次处理。
+| 阶段 | 交付内容 |
+| --- | --- |
+| 项目早期至 v0.5.x | 建立 RSS 订阅、历史补全、多个下载器与资源站、媒体整理、Web 管理、数据迁移和通知。v0.5.x 陆续加入下载器切换、通知记录与 RSS 检查工具。 |
+| v0.6.0–v0.6.1 | 引入原生 MCP 服务、放送日期辅助消歧；后续扩展通知模板、微信与 Signal 通知及 TMDB 系列归并。 |
+| v0.6.2 | 引入 Go 插件作用域、可撤销的资源登记及生命周期状态。命名、过滤和解析的拦截接口在核心定义；实际接入点以当前架构说明为准。 |
+| v0.7.0 | 适配 qBittorrent 5.x 的暂停/恢复端点，更新 SSE 处理及多平台发布工作流。 |
 
-## 🤖 AI 与大模型集成
-- **可选开关**：AI 为可选模块，关闭后所有核心功能必须正常运行。
-- **多模型兼容**：支持 OpenAI 兼容 API、Gemini、本地 Ollama 等市面主流 AI。
-- **AI 辅助分类**：自动识别 TV、剧场版、OVA、特别篇、特典等类型。
-- **系列智能归并**：跨资源站、不同季、剧场版/OVA 能自动识别为同一系列，统一归入同一父目录并自动分季。
-- **自然语言任务解析**：通过 QQ/微信/飞书/钉钉/Telegram 等平台发消息（如"订阅鬼灭之刃第二季"），AI 解析为结构化追番任务并自动创建订阅。
-- **规则兜底**：无 AI 时通过 TMDB Collection/Series ID、标题标准化、BGM.tv 关联等规则实现基础归并。
+具体版本、归档和校验文件见 [GitHub Releases](https://github.com/xiaoyueRX/Ani-Go/releases)。
 
-## 🧩 架构设计与扩展性
-- **接口驱动（Interface-First）**：核心模块全部抽象为接口（Source / Downloader / Metadata / Organizer / Notifier），主程序只依赖协议不依赖实现。
-- **高度可定制框架**：配置驱动行为，处理管道（Pipeline）步骤可插拔、顺序可调、单个步骤可替换。
-- **插件系统（V3 重点）**：全面开放、自定义程度高；支持第三方插件仓库、在线浏览安装、提供完整的插件开发文档与 SDK。
-- **事件总线（EventBus）**：插件/外部脚本可监听下载开始、完成、整理完成等事件并触发自定义逻辑。
+## 本源码树
 
-## 🌐 Web UI 与交互体验
-- **番剧展示**：显示动漫封面、名称、简介、集数进度条。
-- **核心页面**：仪表盘、订阅管理、下载队列、设置页、插件管理。
-- **元数据双源**：同时支持 TMDB 与 BGM.tv，用户可在设置中自行切换首选源。
-- **手动控制**：支持暂停/恢复订阅、手动触发单部番剧的历史补全、切换字幕组。
-- **超时警告与建议**：如果一个番剧添加后超过 2 天仍未下载完成（可能是种子死链），系统将在该番剧的卡片上显示错误提示，并建议用户更换字幕组。
+- **下载与整理**：按订阅读取 RSS，历史补全遵守标题与字幕组过滤；下载记录、合集文件与媒体整理共享季集信息。核对下片和整理时，应同时检查下载器报告的文件与最终媒体路径。[系统架构](01_ARCHITECTURE.md)
+- **插件与 MCP**：官方归属、受管服务依赖、挂起/恢复、JSON 声明式面板及官方 115 磁力云下载已接入源码。插件控制器可返回缺失依赖。部署中可用的功能由所运行的构建决定。[插件作者指南](02_PLUGIN_SPEC.md) · [MCP 工具](03_MCP_SPEC.md)
+- **发布验证**：前端回归和构建、Go 竞态测试及编译在 CI 中执行。容器镜像和平台归档有独立发布工作流。[CI](../.github/workflows/ci.yml) · [镜像构建](../.github/workflows/docker-build.yml) · [发行包](../.github/workflows/release.yml)
 
-## 🛠️ 开发、部署与安全规范
-- **敏感信息隔离**：Mikan Token、下载器密码等严禁硬编码，必须通过环境变量或 `.env` 注入。
-- **多端同步开发**：基于 Git 工作流，换电脑可通过 `git clone` + 阅读 `docs/PROJECT_CONTEXT.md` 快速恢复完整上下文。
-- **CI/CD 自动化**：预留 GitHub Actions 流水线，Push 代码后自动编译、构建多架构 Docker 镜像并推送到 GHCR。
-- **编码规范**：所有源文件统一 UTF-8（无 BOM），避免 Windows PowerShell 默认编码导致的乱码。
-- **数据迁移**：如果方便，加入从原版 ani-rss 迁移数据的功能（作为可选增强功能）。
-
----
-
-## 📅 开发日程 (Roadmap)
-
-### Phase 0: 项目初始化与架构搭建
-- [x] 确定项目名称 (`Ani-Go`) 和技术栈 (Go + SQLite + GORM)。
-- [x] 初始化 Go 模块与目录结构。
-- [x] 定义核心接口 (`internal/core/interfaces.go`)。
-- [x] 实现配置加载系统 (环境变量优先)。
-- [x] 实现数据库初始化与 ORM 模型。
-- [x] 建立 GitHub 仓库并完成首次代码 Push。
-- [x] 创建项目记忆文档 (`docs/PROJECT_CONTEXT.md`)。
-- [x] **参考开源代码**：以 GitHub 上的 `AutoBangumi` 和原版 `ani-rss` 等项目为底，参考其源码，避免重复造轮子。
-- [x] **中英双语文档**：所有 `.md` 和 `docx` 文档生成纯中文和纯英文两份版本，方便国际用户。
-- [x] **中文注释规范**：所有 Go 源码注释使用中文。
-
-### Phase 1: 核心引擎实现 (MVP)
-- [x] **Mikan RSS 解析器**：实现 `Source` 接口，解析 Mikan 个人 RSS，自动发现订阅。
-- [x] **qBittorrent 客户端集成**：实现 `Downloader` 接口，与 qBittorrent API 交互。
-- [x] **基础调度器**：实现定时轮询 RSS 并下发下载任务。
-- [x] **基础文件整理**：实现简单的重命名和目录创建逻辑。
-- [x] **EventBus 事件总线**：实现发布/订阅模式，支持模块间松耦合适信。
-- [x] **标题解析增强**：8 种正则模式覆盖 Vol/【】/[]/SxxExx/.5/版本号/合集/特别篇，参考 ani-rss 和 AutoBangumi。
-
-### Phase 2: 历史补全与元数据
-- [x] **Mikan 全页爬取**：实现历史全量补全逻辑（核心创新点）。
-- [x] **TMDB/BGM.tv 集成**：实现 `MetadataProvider` 接口，获取番剧元数据。
-- [x] **GFW 镜像/代理支持**：Mikan、BGM.tv、TMDB 多镜像域名自动回退，GitHub 代理配置。
-- [x] **补全调度器**（参考 AutoBangumi）：未完结订阅自动检测集数缺失，爬取历史种子补全。
-- [x] **死种超时告警**（参考 AutoBangumi）：N 天未完成下载自动标记警告，默认阈值 48 小时，可通过设置 `stall_timeout_hours` 调整。
-- [x] **用户自定义正则**（参考 AutoBangumi）：允许高级用户通过设置表 `custom_regex_N` 添加自定义标题解析规则，与内置 8 种模式并行生效，自定义规则优先匹配。
-
-### Phase 3: Web UI 与部署
-- [x] **基础 Web UI**：Vue3 + Vite + DaisyUI 实现登录页、仪表盘、订阅管理、下载队列、设置页。
-- [x] **RESTful API**：订阅 CRUD（GET/POST/PUT/DELETE）、下载队列、设置管理、补全触发。
-- [x] **Docker 部署**：多阶段 Dockerfile（Node → Go → Alpine）+ docker-compose.yml 一键启动。
-- [x] **CI/CD**：配置 GitHub Actions 自动构建多架构（amd64/arm64）镜像并推送到 GHCR。
-
-### Phase 4: 进阶功能 (V2/V3)
-- [x] **AI 辅助模块**：集成大模型进行分类和系列归并。支持 OpenAI / Gemini / Claude / Ollama 四大协议，自动检测端点。
-- [x] **多下载器**：qBittorrent / Transmission / Aria2 已实现，环境变量切换。
-- [x] **插件系统**：EventBus 驱动的插件机制，内建插件生命周期管理 + 自定义 Webhook 插件与 API 管理端点（`script` 类型与 `ConfigSchema` 自描述为规划项，尚未实现）。
-- [x] **死种超时检测**：批量查询超时剧集，前端卡片警告，阈值可配置。
-- [x] **用户自定义正则**：数据库存储自定义解析规则，优先级高于内置模式，API 重载。
-- [x] **多资源站**：Nyaa / ACG.RIP / AnimeTosho + MultiSource 聚合器，去重合并结果。
-- [x] **数据迁移工具**：支持从原版 AutoBangumi 导入数据。
-
-### Phase 5: 外部消息平台与 AI 通知系统
-- [x] **多平台消息接入**：统一 `Notifier` 接口，EventBus 驱动自动推送，共 18 个平台 + `MultiNotifier` 聚合广播：
-  - **国内 IM**：
-    - [x] **企业微信**：Webhook bot
-    - [x] **飞书/Lark**：Webhook bot
-    - [x] **钉钉**：Webhook bot
-    - [x] **QQ**：OneBot 协议（NapCat/go-cqhttp/Lagrange/LLOneBot）
-    - [x] **微信公众号**：客服消息 API（`cgi-bin/message/custom/send`）与模板消息 API（`cgi-bin/message/template/send`），支持 Token 失效自动刷新重试与短有效期保护（环境变量 `WECHAT_APP_ID` / `WECHAT_APP_SECRET` / `WECHAT_USER_ID` / `WECHAT_TEMPLATE_ID`）。
-  - **国际 IM**：
-    - [x] **Telegram**：Bot API + Markdown
-    - [x] **Discord**：Webhook
-    - [x] **Slack**：Webhook + Block Kit
-    - [x] **LINE**：Messaging API / push message
-    - [x] **WhatsApp**：Meta Cloud API（graph.facebook.com）
-    - [x] **Signal**：signal-cli REST API（`{SIGNAL_API_URL}/v2/send`，URL 协议验证、接收人清洗去重与 4xx 错误详情提取，环境变量 `SIGNAL_API_URL` / `SIGNAL_SENDER` / `SIGNAL_RECIPIENTS`）。
-  - **Push 推送服务**：
-    - [x] **邮件**：SMTP 发通知（goroutine + context 超时）
-    - [x] **Server酱**：HTTP API（微信推送）
-    - [x] **Bark**：HTTP API（iOS 推送）
-    - [x] **Pushover**：HTTP API
-    - [x] **Gotify**：HTTP API（自托管）
-    - [x] **ntfy**：HTTP API（自托管开源推送）
-    - [x] **Matrix**：Client-Server API / PUT message
-- [x] **任务解析器（双重模式）**：
-  - [x] **规则引擎（默认）**：基于正则 + 关键词匹配，零依赖，无 AI 也能正常工作。内置订阅/搜索/状态等常见命令模式。
-  - [x] **AI 增强（可选）**：接入 OpenAI/Gemini/Ollama 大模型，准确率更高（理解模糊表达、纠错同义词），关闭 AI 后自动回退规则引擎。
-- [x] **通知管理器**：监听 EventBus 事件（下载完成/失败/补番完成等），通过上述所有平台推送通知。
-- [x] **通知模板系统**：安全模板引擎（杜绝 panic）、三级继承覆盖（事件+渠道 -> 事件默认 -> 系统默认）、结构化上下文、内置模板函数（`default`/`upper`/`lower`/`truncate`）、数据库持久化（`NOTIFY_TEMPLATES_JSON`）与 API 实时预览/CRUD。
-- [x] **全平台集成测试与渠道加固**：全 18 渠道 mock 与集成测试覆盖，配置优先级严格对齐（环境变量 > 数据库），多渠道并行分发与安全降级。
-
-### Phase 6: 数据迁移 ✅
-- [x] **AutoBangumi / ani-rss SQLite 导入**：`internal/migrate` 解析历史数据库并导入订阅与剧集，通过 `POST /api/migrate` 对外暴露。
-- [x] **迁移安全加固**：拒绝绝对路径与相对路径穿越，迁移完成后主动关闭源库文件句柄，避免句柄泄漏。
-
-### Phase 7: 前端美化 + 搜索修复 + 新番时间表 + 镜像测速 ✅
-- [x] **Mikan 中文搜索修复**：中文关键词 URL 编码，兼容 Mikan 改版后的 CSS 选择器。
-- [x] **图标系统**：引入 Iconsax Linear 图标组件替换全部 inline SVG 与 emoji（后续在 Phase 8 迁移至 Lucide）。
-- [x] **UI 全面美化**：登录页、侧栏导航、订阅卡片、下载列表、设置页整体重构。
-- [x] **设置页重构**：纵向侧边栏标签、区域分组、配置状态徽标、密码显隐切换。
-- [x] **新番时间表**：接入 yuc.wiki 数据源，按星期分组展示海报，30 分钟自动刷新。
-- [x] **搜索 → 订阅全流程**：字幕组选择弹窗 + RSS URL 自动解析 + 搜索缓存。
-- [x] **PWA 支持**：manifest.json + service worker，可安装为独立应用。
-- [x] **登录页记住密码**：localStorage 保存并在下次访问自动填充。
-- [x] **剧集状态管理**：`PUT /api/episodes/{id}/status` 手动切换状态。
-- [x] **Mikan 镜像测速**：启动自动测速择优 + 设置页手动测速。
-
-### Phase 8: 国际化 + 批量操作 + 代码审查 ✅
-- [x] **国际化 (i18n)**：中英文双语完整支持，`web/src/locales/zh.ts` + `en.ts`，语言切换即时生效，覆盖所有页面。
-- [x] **Lucide 图标迁移**：从 IconSax 迁移到 `lucide-vue-next`，统一图标风格，删除旧组件。
-- [x] **新手引导弹窗**：`OnboardingModal` 首次登录引导，帮助新用户快速上手。
-- [x] **更新日志弹窗**：`ChangelogModal` 内置版本变更查看 + `useVersion` 版本检测与更新提醒。
-- [x] **批量订阅操作**：批量创建（`POST /api/subscriptions/batch`）、批量删除（`POST /api/subscriptions/batch-delete`）、批量恢复（`POST /api/subscriptions/batch-restore`）。
-- [x] **剧集字幕组名称**：剧集 API 新增 `group_name` 字段，前端显示字幕组归属。
-- [x] **前端全面重构**：Schedule / Subscriptions / Settings / Search / SubscriptionDetail / Layout / Login / Downloads 八大页面重构，新增 SubscriptionCard / SubscriptionEditForm / ScheduleCard 组件。
-- [x] **CORS 安全加固**：Origin 白名单从配置读取，非 Debug 模式禁用通配符。
-- [x] **设置页密码脱敏**：API 返回时隐藏敏感密码字段。
-- [x] **EventBus 可靠性**：Subscribe 返回 ID 精确 Unsubscribe、Publish handler 5s 超时保护。
-- [x] **并发安全修复**：Transmission sync/atomic 竞态、MikanSource RWMutex 保护。
-- [x] **JWT Secret 持久化**：密钥存入 SQLite settings 表，重启不丢失。
-- [x] **13 项代码审查修复**：CORS / EventBus / Transmission / Schedule N+1 / MikanSource RWMutex / JWT 持久化 / MultiNotifier 错误聚合 / Shell 审计日志 / LRU 搜索缓存 / Logger 句柄关闭 / QBittorrent Hash / 空 Hash 唯一约束 / 调度器死循环。
-
-### Phase 9: v0.5.0 稳定性加固 + 插件管理闭环 ✅
-- [x] **下载逻辑解耦**：修复 `pollRSS` 中的下载逻辑，匹配后立即下载，不再等待 BangumiID 补全，解决补全过程中的下载阻塞。
-- [x] **多渠道元数据补偿**：新增 Mikan 详情页爬虫逻辑，在 Bangumi/TMDB API 补全失败时自动抓取 Mikan 的 `data-bangumiid` 和海报封面 URL。
-- [x] **备份恢复零值覆盖**：修复备份恢复时 `Enabled: false` 被跳过的缺陷，使用 `Select("*")` 强制更新所有字段。
-- [x] **时间表交互加固**：增加跳转前的订阅存在性验证 API 检查，处理已删除订阅的跳转异常，提升 UI 稳定性。
-- [x] **类型断言 Panic 修复**：修复通知管理器中对 `data["size"]` 的非安全类型断言导致的崩溃。
-- [x] **死种超时字段补全**：剧集模型新增 `StallTimeoutHours`，支持单部番剧覆盖全局设置。
-- [x] **插件管理 Tab 打通**：设置页新增插件 Tab，打通 `GET /api/plugins` 与 `POST /api/plugins/reload` 热重载功能。
-- [x] **批量补全异步化**：重构 `handleSupplementAll`，采用 goroutine 异步触发补全并预过滤，解决海量数据下的 HTTP 超时与性能瓶颈。
-- [x] **i18n 补完**：补全插件管理、备份恢复等新增页面的中英文翻译。
-
-### Phase 10: v0.5.2 ~ v0.5.4 架构优化与全量审计清零 ✅
-- [x] **多下载器动态透明分发**：实现 `DynamicDownloader`，支持 qBittorrent、Transmission、Aria2 运行时免重启无缝热切换与健康探测。
-- [x] **GORM 预编译与数据库批处理优化**：启用 `PrepareStmt: true` 与 WAL 优化，大幅降低高并发查询时数据库 CPU 占用。
-- [x] **配置合并三级优先定律重构**：重写 `MergeFromSettings`，修复默认值强制锁死用户配置的隐患，支持双别名兼容。
-- [x] **全包逐行审计与缺陷清零**：全面修复 qB 并发 Data Race、Aria2 磁盘文件泄漏、TMDB 纯数字 ID 404、整理器路径越界等 10 项缺陷，`go test -race ./...` 100% 通过。
-
-### Phase 11: v0.6.0 次世代微内核架构与全生态加固 ✅
-- [x] **微内核与插件物理断电隔离**：确立五步主干流水线宪法，周边全部插件化，关停即 0 协程、0 网络、0 冗余日志。
-- [x] **原生 MCP Server 协议网关**：内置 SSE + Bearer 鉴权 MCP 服务端，暴露 6 项业务工具与 4 项系统治理工具（插件私有工具动态挂载为规划项，当前尚未实现，详见 `docs/02_PLUGIN_SPEC.md` 第 6 节）。
-- [x] **全自动三级消歧引擎**：首创本地正则 ➔ Bangumi 官方单集放送时间戳比对 ➔ AI 上下文兜底三级漏斗，无感化解 95% 歧义，配备 Token 终身唯一缓存与防爆盾。
-- [x] **Go 1.25+ 与多架构 Docker 流水线**：全面升级 Dockerfile 至 `golang:1.25-alpine` 原生交叉编译，GitHub Actions CI/CD 多架构构建（amd64/arm64）全绿通过并推送到 GHCR，发布 7 大架构二进制 GitHub Release。
-
-### Phase 12: v0.6.1 系列智能归并、通知模板矩阵与全栈深度加固 ✅
-- [x] **TMDB Collection 自动归并服务**：同系列自动识别并分配统一 `SeriesID`，基于 Union-Find 并查集算法与 TMDB 影视元数据，支持多季/剧场版跨季度合集聚合，保留用户自定义 `SeriesID`。
-- [x] **通知模板系统与微信/Signal深度加固**：无 panic 模板引擎、渠道别名继承、微信双模式消息与 Token 自愈、Signal 协议严格校验、结构化 Data 注入。
-- [x] **做种生命周期回收与磁盘急停深度加固**：做种达标安全回收任务，硬链接 SameFile 零 I/O 校验，跨平台剩余空间熔断保护。
-- [x] **原生 MCP Server 生产级安全审计**：SSE 会话超时清理淘汰 (`EvictStaleSessions`)、常数时间 Token 鉴权、敏感系统配置强拦截、nil 服务全方位防护。
-- [x] **三级消歧漏斗深度防毒与边缘覆盖**：年份与技术标签混淆集数深度清洗、v2/v3及小数集解析、时区容差窗口对齐、AI 每日配额与防投毒缓存。
-
-### Phase 13: v0.6.2 DSH/Cordis 现代插件架构演进与全仓库深度重审 ✅
-- [x] **DSH / Cordis 可逆副作用引擎**：引入 `PluginContext` 闭包栈与 `OnDispose(fn)` 机制，插件停用与重载时以 LIFO 逆序自动销毁事件监听与挂载资源，彻底消除协程泄漏与悬挂监听。
-- [x] **微内核流水线拦截器双轨架构**：在 `internal/core/interfaces.go` 与 `hooks.go` 引入强类型流水线拦截器（`OrganizeInterceptor`、`FilterInterceptor`、`ParseInterceptor`），彻底剥除 `TVOrganizer` 对 `internal/plugin` 的反向依赖。
-- [x] **EventBus 稳定性与高并发加固**：消除 `time.After` 引起的运行时计时器泄漏（改用 `time.NewTimer` + Stop/Drain），修复 `Unsubscribe` 切片竞态，引入 128 并发信号量池与弹性溢出派发机制，100% 保障零丢事件。
-- [x] **插件健康状态机与多渠道管理体验**：引入六状态机（`Inactive`, `Loading`, `Active`, `Suspended`, `Error`, `Disposing`），升级 REST API 与 MCP 治理工具，前端 `SettingsPage.vue` 响应式展示健康度徽章、错误堆栈与 Disposable 绑定数。
-
-### Phase 14: v0.7.0 qBittorrent 5.x 自适应引擎、MCP 字符集加固与多平台 CI 流水线 ✅
-- [x] **qBittorrent 5.x 自适应端点兼容**：适配 qB 5.0+ 废弃 `pause`/`resume` 并引入 `/api/v2/torrents/stop` 与 `start` 的架构变化，实现双向自适应回退。
-- [x] **原生 MCP Server 字符集加固**：SSE 补齐 `charset=utf-8` 响应头，经受 20 并发会话、120 次真实调用高压验证。
-- [x] **自动化 GitHub Actions Release 全平台流水线**：一键自动构建 7 大架构二进制（Windows x86/ARM64, Linux amd64/arm64/armv7, macOS M系列/Intel），打包纯净源码归档并生成 SHA256 校验清单。
-- [x] **备份目录自动容错与存储国际化补齐**：自动容错创建备份目录，补全前端存储与硬链接配置文案。
+待处理的功能需求和故障见 [项目 Issues](https://github.com/xiaoyueRX/Ani-Go/issues)。

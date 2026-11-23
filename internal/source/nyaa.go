@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
+	"github.com/xiaoyueRX/Ani-Go/internal/magnet"
 )
 
 // NyaaSource 实现 core.Source 接口，从 nyaa.si 获取资源
@@ -31,6 +33,26 @@ type nyaaItem struct {
 	GUID      string        `xml:"guid"`
 	PubDate   string        `xml:"pubDate"`
 	Enclosure nyaaEnclosure `xml:"enclosure"`
+	InfoHash  nyaaInfoHash  `xml:"infoHash"`
+}
+
+type nyaaInfoHash struct {
+	XMLName xml.Name
+	Value   string `xml:",chardata"`
+}
+
+func (h nyaaInfoHash) publicBTIH(domain string) string {
+	// Nyaa 以当前站点的 /xmlns/nyaa 声明扩展，镜像也可保留官方命名空间。
+	ns, err := url.Parse(h.XMLName.Space)
+	if err != nil || (ns.Scheme != "http" && ns.Scheme != "https") || ns.RequestURI() != "/xmlns/nyaa" || ns.Fragment != "" || ns.User != nil ||
+		(!strings.EqualFold(ns.Host, "nyaa.si") && !strings.EqualFold(ns.Host, domain)) {
+		return ""
+	}
+	hash := strings.TrimSpace(h.Value)
+	if len(hash) != 40 {
+		return ""
+	}
+	return magnet.NormalizeBTIH(hash)
 }
 
 type nyaaEnclosure struct {
@@ -83,8 +105,7 @@ func (n *NyaaSource) FetchRSS(ctx context.Context, rssURL string) ([]core.Torren
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Nyaa 返回状态码 %d: %s", resp.StatusCode, string(body[:min(300, len(body))]))
+		return nil, fmt.Errorf("Nyaa 返回状态码 %d", resp.StatusCode)
 	}
 
 	return n.parseRSS(resp.Body)
@@ -98,39 +119,26 @@ func (n *NyaaSource) SearchAnime(ctx context.Context, title string) ([]core.Torr
 }
 
 func (n *NyaaSource) FetchHistory(ctx context.Context, bangumiID string, filter core.Filter) ([]core.TorrentItem, error) {
-	if filter.SearchTitle == "" {
-		return nil, nil
-	}
-	return n.SearchAnime(ctx, filter.SearchTitle)
+	return searchHistoryTitles(ctx, filter.Titles, n.SearchAnime)
 }
 
 func (n *NyaaSource) parseRSS(r io.Reader) ([]core.TorrentItem, error) {
-	body, err := io.ReadAll(r)
-	if err != nil {
-		return nil, fmt.Errorf("读取 Nyaa RSS 失败: %w", err)
-	}
-
 	var rss nyaaRSS
-	if err := xml.Unmarshal(body, &rss); err != nil {
+	if err := xml.NewDecoder(r).Decode(&rss); err != nil {
 		return nil, fmt.Errorf("解析 Nyaa RSS 失败: %w", err)
 	}
 
 	items := make([]core.TorrentItem, 0, len(rss.Channel.Items))
 	for _, item := range rss.Channel.Items {
 		pubAt, _ := parsePubDate(item.PubDate)
-		// Nyaa enclosure 通常包含 torrent 文件 URL
-		torrentURL := item.Enclosure.URL
-		if torrentURL == "" {
-			torrentURL = item.Link
-		}
-
-		items = append(items, core.TorrentItem{
+		result := core.TorrentItem{
 			Title:       item.Title,
-			URL:         torrentURL,
 			Size:        item.Enclosure.Length,
 			PublishedAt: pubAt,
 			SourceName:  "Nyaa",
-		})
+		}
+		setSupplementalLinks(&result, item.Enclosure.URL, item.Link, item.InfoHash.publicBTIH(n.domain))
+		items = append(items, result)
 	}
 
 	return items, nil

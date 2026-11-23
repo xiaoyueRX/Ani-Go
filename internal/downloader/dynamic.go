@@ -57,6 +57,20 @@ func (d *DynamicDownloader) Add(ctx context.Context, item core.TorrentItem, save
 	return dl.Add(ctx, item, savePath)
 }
 
+func (d *DynamicDownloader) AddWithID(ctx context.Context, item core.TorrentItem, savePath string) (string, error) {
+	dl := d.GetCurrent()
+	if dl == nil {
+		return "", fmt.Errorf("下载器未就绪")
+	}
+	if tracked, ok := dl.(core.TrackedDownloader); ok {
+		return tracked.AddWithID(ctx, item, savePath)
+	}
+	if err := CheckDiskSpaceGuard(savePath); err != nil {
+		return "", err
+	}
+	return item.InfoHash, dl.Add(ctx, item, savePath)
+}
+
 func (d *DynamicDownloader) List(ctx context.Context) ([]core.DownloadTask, error) {
 	dl := d.GetCurrent()
 	if dl == nil {

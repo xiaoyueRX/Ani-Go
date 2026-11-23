@@ -89,6 +89,12 @@ type BGMTVConfig struct {
 	MirrorDomains []string // BGM 镜像域名 (bgm.tv, bangumi.tv, chii.in)
 }
 
+// 内置命名模板同时用于识别旧设置中保存的默认模板。
+const (
+	DefaultTVTemplate    = "{title_cn}{year}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}"
+	DefaultMovieTemplate = "{title_cn}{year}/{title_en}{ext}"
+)
+
 type OrganizerConfig struct {
 	TVBasePath    string
 	MovieBasePath string
@@ -178,6 +184,15 @@ type SchedulerConfig struct {
 
 func Load() *Config {
 	cfg := defaults()
+	if v := strings.TrimSpace(os.Getenv("HOST")); v != "" {
+		cfg.Server.Host = v
+	}
+	if v := strings.TrimSpace(os.Getenv("LOG_PATH")); v != "" {
+		cfg.Server.LogPath = v
+	}
+	if origins := splitEnv(os.Getenv("CORS_ALLOWED_ORIGINS")); len(origins) > 0 {
+		cfg.Server.AllowedOrigins = origins
+	}
 	if v := os.Getenv("ANI_PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
 			cfg.Server.Port = p
@@ -254,6 +269,8 @@ func Load() *Config {
 		cfg.Downloaders.Default = v
 	} else if v := os.Getenv("DOWNLOADER_DEFAULT"); v != "" {
 		cfg.Downloaders.Default = v
+	} else if v := os.Getenv("DOWNLOADER_TYPE"); v != "" {
+		cfg.Downloaders.Default = v
 	}
 	if v := os.Getenv("METADATA_PRIMARY"); v != "" {
 		cfg.Metadata.Primary = v
@@ -279,7 +296,7 @@ func Load() *Config {
 		cfg.Metadata.BGMTV.MirrorDomains = splitEnv(v)
 	}
 	if v := os.Getenv("BGMTV_SYNC_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			cfg.Scheduler.SyncBangumiInterval = d
 		}
 	}
@@ -424,17 +441,17 @@ func Load() *Config {
 		cfg.Notifier.WhatsAppTo = v
 	}
 	if v := os.Getenv("RSS_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			cfg.Scheduler.RSSInterval = d
 		}
 	}
 	if v := os.Getenv("SUPPLEMENT_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			cfg.Scheduler.SupplementInterval = d
 		}
 	}
 	if v := os.Getenv("ORGANIZER_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			cfg.Scheduler.OrganizerInterval = d
 		}
 	}
@@ -442,7 +459,7 @@ func Load() *Config {
 		cfg.Scheduler.SeedCleanupEnabled = v == "true"
 	}
 	if v := os.Getenv("SEED_CLEANUP_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			cfg.Scheduler.SeedCleanupInterval = d
 		}
 	}
@@ -467,19 +484,36 @@ func Load() *Config {
 			cfg.Scheduler.BackupKeepCount = count
 		}
 	}
-	if v := os.Getenv("NYAA_DOMAIN"); v != "" {
-		cfg.Sources.Nyaa.Domain = v
-		cfg.Sources.Nyaa.Enabled = true
-	}
-	if v := os.Getenv("ACGRIP_DOMAIN"); v != "" {
-		cfg.Sources.ACGRIP.Domain = v
-		cfg.Sources.ACGRIP.Enabled = true
-	}
-	if v := os.Getenv("ANIMETOSHO_DOMAIN"); v != "" {
-		cfg.Sources.AnimeTosho.Domain = v
-		cfg.Sources.AnimeTosho.Enabled = true
-	}
+	cfg.Sources.ApplySettings(nil)
 	return cfg
+}
+
+// ApplySettings 合并三个补充源的部署环境与数据库设置。空值沿用调用方的默认配置。
+func (sources *SourcesConfig) ApplySettings(getter func(string) (string, bool)) {
+	get := func(key string) string {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+		if getter != nil {
+			if value, ok := getter(key); ok {
+				return strings.TrimSpace(value)
+			}
+		}
+		return ""
+	}
+	apply := func(prefix string, source *SourceConfig) {
+		if domain := get(prefix + "_DOMAIN"); domain != "" {
+			source.Domain = domain
+		}
+		if enabled := get(prefix + "_ENABLED"); enabled != "" {
+			source.Enabled = enabled == "true" || enabled == "1"
+		} else if strings.TrimSpace(os.Getenv(prefix + "_DOMAIN")) != "" {
+			source.Enabled = true // 兼容仅部署域名即可开启来源的用法。
+		}
+	}
+	apply("NYAA", &sources.Nyaa)
+	apply("ACGRIP", &sources.ACGRIP)
+	apply("ANIMETOSHO", &sources.AnimeTosho)
 }
 
 func splitEnv(v string) []string {
@@ -516,8 +550,8 @@ func defaults() *Config {
 			TVBasePath:    "./TV/番剧",
 			MovieBasePath: "./TV/剧场版",
 			OVABasePath:   "./TV/OVA",
-			TVTemplate:    "{title_cn}{year}/Season {season}/{title_en} S{season:02}E{ep:02}{ext}",
-			MovieTemplate: "{title_cn}{year}/{title_en}{ext}",
+			TVTemplate:    DefaultTVTemplate,
+			MovieTemplate: DefaultMovieTemplate,
 			UseHardLink:   false,
 		},
 		Sources: SourcesConfig{
@@ -529,8 +563,8 @@ func defaults() *Config {
 		Notifier: NotifierConfig{},
 		Scheduler: SchedulerConfig{
 			RSSInterval: 30 * time.Minute, SupplementInterval: 24 * time.Hour, OrganizerInterval: 2 * time.Minute,
-			SyncBangumiInterval:    6 * time.Hour,
-			SeedCleanupEnabled:     true, SeedCleanupInterval: 1 * time.Hour,
+			SyncBangumiInterval: 6 * time.Hour,
+			SeedCleanupEnabled:  true, SeedCleanupInterval: 1 * time.Hour,
 			SeedCleanupMinSeedTime: 48 * time.Hour, SeedCleanupMinRatio: 1.0,
 			BackupPath:      "./data/backups",
 			BackupCron:      "0 0 0 * * *",
@@ -571,9 +605,9 @@ func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
 		}
 	}
 
-	getDuration := func(target *time.Duration, keys ...string) {
+	getInterval := func(target *time.Duration, keys ...string) {
 		if v, ok := get(keys...); ok {
-			if d, err := time.ParseDuration(v); err == nil {
+			if d, err := time.ParseDuration(v); err == nil && d > 0 {
 				*target = d
 			}
 		}
@@ -619,7 +653,7 @@ func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
 	}
 
 	// 默认下载器
-	if v, ok := get("DEFAULT_DOWNLOADER", "DOWNLOADER_DEFAULT"); ok {
+	if v, ok := get("DEFAULT_DOWNLOADER", "DOWNLOADER_DEFAULT", "DOWNLOADER_TYPE"); ok {
 		c.Downloaders.Default = v
 	}
 
@@ -661,8 +695,12 @@ func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
 
 	// 做种清理配置
 	getBool(&c.Scheduler.SeedCleanupEnabled, "SEED_CLEANUP_ENABLED")
-	getDuration(&c.Scheduler.SeedCleanupInterval, "SEED_CLEANUP_INTERVAL")
-	getDuration(&c.Scheduler.SeedCleanupMinSeedTime, "SEED_CLEANUP_MIN_SEED_TIME")
+	getInterval(&c.Scheduler.SeedCleanupInterval, "SEED_CLEANUP_INTERVAL")
+	if v, ok := get("SEED_CLEANUP_MIN_SEED_TIME"); ok {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			c.Scheduler.SeedCleanupMinSeedTime = d
+		}
+	}
 	getFloat(&c.Scheduler.SeedCleanupMinRatio, "SEED_CLEANUP_MIN_RATIO")
 
 	// 元数据配置
@@ -685,7 +723,7 @@ func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
 		c.Metadata.BGMTV.Username = v
 	}
 	getSlice(&c.Metadata.BGMTV.MirrorDomains, "BGMTV_MIRROR_DOMAINS")
-	getDuration(&c.Scheduler.SyncBangumiInterval, "BGMTV_SYNC_INTERVAL")
+	getInterval(&c.Scheduler.SyncBangumiInterval, "BGMTV_SYNC_INTERVAL")
 
 	// 媒体整理与模板
 	if v, ok := get("TV_BASE_PATH"); ok {
@@ -728,9 +766,9 @@ func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
 	}
 
 	// 订阅与整理调度周期
-	getDuration(&c.Scheduler.RSSInterval, "RSS_INTERVAL")
-	getDuration(&c.Scheduler.OrganizerInterval, "ORGANIZER_INTERVAL")
-	getDuration(&c.Scheduler.SupplementInterval, "SUPPLEMENT_INTERVAL")
+	getInterval(&c.Scheduler.RSSInterval, "RSS_INTERVAL")
+	getInterval(&c.Scheduler.OrganizerInterval, "ORGANIZER_INTERVAL")
+	getInterval(&c.Scheduler.SupplementInterval, "SUPPLEMENT_INTERVAL")
 
 	// 备份调度
 	if v, ok := get("BACKUP_PATH"); ok {
@@ -741,17 +779,6 @@ func (c *Config) MergeFromSettings(getter func(key string) (string, bool)) {
 	}
 	getInt(&c.Scheduler.BackupKeepCount, "BACKUP_KEEP_COUNT")
 
-	// 外部搜索源
-	getBool(&c.Sources.Nyaa.Enabled, "NYAA_ENABLED")
-	if v, ok := get("NYAA_DOMAIN"); ok {
-		c.Sources.Nyaa.Domain = v
-	}
-	getBool(&c.Sources.ACGRIP.Enabled, "ACGRIP_ENABLED")
-	if v, ok := get("ACGRIP_DOMAIN"); ok {
-		c.Sources.ACGRIP.Domain = v
-	}
-	getBool(&c.Sources.AnimeTosho.Enabled, "ANIMETOSHO_ENABLED")
-	if v, ok := get("ANIMETOSHO_DOMAIN"); ok {
-		c.Sources.AnimeTosho.Domain = v
-	}
+	// 外部搜索源与聚合搜索使用相同的部署优先级。
+	c.Sources.ApplySettings(getter)
 }

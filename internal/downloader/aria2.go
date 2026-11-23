@@ -3,6 +3,8 @@ package downloader
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
+	"github.com/xiaoyueRX/Ani-Go/internal/magnet"
 )
 
 // ============================================================
@@ -48,20 +51,22 @@ type aria2Resp struct {
 }
 
 type aria2Status struct {
-	GID             string `json:"gid"`
-	Status          string `json:"status"`
-	TotalLength     int64  `json:"totalLength,string"`
-	CompletedLength int64  `json:"completedLength,string"`
-	DownloadSpeed   int64  `json:"downloadSpeed,string"`
-	UploadSpeed     int64  `json:"uploadSpeed,string"`
-	UploadLength    int64  `json:"uploadLength,string"`
-	Dir             string `json:"dir"`
+	FollowedBy      []string `json:"followedBy"`
+	GID             string   `json:"gid"`
+	InfoHash        string   `json:"infoHash"`
+	Status          string   `json:"status"`
+	TotalLength     int64    `json:"totalLength,string"`
+	CompletedLength int64    `json:"completedLength,string"`
+	DownloadSpeed   int64    `json:"downloadSpeed,string"`
+	UploadSpeed     int64    `json:"uploadSpeed,string"`
+	UploadLength    int64    `json:"uploadLength,string"`
+	Dir             string   `json:"dir"`
 	Files           []struct {
 		Path string `json:"path"`
 	} `json:"files"`
-	InfoHash   string `json:"infoHash"`
 	Bittorrent *struct {
-		Info *struct {
+		InfoHash string `json:"infoHash"`
+		Info     *struct {
 			Name string `json:"name"`
 		} `json:"info"`
 	} `json:"bittorrent"`
@@ -117,7 +122,7 @@ func (a *Aria2) callWithRetry(ctx context.Context, method string, params []inter
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		if ctx.Err() == nil && attempt < 2 {
+		if method != "aria2.addUri" && ctx.Err() == nil && attempt < 2 {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -132,7 +137,7 @@ func (a *Aria2) callWithRetry(ctx context.Context, method string, params []inter
 	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
-		if ctx.Err() == nil && attempt < 2 {
+		if method != "aria2.addUri" && ctx.Err() == nil && attempt < 2 {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -159,25 +164,93 @@ func (a *Aria2) callWithRetry(ctx context.Context, method string, params []inter
 
 // Add 添加下载任务
 func (a *Aria2) Add(ctx context.Context, item core.TorrentItem, savePath string) error {
+	_, err := a.AddWithID(ctx, item, savePath)
+	return err
+}
+
+func (a *Aria2) AddWithID(ctx context.Context, item core.TorrentItem, savePath string) (string, error) {
 	// 磁盘空间熔断保护：在向下载器投递前执行熔断检查
 	if err := CheckDiskSpaceGuard(savePath); err != nil {
-		return err
+		return "", err
 	}
 
 	uri := item.MagnetURL
 	if uri == "" {
 		uri = item.URL
 	}
-	params := []interface{}{[]string{uri}}
-	if savePath != "" {
-		params = append(params, map[string]string{"dir": savePath})
+	if strings.TrimSpace(uri) == "" {
+		return "", fmt.Errorf("Aria2 下载地址为空")
 	}
-	_, err := a.call(ctx, "aria2.addUri", params)
+	// 调度器为同一条持久投递提供稳定标签；普通调用仅在本次请求内共用 GID。
+	nonce := item.TrackingTag
+	if nonce == "" {
+		nonce = rand.Text()
+	}
+	sum := sha256.Sum256([]byte("anigo-aria2-v1\x00" + nonce + "\x00" + uri + "\x00" + savePath))
+	gid := fmt.Sprintf("%x", sum[:8])
+	if gid == "0000000000000000" {
+		gid = "0000000000000001"
+	}
+	options := map[string]string{"gid": gid}
+	if savePath != "" {
+		options["dir"] = savePath
+	}
+	raw, err := a.call(ctx, "aria2.addUri", []any{[]string{uri}, options})
 	if err != nil {
-		return fmt.Errorf("Aria2 添加种子失败: %w", err)
+		if ctx.Err() == nil && a.confirmSubmission(ctx, gid, uri, item.InfoHash) {
+			return gid, nil
+		}
+		return "", fmt.Errorf("Aria2 未确认添加任务: %w", err)
+	}
+	var receipt string
+	if err := json.Unmarshal(raw, &receipt); err != nil || !strings.EqualFold(receipt, gid) {
+		return "", fmt.Errorf("Aria2 未返回所提交任务的 GID")
 	}
 	log.Printf("📥 [Aria2] 已添加下载: %s", item.Title)
-	return nil
+	return gid, nil
+}
+
+func (a *Aria2) confirmSubmission(ctx context.Context, gid, uri, hash string) bool {
+	raw, err := a.call(ctx, "aria2.tellStatus", []any{gid, []string{"gid", "status", "files", "infoHash", "followedBy"}})
+	if err != nil {
+		return false
+	}
+	var task struct {
+		GID, Status, InfoHash string
+		FollowedBy            []string
+		Files                 []struct{ URIs []struct{ URI string } }
+	}
+	if err := json.Unmarshal(raw, &task); err != nil || !strings.EqualFold(task.GID, gid) {
+		return false
+	}
+	switch task.Status {
+	case "active", "waiting", "paused", "complete":
+	default:
+		return false
+	}
+	if h, err := magnet.Parse(uri); err == nil && h.V1 != "" {
+		hash = h.V1
+	}
+	expected := magnet.NormalizeBTIH(hash)
+	if expected != "" && strings.EqualFold(expected, task.InfoHash) {
+		return true
+	}
+	for _, file := range task.Files {
+		for _, u := range file.URIs {
+			if u.URI == uri {
+				return true
+			}
+		}
+	}
+	// 元数据任务完成后，实际种子可能只在子 GID 的状态中报告 infoHash。
+	if expected != "" && len(task.FollowedBy) == 1 {
+		child, err := a.call(ctx, "aria2.tellStatus", []any{task.FollowedBy[0], []string{"gid", "infoHash"}})
+		if err == nil {
+			var detail struct{ GID, InfoHash string }
+			return json.Unmarshal(child, &detail) == nil && strings.EqualFold(detail.GID, task.FollowedBy[0]) && strings.EqualFold(detail.InfoHash, expected)
+		}
+	}
+	return false
 }
 
 // listAll 获取所有状态的任务
@@ -216,6 +289,9 @@ func (a *Aria2) listAll(ctx context.Context) ([]aria2Status, error) {
 
 func convertAria2Status(t aria2Status) core.DownloadTask {
 	hash := t.InfoHash
+	if hash == "" && t.Bittorrent != nil {
+		hash = t.Bittorrent.InfoHash
+	}
 	if hash == "" {
 		hash = t.GID
 	}
@@ -249,19 +325,30 @@ func convertAria2Status(t aria2Status) core.DownloadTask {
 		}
 	}
 
+	var remaining *int64
+	if t.TotalLength > 0 {
+		n := t.TotalLength - t.CompletedLength
+		if n < 0 {
+			n = 0
+		}
+		remaining = &n
+	}
 	return core.DownloadTask{
-		Hash:        hash,
-		Name:        name,
-		SavePath:    t.Dir,
-		Status:      status,
-		Progress:    float32(float64(t.CompletedLength) / float64(max(t.TotalLength, 1))),
-		SpeedDown:   t.DownloadSpeed,
-		SpeedUp:     t.UploadSpeed,
-		Size:        t.TotalLength,
-		Done:        t.CompletedLength,
-		Uploaded:    t.UploadLength,
-		Ratio:       ratio,
-		SeedingTime: 0,
+		Hash:           hash,
+		ClientID:       t.GID,
+		FollowedBy:     t.FollowedBy,
+		Name:           name,
+		SavePath:       t.Dir,
+		Status:         status,
+		Progress:       downloadProgress(float64(t.CompletedLength)/float64(max(t.TotalLength, 1)), remaining),
+		RemainingBytes: remaining,
+		SpeedDown:      t.DownloadSpeed,
+		SpeedUp:        t.UploadSpeed,
+		Size:           t.TotalLength,
+		Done:           t.CompletedLength,
+		Uploaded:       t.UploadLength,
+		Ratio:          ratio,
+		SeedingTime:    0,
 	}
 }
 
@@ -291,7 +378,7 @@ func (a *Aria2) resolveGID(ctx context.Context, hashOrGID string) string {
 	tasks, err := a.listAll(ctx)
 	if err == nil {
 		for _, t := range tasks {
-			if strings.EqualFold(t.InfoHash, target) {
+			if strings.EqualFold(t.InfoHash, target) || (t.Bittorrent != nil && strings.EqualFold(t.Bittorrent.InfoHash, target)) {
 				return t.GID
 			}
 			if strings.EqualFold(t.GID, target) {

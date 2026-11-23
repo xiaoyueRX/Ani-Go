@@ -1,86 +1,13 @@
-# Ani-Go 项目迁移上下文
+# 开发交接索引
 
-> 此文件用于从 Windows 开发机迁移到家中服务器 PVE LXC 云端 VS Code 后快速恢复工作上下文。
+[English](TRANSFER_CONTEXT_EN.md)
 
-## 快速恢复（3 步）
+旧交接记录用于项目早期从 Windows 工作站移到 NAS 上的开发环境。部署参数、个人网络拓扑和当时的测试记录不随新检出自动适用。接续工作时可按具体任务定位：
 
-```bash
-git clone https://github.com/xiaoyueRX/Ani-Go.git
-cd Ani-Go
-cp .env.example .env
-# 编辑 .env 填入实际配置
-```
-
-## 当前状态
-
-- **分支**: main
-- **Phase 0**: 全部完成 ✅
-- **Phase 1（核心引擎 MVP）**: 全部完成 ✅ — Mikan RSS 解析器、qBittorrent 客户端、调度器、文件整理、EventBus、8 种标题正则解析模式
-- **Phase 2（历史补全 + 元数据）**: 全部完成 ✅ — Mikan HTML 全页爬取（goquery）、TMDB/BGM.tv 元数据提供者、GFW 镜像/代理回退机制、补全调度器
-- **Phase 3（Web UI + RESTful API + Docker）**: 全部完成 ✅ — Vue3 前端、RESTful API、go:embed 前端嵌合、多阶段 Docker 构建、GitHub Actions CI/CD
-- **Phase 4（AI + 多下载器 + 插件 + 多资源站）**: 全部完成 ✅ — AI 4 协议、qBittorrent/Transmission/Aria2、插件系统、死种检测、Nyaa/ACGRIP/AnimeTosho + MultiSource
-- **Phase 5（多平台消息通知 + 任务解析）**: 全部完成 ✅ — 16 平台通知、自然语言任务解析器（正则 + AI）、EventBus 自动推送
-- **Phase 6（数据迁移）**: 全部完成 ✅ — AutoBangumi SQLite 导入
-- **Phase 7（前端美化 + 搜索修复 + 新番时间表 + 镜像测速）**: 全部完成 ✅
-- **Phase 8（国际化 + 批量操作 + 代码审查）**: 全部完成 ✅
-- **Phase 9（v0.5.0 稳定性加固 + 插件管理闭环）**: 全部完成 ✅ — 下载逻辑解耦、多渠道元数据补偿（Mikan 详情页爬虫）、备份恢复零值覆盖、时间表跳转 404 修复、类型断言加固、批量补全异步化、插件管理面板打通
-- **Phase 10（v0.5.3 通知矩阵全闭环 + 下载器热切换 + 正则沙箱 + 逐行审查清零）**: 全部完成 ✅ — 全 16 渠道 V2 通知中心热重载与插件联动、DynamicDownloader 运行时热切换、自定义正则 10 槽位实时沙箱、全 20 包拉网式逐行审计 10 项缺陷清零、全量 go test -race 100% PASS
-- **Phase 11（v0.5.4 通知持久化履历与送达监控 + 下载中心批量控制与新建 + RSS 实时探针）**: 全部完成 ✅ — `NotificationLog` 异步队列入库与送达率监控看板、下载队列新建磁力/URL弹窗与一键全部暂停/继续并发控制、RSS 实时源 15s 解析探针与特征调试、全量 go test -race 100% PASS
-- **Phase 12（v0.6.0 次世代微内核架构 + 原生 MCP Server + 全自动三级消歧 + 多架构 Docker 全绿构建）**: 全部完成 ✅ — 确立五步主干流水线宪法与插件物理断电隔离机制、内置 SSE+Bearer 鉴权 MCP 服务端、研发单集放送时间戳对齐算法化解 95% 歧义、Dockerfile 升级至 `golang:1.25-alpine` 跑通 GitHub Actions 多架构构建与 7 大平台预编译包发布、全量 go test -race 100% PASS
-- **测试**: 全包单元测试与竞态检测（go test -race ./...）全部通过
-
-## 技术栈
-
-- Go 1.25+
-- SQLite（纯 Go 驱动 `github.com/glebarez/sqlite`，无 CGO）
-- GORM ORM
-- goquery（HTML 解析，Go 版 Jsoup）
-- 架构：接口驱动（Source / Downloader / MetadataProvider / Organizer / Notifier / EventBus）
-- 前端：Vue3 + Vite + TypeScript + TailwindCSS v4 + DaisyUI v5 + Iconsax Linear 图标
-- JWT 鉴权（`golang-jwt/jwt/v5` HS256）+ Bcrypt 密码哈希
-
-## 关键文件
-
-| 文件 | 说明 |
-|------|------|
-| `main.go` | 入口，打印 banner，加载配置，初始化所有模块 |
-| `embed.go` | `//go:embed web/dist` 前端静态文件嵌入 |
-| `internal/core/interfaces.go` | 7 个核心接口 + 事件常量 + 数据类型 |
-| `internal/config/config.go` | 配置加载（环境变量优先）+ DB 回退（MergeFromSettings） |
-| `internal/database/db.go` | GORM 初始化 + AutoMigrate |
-| `internal/database/models.go` | 7 个 ORM 模型（Subscription, Episode, DownloadRecord, Setting, User, NotificationLog, ParserCache） |
-| `internal/source/mikan.go` | Mikan RSS 解析 + HTML 详情页全量爬取 |
-| `internal/source/multi.go` | 多资源站聚合器（Nyaa/ACGRIP/AnimeTosho） |
-| `internal/scheduler/scheduler.go` | 定时任务：RSS 轮询、文件整理、补全扫描 |
-| `internal/api/server.go` | HTTP API 服务 + JWT 鉴权中间件 |
-| `internal/api/handlers.go` | RESTful API 处理器：订阅 CRUD、下载队列、设置、解析、迁移 |
-| `internal/downloader/qbittorrent.go` | qBittorrent Web API 客户端 |
-| `internal/downloader/transmission.go` | Transmission RPC 客户端 |
-| `internal/downloader/aria2.go` | Aria2 JSON-RPC 客户端 |
-| `internal/metadata/tmdb.go` | TMDB API v3 元数据提供者 |
-| `internal/metadata/bangumi.go` | BGM.tv 元数据提供者 |
-| `internal/notifier/` | 18 平台通知实现 |
-| `internal/ai/` | AI 4 协议适配（OpenAI/Google/Anthropic/Ollama） |
-| `internal/parser/` | 自然语言任务解析器（正则 + AI 回退） |
-| `internal/plugin/` | 插件系统（内建插件生命周期 + 自定义 Webhook；script 类型未实现） |
-| `internal/migrate/` | AutoBangumi 数据迁移 |
-| `AGENTS.md` / `AGENTS_EN.md` | AI 助手指南（中/英） |
-| `CLAUDE.md` | Claude Code 指导文件 |
-| `docs/DEVELOPMENT_PLAN.md` | 完整开发日程（中/英） |
-| `docs/PROJECT_CONTEXT.md` | 项目核心记忆（中/英） |
-
-## 关键约束
-
-- Token/密码严禁硬编码，必须环境变量注入
-- 文件编码 UTF-8 无 BOM
-- 数据库驱动必须用 `github.com/glebarez/sqlite`
-- Go 源码注释用中文，文档中英双语
-- 新功能必须实现对应接口
-- GFW 环境：使用 `GOPROXY=https://goproxy.cn,direct`，Mikan/BGM/TMDB 均已配置多镜像域名自动回退
-
-## 服务器环境
-
-- PVE 9.1 → fnOS Docker 宿主机
-- 存储：`/vol2/1000/TV/Media/番剧`（TV）/ `/vol2/1000/TV/Media/剧场版`（Movie）
-- 网络：Lucky v2.27.2 反向代理，HTTPS 端口 16601/50929
-- 禁止跨子网 LAN 广播，需经 Lucky 反代或内网隧道
+| 任务 | 入口 |
+| --- | --- |
+| 首次构建并运行 | [快速开始](../README.md#从源码构建)、[仓库开发约定](../AGENTS.md) |
+| 核对运行中的版本、卷挂载、凭据配置 | [部署指南](05_DEPLOYMENT.md)、[环境变量示例](../.env.example) |
+| 接手订阅、下载或整理问题 | [流水线](01_ARCHITECTURE.md)、[季集识别](04_AUTOPARSER_SPEC.md) |
+| 开发扩展或接入外部客户端 | [插件开发](02_PLUGIN_SPEC.md)、[MCP](03_MCP_SPEC.md) |
+| 了解历史决策和当前代码范围 | [项目背景](PROJECT_CONTEXT.md)、[开发里程碑](DEVELOPMENT_PLAN.md)、[发行记录](../CHANGELOG.md) |

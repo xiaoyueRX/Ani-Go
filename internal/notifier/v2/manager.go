@@ -2,8 +2,11 @@ package v2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -43,20 +46,20 @@ type NotifyManager struct {
 	tmplMgr   *TemplateManager
 	queue     chan *NotifyMessage
 	retryChan chan *NotifyMessage
-	dlq       chan *NotifyMessage             // 死信队列
 	logQueue  chan *database.NotificationLog // 日志持久化队列
 
+	lifecycle   sync.Mutex // 串行化完整启停过程，待旧投递退出后才能启动下一轮
+	logDone     chan struct{}
 	workerCount int
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
 
-	mu          sync.RWMutex
-	enabled     bool
-	running     bool
-	eventSubs   []eventSubRef
-	stats       map[string]int64
-	reloader    func() []Notifier
+	mu        sync.RWMutex
+	running   bool
+	eventSubs []eventSubRef
+	stats     map[string]int64
+	reloader  func() []Notifier
 
 	// 事件路由规则：事件类型 -> 目标渠道列表（空=全渠道）
 	routeRules map[string][]string
@@ -68,23 +71,15 @@ type eventSubRef struct {
 }
 
 func NewNotifyManager(notifiers []Notifier, bus *event.Bus) *NotifyManager {
-	ctx, cancel := context.WithCancel(context.Background())
 	tmplMgr := NewTemplateManager()
 	if err := tmplMgr.LoadFromDB(); err != nil {
 		log.Printf("⚠️ 初始化加载自定义通知模板失败: %v", err)
 	}
 	return &NotifyManager{
-		notifiers:   notifiers,
+		notifiers:   slices.Clone(notifiers),
 		bus:         bus,
 		tmplMgr:     tmplMgr,
-		queue:       make(chan *NotifyMessage, 5000),
-		retryChan:   make(chan *NotifyMessage, 1000),
-		dlq:         make(chan *NotifyMessage, 1000),
-		logQueue:    make(chan *database.NotificationLog, 1000),
 		workerCount: 4,
-		ctx:         ctx,
-		cancel:      cancel,
-		enabled:     true,
 		stats:       make(map[string]int64),
 		routeRules: map[string][]string{
 			"download.started":   {}, // 全渠道
@@ -149,61 +144,66 @@ func (m *NotifyManager) SetEnabled(enabled bool) {
 func (m *NotifyManager) IsEnabled() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.enabled && m.running
+	return m.running
 }
 
 // Start 启动通知管理器（保证幂等与协程安全）
 func (m *NotifyManager) Start() {
+	m.lifecycle.Lock()
+	defer m.lifecycle.Unlock()
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.running {
-		m.mu.Unlock()
 		return
 	}
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 	m.queue = make(chan *NotifyMessage, 5000)
 	m.retryChan = make(chan *NotifyMessage, 1000)
-	m.dlq = make(chan *NotifyMessage, 1000)
 	m.logQueue = make(chan *database.NotificationLog, 1000)
+	m.logDone = make(chan struct{})
 	m.running = true
-	m.enabled = true
-	m.mu.Unlock()
-
-	m.wg.Add(4)
-	go m.worker()
+	m.wg.Add(m.workerCount + 1)
+	for range m.workerCount {
+		go m.worker()
+	}
 	go m.retryScheduler()
-	go m.handleDLQ()
-	go m.handleLogPersist()
-
-	m.subscribeEvents()
+	go m.handleLogPersist(m.logQueue, m.logDone)
+	m.subscribeEvents(m.ctx)
 	log.Printf("🚀 通知中心启动: Workers=%d, Providers=%v", m.workerCount, m.getProviderNames())
 }
 
-// Stop 优雅关闭通知管理器并回收所有后台协程
+// Stop 取消投递，等待在途请求结束并将已受理的流水写入数据库。
 func (m *NotifyManager) Stop() {
+	m.lifecycle.Lock()
+	defer m.lifecycle.Unlock()
 	m.mu.Lock()
 	if !m.running {
 		m.mu.Unlock()
 		return
 	}
 	m.running = false
-	m.enabled = false
-	if m.cancel != nil {
-		m.cancel()
-	}
+	m.cancel()
 	m.unsubscribeEvents()
 	m.mu.Unlock()
 
 	m.wg.Wait()
-	log.Println("🛑 通知中心已关闭（0 协程/0 网络消耗）")
+	m.mu.Lock()
+	close(m.logQueue)
+	done := m.logDone
+	m.queue, m.retryChan, m.logQueue, m.logDone = nil, nil, nil, nil
+	m.ctx, m.cancel = nil, nil
+	m.mu.Unlock()
+	<-done
+	log.Println("🛑 通知中心已关闭")
 }
 
 // subscribeEvents 订阅核心业务事件
-func (m *NotifyManager) subscribeEvents() {
+func (m *NotifyManager) subscribeEvents(lifetime context.Context) {
 	if m.bus == nil {
 		log.Println("⚠️ EventBus 未初始化，通知功能不可用")
 		return
 	}
-	m.unsubscribeEvents()
+	publish := func(msg *NotifyMessage) { m.publish(lifetime, msg) }
 
 	sub := func(evType string, handler core.EventHandler) {
 		id := m.bus.Subscribe(evType, handler)
@@ -236,7 +236,7 @@ func (m *NotifyManager) subscribeEvents() {
 			"Episode":    payloadValue(e.Payload, "episode"),
 			"Timestamp":  eventTimestamp(e.Time),
 		})
-		m.Publish(&NotifyMessage{
+		publish(&NotifyMessage{
 			Title:      title,
 			Content:    itemTitle,
 			EventType:  "download.started",
@@ -292,7 +292,7 @@ func (m *NotifyManager) subscribeEvents() {
 			"Source":     payloadString(data, "source"),
 			"Timestamp":  eventTimestamp(e.Time),
 		})
-		m.Publish(&NotifyMessage{
+		publish(&NotifyMessage{
 			Title:      title,
 			Content:    msg,
 			EventType:  "download.completed",
@@ -310,7 +310,7 @@ func (m *NotifyManager) subscribeEvents() {
 				msg.Data["Timestamp"] = eventTimestamp(e.Time)
 			}
 		}
-		m.Publish(msg)
+		publish(msg)
 	})
 
 	// 补全缺失集数
@@ -336,7 +336,7 @@ func (m *NotifyManager) subscribeEvents() {
 			"TotalEpisodes":   payloadInt(data, "total_episodes"),
 			"Timestamp":       eventTimestamp(e.Time),
 		})
-		m.Publish(&NotifyMessage{
+		publish(&NotifyMessage{
 			Title:      title,
 			Content:    msg,
 			EventType:  "episode.missing",
@@ -371,7 +371,7 @@ func (m *NotifyManager) subscribeEvents() {
 			"Episode":    payloadValue(e.Payload, "episode"),
 			"Timestamp":  eventTimestamp(e.Time),
 		})
-		m.Publish(&NotifyMessage{
+		publish(&NotifyMessage{
 			Title:      title,
 			Content:    errText,
 			EventType:  "error",
@@ -468,13 +468,15 @@ func intValue(value interface{}) int {
 }
 
 // Publish 发布通知消息（非阻塞）
-func (m *NotifyManager) Publish(msg *NotifyMessage) {
+func (m *NotifyManager) Publish(msg *NotifyMessage) { m.publish(nil, msg) }
+
+func (m *NotifyManager) publish(lifetime context.Context, msg *NotifyMessage) {
 	if msg == nil {
 		return
 	}
 
 	m.mu.RLock()
-	enabled := m.enabled && m.running
+	enabled := m.running && (lifetime == nil || m.ctx == lifetime)
 	queue := m.queue
 	ctx := m.ctx
 	targets := m.routeRules[msg.EventType]
@@ -484,6 +486,9 @@ func (m *NotifyManager) Publish(msg *NotifyMessage) {
 		return
 	}
 
+	copy := *msg
+	copy.Data = maps.Clone(msg.Data)
+	msg = &copy
 	if msg.CreatedAt.IsZero() {
 		msg.CreatedAt = time.Now()
 	}
@@ -505,33 +510,76 @@ func (m *NotifyManager) Publish(msg *NotifyMessage) {
 	}
 }
 
-// SendTest 发送测试消息（同步，用于 WebUI 测试按钮）
-func (m *NotifyManager) SendTest(ctx context.Context, channel, title, message string) error {
-	if !m.IsEnabled() {
-		return fmt.Errorf("消息通知推送插件当前处于停用状态，请先在插件管理中启用")
-	}
+// ErrNotifierNotFound 表示运行中的通知中心没有匹配所选渠道。
+var ErrNotifierNotFound = errors.New("未找到通知渠道")
 
-	var targets []Notifier
-	targetName := strings.ToLower(strings.TrimSpace(channel))
+func notificationChannel(name string) string {
+	switch key := strings.ToLower(strings.TrimSpace(name)); key {
+	case "qq", "onebot", "qq(onebot)":
+		return "onebot"
+	case "smtp":
+		return "email"
+	case "钉钉":
+		return "dingtalk"
+	case "企业微信":
+		return "wecom"
+	case "飞书":
+		return "feishu"
+	case "server酱":
+		return "serverchan"
+	case "weixin", "mp_wechat", "微信公众号":
+		return "wechat"
+	default:
+		return key
+	}
+}
+
+// SendTest 同步测试指定渠道，空渠道表示所有已配置的通知器。
+func (m *NotifyManager) SendTest(ctx context.Context, channel, title, message string) error {
+	return m.SendTestWithFallback(ctx, channel, title, message, nil)
+}
+
+// SendTestWithFallback 仅在没有匹配渠道时使用兼容投递，且共享相同的取消和停用生命周期。
+func (m *NotifyManager) SendTestWithFallback(ctx context.Context, channel, title, message string, missing func(context.Context) error) (sendErr error) {
+	targetName := notificationChannel(channel)
 	m.mu.RLock()
-	for _, n := range m.notifiers {
-		curName := strings.ToLower(n.Name())
-		if channel == "" || curName == targetName ||
-			strings.Contains(curName, targetName) ||
-			strings.Contains(targetName, curName) ||
-			(targetName == "qq" && strings.Contains(curName, "qq")) ||
-			(targetName == "smtp" && (curName == "email" || strings.Contains(curName, "smtp"))) ||
-			(targetName == "serverchan" && strings.Contains(curName, "serverchan")) ||
-			(targetName == "wecom" && (curName == "企业微信" || strings.Contains(curName, "wecom"))) ||
-			(targetName == "dingtalk" && (curName == "钉钉" || strings.Contains(curName, "ding"))) ||
-			(targetName == "feishu" && (curName == "飞书" || strings.Contains(curName, "feishu"))) {
-			targets = append(targets, n)
+	if !m.running {
+		m.mu.RUnlock()
+		return errors.New("消息通知推送插件当前处于停用状态，请先在插件管理中启用")
+	}
+	lifetime := m.ctx
+	var targets []Notifier
+	for _, notifier := range m.notifiers {
+		if channel == "" || (targetName != "" && notificationChannel(notifier.Name()) == targetName) {
+			targets = append(targets, notifier)
 		}
 	}
+	m.wg.Add(1)
 	m.mu.RUnlock()
+	defer m.wg.Done()
+	defer func() {
+		target := channel
+		if target == "" {
+			target = "all"
+		}
+		if sendErr != nil {
+			m.RecordManualLog("manual.test", target, title, message, "failed", sendErr.Error())
+		} else {
+			m.RecordManualLog("manual.test", target, title, message, "success", "")
+		}
+	}()
 
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(lifetime, cancel)
+	defer func() { stop(); cancel() }()
+	if lifetime.Err() != nil {
+		return lifetime.Err()
+	}
 	if len(targets) == 0 {
-		return fmt.Errorf("未找到通知渠道: %s (请检查该渠道是否已填写配置并保存)", channel)
+		if targetName != "" && missing != nil {
+			return missing(ctx)
+		}
+		return fmt.Errorf("%w: %s (请检查该渠道是否已填写配置并保存)", ErrNotifierNotFound, channel)
 	}
 
 	var errs []string
@@ -563,8 +611,8 @@ func (m *NotifyManager) worker() {
 		select {
 		case <-m.ctx.Done():
 			return
-		case msg, ok := <-m.queue:
-			if !ok {
+		case msg := <-m.queue:
+			if m.ctx.Err() != nil {
 				return
 			}
 			m.process(msg)
@@ -602,7 +650,9 @@ func (m *NotifyManager) process(msg *NotifyMessage) {
 			renderedTitle, renderedContent := m.renderMessageForChannel(msg, notifier.Name())
 			err := notifier.Send(m.ctx, renderedTitle, renderedContent)
 			if err != nil {
-				m.handleFailure(notifier, msg, renderedContent, err)
+				if m.ctx.Err() == nil {
+					m.handleFailure(notifier, msg, renderedContent, err)
+				}
 			} else {
 				m.incStat(notifier.Name() + ".success")
 				m.recordLog(msg.EventType, notifier.Name(), renderedTitle, renderedContent, "success", "", msg.RetryCount)
@@ -677,16 +727,8 @@ func (m *NotifyManager) handleFailure(n Notifier, msg *NotifyMessage, renderedCo
 	m.recordLog(msg.EventType, n.Name(), msg.Title, renderedContent, "failed", err.Error(), msg.RetryCount)
 
 	if msg.RetryCount >= msg.MaxRetries {
-		dlqMsg := *msg
-		dlqMsg.Target = n.Name()
-		dlqMsg.LastError = err.Error()
-		if dlqMsg.Content == "" {
-			dlqMsg.Content = renderedContent
-		}
-		select {
-		case m.dlq <- &dlqMsg:
-		case <-m.ctx.Done():
-		}
+		log.Printf("💀 [DLQ] 永久失败: Title=%s, Target=%s", msg.Title, n.Name())
+		m.recordLog(msg.EventType, n.Name(), msg.Title, renderedContent, "dlq", err.Error(), msg.RetryCount)
 		return
 	}
 
@@ -709,81 +751,38 @@ func (m *NotifyManager) retryScheduler() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	var retryList []*NotifyMessage
-	var mu sync.Mutex
-	var innerWg sync.WaitGroup
-	defer innerWg.Wait()
-
-	innerWg.Add(1)
-	go func() {
-		defer innerWg.Done()
-		for {
-			select {
-			case <-m.ctx.Done():
-				return
-			case msg := <-m.retryChan:
-				mu.Lock()
-				retryList = append(retryList, msg)
-				mu.Unlock()
-			}
-		}
-	}()
-
+	var pending []*NotifyMessage
 	for {
 		select {
 		case <-m.ctx.Done():
 			return
-		case <-ticker.C:
-			mu.Lock()
-			now := time.Now()
-			remaining := retryList[:0]
-			for _, msg := range retryList {
-				if now.After(msg.NextRunAt) {
+		case msg := <-m.retryChan:
+			pending = append(pending, msg)
+		case now := <-ticker.C:
+			remaining := pending[:0]
+			for _, msg := range pending {
+				if !now.Before(msg.NextRunAt) {
 					select {
 					case m.queue <- msg:
-					case <-m.ctx.Done():
-						mu.Unlock()
-						return
+						continue
+					default:
 					}
-				} else {
-					remaining = append(remaining, msg)
 				}
+				remaining = append(remaining, msg)
 			}
-			retryList = remaining
-			mu.Unlock()
+			clear(pending[len(remaining):])
+			pending = remaining
 		}
 	}
 }
 
-// handleDLQ 死信队列
-func (m *NotifyManager) handleDLQ() {
-	defer m.wg.Done()
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case msg := <-m.dlq:
-			log.Printf("💀 [DLQ] 永久失败: Title=%s, Target=%s, Err=%s", msg.Title, msg.Target, msg.LastError)
-			m.recordLog(msg.EventType, msg.Target, msg.Title, msg.Content, "dlq", msg.LastError, msg.RetryCount)
-		}
-	}
-}
-
-// handleLogPersist 异步持久化通知记录协程
-func (m *NotifyManager) handleLogPersist() {
-	defer m.wg.Done()
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case entry, ok := <-m.logQueue:
-			if !ok {
-				return
-			}
-			if entry != nil && database.DB != nil {
-				if err := database.DB.Create(entry).Error; err != nil {
-					log.Printf("⚠️ 持久化通知记录失败: %v", err)
-				}
+// handleLogPersist 按入队顺序持久化；停机时先等所有投递完成，再关闭队列。
+func (m *NotifyManager) handleLogPersist(queue <-chan *database.NotificationLog, done chan<- struct{}) {
+	defer close(done)
+	for entry := range queue {
+		if database.DB != nil {
+			if err := database.DB.Create(entry).Error; err != nil {
+				log.Printf("⚠️ 持久化通知记录失败: %v", err)
 			}
 		}
 	}
@@ -802,24 +801,9 @@ func (m *NotifyManager) recordLog(eventType, channel, title, content, status, er
 	}
 
 	m.mu.RLock()
-	logQueue := m.logQueue
-	ctx := m.ctx
-	m.mu.RUnlock()
-
-	if logQueue == nil {
-		return
-	}
-
-	select {
-	case <-ctx.Done():
-		return
-	case logQueue <- entry:
-	default:
-		go func() {
-			if database.DB != nil {
-				_ = database.DB.Create(entry).Error
-			}
-		}()
+	defer m.mu.RUnlock()
+	if m.logQueue != nil {
+		m.logQueue <- entry
 	}
 }
 
@@ -1043,7 +1027,7 @@ func (m *NotifyManager) GetStats() map[string]int64 {
 func (m *NotifyManager) ReloadNotifiers(newNotifiers []Notifier) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.notifiers = newNotifiers
+	m.notifiers = slices.Clone(newNotifiers)
 	log.Printf("🔄 通知器已热重载: %v", m.getProviderNames())
 }
 
@@ -1084,11 +1068,17 @@ func formatBytes(b int64) string {
 }
 
 func formatInt64(v interface{}) string {
-	if v == nil { return "0" }
+	if v == nil {
+		return "0"
+	}
 	switch val := v.(type) {
-	case int64: return formatBytes(val)
-	case int: return formatBytes(int64(val))
-	case float64: return formatBytes(int64(val))
-	default: return "0"
+	case int64:
+		return formatBytes(val)
+	case int:
+		return formatBytes(int64(val))
+	case float64:
+		return formatBytes(int64(val))
+	default:
+		return "0"
 	}
 }

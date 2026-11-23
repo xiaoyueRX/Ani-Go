@@ -5,7 +5,6 @@ import {
   Trash2, User, History 
 } from 'lucide-vue-next'
 
-
 interface Subscription {
   id: number
   title_cn: string
@@ -60,7 +59,7 @@ const emit = defineEmits<{
 const isImageLoaded = ref(false)
 
 const progress = computed(() => {
-  if (!props.sub.total_episodes) return 0
+  if (props.sub.total_episodes <= 0) return null
   return Math.min(100, (props.sub.current_episodes / props.sub.total_episodes) * 100)
 })
 
@@ -150,11 +149,11 @@ const progressColor = computed(() => {
                <p class="text-[7px] text-white/50 font-black uppercase tracking-[0.2em] mb-0.5">{{ $t('card.episodes') }}</p>
                <p class="text-sm text-white font-black leading-none">{{ sub.current_episodes }}<span class="text-white/30 text-[9px] ml-1 font-bold">/ {{ sub.total_episodes || '?' }}</span></p>
             </div>
-            <div class="text-right">
+            <div v-if="progress !== null" class="text-right">
                <p class="text-[9px] text-white font-black leading-none">{{ Math.round(progress) }}%</p>
             </div>
          </div>
-         <div class="h-1 w-full bg-white/10 rounded-full overflow-hidden border border-white/5">
+         <div v-if="progress !== null" class="h-1 w-full bg-white/10 rounded-full overflow-hidden border border-white/5">
             <div 
               class="h-full rounded-full transition-all duration-1000 ease-out relative"
               :class="progressColor"

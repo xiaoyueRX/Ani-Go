@@ -11,22 +11,20 @@ import (
 )
 
 func TestParseMikanTitleAdvanced_AirdateAlignment(t *testing.T) {
-	previous := database.DB
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test_advanced.db")
+	previous := database.DB
 	if err := database.Init(dbPath); err != nil {
 		t.Fatalf("db init failed: %v", err)
 	}
 
-	db, err := database.DB.DB()
+	connection, err := database.DB.DB()
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		connection.Close()
 		database.DB = previous
-		if err := db.Close(); err != nil {
-			t.Error(err)
-		}
 	})
 
 	// 模拟剧集：S02E01 对应总集数 25

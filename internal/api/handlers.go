@@ -22,6 +22,7 @@ import (
 
 	"github.com/xiaoyueRX/Ani-Go/internal/ai"
 	"github.com/xiaoyueRX/Ani-Go/internal/auth"
+	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/downloader"
@@ -44,6 +45,7 @@ import (
 
 // subscriptionResponse API 返回的订阅数据结构
 type subscriptionResponse struct {
+	MikanID           string  `json:"mikan_id"`
 	ID                uint    `json:"id"`
 	TitleCN           string  `json:"title_cn"`
 	TitleEN           string  `json:"title_en"`
@@ -75,6 +77,10 @@ type subscriptionResponse struct {
 }
 
 type createSubscriptionRequest struct {
+	MikanID          string   `json:"mikan_id"`
+	MetadataID       string   `json:"metadata_id"`
+	MetadataProvider string   `json:"metadata_provider"`
+	Season           int      `json:"season"`
 	TitleCN          string   `json:"title_cn"`
 	BangumiID        string   `json:"bangumi_id"`
 	SubgroupName     string   `json:"subgroup_name"`
@@ -87,12 +93,16 @@ type createSubscriptionRequest struct {
 }
 
 type batchSubscriptionItem struct {
-	TitleCN       string   `json:"title_cn"`
-	BangumiID     string   `json:"bangumi_id"`
-	CoverURL      string   `json:"cover_url"`
-	Subgroups     []string `json:"subgroups"`
-	TotalEpisodes int      `json:"total_episodes"`
-	IsFinished    bool     `json:"is_finished"`
+	Season           int      `json:"season"`
+	MikanID          string   `json:"mikan_id"`
+	MetadataID       string   `json:"metadata_id"`
+	MetadataProvider string   `json:"metadata_provider"`
+	TitleCN          string   `json:"title_cn"`
+	BangumiID        string   `json:"bangumi_id"`
+	CoverURL         string   `json:"cover_url"`
+	Subgroups        []string `json:"subgroups"`
+	TotalEpisodes    int      `json:"total_episodes"`
+	IsFinished       bool     `json:"is_finished"`
 }
 
 type batchSubscriptionRequest struct {
@@ -111,27 +121,28 @@ type batchSubResult struct {
 }
 
 type updateSubscriptionRequest struct {
-	TitleCN           *string `json:"title_cn"`
-	TitleEN           *string `json:"title_en"`
-	TitleJP           *string `json:"title_jp"`
-	Year              *int    `json:"year"`
-	Season            *int    `json:"season"`
-	BangumiID         *string `json:"bangumi_id"`
-	SubgroupName      *string `json:"subgroup_name"`
-	MetadataID        *string `json:"metadata_id"`
-	MetadataProvider  *string `json:"metadata_provider"`
-	CoverURL          *string `json:"cover_url"`
-	Description       *string `json:"description"`
-	AnimeType         *string `json:"anime_type"`
-	TotalEpisodes     *int    `json:"total_episodes"`
-	Enabled           *bool   `json:"enabled"`
-	Completed         *bool   `json:"completed"`
-	FilterJSON        *string `json:"filter_json"`
-	CustomPath        *string `json:"custom_path"`
-	ExcludedKeywords  *string `json:"excluded_keywords"`
-	AllowedSubgroups  *string `json:"allowed_subgroups"`
-	SkipBulkUpdate    *bool   `json:"skip_bulk_update"`
-	StallTimeoutHours *int    `json:"stall_timeout_hours"`
+	TitleCN           *string         `json:"title_cn"`
+	TitleEN           *string         `json:"title_en"`
+	TitleJP           *string         `json:"title_jp"`
+	Year              *int            `json:"year"`
+	Season            *int            `json:"season"`
+	BangumiID         *string         `json:"bangumi_id"`
+	MikanID           *string         `json:"mikan_id"`
+	SubgroupName      *string         `json:"subgroup_name"`
+	MetadataID        *string         `json:"metadata_id"`
+	MetadataProvider  *string         `json:"metadata_provider"`
+	CoverURL          *string         `json:"cover_url"`
+	Description       *string         `json:"description"`
+	AnimeType         *string         `json:"anime_type"`
+	TotalEpisodes     *int            `json:"total_episodes"`
+	Enabled           *bool           `json:"enabled"`
+	Completed         *bool           `json:"completed"`
+	FilterJSON        *string         `json:"filter_json"`
+	CustomPath        json.RawMessage `json:"custom_path"`
+	ExcludedKeywords  *string         `json:"excluded_keywords"`
+	AllowedSubgroups  *string         `json:"allowed_subgroups"`
+	SkipBulkUpdate    *bool           `json:"skip_bulk_update"`
+	StallTimeoutHours *int            `json:"stall_timeout_hours"`
 }
 
 type batchDeleteRequest struct {
@@ -180,6 +191,7 @@ func toSubscriptionResponse(sub database.Subscription) subscriptionResponse {
 		Year:              sub.Year,
 		Season:            sub.Season,
 		BangumiID:         sub.BangumiID,
+		MikanID:           sub.MikanID,
 		SubgroupName:      sub.SubgroupName,
 		MetadataID:        sub.MetadataID,
 		MetadataProvider:  sub.MetadataProvider,
@@ -269,44 +281,14 @@ func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request)
 	}
 	stalledMap := batchStalledCounts(subIDs, getStallTimeout())
 
-	// 批量获取每个订阅的集数统计（包含已整理和下载中）
-	type statusCount struct {
-		SubscriptionID uint
-		Status         string
-		Count          int
+	counts, err := database.FinishedEpisodeCounts(database.DB.WithContext(r.Context()), subIDs)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "读取剧集进度失败"})
+		return
 	}
-	var statusCounts []statusCount
-	if len(subIDs) > 0 {
-		database.DB.Model(&database.Episode{}).
-			Select("subscription_id, status, count(*) as count").
-			Where("subscription_id IN ? AND deleted_at IS NULL", subIDs).
-			Group("subscription_id, status").
-			Scan(&statusCounts)
-	}
-
-	organizedMap := make(map[uint]int)
-	downloadingMap := make(map[uint]int)
-	for _, c := range statusCounts {
-		if c.Status == "organized" {
-			organizedMap[c.SubscriptionID] += c.Count
-		} else if c.Status == "downloading" || c.Status == "pending" || c.Status == "downloaded" {
-			downloadingMap[c.SubscriptionID] += c.Count
-		}
-	}
-
 	result := make([]subscriptionResponse, 0, len(subs))
 	for _, sub := range subs {
-		// 实时修正 current_episodes
-		realOrganized := organizedMap[sub.ID]
-		if sub.CurrentEpisodes != realOrganized {
-			sub.CurrentEpisodes = realOrganized
-			go database.DB.Model(&sub).Update("current_episodes", realOrganized)
-		}
-
-		// 如果元数据缺失，后台异步补全一次
-		if (sub.Year == 0 || sub.TotalEpisodes == 0) && s.triggerSupplement != nil {
-			go s.triggerSupplement(context.Background(), sub.ID)
-		}
+		sub.CurrentEpisodes = counts[sub.ID]
 
 		r := toSubscriptionResponse(sub)
 		r.StalledEpisodes = stalledMap[sub.ID]
@@ -357,36 +339,42 @@ func (s *Server) handleBatchCreateSubscriptions(w http.ResponseWriter, r *http.R
 	}
 
 	for _, item := range req.Items {
+		item.TitleCN = strings.TrimSpace(item.TitleCN)
 		if item.TitleCN == "" {
 			resp.Failed = append(resp.Failed, batchSubResult{Title: item.TitleCN, Error: "番剧标题不能为空"})
 			continue
 		}
 
-		// 检查是否已订阅（通过 BangumiID 或标题）
-		var existing database.Subscription
-		query := database.DB.Where("bangumi_id = ?", item.BangumiID)
-		if item.BangumiID == "" {
-			query = database.DB.Where("title_cn = ?", item.TitleCN)
-		}
-		if query.First(&existing).RowsAffected > 0 {
-			resp.Failed = append(resp.Failed, batchSubResult{Title: item.TitleCN, Error: "已存在订阅"})
+		if item.Season < 0 {
+			resp.Failed = append(resp.Failed, batchSubResult{Title: item.TitleCN, Error: "季号不能为负数"})
 			continue
 		}
 
-		subgroup := strings.Join(item.Subgroups, ",")
+		subgroup, allowed := subscriptionGroups("", item.Subgroups, nil)
 
 		sub := database.Subscription{
-			TitleCN:       item.TitleCN,
-			BangumiID:     item.BangumiID,
-			SubgroupName:  subgroup,
-			CoverURL:      item.CoverURL,
-			TotalEpisodes: item.TotalEpisodes,
-			Completed:     item.IsFinished,
-			Enabled:       &[]bool{true}[0],
+			TitleCN:          item.TitleCN,
+			Season:           item.Season,
+			BangumiID:        item.BangumiID,
+			SubgroupName:     subgroup,
+			AllowedSubgroups: allowed,
+			MikanID:          item.MikanID,
+			MetadataID:       item.MetadataID,
+			MetadataProvider: item.MetadataProvider,
+			CoverURL:         item.CoverURL,
+			TotalEpisodes:    item.TotalEpisodes,
+			Completed:        item.IsFinished,
+			Enabled:          &[]bool{true}[0],
 		}
 
-		if err := database.DB.Create(&sub).Error; err != nil {
-			resp.Failed = append(resp.Failed, batchSubResult{Title: item.TitleCN, Error: err.Error()})
+		if err := database.CreateSubscription(database.DB.WithContext(r.Context()), &sub); err != nil {
+			message := "创建订阅失败"
+			if errors.Is(err, database.ErrSubscriptionExists) {
+				message = "已存在订阅"
+			} else {
+				log.Printf("创建订阅失败: %v", err)
+			}
+			resp.Failed = append(resp.Failed, batchSubResult{Title: item.TitleCN, Error: message})
 			continue
 		}
 
@@ -404,6 +392,23 @@ func (s *Server) handleBatchCreateSubscriptions(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// 多选字幕组匹配任一候选，单选兼容历史首选组字段。
+func subscriptionGroups(preferred string, groups, allowed []string) (string, string) {
+	if len(groups) == 1 {
+		preferred = groups[0]
+	} else if len(groups) > 1 {
+		preferred = ""
+	}
+	if len(allowed) == 0 && len(groups) > 1 {
+		allowed = groups
+	}
+	if len(allowed) == 0 {
+		return preferred, "[]"
+	}
+	data, _ := json.Marshal(allowed)
+	return preferred, string(data)
+}
+
 // handleCreateSubscription 创建新订阅
 // POST /api/subscriptions
 func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -413,40 +418,24 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	req.TitleCN = strings.TrimSpace(req.TitleCN)
 	if req.TitleCN == "" {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "番剧标题 (title_cn) 不能为空"})
 		return
 	}
 
-	// 查重：防止重复订阅
-	var existing database.Subscription
-	query := database.DB.Where("title_cn = ?", req.TitleCN)
-	if req.BangumiID != "" {
-		query = database.DB.Where("title_cn = ? OR bangumi_id = ?", req.TitleCN, req.BangumiID)
-	}
-	if err := query.First(&existing).Error; err == nil {
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "该番剧已在订阅列表中"})
+	if req.Season < 0 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "季号不能为负数"})
 		return
 	}
-
-	subgroupName := req.SubgroupName
-	if len(req.SubgroupNames) > 0 {
-		subgroupName = strings.Join(req.SubgroupNames, ", ")
-	}
-
-	allowedSubgroupsJSON := "[]"
-	if len(req.AllowedSubgroups) > 0 {
-		if b, err := json.Marshal(req.AllowedSubgroups); err == nil {
-			allowedSubgroupsJSON = string(b)
-		}
-	} else if len(req.SubgroupNames) > 1 {
-		if b, err := json.Marshal(req.SubgroupNames); err == nil {
-			allowedSubgroupsJSON = string(b)
-		}
-	}
+	subgroupName, allowedSubgroupsJSON := subscriptionGroups(req.SubgroupName, req.SubgroupNames, req.AllowedSubgroups)
 
 	sub := database.Subscription{
 		TitleCN:          req.TitleCN,
+		Season:           req.Season,
+		MikanID:          req.MikanID,
+		MetadataID:       req.MetadataID,
+		MetadataProvider: req.MetadataProvider,
 		BangumiID:        req.BangumiID,
 		SubgroupName:     subgroupName,
 		AllowedSubgroups: allowedSubgroupsJSON,
@@ -457,14 +446,18 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		Enabled:          &[]bool{true}[0],
 	}
 
-	if err := database.DB.Create(&sub).Error; err != nil {
+	if err := database.CreateSubscription(database.DB.WithContext(r.Context()), &sub); err != nil {
+		if errors.Is(err, database.ErrSubscriptionExists) {
+			writeJSON(w, http.StatusConflict, errorResponse{Error: database.ErrSubscriptionExists.Error()})
+			return
+		}
 		log.Printf("❌ 创建订阅失败: %v", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建订阅失败"})
 		return
 	}
 
 	// 如果有 BangumiID 但前端未提供 RSS URL，后台异步解析 Mikan 字幕组 RSS
-	if sub.BangumiID != "" && sub.RSSURL == "" && s.mikanSrc != nil {
+	if sub.MikanID != "" && sub.RSSURL == "" && s.mikanSrc != nil {
 		go func(subID uint, bangumiID string) {
 			rssURL, err := s.mikanSrc.ResolveFirstRSSURL(context.Background(), bangumiID)
 			if err != nil {
@@ -476,7 +469,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 			} else {
 				log.Printf("✅ 已自动解析 RSS URL [%s]: %s", bangumiID, rssURL)
 			}
-		}(sub.ID, sub.BangumiID)
+		}(sub.ID, sub.MikanID)
 	}
 
 	// 如果没有 BangumiID，尝试自动找回（用于处理通过 API 创建但缺失 ID 的情况）
@@ -534,6 +527,12 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	subResp := toSubscriptionResponse(sub)
+	counts, err := database.FinishedEpisodeCounts(database.DB.WithContext(r.Context()), []uint{sub.ID})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "读取剧集进度失败"})
+		return
+	}
+	subResp.CurrentEpisodes = counts[sub.ID]
 	subResp.StalledEpisodes = stalledCount
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -551,12 +550,6 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var sub database.Subscription
-	if err := database.DB.First(&sub, id).Error; err != nil {
-		writeJSON(w, http.StatusNotFound, errorResponse{Error: "订阅不存在"})
-		return
-	}
-
 	var req updateSubscriptionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
@@ -565,7 +558,12 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 
 	updates := map[string]interface{}{}
 	if req.TitleCN != nil {
-		updates["title_cn"] = *req.TitleCN
+		title := strings.TrimSpace(*req.TitleCN)
+		if title == "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "番剧标题不能为空"})
+			return
+		}
+		updates["title_cn"] = title
 	}
 	if req.TitleEN != nil {
 		updates["title_en"] = *req.TitleEN
@@ -577,10 +575,17 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		updates["year"] = *req.Year
 	}
 	if req.Season != nil {
+		if *req.Season < 0 {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "季号不能为负数"})
+			return
+		}
 		updates["season"] = *req.Season
 	}
 	if req.BangumiID != nil {
 		updates["bangumi_id"] = *req.BangumiID
+	}
+	if req.MikanID != nil {
+		updates["mikan_id"] = strings.TrimSpace(*req.MikanID)
 	}
 	if req.SubgroupName != nil {
 		updates["subgroup_name"] = *req.SubgroupName
@@ -613,7 +618,12 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		updates["filter_json"] = *req.FilterJSON
 	}
 	if req.CustomPath != nil {
-		updates["custom_path"] = *req.CustomPath
+		var path string
+		if err := json.Unmarshal(req.CustomPath, &path); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "下载目录必须是字符串或 null"})
+			return
+		}
+		updates["custom_path"] = path
 	}
 	if req.ExcludedKeywords != nil {
 		updates["excluded_keywords"] = *req.ExcludedKeywords
@@ -633,14 +643,18 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := database.DB.Model(&sub).Updates(updates).Error; err != nil {
-		log.Printf("❌ 更新订阅失败: %v", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "更新订阅失败"})
+	sub, err := database.UpdateSubscription(database.DB.WithContext(r.Context()), uint(id), updates)
+	if errors.Is(err, database.ErrSubscriptionExists) {
+		writeJSON(w, http.StatusConflict, errorResponse{Error: err.Error()})
 		return
 	}
-
-	if err := database.DB.First(&sub, id).Error; err != nil {
-		writeJSON(w, http.StatusNotFound, errorResponse{Error: "更新后查询订阅失败"})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "订阅不存在"})
+		return
+	}
+	if err != nil {
+		log.Printf("❌ 更新订阅失败: %v", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "更新订阅失败"})
 		return
 	}
 	log.Printf("✅ 已更新订阅: ID=%d", sub.ID)
@@ -656,34 +670,15 @@ func (s *Server) handleDeleteSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var sub database.Subscription
-	if err := database.DB.First(&sub, id).Error; err != nil {
+	deleted, failure := s.deleteSubscriptions(r.Context(), []uint{uint(id)}, r.URL.Query().Get("delete_files") == "true")
+	if failure != nil {
+		failure.write(w)
+		return
+	}
+	if deleted == 0 {
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "订阅不存在"})
 		return
 	}
-
-	deleteFiles := r.URL.Query().Get("delete_files") == "true"
-
-	// 先删 qB 种子和文件（有操作失败只记录日志，不中断流程）
-	if deleteFiles && s.downloader != nil {
-		var episodes []database.Episode
-		database.DB.Where("subscription_id = ?", id).Find(&episodes)
-		for _, ep := range episodes {
-			if ep.TorrentHash == "" {
-				continue
-			}
-			if err := s.downloader.Delete(r.Context(), ep.TorrentHash, true); err != nil {
-				log.Printf("⚠️  删除种子失败 (hash=%s): %v", ep.TorrentHash, err)
-			}
-		}
-	}
-
-	// 删除关联剧集
-	database.DB.Where("subscription_id = ?", id).Delete(&database.Episode{})
-	// 删除订阅
-	database.DB.Delete(&sub)
-
-	log.Printf("🗑️  已删除订阅: %s (ID=%d, deleteFiles=%v)", sub.TitleCN, sub.ID, deleteFiles)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "订阅已删除"})
 }
 
@@ -714,7 +709,7 @@ func (s *Server) handleTriggerSupplement(w http.ResponseWriter, r *http.Request)
 
 	go func() {
 		// 不能用 r.Context() — HTTP 响应返回后会被 Cancel
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(s.jobContext(), 5*time.Minute)
 		defer cancel()
 		if err := s.triggerSupplement(ctx, uint(id)); err != nil {
 			log.Printf("❌ 手动补全失败 [%s]: %v", sub.TitleCN, err)
@@ -755,27 +750,24 @@ func (s *Server) handleSupplementAll(w http.ResponseWriter, r *http.Request) {
 		targets = append(targets, sub)
 	}
 
-	for _, sub := range targets {
-		wg.Add(1)
-		go func(subID uint, title string) {
-			defer wg.Done()
-			sem <- struct{}{}        // 获取信号量
-			defer func() { <-sem }() // 释放信号量
-
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer cancel()
-
-			if err := s.triggerSupplement(ctx, subID); err != nil {
-				log.Printf("❌ 批量补全失败 [%s]: %v", title, err)
-			} else {
-				log.Printf("✅ 批量补全完成 [%s]", title)
-			}
-		}(sub.ID, sub.TitleCN)
-	}
-
 	go func() {
-		wg.Wait()
-		log.Println("✅ 全量补全任务全部完成")
+		root := s.jobContext()
+		defer wg.Wait()
+		for _, sub := range targets {
+			select {
+			case <-root.Done():
+				return
+			case sem <- struct{}{}:
+			}
+			wg.Go(func() {
+				defer func() { <-sem }()
+				ctx, cancel := context.WithTimeout(root, 10*time.Minute)
+				defer cancel()
+				if err := s.triggerSupplement(ctx, sub.ID); err != nil && root.Err() == nil {
+					log.Printf("批量补全失败 [%s]: %v", sub.TitleCN, err)
+				}
+			})
+		}
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]string{
@@ -798,47 +790,80 @@ func (s *Server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 	tasks, err := s.downloader.List(r.Context())
 	if err != nil {
 		log.Printf("⚠️  获取下载列表失败 (下载器可能未启动或连接断开): %v", err)
-		tasks = []core.DownloadTask{}
-	}
-
-	if tasks == nil {
-		tasks = []core.DownloadTask{}
+		writeJSON(w, http.StatusBadGateway, errorResponse{Error: "无法取得下载任务，请检查下载器连接"})
+		return
 	}
 
 	type downloadResponse struct {
-		Hash        string  `json:"hash"`
-		Name        string  `json:"name"`
-		SavePath    string  `json:"save_path"`
-		Status      string  `json:"status"`
-		Progress    float32 `json:"progress"`
-		SpeedDown   int64   `json:"speed_down"`
-		SpeedUp     int64   `json:"speed_up"`
-		Size        int64   `json:"size"`
-		Done        int64   `json:"done"`
-		Uploaded    int64   `json:"uploaded"`
-		Ratio       float64 `json:"ratio"`
-		SeedingTime int64   `json:"seeding_time"`
+		Hash          string  `json:"hash"`
+		Name          string  `json:"name"`
+		SavePath      string  `json:"save_path"`
+		Status        string  `json:"status"`
+		DisplayStatus string  `json:"display_status"`
+		CanPause      bool    `json:"can_pause"`
+		CanResume     bool    `json:"can_resume"`
+		Complete      bool    `json:"complete"`
+		Progress      float32 `json:"progress"`
+		SpeedDown     int64   `json:"speed_down"`
+		SpeedUp       int64   `json:"speed_up"`
+		Size          int64   `json:"size"`
+		Done          int64   `json:"done"`
+		Uploaded      int64   `json:"uploaded"`
+		Ratio         float64 `json:"ratio"`
+		SeedingTime   int64   `json:"seeding_time"`
 	}
 
 	result := make([]downloadResponse, 0, len(tasks))
 	for _, t := range tasks {
+		complete := t.IsComplete()
 		result = append(result, downloadResponse{
-			Hash:        t.Hash,
-			Name:        t.Name,
-			SavePath:    t.SavePath,
-			Status:      t.Status,
-			Progress:    t.Progress,
-			SpeedDown:   t.SpeedDown,
-			SpeedUp:     t.SpeedUp,
-			Size:        t.Size,
-			Done:        t.Done,
-			Uploaded:    t.Uploaded,
-			Ratio:       t.Ratio,
-			SeedingTime: t.SeedingTime,
+			Hash:          t.Hash,
+			Name:          t.Name,
+			SavePath:      t.SavePath,
+			Status:        t.Status,
+			DisplayStatus: downloadDisplayStatus(t.Status, complete),
+			CanPause:      downloader.CanPause(t.Status),
+			CanResume:     downloader.CanResume(t.Status),
+			Complete:      complete,
+			Progress:      t.Progress,
+			SpeedDown:     t.SpeedDown,
+			SpeedUp:       t.SpeedUp,
+			Size:          t.Size,
+			Done:          t.Done,
+			Uploaded:      t.Uploaded,
+			Ratio:         t.Ratio,
+			SeedingTime:   t.SeedingTime,
 		})
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// Keep native status in the API for callers that need downloader-specific details.
+func downloadDisplayStatus(status string, complete bool) string {
+	if downloader.CanResume(status) {
+		return "paused"
+	}
+	switch strings.ToLower(status) {
+	case "active":
+		if complete {
+			return "completed"
+		}
+		return "downloading"
+	case "downloading", "stalleddl", "forceddl", "metadl", "forcedmetadl":
+		return "downloading"
+	case "uploading", "seeding", "stalledup", "forcedup":
+		return "seeding"
+	case "waiting", "queued", "queueddl", "queuedup":
+		return "queued"
+	case "checking", "checkingdl", "checkingup", "checkingresumedata":
+		return "checking"
+	case "error", "missingfiles":
+		return "error"
+	case "complete", "completed":
+		return "completed"
+	}
+	return status
 }
 
 // handleCreateDownload 直接添加下载任务（无需订阅）
@@ -979,12 +1004,34 @@ func (s *Server) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 type testDownloaderRequest struct {
-	Type     string `json:"type"` // "qbittorrent" / "transmission" / "aria2"
-	Host     string `json:"host"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Secret   string `json:"secret"`
-	Category string `json:"category"`
+	Type             string `json:"type"` // "qbittorrent" / "transmission" / "aria2"
+	Host             string `json:"host"`
+	Username         string `json:"username"`
+	Password         string `json:"password"`
+	Secret           string `json:"secret"`
+	Category         string `json:"category"`
+	ReuseCredentials bool   `json:"use_saved_credentials"`
+}
+
+// 仅同一地址与账号可以沿用服务端凭据。新输入的密码或令牌始终优先。
+func (req *testDownloaderRequest) useSavedCredentials(cfg config.DownloadersConfig) {
+	if req.Host == "" {
+		return
+	}
+	switch req.Type {
+	case "qbittorrent":
+		if req.Password == "" && req.Host == cfg.QBittorrent.Host && req.Username == cfg.QBittorrent.Username {
+			req.Password = cfg.QBittorrent.Password
+		}
+	case "transmission":
+		if req.Password == "" && req.Host == cfg.Transmission.Host && req.Username == cfg.Transmission.Username {
+			req.Password = cfg.Transmission.Password
+		}
+	case "aria2":
+		if req.Secret == "" && req.Host == cfg.Aria2.Host {
+			req.Secret = cfg.Aria2.Secret
+		}
+	}
 }
 
 // handleTestDownloader 测试下载器连接与健康状态
@@ -998,13 +1045,21 @@ func (s *Server) handleTestDownloader(w http.ResponseWriter, r *http.Request) {
 
 	var targetDL core.Downloader
 
-	dlType := strings.ToLower(strings.TrimSpace(req.Type))
-	if dlType == "" && req.Host == "" {
+	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
+	if req.ReuseCredentials && req.Host != "" {
+		values, err := settingValues(database.DB.WithContext(ctx))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "读取下载器配置失败"})
+			return
+		}
+		req.useSavedCredentials(configuredDownloaders(values))
+	}
+	if req.Type == "" && req.Host == "" {
 		// 未指定具体配置，直接探测当前系统生效的下载器
 		targetDL = s.downloader
 	} else {
 		// 根据前端传入的临时配置构造测试实例
-		switch dlType {
+		switch req.Type {
 		case "transmission":
 			host := req.Host
 			if host == "" {
@@ -1182,40 +1237,36 @@ func isEpisodeStalled(ep database.Episode, timeout time.Duration) bool {
 	}
 }
 
-// handleUpdateEpisodeStatus 手动更新剧集状态
-// PUT /api/episodes/{id}/status  body: {"status": "completed"}
+// handleUpdateEpisodeStatus 更新或清除手工标记，保留下载器的状态和重试时间。
 func (s *Server) handleUpdateEpisodeStatus(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的剧集 ID"})
 		return
 	}
-
 	var req struct {
-		Status string `json:"status"`
+		Status *string `json:"status"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Status == nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "需要提供状态值"})
 		return
 	}
-
-	valid := map[string]bool{"pending": true, "downloading": true, "completed": true, "failed": true}
-	if !valid[req.Status] {
+	switch *req.Status {
+	case "", "pending", "downloading", "completed", "failed":
+	default:
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的状态值"})
 		return
 	}
-
-	updated := database.DB.Model(&database.Episode{}).Where("id = ?", id).Update("manual_status", req.Status)
+	updated := database.DB.WithContext(r.Context()).Model(&database.Episode{}).Where("id = ?", id).UpdateColumn("manual_status", *req.Status)
 	if updated.Error != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "更新失败"})
 		return
 	}
-
 	if updated.RowsAffected == 0 {
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "剧集不存在"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": req.Status, "manual_status": req.Status})
+	writeJSON(w, http.StatusOK, map[string]string{"status": *req.Status, "manual_status": *req.Status})
 }
 
 // ============================================================
@@ -1230,14 +1281,22 @@ type settingsRequest struct {
 // GET /api/settings
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	var settings []database.Setting
-	database.DB.Find(&settings)
+	if err := database.DB.WithContext(r.Context()).Find(&settings).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "获取设置失败"})
+		return
+	}
 
 	result := make(map[string]string, len(settings))
 	for _, setting := range settings {
+		if internalPluginSetting(setting.Key) || strings.EqualFold(setting.Key, "MCP_TOKEN_CONFIGURED") {
+			continue
+		}
 		val := setting.Value
-		keyUpper := strings.ToUpper(setting.Key)
-		// 脱敏敏感字段：包含 PASS, SECRET, KEY 的键返回空字符串
-		if strings.Contains(keyUpper, "PASS") || strings.Contains(keyUpper, "SECRET") || strings.Contains(keyUpper, "KEY") {
+		if strings.EqualFold(setting.Key, "MCP_TOKEN") {
+			result["MCP_TOKEN_CONFIGURED"] = strconv.FormatBool(strings.TrimSpace(val) != "")
+			continue
+		}
+		if sensitiveSetting(setting.Key) {
 			val = ""
 		}
 		result[setting.Key] = val
@@ -1259,31 +1318,42 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for key, value := range req.Settings {
-		// 阻止通过 API 修改内部 JWT 密钥等系统配置
-		keyUpper := strings.ToUpper(key)
-		if keyUpper == "JWT_SECRET" || keyUpper == "TOKEN_SECRET" {
-			log.Printf("⚠️  拒绝通过 API 修改内部鉴权密钥: %s", key)
-			continue
-		}
-
-		// 如果值为空，且属于敏感凭证且数据库中已有值，则保留原值（避免前端脱敏展示后提交空值覆盖原有密钥）
-		if value == "" && (strings.Contains(keyUpper, "PASS") || strings.Contains(keyUpper, "SECRET") || strings.Contains(keyUpper, "KEY") || strings.Contains(keyUpper, "TOKEN")) {
-			var existing database.Setting
-			if err := database.DB.Where("key = ?", key).First(&existing).Error; err == nil && existing.Value != "" {
-				continue // 保持原有密码/密钥不变
+	if err := validatePollingIntervals(req.Settings); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+	var cfg config.DownloadersConfig
+	var changed bool
+	newAvatar, avatarChanged := req.Settings[avatarSettingKey]
+	var previousAvatar string
+	err := database.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if avatarChanged {
+			if err := tx.Model(&database.Setting{}).Select("value").Where("key = ?", avatarSettingKey).Scan(&previousAvatar).Error; err != nil {
+				return err
 			}
 		}
+		var err error
+		cfg, changed, err = applySettings(tx, req.Settings)
+		return err
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存设置失败"})
+		return
+	}
 
-		setting := database.Setting{Key: key, Value: value}
-		database.DB.Where("key = ?", key).Assign(setting).FirstOrCreate(&setting)
-
-		if key == "USER_AVATAR_URL" {
-			database.DB.Model(&database.User{}).Where("1 = 1").Update("avatar_url", value)
-		}
+	if avatarChanged && previousAvatar != newAvatar {
+		removeUploadedAvatar(previousAvatar)
 	}
 
 	log.Printf("✅ 已更新 %d 项设置", len(req.Settings))
+	for _, key := range []string{"RSS_INTERVAL", "ORGANIZER_INTERVAL", "SUPPLEMENT_INTERVAL", "BGMTV_SYNC_INTERVAL", "SEED_CLEANUP_INTERVAL"} {
+		if _, ok := req.Settings[key]; ok && s.reloadIntervals != nil {
+			s.reloadIntervals()
+			break
+		}
+	}
 
 	// 热重载通知系统（全渠道即时生效）
 	if s.notifyMgr != nil {
@@ -1291,12 +1361,8 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 热重载下载器实例（支持切换 qBittorrent/Transmission/Aria2 无需重启）
-	if dyn, ok := s.downloader.(*downloader.DynamicDownloader); ok {
-		newDL := s.buildDownloaderFromSettings()
-		if newDL != nil {
-			dyn.Swap(newDL)
-			log.Printf("⬇️ [下载器热重载] 当前生效下载器已切换为: %s", newDL.Name())
-		}
+	if dyn, ok := s.downloader.(*downloader.DynamicDownloader); ok && changed {
+		dyn.Swap(downloader.NewConfigured(cfg))
 	}
 
 	// 热重载自定义正则规则
@@ -1308,157 +1374,16 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return setting.Value, true
 	})
 
+	_, cronChanged := req.Settings["BACKUP_CRON"]
+	_, keepChanged := req.Settings["BACKUP_KEEP_COUNT"]
+	if s.backupManager != nil && (cronChanged || keepChanged) {
+		if err := s.backupManager.ReloadSchedule(); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "设置已保存，定时备份重载失败"})
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"message": "设置已更新"})
-}
-
-// buildDownloaderFromSettings 从数据库设置与环境变量动态构建下载器实例
-func (s *Server) buildDownloaderFromSettings() core.Downloader {
-	getSetting := func(key string) string {
-		var st database.Setting
-		if database.DB != nil {
-			if err := database.DB.Where("key = ?", key).First(&st).Error; err == nil && st.Value != "" {
-				return strings.TrimSpace(st.Value)
-			}
-		}
-		return strings.TrimSpace(os.Getenv(key))
-	}
-
-	defaultDL := getSetting("DEFAULT_DOWNLOADER")
-	if defaultDL == "" {
-		defaultDL = getSetting("DOWNLOADER_DEFAULT")
-	}
-	if defaultDL == "" {
-		defaultDL = "qbittorrent"
-	}
-
-	switch strings.ToLower(defaultDL) {
-	case "transmission":
-		host := getSetting("TR_HOST")
-		if host == "" {
-			host = "http://localhost:9091"
-		}
-		return downloader.NewTransmission(host, getSetting("TR_USER"), getSetting("TR_PASS"))
-	case "aria2":
-		host := getSetting("ARIA2_HOST")
-		if host == "" {
-			host = "http://localhost:6800/jsonrpc"
-		}
-		return downloader.NewAria2(host, getSetting("ARIA2_SECRET"))
-	default:
-		host := getSetting("QB_HOST")
-		if host == "" {
-			host = "http://localhost:8081"
-		}
-		cat := getSetting("QB_CATEGORY")
-		if cat == "" {
-			cat = "ani-go"
-		}
-		return downloader.NewQBittorrent(host, getSetting("QB_USER"), getSetting("QB_PASS"), cat)
-	}
-}
-
-// handleUploadAvatar 上传管理员头像图片
-// POST /api/user/avatar
-func (s *Server) handleUploadAvatar(w http.ResponseWriter, r *http.Request) {
-	claims, ok := r.Context().Value("claims").(*auth.Claims)
-	if !ok || claims == nil {
-		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "未登录或登录已过期"})
-		return
-	}
-
-	// 限制文件大小最大 5MB
-	if err := r.ParseMultipartForm(5 << 20); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "文件过大，头像不能超过 5MB"})
-		return
-	}
-
-	file, header, err := r.FormFile("avatar")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "未找到上传的文件，字段名应为 avatar"})
-		return
-	}
-	defer file.Close()
-
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp" && ext != ".gif" && ext != ".svg" {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "格式不支持，仅允许 PNG, JPG, WebP, GIF 或 SVG 图片"})
-		return
-	}
-
-	uploadDir := "./data/uploads"
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建上传目录失败"})
-		return
-	}
-
-	// 删除此用户旧的头像文件
-	oldFiles, _ := filepath.Glob(filepath.Join(uploadDir, fmt.Sprintf("avatar_%s.*", claims.Username)))
-	for _, old := range oldFiles {
-		os.Remove(old)
-	}
-
-	destFilename := fmt.Sprintf("avatar_%s%s", claims.Username, ext)
-	destPath := filepath.Join(uploadDir, destFilename)
-
-	destFile, err := os.Create(destPath)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建头像文件失败"})
-		return
-	}
-	defer destFile.Close()
-
-	if _, err := io.Copy(destFile, file); err != nil {
-		destFile.Close()
-		_ = os.Remove(destPath)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存头像文件内容失败"})
-		return
-	}
-
-	avatarURL := fmt.Sprintf("/api/user/avatar?t=%d", time.Now().Unix())
-
-	// 同步到数据库
-	database.DB.Model(&database.User{}).Where("username = ?", claims.Username).Update("avatar_url", avatarURL)
-	database.DB.Save(&database.Setting{Key: "USER_AVATAR_URL", Value: avatarURL})
-
-	log.Printf("✅ 用户 %s 上传了新头像: %s", claims.Username, destFilename)
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success":    true,
-		"avatar_url": avatarURL,
-		"message":    "头像上传成功",
-	})
-}
-
-// handleGetAvatar 读取并返回管理员头像
-// GET /api/user/avatar
-func (s *Server) handleGetAvatar(w http.ResponseWriter, r *http.Request) {
-	uploadDir := "./data/uploads"
-	matches, err := filepath.Glob(filepath.Join(uploadDir, "avatar_*"))
-	if err != nil || len(matches) == 0 {
-		http.NotFound(w, r)
-		return
-	}
-
-	// 读取最新的头像文件
-	latest := matches[len(matches)-1]
-	ext := strings.ToLower(filepath.Ext(latest))
-	switch ext {
-	case ".png":
-		w.Header().Set("Content-Type", "image/png")
-	case ".jpg", ".jpeg":
-		w.Header().Set("Content-Type", "image/jpeg")
-	case ".webp":
-		w.Header().Set("Content-Type", "image/webp")
-	case ".gif":
-		w.Header().Set("Content-Type", "image/gif")
-	case ".svg":
-		w.Header().Set("Content-Type", "image/svg+xml")
-	default:
-		w.Header().Set("Content-Type", "application/octet-stream")
-	}
-
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	http.ServeFile(w, r, latest)
 }
 
 // handleGetLogs 获取系统日志（最近 100 行，过滤认证和心跳噪音）
@@ -1611,12 +1536,6 @@ func (s *Server) handleTestCustomRegex(w http.ResponseWriter, r *http.Request) {
 // 插件管理
 // ============================================================
 
-// handleGetPlugins 获取当前已加载的插件列表（兼容接口）
-// GET /api/plugins
-func (s *Server) handleGetPlugins(w http.ResponseWriter, r *http.Request) {
-	s.handleListPlugins(w, r)
-}
-
 // ============================================================
 // 搜索番剧
 // ============================================================
@@ -1761,7 +1680,7 @@ func (s *Server) handleScheduleBangumi(w http.ResponseWriter, r *http.Request) {
 		if s.mikanSrc != nil {
 			schedule, err = s.mikanSrc.FetchWeekSchedule(r.Context(), year, season)
 		}
-		if (err != nil || len(schedule) == 0) && s.yucSrc != nil && s.pluginManager != nil && s.pluginManager.IsPluginEnabled("yuc_schedule") {
+		if (err != nil || len(schedule) == 0) && s.yucSrc != nil && s.pluginManager != nil && s.pluginManager.IsPluginActive("yuc_schedule") {
 			yucCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 			schedule, _ = s.yucSrc.FetchWeekSchedule(yucCtx, year, season)
 			cancel()
@@ -1819,27 +1738,12 @@ func (s *Server) handleScheduleBangumi(w http.ResponseWriter, r *http.Request) {
 	// 同时获取订阅列表，标注已订阅的番剧
 	var subs []database.Subscription
 	database.DB.Find(&subs)
-	subscribed := make(map[string]uint)
+	schedule, subscribed := scheduleSubscriptions(schedule, subs)
 	subStats := make(map[uint]map[string]int)
 	for _, sub := range subs {
-		if sub.BangumiID != "" {
-			subscribed[sub.BangumiID] = sub.ID
-		}
-		if sub.TitleCN != "" {
-			subscribed[sub.TitleCN] = sub.ID
-		}
 		subStats[sub.ID] = map[string]int{
 			"downloaded": int(sub.CurrentEpisodes),
 			"total":      sub.TotalEpisodes,
-		}
-	}
-
-	for _, day := range schedule {
-		for i := range day.Items {
-			item := &day.Items[i]
-			if id, ok := subscribed[item.BangumiID]; ok {
-				item.InfoHash = fmt.Sprintf("%d", id)
-			}
 		}
 	}
 
@@ -1864,7 +1768,7 @@ func (s *Server) fallbackPreviousSeason(ctx context.Context, year, season, maxBa
 		return nil, 0, 0
 	}
 
-	yucEnabled := s.pluginManager != nil && s.pluginManager.IsPluginEnabled("yuc_schedule")
+	yucEnabled := s.pluginManager != nil && s.pluginManager.IsPluginActive("yuc_schedule")
 	fy, fs := year, season
 
 	// 整体预算 20s，避免多次回退叠加拖垮前端请求（前端超时 30s）
@@ -1908,7 +1812,7 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 	var schedule []source.WeekDayItem
 	var err error
 
-	yucEnabled := s.pluginManager != nil && s.pluginManager.IsPluginEnabled("yuc_schedule")
+	yucEnabled := s.pluginManager != nil && s.pluginManager.IsPluginActive("yuc_schedule")
 
 	// 1. 若显式请求 yuc 且 yuc_schedule 插件已启用
 	if sourceParam == "yuc" && yucEnabled && s.yucSrc != nil {
@@ -1954,56 +1858,24 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 	var subs []database.Subscription
 	database.DB.Find(&subs)
 
-	subscribed := make(map[string]uint)
-	normSubs := make(map[string]uint)
+	schedule, subscribed := scheduleSubscriptions(schedule, subs)
 	subStats := make(map[uint]map[string]int) // subID → {downloaded, total}
 
 	// 批量统计已下载集数（避免 N+1 查询）
-	type episodeCountResult struct {
-		SubscriptionID uint
-		Count          int64
-	}
-	var epResults []episodeCountResult
 	subIDs := make([]uint, len(subs))
 	for i, sub := range subs {
 		subIDs[i] = sub.ID
 	}
-	if len(subIDs) > 0 {
-		database.DB.Model(&database.Episode{}).
-			Select("subscription_id, count(*) as count").
-			Where("subscription_id IN ? AND status IN ?", subIDs, []string{"downloaded", "downloading"}).
-			Group("subscription_id").
-			Find(&epResults)
-	}
-	downloadedMap := make(map[uint]int, len(epResults))
-	for _, r := range epResults {
-		downloadedMap[r.SubscriptionID] = int(r.Count)
+	downloadedMap, err := database.FinishedEpisodeCounts(database.DB.WithContext(r.Context()), subIDs)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "读取剧集进度失败"})
+		return
 	}
 
 	for _, sub := range subs {
-		if sub.BangumiID != "" {
-			subscribed[sub.BangumiID] = sub.ID
-		}
-		if sub.TitleCN != "" {
-			subscribed[sub.TitleCN] = sub.ID
-			normSubs[core.NormalizeTitle(sub.TitleCN)] = sub.ID
-		}
 		subStats[sub.ID] = map[string]int{
 			"downloaded": downloadedMap[sub.ID],
 			"total":      sub.TotalEpisodes,
-		}
-	}
-
-	for _, day := range schedule {
-		for i := range day.Items {
-			item := &day.Items[i]
-			if id, ok := subscribed[item.BangumiID]; ok {
-				item.InfoHash = fmt.Sprintf("%d", id)
-			} else if id, ok := subscribed[item.Title]; ok {
-				item.InfoHash = fmt.Sprintf("%d", id)
-			} else if id, ok := normSubs[core.NormalizeTitle(item.Title)]; ok {
-				item.InfoHash = fmt.Sprintf("%d", id)
-			}
 		}
 	}
 
@@ -2081,28 +1953,14 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 域名白名单校验（使用 URL 解析 + 后缀匹配，防止 SSRF 绕过）
-	allowedDomains := []string{"i0.hdslb.com", "lain.bgm.tv", "img.mikanani.me", "mikanani.me", "mikanani.kas.pub", "image.tmdb.org", "bilibili.com", "bgm.tv", "mikanime.tv", "yuc.wiki", "yucc.wiki", "yucwiki.net"}
 	parsedURL, err := url.Parse(imageURL)
-	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		http.Error(w, "invalid url", http.StatusBadRequest)
-		return
-	}
-	host := parsedURL.Hostname()
-	allowed := false
-	for _, domain := range allowedDomains {
-		if host == domain || strings.HasSuffix(host, "."+domain) {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		log.Printf("⚠️  非法图片代理请求被拦截: %s", imageURL)
-		http.Error(w, "domain not allowed", http.StatusForbidden)
+	if err != nil || !allowedImageURL(parsedURL) {
+		http.Error(w, "图片地址不在允许范围内", http.StatusForbidden)
 		return
 	}
 
-	client := httpx.NewInsecure(15 * time.Second)
+	client := httpx.New(15 * time.Second)
+	client.CheckRedirect = checkImageRedirect
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, imageURL, nil)
 	if err != nil {
 		http.Error(w, "invalid url", http.StatusBadRequest)
@@ -2127,14 +1985,7 @@ func (s *Server) handleProxyImage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	w.Header().Set("Cache-Control", "public, max-age=604800")
-	w.WriteHeader(resp.StatusCode)
-	// 限制代理响应体最大 20MB，防止恶意 URL 消耗服务器内存
-	lr := io.LimitReader(resp.Body, 20*1024*1024)
-	if _, err := io.Copy(w, lr); err != nil && err != io.EOF {
-		log.Printf("⚠️  图片代理传输中断: %v", err)
-	}
+	serveRasterImage(w, resp)
 }
 
 // getSettingValue 从数据库获取设置值
@@ -2196,7 +2047,7 @@ type migrateRequest struct {
 	SourcePath string `json:"source_path"`
 }
 
-// handleMigrateData 从 AutoBangumi / ani-rss SQLite 数据库迁移数据
+// handleMigrateData 导入 AutoBangumi SQLite 或 ani-rss 的订阅清单与备份
 // 支持 JSON ({"source_path": "data/..."}) 与 multipart/form-data (上传 .db 文件)
 // POST /api/migrate
 func (s *Server) handleMigrateData(w http.ResponseWriter, r *http.Request) {
@@ -2205,8 +2056,8 @@ func (s *Server) handleMigrateData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.pluginManager != nil && !s.pluginManager.IsPluginEnabled("data-migrate") {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "数据导入与迁移插件 (data-migrate) 当前处于停用状态，请先在插件管理中启用"})
+	if s.pluginManager != nil && !s.pluginManager.IsPluginActive("data-migrate") {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "数据导入与迁移插件 (data-migrate) 当前未运行，请在插件管理中检查状态"})
 		return
 	}
 
@@ -2216,7 +2067,8 @@ func (s *Server) handleMigrateData(w http.ResponseWriter, r *http.Request) {
 	contentType := r.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "multipart/form-data") {
 		// 处理文件上传
-		if err := r.ParseMultipartForm(50 << 20); err != nil { // 50MB
+		r.Body = http.MaxBytesReader(w, r.Body, (50<<20)+(1<<20))
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "上传文件解析失败: " + err.Error()})
 			return
 		}
@@ -2226,10 +2078,14 @@ func (s *Server) handleMigrateData(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer file.Close()
+		if handler.Size > 50<<20 {
+			writeJSON(w, http.StatusRequestEntityTooLarge, errorResponse{Error: "导入文件不能超过 50 MiB"})
+			return
+		}
 
 		ext := strings.ToLower(filepath.Ext(handler.Filename))
-		if ext != ".db" && ext != ".sqlite" && ext != ".sqlite3" {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "仅支持上传 .db, .sqlite 或 .sqlite3 数据库文件"})
+		if ext != ".db" && ext != ".sqlite" && ext != ".sqlite3" && ext != ".json" && ext != ".zip" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请上传 AutoBangumi SQLite、ani.v2.json 或 ani-rss ZIP 备份"})
 			return
 		}
 
@@ -2238,19 +2094,23 @@ func (s *Server) handleMigrateData(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		tempPath := filepath.Join("data", fmt.Sprintf("upload_migrate_%d%s", time.Now().UnixNano(), ext))
-		dest, err := os.Create(tempPath)
+		dest, err := os.CreateTemp("data", "upload_migrate_*"+ext)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存上传文件失败: " + err.Error()})
 			return
 		}
+		tempPath := dest.Name()
 		if _, err := io.Copy(dest, file); err != nil {
 			dest.Close()
 			os.Remove(tempPath)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "写入文件失败: " + err.Error()})
 			return
 		}
-		dest.Close()
+		if err := dest.Close(); err != nil {
+			os.Remove(tempPath)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "导入文件写入失败"})
+			return
+		}
 
 		sourcePath = tempPath
 		needCleanup = true
@@ -2346,8 +2206,12 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var user database.User
-	if err := database.DB.Where("username = ?", claims.Username).First(&user).Error; err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+	if err := database.DB.WithContext(r.Context()).Where("username = ? AND token_version = ?", claims.Username, claims.TokenVersion).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "登录已过期，请重新登录"})
+		} else {
+			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "账户数据暂时不可用"})
+		}
 		return
 	}
 	if !auth.CheckPassword(req.OldPassword, user.PasswordHash) {
@@ -2359,78 +2223,18 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "密码加密失败"})
 		return
 	}
-	// 凭证轮换与版本检查一并提交，防止两个并发改密请求复用同一版本。
-	token, err := auth.GenerateToken(user.Username, user.TokenVersion+1)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建新会话失败"})
+	result := database.DB.WithContext(r.Context()).Model(&database.User{}).
+		Where("id = ? AND token_version = ?", user.ID, user.TokenVersion).
+		Updates(map[string]any{"password_hash": hash, "token_version": gorm.Expr("token_version + 1")})
+	if result.Error != nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "无法保存密码，请稍后重试"})
 		return
 	}
-	updated := database.DB.Model(&database.User{}).Where("id = ? AND token_version = ?", user.ID, user.TokenVersion).
-		Updates(map[string]any{"password_hash": hash, "token_version": user.TokenVersion + 1})
-	if updated.Error != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存失败"})
+	if result.RowsAffected == 0 {
+		writeJSON(w, http.StatusConflict, errorResponse{Error: "账户已经更新，请重新登录"})
 		return
 	}
-	if updated.RowsAffected != 1 {
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "账户已修改，请重新登录"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "密码修改成功", "token": token})
-}
-
-// 删除前校验整个选择集；即使剧集和订阅的数字主键相同也不会跨订阅操作。
-func (s *Server) handleBatchDeleteEpisodes(w http.ResponseWriter, r *http.Request) {
-	subID, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
-	var req batchDeleteRequest
-	if err != nil || subID == 0 || json.NewDecoder(r.Body).Decode(&req) != nil || len(req.IDs) == 0 || len(req.IDs) > 100 {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请提供有效订阅和 1 至 100 个剧集 ID"})
-		return
-	}
-	var episodes []database.Episode
-	// 允许重试已经成功删除的同订阅记录，其下载器任务无需重复删除。
-	query := database.DB.Unscoped().Where("subscription_id = ? AND id IN ?", subID, req.IDs)
-	if err := query.Find(&episodes).Error; err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "读取剧集失败"})
-		return
-	}
-	if len(episodes) != len(req.IDs) {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "所选剧集必须互不重复且均属于当前订阅"})
-		return
-	}
-	if req.DeleteFiles {
-		for _, ep := range episodes {
-			if !ep.DeletedAt.Valid && (s.downloader == nil || ep.TorrentHash == "" || strings.HasPrefix(ep.TorrentHash, "url:")) {
-				writeJSON(w, http.StatusConflict, errorResponse{Error: "下载器任务尚未关联，可选择仅删除记录"})
-				return
-			}
-		}
-	}
-	deleted := 0
-	for _, ep := range episodes {
-		if ep.DeletedAt.Valid {
-			continue
-		}
-		if req.DeleteFiles {
-			if err := s.downloader.Delete(r.Context(), ep.TorrentHash, true); err != nil {
-				writeJSON(w, http.StatusBadGateway, errorResponse{Error: fmt.Sprintf("已移除 %d 项，删除剧集 %d 的下载文件失败", deleted, ep.ID)})
-				return
-			}
-		}
-		err := database.DB.Transaction(func(tx *gorm.DB) error {
-			result := tx.Where("subscription_id = ? AND id = ?", subID, ep.ID).Delete(&database.Episode{})
-			if result.Error != nil {
-				return result.Error
-			}
-			deleted += int(result.RowsAffected)
-			countOrganized := tx.Model(&database.Episode{}).Select("count(*)").Where("subscription_id = ? AND status = ?", subID, "organized")
-			return tx.Model(&database.Subscription{}).Where("id = ?", subID).Update("current_episodes", countOrganized).Error
-		})
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "删除剧集记录失败"})
-			return
-		}
-	}
-	writeJSON(w, http.StatusOK, batchDeleteResponse{Deleted: deleted})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "密码修改成功"})
 }
 
 func (s *Server) handleBatchDeleteSubscriptions(w http.ResponseWriter, r *http.Request) {
@@ -2448,36 +2252,12 @@ func (s *Server) handleBatchDeleteSubscriptions(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// 先删 qB 种子和文件（有操作失败只记录日志，不中断流程）
-	if req.DeleteFiles && s.downloader != nil {
-		var episodes []database.Episode
-		database.DB.Where("subscription_id IN ?", req.IDs).Find(&episodes)
-		for _, ep := range episodes {
-			if ep.TorrentHash == "" {
-				continue
-			}
-			if err := s.downloader.Delete(r.Context(), ep.TorrentHash, true); err != nil {
-				log.Printf("⚠️  批量删除种子失败 (hash=%s): %v", ep.TorrentHash, err)
-			}
-		}
-	}
-
-	// 事务：软删除订阅 + 关联剧集
-	tx := database.DB.Begin()
-	if err := tx.Where("id IN ?", req.IDs).Delete(&database.Subscription{}).Error; err != nil {
-		tx.Rollback()
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "删除失败"})
+	deleted, failure := s.deleteSubscriptions(r.Context(), req.IDs, req.DeleteFiles)
+	if failure != nil {
+		failure.write(w)
 		return
 	}
-	if err := tx.Where("subscription_id IN ?", req.IDs).Delete(&database.Episode{}).Error; err != nil {
-		tx.Rollback()
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "删除关联剧集失败"})
-		return
-	}
-	tx.Commit()
-
-	log.Printf("🗑️  批量删除订阅: %v（deleteFiles=%v）", req.IDs, req.DeleteFiles)
-	writeJSON(w, http.StatusOK, batchDeleteResponse{Deleted: len(req.IDs)})
+	writeJSON(w, http.StatusOK, batchDeleteResponse{Deleted: deleted})
 }
 
 func (s *Server) handleBatchRestoreSubscriptions(w http.ResponseWriter, r *http.Request) {
@@ -2640,66 +2420,31 @@ func (s *Server) handleTestNotify(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	// 校验消息通知推送插件状态
-	if s.pluginManager != nil && !s.pluginManager.IsPluginEnabled("extended-notifiers") {
+	if s.pluginManager != nil && !s.pluginManager.IsPluginActive("extended-notifiers") {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false,
-			"error":   "消息通知推送插件当前处于停用状态，请先在插件管理中启用",
+			"error":   "消息通知推送插件当前未运行，请在插件管理中检查状态",
 		})
 		return
 	}
 
-	if req.Channel != "" {
-		// 单渠道测试：先由 v2 核心管理器测试
-		var err error
-		if s.notifyMgr != nil {
-			err = s.notifyMgr.SendTest(ctx, req.Channel, req.Title, req.Message)
-		}
-		// 若核心未匹配到渠道，尝试扩展推送插件支持的渠道
-		if err != nil || s.notifyMgr == nil {
-			extErr := s.testExtendedNotifier(ctx, req.Channel, req.Title, req.Message)
-			if extErr != nil {
-				if !strings.Contains(extErr.Error(), "未找到通知渠道") {
-					err = extErr
-				}
-			} else {
-				err = nil
-			}
-		}
-
-		if err != nil {
-			if s.notifyMgr != nil {
-				s.notifyMgr.RecordManualLog("manual.test", req.Channel, req.Title, req.Message, "failed", err.Error())
-			}
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"success": false,
-				"error":   err.Error(),
-			})
-			return
-		}
-		if s.notifyMgr != nil {
-			s.notifyMgr.RecordManualLog("manual.test", req.Channel, req.Title, req.Message, "success", "")
-		}
-	} else {
-		// 全渠道测试
-		var err error
-		if s.notifyMgr != nil {
-			err = s.notifyMgr.SendTest(ctx, "", req.Title, req.Message)
-		}
-		if err != nil {
-			if s.notifyMgr != nil {
-				s.notifyMgr.RecordManualLog("manual.test", "all", req.Title, req.Message, "failed", err.Error())
-			}
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"success": false,
-				"error":   err.Error(),
-			})
-			return
-		}
-		if s.notifyMgr != nil {
-			s.notifyMgr.RecordManualLog("manual.test", "all", req.Title, req.Message, "success", "")
-		}
+	var err error
+	testExtended := func(ctx context.Context) error {
+		return s.testExtendedNotifier(ctx, req.Channel, req.Title, req.Message)
+	}
+	switch {
+	case s.notifyMgr != nil:
+		err = s.notifyMgr.SendTestWithFallback(ctx, req.Channel, req.Title, req.Message, testExtended)
+	case req.Channel != "":
+		err = testExtended(ctx)
+	default:
+		err = errors.New("通知中心未初始化，无法测试已配置渠道")
 	}
 
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "测试通知已发送",
@@ -2708,10 +2453,6 @@ func (s *Server) handleTestNotify(w http.ResponseWriter, r *http.Request) {
 
 // testExtendedNotifier 测试扩展通知插件通道 (Bark, ServerChan, Discord, Slack, Gotify, Ntfy, Pushover, Email)
 func (s *Server) testExtendedNotifier(ctx context.Context, channel, title, message string) error {
-	if s.pluginManager != nil && !s.pluginManager.IsPluginEnabled("extended-notifiers") {
-		return fmt.Errorf("消息通知推送插件当前处于停用状态，请先在插件管理中启用")
-	}
-
 	getSetting := func(key string) string {
 		var st database.Setting
 		if err := database.DB.Where("key = ?", key).First(&st).Error; err == nil {
@@ -2834,7 +2575,7 @@ func (s *Server) testExtendedNotifier(ctx context.Context, channel, title, messa
 		}
 		target = notifier.NewWeChatNotifierWithParams(appID, appSecret, userID, templateID)
 	default:
-		return fmt.Errorf("未找到通知渠道: %s", channel)
+		return fmt.Errorf("%w: %s", v2.ErrNotifierNotFound, channel)
 	}
 
 	return target.Send(ctx, title, message)
@@ -3066,7 +2807,12 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 		}
 		// 简单的 Token 版本校验
 		var user database.User
-		if err := database.DB.Where("username = ? AND token_version = ?", claims.Username, claims.TokenVersion).First(&user).Error; err != nil {
+		if err := database.DB.WithContext(r.Context()).Where("username = ? AND token_version = ?", claims.Username, claims.TokenVersion).First(&user).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				http.Error(w, "账户数据暂时不可用", http.StatusServiceUnavailable)
+				return
+			}
+
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -3076,7 +2822,7 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
@@ -3121,8 +2867,9 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	fmt.Fprintf(w, "data: {\"type\": \"connected\"}\n\n")
-	flusher.Flush()
+	if err := httpx.WriteSSEFrame(w, "data: {\"type\": \"connected\"}\n\n"); err != nil {
+		return
+	}
 
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
@@ -3132,12 +2879,14 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			fmt.Fprintf(w, ": heartbeat\n\n")
-			flusher.Flush()
+			if err := httpx.WriteSSEFrame(w, ": heartbeat\n\n"); err != nil {
+				return
+			}
 		case ev := <-eventChan:
 			data, _ := json.Marshal(ev)
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+			if err := httpx.WriteSSEFrame(w, fmt.Sprintf("data: %s\n\n", data)); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -3179,8 +2928,8 @@ func (s *Server) handleTogglePlugin(w http.ResponseWriter, r *http.Request) {
 		Enabled *bool  `json:"enabled"`
 	}
 
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
+	if !decodePluginRequest(w, r, &req, false) {
+		return
 	}
 
 	// 兼容支持路径变量: POST /api/plugins/{id}/toggle
@@ -3202,7 +2951,11 @@ func (s *Server) handleTogglePlugin(w http.ResponseWriter, r *http.Request) {
 	defer s.pluginReloadMu.Unlock()
 
 	if err := s.pluginManager.TogglePlugin(req.ID, *req.Enabled); err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		if errors.Is(err, plugin.ErrPluginNotFound) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "插件不存在"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "更新插件状态失败"})
 		return
 	}
 
@@ -3222,30 +2975,35 @@ func (s *Server) handleSavePlugin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "插件管理器未初始化"})
 		return
 	}
-	var p plugin.PluginInfo
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+	var req struct {
+		plugin.PluginInfo
+		Secret *string `json:"secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请求格式错误"})
 		return
 	}
-	if strings.TrimSpace(p.Name) == "" {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "插件名称不能为空"})
-		return
-	}
-	if p.Type == "webhook" && strings.TrimSpace(p.URL) == "" {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "Webhook URL 不能为空"})
-		return
-	}
-
+	p := req.PluginInfo
 	s.pluginReloadMu.Lock()
 	defer s.pluginReloadMu.Unlock()
 
-	if err := s.pluginManager.AddOrUpdatePlugin(p); err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+	info, err := s.pluginManager.SaveCustomPluginInfo(p, req.Secret)
+	if err != nil {
+		switch {
+		case errors.Is(err, plugin.ErrReservedPluginID):
+			writeJSON(w, http.StatusConflict, errorResponse{Error: err.Error()})
+		case errors.Is(err, plugin.ErrInvalidPluginManifest):
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		default:
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存插件配置失败"})
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message": "插件已保存并启用",
-		"id":      p.ID,
+		"message": "插件配置已保存",
+		"id":      info.ID,
+		"enabled": info.Enabled,
+		"status":  info.Status,
 	})
 }
 
@@ -3268,7 +3026,14 @@ func (s *Server) handleDeletePlugin(w http.ResponseWriter, r *http.Request) {
 	defer s.pluginReloadMu.Unlock()
 
 	if err := s.pluginManager.DeletePlugin(id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		switch {
+		case errors.Is(err, plugin.ErrReservedPluginID):
+			writeJSON(w, http.StatusConflict, errorResponse{Error: err.Error()})
+		case errors.Is(err, plugin.ErrPluginNotFound):
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "插件不存在"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "删除插件配置失败"})
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -3293,13 +3058,19 @@ func (s *Server) handleReloadPlugins(w http.ResponseWriter, r *http.Request) {
 	defer s.pluginReloadMu.Unlock()
 
 	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("❌ [API] 重载插件异常 panic: %v", rec)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("重载插件异常: %v", rec)})
+		if recover() != nil {
+			log.Print("❌ [API] 重载插件时发生异常")
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "重载插件异常"})
 		}
 	}()
 
-	s.pluginManager.Load()
+	if err := s.pluginManager.Load(); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "重载插件配置失败，请检查数据库和插件配置后重试"})
+		return
+	}
+	if s.notifyMgr != nil && s.notifyMgr.IsEnabled() {
+		s.notifyMgr.Reload()
+	}
 	plugins := s.pluginManager.GetPluginList()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "插件已重新加载",
@@ -3323,10 +3094,20 @@ func (s *Server) handleBangumiAuthLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectURI := fmt.Sprintf("%s/api/bangumi/auth/callback", s.getPublicBaseURL(r))
-	authURL := fmt.Sprintf("https://bgm.tv/oauth/authorize?client_id=%s&response_type=code&redirect_uri=%s",
-		clientID, url.QueryEscape(redirectURI))
-	writeJSON(w, http.StatusOK, map[string]string{"url": authURL})
+	claims, ok := r.Context().Value("claims").(*auth.Claims)
+	if !ok || claims == nil {
+		http.Error(w, "管理员会话无效", http.StatusUnauthorized)
+		return
+	}
+	redirectURI := s.getPublicBaseURL(r) + bangumiCallbackPath
+	state, err := s.bgmFlows.start(w, claims, redirectURI)
+	if err != nil {
+		http.Error(w, "无法创建授权会话", http.StatusInternalServerError)
+		return
+	}
+	params := url.Values{"client_id": {clientID}, "response_type": {"code"}, "redirect_uri": {redirectURI}, "state": {state}}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]string{"url": "https://bgm.tv/oauth/authorize?" + params.Encode()})
 }
 
 func (s *Server) handleBangumiAuthCallback(w http.ResponseWriter, r *http.Request) {
@@ -3336,6 +3117,11 @@ func (s *Server) handleBangumiAuthCallback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	redirectURI := s.getPublicBaseURL(r) + bangumiCallbackPath
+	if !s.bgmFlows.consume(r, redirectURI) {
+		http.Error(w, "授权会话无效或已过期，请从设置页重新授权", http.StatusBadRequest)
+		return
+	}
 	clientID := os.Getenv("BANGUMI_CLIENT_ID")
 	if clientID == "" {
 		var setting database.Setting
@@ -3357,8 +3143,6 @@ func (s *Server) handleBangumiAuthCallback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	redirectURI := fmt.Sprintf("%s/api/bangumi/auth/callback", s.getPublicBaseURL(r))
-
 	data := url.Values{}
 	data.Set("grant_type", "authorization_code")
 	data.Set("client_id", clientID)
@@ -3366,61 +3150,74 @@ func (s *Server) handleBangumiAuthCallback(w http.ResponseWriter, r *http.Reques
 	data.Set("code", code)
 	data.Set("redirect_uri", redirectURI)
 
-	resp, err := httpx.Default.PostForm("https://bgm.tv/oauth/access_token", data)
+	exchange, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "https://bgm.tv/oauth/access_token", strings.NewReader(data.Encode()))
 	if err != nil {
-		http.Error(w, "failed to exchange token: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "创建授权请求失败", http.StatusInternalServerError)
+		return
+	}
+	exchange.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := httpx.Default.Do(exchange)
+	if err != nil {
+		http.Error(w, "连接 Bangumi 授权服务失败", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		http.Error(w, fmt.Sprintf("Bangumi 授权换取令牌失败 (HTTP %d): %s", resp.StatusCode, string(body)), http.StatusBadRequest)
+		http.Error(w, "Bangumi 拒绝了授权请求", http.StatusBadRequest)
 		return
 	}
-
 	var tokenResp struct {
 		AccessToken string `json:"access_token"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil || tokenResp.AccessToken == "" {
-		http.Error(w, "解析 Bangumi 访问令牌失败或令牌为空", http.StatusInternalServerError)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&tokenResp); err != nil || tokenResp.AccessToken == "" {
+		http.Error(w, "Bangumi 返回的授权令牌无效", http.StatusBadGateway)
 		return
 	}
-
-	database.DB.Save(&database.Setting{Key: "BGMTV_USER_TOKEN", Value: tokenResp.AccessToken})
-	database.DB.Save(&database.Setting{Key: "BANGUMI_USER_TOKEN", Value: tokenResp.AccessToken})
-
+	meCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	meReq, err := http.NewRequestWithContext(meCtx, http.MethodGet, "https://api.bgm.tv/v0/me", nil)
+	if err != nil {
+		http.Error(w, "创建账户查询失败", http.StatusInternalServerError)
+		return
+	}
+	meReq.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+	meReq.Header.Set("User-Agent", "Ani-Go/1.0")
+	meResp, err := httpx.Default.Do(meReq)
+	if err != nil {
+		http.Error(w, "无法确认 Bangumi 账户", http.StatusBadGateway)
+		return
+	}
+	defer meResp.Body.Close()
+	var me struct {
+		Username string `json:"username"`
+		ID       int    `json:"id"`
+	}
+	if meResp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(meResp.Body, 1<<20)).Decode(&me) != nil || (me.Username == "" && me.ID <= 0) {
+		http.Error(w, "无法确认 Bangumi 账户", http.StatusBadGateway)
+		return
+	}
+	if me.Username == "" {
+		me.Username = strconv.Itoa(me.ID)
+	}
+	err = database.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		for _, setting := range []database.Setting{
+			{Key: "BGMTV_USER_TOKEN", Value: tokenResp.AccessToken},
+			{Key: "BANGUMI_USER_TOKEN", Value: tokenResp.AccessToken},
+			{Key: "BGMTV_USERNAME", Value: me.Username},
+		} {
+			if err := tx.Save(&setting).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		http.Error(w, "无法保存 Bangumi 账户绑定", http.StatusInternalServerError)
+		return
+	}
 	if p, ok := s.md.(*metadata.BGMTVProvider); ok {
 		p.SetUserToken(tokenResp.AccessToken)
 	}
-
-	// 自动获取当前登录用户的 username 并持久化
-	client := httpx.New(10 * time.Second)
-	meReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://api.bgm.tv/v0/me", nil)
-	if err == nil {
-		meReq.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
-		meReq.Header.Set("User-Agent", "Ani-Go/1.0")
-		if meResp, err := client.Do(meReq); err == nil {
-			defer meResp.Body.Close()
-			if meResp.StatusCode == http.StatusOK {
-				var me struct {
-					Username string `json:"username"`
-					ID       int    `json:"id"`
-				}
-				if err := json.NewDecoder(meResp.Body).Decode(&me); err == nil {
-					uname := me.Username
-					if uname == "" && me.ID > 0 {
-						uname = fmt.Sprintf("%d", me.ID)
-					}
-					if uname != "" {
-						database.DB.Save(&database.Setting{Key: "BGMTV_USERNAME", Value: uname})
-						log.Printf("✅ Bangumi OAuth 授权成功，已自动关联用户: %s", uname)
-					}
-				}
-			}
-		}
-	}
-
 	http.Redirect(w, r, "/settings?tab=bangumi&status=success", http.StatusFound)
 }
 func (s *Server) getPublicBaseURL(r *http.Request) string {
@@ -3438,78 +3235,67 @@ func (s *Server) getPublicBaseURL(r *http.Request) string {
 // handlePauseAllDownloads 批量暂停所有活跃任务
 // POST /api/downloads/pause-all
 func (s *Server) handlePauseAllDownloads(w http.ResponseWriter, r *http.Request) {
-	if s.downloader == nil {
-		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "下载器未配置"})
-		return
-	}
-
-	tasks, err := s.downloader.List(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("获取任务列表失败: %v", err)})
-		return
-	}
-
-	var count int64
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	for _, t := range tasks {
-		if t.Status == "downloading" || t.Status == "seeding" || t.Status == "queued" {
-			wg.Add(1)
-			go func(hash string) {
-				defer wg.Done()
-				if err := s.downloader.Pause(r.Context(), hash); err == nil {
-					mu.Lock()
-					count++
-					mu.Unlock()
-				}
-			}(t.Hash)
-		}
-	}
-	wg.Wait()
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": fmt.Sprintf("已成功暂停 %d 个下载任务", count),
-		"count":   count,
-	})
+	s.changeDownloadStates(w, r, true)
 }
 
-// handleResumeAllDownloads 批量恢复所有暂停任务
-// POST /api/downloads/resume-all
+// handleResumeAllDownloads 恢复所有已暂停的任务。
 func (s *Server) handleResumeAllDownloads(w http.ResponseWriter, r *http.Request) {
-	if s.downloader == nil {
+	s.changeDownloadStates(w, r, false)
+}
+
+func (s *Server) changeDownloadStates(w http.ResponseWriter, r *http.Request, pause bool) {
+	dl := s.downloader
+	if dynamic, ok := dl.(*downloader.DynamicDownloader); ok {
+		// 同一批操作与取列表时使用同一个下载器实例。
+		dl = dynamic.GetCurrent()
+	}
+	if dl == nil {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "下载器未配置"})
 		return
 	}
-
-	tasks, err := s.downloader.List(r.Context())
+	tasks, err := dl.List(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("获取任务列表失败: %v", err)})
+		writeJSON(w, http.StatusBadGateway, errorResponse{Error: fmt.Sprintf("获取任务列表失败: %v", err)})
 		return
 	}
 
-	var count int64
+	action, eligible, label := dl.Resume, downloader.CanResume, "恢复"
+	if pause {
+		action, eligible, label = dl.Pause, downloader.CanPause, "暂停"
+	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	for _, t := range tasks {
-		if t.Status == "paused" {
-			wg.Add(1)
-			go func(hash string) {
-				defer wg.Done()
-				if err := s.downloader.Resume(r.Context(), hash); err == nil {
-					mu.Lock()
-					count++
-					mu.Unlock()
-				}
-			}(t.Hash)
+	var succeeded, failed int
+	slots := make(chan struct{}, 8)
+	for _, task := range tasks {
+		if !eligible(task.Status) {
+			continue
 		}
+		slots <- struct{}{}
+		wg.Add(1)
+		go func(hash string) {
+			defer wg.Done()
+			defer func() { <-slots }()
+			err := action(r.Context(), hash)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failed++
+			} else {
+				succeeded++
+			}
+		}(task.Hash)
 	}
 	wg.Wait()
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": fmt.Sprintf("已成功恢复 %d 个下载任务", count),
-		"count":   count,
+	if failed > 0 {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"success": false, "count": succeeded, "failed": failed,
+			"error": fmt.Sprintf("已%s %d 个任务，%d 个失败", label, succeeded, failed),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true, "count": succeeded, "message": fmt.Sprintf("已成功%s %d 个下载任务", label, succeeded),
 	})
 }
 
@@ -3555,7 +3341,15 @@ func (s *Server) handleListNotificationLogs(w http.ResponseWriter, r *http.Reque
 // handleClearNotificationLogs 清空通知日志
 // DELETE /api/notifications/logs
 func (s *Server) handleClearNotificationLogs(w http.ResponseWriter, r *http.Request) {
-	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	days := 0
+	if values, present := r.URL.Query()["days"]; present {
+		value, err := strconv.ParseUint(values[0], 10, 31)
+		if err != nil || len(values) != 1 {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "days 必须是单个非负整数"})
+			return
+		}
+		days = int(value)
+	}
 	if err := v2.ClearNotificationLogs(days); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("清空通知日志失败: %v", err)})
 		return
@@ -3749,6 +3543,10 @@ func (s *Server) handleGenerateMCPToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if s.mcpServer != nil {
+		s.mcpServer.Close()
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]string{
 		"token": token,
 	})
@@ -3828,8 +3626,11 @@ func (s *Server) handleMergeCollections(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req mergeCollectionsRequest
-	if r.Body != nil && r.ContentLength > 0 {
-		_ = json.NewDecoder(r.Body).Decode(&req)
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "无效的归并参数"})
+			return
+		}
 	}
 
 	ctx := r.Context()
@@ -3986,12 +3787,11 @@ func (s *Server) handleUpdateNotificationTemplate(w http.ResponseWriter, r *http
 
 	tm := s.getTemplateManager()
 	if err := tm.SetTemplate(req.EventType, req.Channel, req.Template); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "模板语法错误: " + err.Error()})
-		return
-	}
-
-	if err := tm.SaveToDB(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存模板到数据库失败: " + err.Error()})
+		if errors.Is(err, v2.ErrInvalidTemplate) {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		} else {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "保存通知模板失败"})
+		}
 		return
 	}
 
@@ -4046,25 +3846,23 @@ type resetTemplateRequest struct {
 	Channel   string `json:"channel"`
 }
 
-// handleResetNotificationTemplate 重置指定或全部模板为内置默认
-// POST /api/notifications/templates/reset
+// handleResetNotificationTemplate 移除指定事件与渠道的覆盖模板。
 func (s *Server) handleResetNotificationTemplate(w http.ResponseWriter, r *http.Request) {
 	var req resetTemplateRequest
-	if r.Body != nil && r.ContentLength > 0 {
-		_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "需要包含 event_type 的通知模板请求"})
+		return
 	}
-
 	req.EventType = strings.TrimSpace(req.EventType)
 	req.Channel = strings.TrimSpace(req.Channel)
+	if req.EventType == "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "event_type 不能为空"})
+		return
+	}
 
 	tm := s.getTemplateManager()
 	if err := tm.DeleteTemplate(req.EventType, req.Channel); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "重置模板失败: " + err.Error()})
-		return
-	}
-
-	if err := tm.SaveToDB(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "持久化重置状态失败: " + err.Error()})
 		return
 	}
 

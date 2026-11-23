@@ -28,10 +28,10 @@ interface TorrentItem {
   bangumi_id: string; 
   info_hash: string; 
   cover_url: string;
-  total_episodes?: number;
-  is_finished?: boolean;
   aired_time?: string;
   aired_date?: string;
+  total_episodes?: number;
+  is_finished?: boolean;
 }
 
 
@@ -529,6 +529,9 @@ async function confirmBatchSubscribe() {
       items: allItems.map(i => ({
         title_cn: i.title,
         bangumi_id: i.bangumi_id,
+        mikan_id: i.item.source === 'Mikan' ? i.bangumi_id : undefined,
+        metadata_id: i.item.source === 'BGM.tv' ? i.bangumi_id : undefined,
+        metadata_provider: i.item.source === 'BGM.tv' ? 'BGM.tv' : undefined,
         cover_url: i.cover_url,
         subgroups: i.subgroups,
         total_episodes: i.item.total_episodes || 0,

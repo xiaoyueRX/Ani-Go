@@ -143,7 +143,9 @@ func TestServer_SSEAndJSONRPCWorkflow(t *testing.T) {
 	mux.HandleFunc("GET /mcp/sse", s.HandleSSE)
 	mux.HandleFunc("POST /mcp/messages", s.HandleMessages)
 
-	ts := httptest.NewServer(mux)
+	ts := httptest.NewUnstartedServer(mux)
+	ts.Config.WriteTimeout = 100 * time.Millisecond
+	ts.Start()
 	defer ts.Close()
 
 	// 1. 发起 SSE 连接
@@ -187,6 +189,9 @@ func TestServer_SSEAndJSONRPCWorkflow(t *testing.T) {
 	if sessionEndpoint == "" {
 		t.Fatalf("未接收到 session endpoint")
 	}
+
+	// 等到普通请求写入期限结束后，原有会话仍应正常接收消息。
+	time.Sleep(2 * ts.Config.WriteTimeout)
 
 	// 2. 发送 initialize 请求
 	initReq := JSONRPCRequest{
@@ -369,6 +374,9 @@ func TestGovernanceAndAnimeTools(t *testing.T) {
 		t.Fatalf("trigger_refresh 失败: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
+	if !strings.Contains(resRef.Content[0].Text, "历史补全") {
+		t.Errorf("回执应指明历史补全，实际为 %q", resRef.Content[0].Text)
+	}
 	if !refreshed.Load() {
 		t.Errorf("trigger_refresh 未触发回调函数")
 	}
@@ -848,6 +856,11 @@ func TestAllTools_ValidationNilGuardsAndSecurity(t *testing.T) {
 		if resAdd.IsError {
 			t.Fatalf("add_subscription 创建失败: %+v", resAdd)
 		}
+	}
+
+	duplicate, _ := s.CallTool(ctx, "add_subscription", map[string]interface{}{"title": "测试番剧-2", "season": float64(2)})
+	if !duplicate.IsError {
+		t.Fatal("MCP 重复创建了同标题同季的订阅")
 	}
 
 	// 为订阅 ID=1 插入关联剧集以验证级联删除

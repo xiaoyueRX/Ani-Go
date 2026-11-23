@@ -40,7 +40,7 @@ function handleSubmit() {
   if (animeType.value !== (props.sub.anime_type || '')) u.anime_type = animeType.value || null
   if (totalEpisodes.value !== props.sub.total_episodes) u.total_episodes = totalEpisodes.value
   if (completed.value !== props.sub.completed) u.completed = completed.value
-  if (customPath.value !== (props.sub.custom_path || '')) u.custom_path = customPath.value || null
+  if (customPath.value !== (props.sub.custom_path || '')) u.custom_path = customPath.value
   if (filterJson.value !== (props.sub.filter_json || '')) u.filter_json = filterJson.value || null
   if (excludedKeywords.value !== (props.sub.excluded_keywords || '[]')) u.excluded_keywords = excludedKeywords.value || '[]'
   if (skipBulkUpdate.value !== (props.sub.skip_bulk_update || false)) u.skip_bulk_update = skipBulkUpdate.value
@@ -118,8 +118,8 @@ function handleSubmit() {
     </div>
 
     <div class="space-y-2">
-      <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.pathOverride') }}</label>
-      <input v-model="customPath" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" placeholder="{title_cn} ({year})/Season {season:02}" />
+      <label for="subscription-download-directory" class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.pathOverride') }}</label>
+      <input id="subscription-download-directory" v-model="customPath" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" :placeholder="t('edit.label.defaultDownloadDirectory')" />
     </div>
 
     <div class="space-y-2">

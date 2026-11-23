@@ -161,8 +161,8 @@ func TestSetCustomRegexPatterns_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("设置自定义正则失败: %v", err)
 	}
-	if len(customRegexPatterns) != 2 {
-		t.Fatalf("自定义正则数量 = %d, 期望 2", len(customRegexPatterns))
+	if len(GetCustomRegexPatterns()) != 2 {
+		t.Fatalf("自定义正则数量 = %d, 期望 2", len(GetCustomRegexPatterns()))
 	}
 	// 清理
 	SetCustomRegexPatterns(nil)

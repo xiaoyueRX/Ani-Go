@@ -425,7 +425,7 @@ func extractInfoHash(magnetURL string) string {
 // parsePubDate 解析 RSS 中的 pubDate 字段
 func parsePubDate(s string) (time.Time, error) {
 	if s == "" {
-		return time.Now(), nil
+		return time.Time{}, nil
 	}
 	// 尝试多种日期格式
 	formats := []string{
@@ -434,11 +434,12 @@ func parsePubDate(s string) (time.Time, error) {
 		time.RFC3339,
 		"2006-01-02T15:04:05-07:00",
 		"2006-01-02 15:04:05",
+		"2006-01-02",
 	}
 	for _, f := range formats {
 		if t, err := time.Parse(f, s); err == nil {
 			return t, nil
 		}
 	}
-	return time.Now(), nil
+	return time.Time{}, nil
 }

@@ -1,94 +1,55 @@
-# Ani-Go 生产部署与 NAS 最佳实践指南 (Deployment Guide)
+# 部署到 NAS 或家庭服务器
 
-## 1. 存储挂载规范：规避跨卷硬链接失效
+[English](05_DEPLOYMENT_EN.md) · [快速开始](../README.md#快速开始)
 
-硬链接（Hardlink）是指向底层文件系统同一物理数据块的目录项，**不能跨物理分区，也不能在 Docker 中跨不同的 Volume 挂载点**。
+## 容器部署
 
-### ❌ 常见误区（跨卷挂载导致无法硬链接，报错 Invalid cross-device link）：
-```yaml
-volumes:
-  - /volume1/downloads:/downloads   # 挂载点 A
-  - /volume1/media:/media           # 挂载点 B (跨卷导致硬链接无法建立)
+1. 在仓库目录复制 `.env.example` 为 `.env`，填写下载器地址和凭据。容器需要通过服务名或可达的宿主机地址访问下载器。
+2. 编辑仓库的 Compose 文件，把 `/path/to/your/data` 换为 NAS 上已存在的共享目录。首次部署可以使用空目录，容器账户须能在其中创建文件及子目录。默认容器以 UID/GID `1000:1000` 运行。若共享目录已授权给其他账户，可在 `.env` 填写其数字 `PUID`、`PGID`。独立使用 `docker run` 时，通过 `--user UID:GID` 选择账户。
+3. 运行 `docker compose up -d ani-go`。访问 `http://localhost:20001`；从其他设备使用 NAS 的地址。首次启动可预设 `ANIGO_ADMIN_PASSWORD`，否则从 `docker compose logs ani-go` 读取随机生成的管理员密码。[Compose 文件](../docker-compose.yml) · [环境变量示例](../.env.example)
+
+| 容器路径 | 用途 |
+| --- | --- |
+| `/data/db/ani-go.db` | 持久化 SQLite 数据库，包括账号、订阅、设置和插件配置。 |
+| `/data/backups` | Compose 的备份目录，可通过 `BACKUP_PATH` 配置。 |
+| `/data/uploads/avatars`、`/data/ani-go.log` | 上传的头像及应用日志。Compose 服务从根目录 `/` 启动。 |
+| `/data/media` | Compose 将番剧、电影、特别篇分别整理到该目录下。 |
+| `/data/downloads` | 可选的下载目录。下载器完成任务时报告的路径必须可由 Ani-Go 读取。 |
+
+订阅的**下载目录**留空时，Transmission、aria2 和 qBittorrent 使用自身的默认保存设置。需要指定目录时，请填写下载器能识别的实际路径，例如 `/data/downloads/series`。清空该字段会恢复默认值，后续新增任务才会使用新设置。整理完成的媒体另存到配置的媒体库目录。
+
+空下载目录的订阅仍在投递前按 `DISK_MIN_FREE_GB` 检查 Ani-Go 所在机器的 `TV_BASE_PATH` 卷。显式下载目录按 Ani-Go 本机所见的路径或其已有父目录检查。远程下载器默认卷的剩余空间由下载器所在机器监控。
+
+在群晖、fnOS 或 Unraid 上，从各自的共享目录选择统一父目录作为 `/data`。将它按相同的容器路径挂入下载器和 Ani-Go，避免下载器报告仅在另一个容器中有效的路径。媒体库和下载目录处于同一挂载、同一文件系统时可以建立硬链接。跨文件系统会额外复制一份媒体；若要保留下载源继续做种，启用 `USE_HARDLINK`。[整理实现](../internal/organizer/organizer.go)
+
+整理前会向 qBittorrent、Transmission 或 Aria2 核对逐文件清单，只处理任务中已选、下载完成且本地大小吻合的视频。选集下载的合集中，未选文件和同目录的其他视频会留在原处。下载器无法确认文件状态时，整理会等到后续轮询。
+
+移动模式先在媒体库所在卷准备完整文件，再提交剧集记录，最后清理下载源。数据库写入失败会保留源文件供重试。服务重启后会继续清理待移动文件；如果源路径的文件发生变化或库文件缺失，就保留源文件。如果需要下载器继续做种，请启用硬链接模式，同卷优先硬链接，跨卷复制后也会保留下载源。Linux 本地 ext4、Btrfs、XFS、F2FS 或 tmpfs 卷支持目录锁时，下次在同一目录整理会清理 Ani-Go 意外中断的暂存文件。Windows、网络共享和其他未确认可安全加锁的卷使用独立暂存目录；服务若在复制中断电，可能留下隐藏的暂存文件。[整理提交与恢复](../internal/scheduler/organizer_commit.go)
+
+## 备份与恢复
+
+将 `BACKUP_PATH` 指向持久卷中可写的目录。手工和定时备份共用 `BACKUP_KEEP_COUNT`，默认保留最新 7 份。`BACKUP_CRON` 默认为每天零点，可使用五字段表达式（例如 `0 3 * * *`）或带秒的六字段表达式。在设置页保存计划或保留数后即时生效。部署时设置的同名环境变量优先。
+
+升级前可在设置页创建并下载一份备份，按需勾选剧集。管理员 JSON 包含设置、订阅和可选的剧集记录，也可能包含插件凭据，应存放在私有目录。账号和本机登录签名密钥由持久化 SQLite 数据库保留。首个管理员只在空用户表中创建。若数据库无法读取或已有签名密钥损坏，启动会报告错误。恢复数据库访问或从本机有效的 SQLite 副本恢复密钥后可重新启动。新快照带 SHA-256 完整性校验，恢复前会核对内容。旧版生成的无摘要快照可继续恢复。跨库恢复同名同季订阅时会核对来源、字幕组及筛选条件，保留各订阅的剧集归属。恢复成功后插件会重新加载，其他启动配置可在重启后核对。[备份 API](API.md#设置与管理员备份)
+
+## 升级与验证
+
+先检查备份是否在持久卷上。沿用现有挂载至 `/data` 的宿主机目录。重建旧容器前，如 `/app/data/uploads` 有头像，将它复制到宿主机挂载目录中的 `uploads`；同时取出 `/app/data` 中仍需保留的旧备份和日志。执行以下操作后查看 `version` 及容器日志。
+
+```bash
+docker compose pull ani-go
+docker compose up -d ani-go
+curl -fsS http://localhost:20001/api/health
 ```
 
-### ✅ 推荐规范（单根卷挂载规范 Single-Volume-Mount）：
-始终将下载目录与媒体库目录放在同一个父目录下，并在容器中作为**单个统一卷**挂载：
-```yaml
-volumes:
-  - /volume1/data:/data             # 统一挂载
-```
-此时：
-- 下载路径配置为：`/data/downloads`
-- 媒体库路径配置为：`/data/media/anime`
-- 数据库持久化：`/data/db/ani-go.db`
-- 硬链接创建速度极快（Zero IO），既不产生磁盘复制，也不占用双倍空间。
+## 独立二进制安装
 
-### 🛡️ 生产环境用户权限安全规范（非 root 权限）
-- 为保证宿主机与 NAS 存储安全，Ani-Go 官方容器镜像默认以非 root 用户身份（UID: `1000`, GID: `1000`，内置用户 `anigo`）运行。
-- 在 Linux / 群晖 / 飞牛部署前，请确保宿主机挂载目录具有相应读写权限：
-  ```bash
-  # 赋予宿主机目录 1000:1000 读写权限
-  sudo chown -R 1000:1000 /volume1/data
-  ```
+Linux 或 macOS 可使用安装脚本，它从 GitHub 下载发行包，核对同一版本的 `checksums.txt` 后安装到当前用户的目录。需要固定版本时，把示例中的 `| sh` 改成 `| ANIGO_VERSION=v0.7.0 sh`。
 
----
-
-## 2. Docker Compose 标准部署模版
-
-在 NAS 或服务器创建 `docker-compose.yml`：
-
-```yaml
-version: "3.8"
-
-services:
-  anigo:
-    image: ghcr.io/xiaoyuerx/ani-go:latest
-    container_name: anigo
-    restart: unless-stopped
-    # 遵循生产安全规范：非 root 用户 (UID 1000, GID 1000)
-    user: "1000:1000"
-    ports:
-      - "20001:20001"
-    environment:
-      - TZ=Asia/Shanghai
-      - PUID=1000
-      - PGID=1000
-      # 基础数据库与网络设置
-      - DB_PATH=/data/db/ani-go.db
-      - TV_BASE_PATH=/data/media/anime
-      - MOVIE_BASE_PATH=/data/media/movie
-      - OVA_BASE_PATH=/data/media/ova
-      - USE_HARDLINK=true
-      # 下载器关联 (以同网络下的 qBittorrent 为例，兼容 QB_USER 与 QB_USERNAME)
-      - QB_HOST=http://qbittorrent:8080
-      - QB_USER=admin
-      - QB_PASS=adminadmin
-      # 可选 MCP 服务 Token (用于 Claude/Cursor 远程连接)
-      - MCP_ENABLED=true
-      - MCP_AUTH_TOKEN=your-secure-token-here
-    volumes:
-      - /vol1/1000/anime-factory/data:/data
-    networks:
-      - anime-net
-
-networks:
-  anime-net:
-    driver: bridge
+```sh
+curl -fsSL https://raw.githubusercontent.com/xiaoyueRX/Ani-Go/main/install.sh | sh
+cd "$HOME/.anigo"
+"$HOME/.local/bin/anigo"
 ```
 
----
-
-## 3. 各平台适配要点
-
-### 3.1 飞牛私有云 (fnOS)
-- fnOS 采用基于 Debian 的底层架构，推荐通过「应用中心」->「Docker 容器」或通过 Compose 部署；
-- 确保共享文件夹的权限给到运行用户（默认 PUID/PGID 1000）；
-- 宿主机如果启用了科学上网代理（如端口 7890），在 Ani-Go 设置中可直接填写宿主机 LAN IP 代理地址。
-
-### 3.2 群晖 (Synology DSM)
-- 打开 Container Manager，新增项目，粘贴上述 Compose 配置；
-- 在 File Station 中确认 `/volume1/data` 目录赋予 `Everyone` 或指定 Docker 用户的读写权限。
-
-### 3.3 Unraid
-- 在 Docker 页面使用 Docker Compose Manager 运行；
-- 建议将 AppData 路径映射到高速 NVMe 缓存盘，媒体与下载目录映射到阵列存储盘。
+工作目录决定程序读取哪份 `.env`、使用哪个相对路径数据库。升级前停止正在运行的进程，重新执行安装脚本，再从同一目录启动。在仓库目录运行 `sh install.sh --uninstall` 会移除安装器管理的程序并保留配置和运行数据。Windows 或手动部署时从 Releases 下载对应压缩包，核对摘要，解压后在可写工作目录运行 `./anigo` 或 `anigo.exe`。反向代理如需启用 MCP，参照其 SSE 路径和令牌配置。[发行包](https://github.com/xiaoyueRX/Ani-Go/releases) · [MCP 接入](03_MCP_SPEC.md)

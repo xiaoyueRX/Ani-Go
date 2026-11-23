@@ -6,36 +6,37 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  test:
-    name: Test & Build Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+  verify:
+    uses: ./.github/workflows/check.yml
+    with:
+      revision: ${{ github.sha }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
+  check-container:
+    needs: verify
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      revision: ${{ github.sha }}
+      publish: false
 
-      - name: Build Web UI
-        working-directory: web
-        run: |
-          npm ci
-          npm test
-          npm run build
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-          cache: true
-
-      - name: Run Tests with Race Detector
-        run: go test -race ./...
-
-      - name: Verify Binary Compilation
-        run: go build -v -trimpath -ldflags="-s -w" -o /dev/null .
+  publish-container:
+    needs: verify
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      revision: ${{ github.sha }}
+      publish: true
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

@@ -29,34 +29,20 @@ type PreviewResult struct {
 
 // Preview 执行单个文件的 Dry-Run 预览，不执行任何文件系统写操作
 func (o *TVOrganizer) Preview(ctx context.Context, filePath string, anime core.Anime, episode core.Episode) (PreviewResult, error) {
-	template := o.selectTemplate(anime)
-	values := o.buildVarValues(anime, episode)
-
-	// 初始渲染
-	initialPath := renderTemplate(template, values)
-
-	// 执行命名钩子链（Waterfall 模式）
-	var finalPath string
+	input := o.namingInput(filePath, anime, episode)
+	finalPath := input.RenderedPath
 	if o.hookManager != nil {
-		hookFinal, cancelled, reason := o.hookManager.ExecuteNamingHooks(ctx, core.NamingHookInput{
-			Anime:        anime,
-			Episode:      episode,
-			Template:     template,
-			VarValues:    values,
-			RenderedPath: initialPath,
-		})
+		hookFinal, cancelled, reason := o.hookManager.ExecuteNamingHooks(ctx, input)
 		if cancelled {
 			return PreviewResult{
 				OriginalPath: filePath,
-				RenderedPath: initialPath,
+				RenderedPath: input.RenderedPath,
 				Action:       "cancelled",
-				Template:     template,
+				Template:     input.Template,
 				Error:        reason,
 			}, fmt.Errorf("整理被钩子取消: %s", reason)
 		}
 		finalPath = hookFinal
-	} else {
-		finalPath = initialPath
 	}
 
 	basePath := o.getBasePath(anime.Type)
@@ -71,9 +57,9 @@ func (o *TVOrganizer) Preview(ctx context.Context, filePath string, anime core.A
 	if err := checkPathEscape(basePath, fullPath); err != nil {
 		return PreviewResult{
 			OriginalPath: filePath,
-			RenderedPath: initialPath,
+			RenderedPath: input.RenderedPath,
 			FinalPath:    fullPath,
-			Template:     template,
+			Template:     input.Template,
 			Error:        err.Error(),
 		}, err
 	}
@@ -89,11 +75,11 @@ func (o *TVOrganizer) Preview(ctx context.Context, filePath string, anime core.A
 
 	return PreviewResult{
 		OriginalPath: filePath,
-		RenderedPath: initialPath,
+		RenderedPath: input.RenderedPath,
 		FinalPath:    fullPath,
 		Action:       action,
 		Exists:       exists,
-		Template:     template,
+		Template:     input.Template,
 	}, nil
 }
 

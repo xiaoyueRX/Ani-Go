@@ -1,19 +1,15 @@
 openapi: 3.0.3
 info:
   title: Ani-Go API
-  description: |
-    Ani-Go 自动化番剧下载器 REST API。
-
-    **认证方式**: JWT Bearer Token（通过 `/api/login` 获取）。
-    **免认证接口**: `/api/login`、`/api/health`、`/api/proxy/image`。
+  description: Ani-Go 的管理 REST API、事件流与 MCP 消息接口。管理操作默认使用登录获得的 JWT。公开接口与各自独立的认证要求见具体操作。
   version: 1.3.0
-  contact:
-    name: Ani-Go
-    url: https://github.com/xiaoyueRX/Ani-Go
+  contact: {name: Ani-Go, url: 'https://github.com/xiaoyueRX/Ani-Go'}
 
 servers:
   - url: /api
     description: API 基础路径
+security:
+  - BearerAuth: []
 
 tags:
   - name: Auth
@@ -44,13 +40,32 @@ tags:
     description: 版本信息
   - name: Proxy
     description: 图片代理
+  - name: Backup
+    description: 备份管理
+  - name: Notifications
+    description: 通知履历与模板
+  - name: Bangumi
+    description: Bangumi 元数据及账户绑定
+  - name: Organize
+    description: 整理预览及系列归并
+  - name: MCP
+    description: MCP 服务与令牌
+  - name: Events
+    description: 实时事件
 
 components:
   securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+    BearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+    McpBearer: {type: http, scheme: bearer, description: 设置页生成的独立 MCP 令牌。}
+    EventStreamJWT:
+      type: apiKey
+      in: query
+      name: token
+      description: EventSource 使用的登录 JWT，也可用 Authorization 请求头。
+    McpQueryToken: {type: apiKey, in: query, name: token, description: MCP 客户端兼容的查询令牌。}
+
+  responses:
+    LoginRequired: {description: 管理会话缺失、无效或已过期。}
 
   schemas:
     Error:
@@ -82,18 +97,16 @@ components:
     HealthResponse:
       type: object
       properties:
-        status:
-          type: string
-          example: ok
-        time:
-          type: string
-          format: date-time
+        status: {type: string, example: ok}
+        time: {type: string, format: date-time}
+        version: {type: string}
 
     UserResponse:
       type: object
       properties:
-        username:
-          type: string
+        username: {type: string}
+        avatar_url: {type: string}
+        is_default_password: {type: boolean}
 
     ChangePasswordRequest:
       type: object
@@ -108,123 +121,99 @@ components:
     Subscription:
       type: object
       properties:
-        id:
-          type: integer
-        title_cn:
-          type: string
-        title_en:
-          type: string
-        title_jp:
-          type: string
-        year:
-          type: integer
-        season:
-          type: integer
-        bangumi_id:
-          type: string
-        subgroup_name:
-          type: string
-        metadata_id:
-          type: string
-        metadata_provider:
-          type: string
-        cover_url:
-          type: string
-        description:
-          type: string
-        anime_type:
-          type: string
-        total_episodes:
-          type: integer
-        current_episodes:
-          type: integer
-        enabled:
-          type: boolean
-        completed:
-          type: boolean
-        filter_json:
-          type: string
-        custom_path:
-          type: string
-        stalled_episodes:
-          type: integer
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
+        mikan_id: {type: string}
+        id: {type: integer}
+        title_cn: {type: string}
+        title_en: {type: string}
+        title_jp: {type: string}
+        year: {type: integer}
+        season: {type: integer}
+        bangumi_id: {type: string}
+        subgroup_name: {type: string}
+        metadata_id: {type: string}
+        metadata_provider: {type: string}
+        cover_url: {type: string}
+        avatar_url: {type: string}
+        description: {type: string}
+        anime_type: {type: string}
+        total_episodes: {type: integer}
+        current_episodes: {type: integer, description: 该订阅季已整理或手工完成的正片集号数，同集多份只计一次}
+        enabled: {type: boolean}
+        completed: {type: boolean}
+        filter_json: {type: string}
+        custom_path: {type: string, description: 下载器使用的原始文件目录，空字符串表示沿用下载器默认设置。}
+        excluded_keywords: {type: string}
+        allowed_subgroups: {type: string}
+        skip_bulk_update: {type: boolean}
+        stall_timeout_hours: {type: integer}
+        stalled_episodes: {type: integer}
+        created_at: {type: string}
+        updated_at: {type: string}
+        deleted_at: {type: string}
 
     CreateSubscriptionRequest:
       type: object
       properties:
-        title_cn:
-          type: string
-        bangumi_id:
-          type: string
-        subgroup_name:
-          type: string
-        rss_url:
-          type: string
-        filter_json:
-          type: string
-        custom_path:
-          type: string
-        cover_url:
-          type: string
+        mikan_id: {type: string}
+        metadata_id: {type: string}
+        metadata_provider: {type: string}
+        season: {type: integer, minimum: 0, default: 1, description: 省略或填 0 按第 1 季创建。}
+        title_cn: {type: string}
+        bangumi_id: {type: string}
+        subgroup_name: {type: string}
+        subgroup_names:
+          type: array
+          items: {type: string}
+        allowed_subgroups:
+          type: array
+          items: {type: string}
+        rss_url: {type: string}
+        filter_json: {type: string}
+        custom_path: {type: string, description: 下载器使用的原始文件目录，空字符串表示沿用下载器默认设置。}
+        cover_url: {type: string}
       required: [title_cn]
 
     UpdateSubscriptionRequest:
       type: object
       properties:
-        title_cn:
-          type: string
-        title_en:
-          type: string
-        title_jp:
-          type: string
-        year:
-          type: integer
-        season:
-          type: integer
-        bangumi_id:
-          type: string
-        subgroup_name:
-          type: string
-        metadata_id:
-          type: string
-        metadata_provider:
-          type: string
-        cover_url:
-          type: string
-        description:
-          type: string
-        anime_type:
-          type: string
-        total_episodes:
-          type: integer
-        enabled:
-          type: boolean
-        completed:
-          type: boolean
-        filter_json:
-          type: string
-        custom_path:
-          type: string
+        title_cn: {type: string}
+        title_en: {type: string}
+        title_jp: {type: string}
+        year: {type: integer}
+        season: {type: integer, minimum: 0}
+        bangumi_id: {type: string}
+        mikan_id: {type: string}
+        subgroup_name: {type: string}
+        metadata_id: {type: string}
+        metadata_provider: {type: string}
+        cover_url: {type: string}
+        description: {type: string}
+        anime_type: {type: string}
+        total_episodes: {type: integer}
+        enabled: {type: boolean}
+        completed: {type: boolean}
+        filter_json: {type: string}
+        custom_path: {type: string, nullable: true, description: 省略时保留已有目录；空字符串或 null 清除覆盖。}
+        excluded_keywords: {type: string}
+        allowed_subgroups: {type: string}
+        skip_bulk_update: {type: boolean}
+        stall_timeout_hours: {type: integer}
 
     BatchSubscriptionItem:
       type: object
       properties:
-        title_cn:
-          type: string
-        bangumi_id:
-          type: string
-        cover_url:
-          type: string
+        mikan_id: {type: string}
+        metadata_id: {type: string}
+        metadata_provider: {type: string}
+        title_cn: {type: string}
+        season: {type: integer, minimum: 0, default: 1, description: 省略或填 0 按第 1 季创建。}
+        bangumi_id: {type: string}
+        cover_url: {type: string}
         subgroups:
           type: array
-          items:
-            type: string
+          items: {type: string}
+        total_episodes: {type: integer}
+        is_finished: {type: boolean}
       required: [title_cn]
 
     BatchSubscriptionRequest:
@@ -297,44 +286,22 @@ components:
     Episode:
       type: object
       properties:
-        id:
-          type: integer
-        subscription_id:
-          type: integer
-        season:
-          type: integer
-        number:
-          type: number
-          format: float
-        title:
-          type: string
-        status:
-          type: string
-          enum: [pending, downloading, downloaded, organized, failed]
-        manual_status:
-          type: string
-          enum: [pending, downloading, completed, failed]
-        torrent_hash:
-          type: string
-        torrent_url:
-          type: string
-        original_name:
-          type: string
-        final_path:
-          type: string
-        file_size:
-          type: integer
-          format: int64
-        is_stalled:
-          type: boolean
-        group_name:
-          type: string
-        download_started_at:
-          type: string
-          format: date-time
-        created_at:
-          type: string
-          format: date-time
+        id: {type: integer}
+        subscription_id: {type: integer}
+        season: {type: integer}
+        number: {type: number, format: float}
+        title: {type: string}
+        status: {type: string, description: 下载器及整理流程记录的实际状态}
+        manual_status: {type: string, enum: ['', pending, downloading, completed, failed], description: 用户的手动标记}
+        torrent_hash: {type: string}
+        torrent_url: {type: string}
+        original_name: {type: string}
+        final_path: {type: string}
+        file_size: {type: integer, format: int64}
+        is_stalled: {type: boolean}
+        group_name: {type: string}
+        download_started_at: {type: string}
+        created_at: {type: string}
 
     SubscriptionDetail:
       type: object
@@ -351,60 +318,57 @@ components:
       properties:
         status:
           type: string
-          enum: [pending, downloading, completed, failed]
+          enum: ['', pending, downloading, completed, failed]
+          description: 空字符串清除手动标记
       required: [status]
 
     DownloadTask:
       type: object
       properties:
-        hash:
+        hash: {type: string}
+        name: {type: string}
+        save_path: {type: string}
+        status: {type: string, description: 下载器原生状态。}
+        display_status:
           type: string
-        name:
-          type: string
-        save_path:
-          type: string
-        status:
-          type: string
-        progress:
-          type: number
-          format: float
-        speed_down:
-          type: integer
-          format: int64
-        size:
-          type: integer
-          format: int64
-        done:
-          type: integer
-          format: int64
+          description: 通用状态包括 paused、downloading、seeding、queued、checking、error、completed。未识别的状态按下载器原值返回。
+        can_pause: {type: boolean, description: 当前状态允许暂停。}
+        can_resume: {type: boolean, description: 当前状态允许恢复。}
+        complete: {type: boolean, description: 下载数据已经完整。}
+        progress: {type: number, format: float, minimum: 0, maximum: 1}
+        speed_down: {type: integer, format: int64}
+        speed_up: {type: integer, format: int64}
+        size: {type: integer, format: int64}
+        done: {type: integer, format: int64}
+        uploaded: {type: integer, format: int64}
+        ratio: {type: number, format: double}
+        seeding_time: {type: integer, format: int64}
 
     SettingsResponse:
       type: object
-      additionalProperties:
-        type: string
+      additionalProperties: {type: string}
+      description: 设置值是字符串。敏感字段返回空串，MCP 令牌仅返回 MCP_TOKEN_CONFIGURED 字符串标记；插件内部清单、开关和社区面板凭据由专用接口管理。
 
     UpdateSettingsRequest:
       type: object
       properties:
         settings:
           type: object
-          additionalProperties:
-            type: string
+          additionalProperties: {type: string}
       required: [settings]
+      description: 普通配置可部分更新。专用插件凭据与内部状态需通过插件管理接口修改。
 
     CustomRegexResponse:
       type: object
       properties:
         patterns:
           type: array
-          items:
-            type: string
+          items: {type: string}
         compiled:
           type: array
-          items:
-            type: string
-        builtin_count:
-          type: integer
+          items: {type: string}
+          nullable: true
+        builtin_count: {type: integer}
 
     LogsResponse:
       type: object
@@ -419,54 +383,36 @@ components:
     TorrentItem:
       type: object
       properties:
-        title:
-          type: string
-        url:
-          type: string
-        magnet:
-          type: string
-        info_hash:
-          type: string
-        size:
-          type: integer
-          format: int64
-        pub_date:
-          type: string
-          format: date-time
-        source:
-          type: string
-        bangumi_id:
-          type: string
-        episode_url:
-          type: string
-        cover_url:
-          type: string
-        aired_time:
-          type: string
-        aired_date:
-          type: string
-        group_name:
-          type: string
+        title: {type: string}
+        url: {type: string}
+        magnet: {type: string}
+        alternate_magnet: {type: string, description: 本地下载使用种子 URL 时，来源为仅接收磁力的操作提供的备用链接。}
+        info_hash: {type: string}
+        size: {type: integer, format: int64}
+        pub_date: {type: string, format: date-time}
+        source: {type: string}
+        bangumi_id: {type: string}
+        episode_url: {type: string}
+        cover_url: {type: string}
+        aired_time: {type: string}
+        aired_date: {type: string}
+        group_name: {type: string}
+        resolution: {type: string}
+        total_episodes: {type: integer}
+        is_finished: {type: boolean}
 
     SubgroupInfo:
       type: object
       properties:
-        name:
-          type: string
-        rss_url:
-          type: string
-        subgroup_id:
-          type: string
+        name: {type: string}
+        rss_url: {type: string}
 
     MirrorResult:
       type: object
       properties:
-        domain:
-          type: string
-        latency:
-          type: integer
-        ok:
-          type: boolean
+        domain: {type: string}
+        latency_ms: {type: integer, format: int64}
+        ok: {type: boolean}
 
     SelectMirrorRequest:
       type: object
@@ -480,32 +426,23 @@ components:
       properties:
         days:
           type: array
-          items:
-            type: object
-            properties:
-              day_of_week:
-                type: integer
-              label:
-                type: string
-              items:
-                type: array
-                items:
-                  $ref: '#/components/schemas/TorrentItem'
+          items: {$ref: '#/components/schemas/WeekDayItem'}
         subscribed:
+          description: 只有能唯一对应订阅的标题或站点编号才会作为查找键。时间表条目的 info_hash 包含其实际匹配的订阅 ID。
           type: object
-          additionalProperties:
-            type: integer
-        subscriptionCount:
-          type: integer
-        sub_stats:
+          additionalProperties: {type: integer}
+        subscriptionCount: {type: integer}
+        stats:
           type: object
           additionalProperties:
             type: object
             properties:
-              downloaded:
-                type: integer
-              total:
-                type: integer
+              downloaded: {type: integer}
+              total: {type: integer}
+        fallback_year: {type: integer}
+        fallback_season: {type: integer}
+        requested_year: {type: integer}
+        requested_season: {type: integer}
 
     ParseRequest:
       type: object
@@ -517,22 +454,16 @@ components:
     ParseResult:
       type: object
       properties:
-        action:
-          type: string
-          enum: [subscribe, unsubscribe, list, search, unknown]
-        title:
-          type: string
-        season:
-          type: integer
-        resolution:
-          type: string
-        subgroups:
+        action: {type: string}
+        title: {type: string}
+        season: {type: integer}
+        resolution: {type: string}
+        subgroup_pref: {type: string}
+        keywords:
           type: array
-          items:
-            type: string
-        confidence:
-          type: number
-          format: float
+          items: {type: string}
+        confidence: {type: number, format: double}
+        raw_input: {type: string}
 
     MigrateRequest:
       type: object
@@ -544,10 +475,8 @@ components:
     MigrateResponse:
       type: object
       properties:
-        message:
-          type: string
-        stats:
-          type: object
+        message: {type: string}
+        stats: {$ref: '#/components/schemas/MigrationStats'}
 
     VersionResponse:
       type: object
@@ -565,13 +494,493 @@ components:
         message:
           type: string
 
+    PluginPanel:
+      type: object
+      additionalProperties: false
+      required: [actions]
+      properties:
+        version: {type: integer, enum: [1], default: 1, description: 面板协议版本}
+        credential:
+          type: object
+          additionalProperties: false
+          required: [label]
+          properties:
+            label: {type: string, minLength: 1, maxLength: 128}
+            required: {type: boolean, default: false}
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, label, result]
+            properties:
+              id: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}
+              label: {type: string, minLength: 1, maxLength: 128}
+              input:
+                type: object
+                additionalProperties: false
+                required: [key, label]
+                properties:
+                  key: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}
+                  label: {type: string, minLength: 1, maxLength: 128}
+                  placeholder: {type: string, maxLength: 256}
+                  format: {type: string, enum: [magnet]}
+              placement: {type: string, enum: [search_result], description: 可选。搜索入口仅适用于声明 magnet 输入并返回 message 的动作。}
+              result: {type: string, enum: [message, tasks]}
+
+    WebhookManifest:
+      type: object
+      required: [name, url]
+      properties:
+        id: {type: string, description: 更新时使用同一自定义 ID}
+        name: {type: string}
+        description: {type: string}
+        version: {type: string}
+        author: {type: string}
+        author_url: {type: string}
+        icon: {type: string}
+        type:
+          type: string
+          enum: [webhook]
+          default: webhook
+        url: {type: string, format: uri, description: 带面板的社区插件须使用公开 HTTPS 目标}
+        secret: {type: string, writeOnly: true, description: 仅写入。省略时可保留同一目标的共享值，显式空串清除；变更目标后须重新配置。}
+        dependencies:
+          type: array
+          items: {type: string}
+          description: 依赖的宿主服务名。
+        events:
+          type: array
+          items: {type: string}
+        panel: {$ref: '#/components/schemas/PluginPanel'}
+
+    Cloud115Config: {$ref: '#/components/schemas/PanelCredentialState'}
+
+    Cloud115TaskPage: {$ref: '#/components/schemas/PanelTaskPage'}
+
     PluginReloadResponse:
       type: object
       properties:
-        message:
+        message: {type: string}
+        count: {type: integer}
+        plugins:
+          type: array
+          items: {$ref: '#/components/schemas/PluginInfo'}
+
+    SmartSearchRequest:
+      type: object
+      properties:
+        query: {type: string, minLength: 1, maxLength: 200}
+        limit: {type: integer, default: 20, description: 大于 60 时按 60 处理。}
+        offset: {type: integer}
+        sources:
+          type: array
+          items: {type: string}
+      required: [query]
+
+    SmartSearchResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TorrentItem'}
+        total: {type: integer}
+        has_more: {type: boolean}
+        expanded_queries:
+          type: array
+          items: {type: string}
+        used_ai: {type: boolean}
+        ai_error: {type: string}
+
+    TestDownloader:
+      type: object
+      properties:
+        type: {type: string}
+        host: {type: string}
+        username: {type: string}
+        password: {type: string, format: password, writeOnly: true}
+        secret: {type: string, format: password, writeOnly: true}
+        category: {type: string}
+        use_saved_credentials:
+          type: boolean
+          default: false
+          description: 同类型、地址与账号匹配时，空密码或空令牌可沿用服务端生效的凭据。Aria2 只匹配地址。
+
+    RSSPreviewItem:
+      type: object
+      properties:
+        title: {type: string}
+        link: {type: string}
+        pub_date: {type: string}
+        magnet: {type: string}
+        size: {type: integer, format: int64}
+        parsed_title: {type: string}
+        episode: {type: number, format: float}
+        season: {type: integer}
+        subgroup: {type: string}
+        resolution: {type: string}
+        is_batch: {type: boolean}
+        is_special: {type: boolean}
+
+    AIModelsRequest:
+      type: object
+      properties:
+        protocol: {type: string}
+        endpoint: {type: string}
+        apiKey: {type: string, format: password, writeOnly: true}
+      required: [endpoint]
+
+    TestNotify:
+      type: object
+      properties:
+        channel: {type: string}
+        title: {type: string}
+        message: {type: string}
+
+    Anime:
+      type: object
+      properties:
+        id: {type: string}
+        provider: {type: string}
+        title_cn: {type: string}
+        title_en: {type: string}
+        title_jp: {type: string}
+        year: {type: integer}
+        season: {type: integer}
+        total_eps: {type: integer}
+        type: {type: string}
+        description: {type: string}
+        cover_url: {type: string}
+        series_id: {type: string}
+        tmdb_id: {type: string}
+        imdb_id: {type: string}
+
+    MetadataEpisode:
+      type: object
+      properties:
+        AnimeID: {type: string}
+        Season: {type: integer}
+        Number: {type: number, format: float}
+        Title: {type: string}
+        AiredAt: {type: string, format: date-time}
+
+    WeekDayItem:
+      type: object
+      properties:
+        day_of_week: {type: integer}
+        label: {type: string}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TorrentItem'}
+
+    BackupFile:
+      type: object
+      properties:
+        name: {type: string}
+        size: {type: integer, format: int64}
+        mod_time: {type: string, format: date-time}
+
+    PreviewItem:
+      type: object
+      properties:
+        file_path: {type: string}
+        anime: {$ref: '#/components/schemas/Anime'}
+        episode: {$ref: '#/components/schemas/MetadataEpisode'}
+
+    PreviewResult:
+      type: object
+      properties:
+        original_path: {type: string}
+        rendered_path: {type: string}
+        final_path: {type: string}
+        action: {type: string}
+        exists: {type: boolean}
+        template: {type: string}
+        error: {type: string}
+
+    TemplateCatalog:
+      type: object
+      properties:
+        defaults:
+          type: object
+          additionalProperties: {type: string}
+        custom:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {type: string}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TemplateInfo'}
+
+    TemplateInfo:
+      type: object
+      properties:
+        event_type: {type: string}
+        channel: {type: string}
+        template: {type: string}
+        is_custom: {type: boolean}
+
+    NotificationLog:
+      type: object
+      properties:
+        event_type: {type: string}
+        channel: {type: string}
+        title: {type: string}
+        content: {type: string}
+        status: {type: string}
+        error_msg: {type: string}
+        retry_count: {type: integer}
+        ID: {type: integer}
+        CreatedAt: {type: string, format: date-time}
+        UpdatedAt: {type: string, format: date-time}
+        DeletedAt: {type: string, format: date-time, nullable: true}
+
+    ChannelStatDTO:
+      type: object
+      properties:
+        success: {type: integer, format: int64}
+        failed: {type: integer, format: int64}
+
+    NotificationStats:
+      type: object
+      properties:
+        total: {type: integer, format: int64}
+        success: {type: integer, format: int64}
+        failed: {type: integer, format: int64}
+        dlq: {type: integer, format: int64}
+        channel_stats:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/ChannelStatDTO'}
+
+    CollectionMergeSummary:
+      type: object
+      properties:
+        total_processed: {type: integer}
+        total_matched: {type: integer}
+        total_applied: {type: integer}
+        plans:
+          type: array
+          items: {$ref: '#/components/schemas/CollectionMergePlan'}
+
+    CollectionMergePlan:
+      type: object
+      properties:
+        subscription_id: {type: integer}
+        title_cn: {type: string}
+        old_series_id: {type: string}
+        new_series_id: {type: string}
+        collection_name: {type: string}
+        collection_id: {type: integer}
+        source: {type: string}
+        should_apply: {type: boolean}
+        reason: {type: string}
+
+    SeriesCollectionInfo:
+      type: object
+      properties:
+        tmdb_id: {type: string}
+        media_type: {type: string}
+        collection_id: {type: integer}
+        collection_name: {type: string}
+        series_id: {type: string}
+        franchise_key: {type: string}
+        source: {type: string}
+        part_tmdb_ids:
+          type: array
+          items: {type: string}
+
+    UpdateInfo:
+      type: object
+      properties:
+        current_version: {type: string}
+        latest_version: {type: string}
+        has_update: {type: boolean}
+        release_notes: {type: string}
+        published_at: {type: string}
+        environment: {type: string}
+        can_self_update: {type: boolean}
+        docker_sock: {type: boolean}
+      required: [current_version, latest_version, has_update, can_self_update]
+
+    UpdateProgress:
+      type: object
+      properties:
+        status: {type: string}
+        progress: {type: integer}
+        message: {type: string}
+        error: {type: string}
+
+    MigrationStats:
+      type: object
+      properties:
+        Subscriptions: {type: integer}
+        Episodes: {type: integer}
+        Downloads: {type: integer}
+        Skipped: {type: integer}
+        Errors:
+          type: array
+          items: {type: string}
+
+    PluginInfo:
+      type: object
+      properties:
+        panel: {$ref: '#/components/schemas/PluginPanel'}
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        version: {type: string}
+        author: {type: string}
+        author_url: {type: string}
+        icon: {type: string}
+        enabled: {type: boolean}
+        is_builtin: {type: boolean}
+        origin:
           type: string
-        count:
-          type: integer
+          enum: [official, community]
+        type: {type: string}
+        url: {type: string}
+        dependencies:
+          type: array
+          items: {type: string}
+        missing_dependencies:
+          type: array
+          items: {type: string}
+        events:
+          type: array
+          items: {type: string}
+        status:
+          type: string
+          enum: [inactive, loading, active, suspended, error, disposing]
+        error: {type: string}
+        loaded_at: {type: string, format: date-time}
+
+    PluginSaved:
+      type: object
+      properties:
+        message: {type: string}
+        id: {type: string}
+        enabled: {type: boolean}
+        status:
+          type: string
+          enum: [inactive, loading, active, suspended, error, disposing]
+      required: [message, id, enabled, status]
+
+    BackupSubscription:
+      type: object
+      properties:
+        TitleCN: {type: string}
+        TitleEN: {type: string}
+        TitleJP: {type: string}
+        Year: {type: integer}
+        Season: {type: integer}
+        SourceName: {type: string}
+        BangumiID: {type: string}
+        MikanID: {type: string}
+        RSSURL: {type: string}
+        SubgroupName: {type: string}
+        ExcludedKeywords: {type: string}
+        SkipBulkUpdate: {type: boolean}
+        AllowedSubgroups: {type: string}
+        SubgroupID: {type: string}
+        MetadataID: {type: string}
+        MetadataProvider: {type: string}
+        CoverURL: {type: string}
+        Description: {type: string}
+        AnimeType: {type: string}
+        TotalEpisodes: {type: integer}
+        CurrentEpisodes: {type: integer}
+        Enabled: {type: boolean, nullable: true}
+        Completed: {type: boolean}
+        FilterJSON: {type: string}
+        CustomPath: {type: string}
+        SeriesID: {type: string}
+        TMDBID: {type: string}
+        IMDBID: {type: string}
+        StallTimeoutHours: {type: integer}
+        ID: {type: integer}
+        CreatedAt: {type: string, format: date-time}
+        UpdatedAt: {type: string, format: date-time}
+        DeletedAt: {type: string, format: date-time, nullable: true}
+
+    BackupEpisode:
+      type: object
+      properties:
+        SubscriptionID: {type: integer}
+        Season: {type: integer}
+        Number: {type: number, format: float}
+        Title: {type: string}
+        Status: {type: string}
+        ManualStatus: {type: string, enum: ['', pending, downloading, completed, failed]}
+        TorrentHash: {type: string}
+        OriginKey: {type: string}
+        ReservationKey: {type: string, nullable: true}
+        SourceFile: {type: string}
+        DownloadRoot: {type: string}
+        MagnetURL: {type: string}
+        TorrentURL: {type: string}
+        OriginalName: {type: string}
+        FinalPath: {type: string}
+        FileSize: {type: integer, format: int64}
+        GroupName: {type: string}
+        Resolution: {type: string}
+        DownloadStartedAt: {type: string, format: date-time, nullable: true}
+        DownloadFinishedAt: {type: string, format: date-time, nullable: true}
+        OrganizedAt: {type: string, format: date-time, nullable: true}
+        ID: {type: integer}
+        CreatedAt: {type: string, format: date-time}
+        UpdatedAt: {type: string, format: date-time}
+        DeletedAt: {type: string, format: date-time, nullable: true}
+
+    BackupData:
+      type: object
+      properties:
+        format_version: {type: integer, enum: [1], description: 新备份格式。历史备份可省略}
+        sha256: {type: string, pattern: '^[a-f0-9]{64}$', description: 格式 1 快照中各数据字段的 SHA-256 摘要}
+        timestamp: {type: string, format: date-time}
+        version: {type: string}
+        settings:
+          type: object
+          additionalProperties: {type: string}
+        subscriptions:
+          type: array
+          items: {$ref: '#/components/schemas/BackupSubscription'}
+        episodes:
+          type: array
+          items: {$ref: '#/components/schemas/BackupEpisode'}
+      description: 管理员私有快照，可能包含实际凭据。快照保存普通设置、插件清单、内置和清单可达的插件授权；本机 JWT 签名密钥保存在宿主数据库；episodes 按创建选项提供。
+
+    PanelTaskPage:
+      type: object
+      required: [page, page_count, tasks]
+      properties:
+        page: {type: integer, minimum: 1}
+        page_count: {type: integer, minimum: 0}
+        tasks:
+          type: array
+          items:
+            type: object
+            required: [info_hash, name, status, progress]
+            properties:
+              info_hash: {type: string}
+              name: {type: string}
+              status:
+                type: string
+                enum: [pending, downloading, completed, failed, unknown]
+              progress: {type: integer, minimum: 0, maximum: 100}
+          description: 没有任务时返回空数组。
+
+    PanelCredentialState:
+      type: object
+      required: [configured, source]
+      properties:
+        configured: {type: boolean}
+        source:
+          type: string
+          enum: [none, stored, environment]
+          description: none 表示未配置，stored 表示保存在数据库，environment 表示来自插件配置的环境变量。
 
 paths:
   /login:
@@ -584,68 +993,62 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/LoginRequest'
+            schema: {$ref: '#/components/schemas/LoginRequest'}
       responses:
         '200':
           description: 登录成功
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/LoginResponse'
+              schema: {$ref: '#/components/schemas/LoginResponse'}
         '400':
           description: 请求格式错误或参数为空
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
         '401':
           description: 用户名或密码错误
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
         '500':
           description: Token 生成失败
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
+        '503': {description: 账户存储暂时不可用，可在恢复后重试}
+      security: []
 
   /health:
     get:
       tags: [Health]
       summary: 健康检查
-      description: 服务健康状态检查，无需认证。
+      description: 读取服务状态、版本和服务器时间。
       operationId: health
       responses:
         '200':
           description: 服务正常
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/HealthResponse'
+              schema: {$ref: '#/components/schemas/HealthResponse'}
+      security: []
 
   /me:
     get:
       tags: [User]
       summary: 获取当前用户信息
       operationId: getMe
-      security:
-        - BearerAuth: []
       responses:
         '200':
           description: 用户信息
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/UserResponse'
+              schema: {$ref: '#/components/schemas/UserResponse'}
         '401':
           description: Token 无效
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
+        '503': {description: 账户存储暂时不可用，可在恢复后重试}
 
   /user/change-password:
     post:
@@ -653,55 +1056,51 @@ paths:
       summary: 修改密码
       description: 修改当前用户密码，修改后所有旧 Token 失效。
       operationId: changePassword
-      security:
-        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ChangePasswordRequest'
+            schema: {$ref: '#/components/schemas/ChangePasswordRequest'}
       responses:
         '200':
-          description: 密码修改成功，返回新会话令牌
+          description: 密码修改成功
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  message: {type: string}
-                  token: {type: string}
+              schema: {$ref: '#/components/schemas/MessageResponse'}
         '400':
           description: 参数校验失败
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: 未登录
-        '403':
-          description: 旧密码错误
-        '404':
-          description: 用户不存在
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {description: 未登录}
+        '403': {description: 旧密码错误}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409': {description: 账户已由另一个请求修改，须重新登录}
+        '503': {description: 账户存储暂时不可用，可在恢复后重试}
 
   /subscriptions:
     get:
       tags: [Subscriptions]
       summary: 获取订阅列表
       operationId: listSubscriptions
-      security:
-        - BearerAuth: []
       parameters:
         - name: enabled
           in: query
-          schema:
-            type: boolean
+          schema: {type: boolean}
           description: 按启用状态过滤
         - name: completed
           in: query
-          schema:
-            type: boolean
+          schema: {type: boolean}
           description: 按完成状态过滤
+        - name: deleted
+          in: query
+          required: false
+          schema: {type: boolean}
+          description: 仅列回收站中的订阅。
       responses:
         '200':
           description: 订阅列表
@@ -709,76 +1108,69 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/Subscription'
+                items: {$ref: '#/components/schemas/Subscription'}
         '500':
           description: 查询失败
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
     post:
       tags: [Subscriptions]
       summary: 创建订阅
-      description: |
-        创建新订阅。如果有 bangumi_id 但无 rss_url，后台自动解析 Mikan 字幕组 RSS。
-        创建后自动触发补全扫描。
+      description: 创建订阅并触发后台补全。相同标题和季号、相同蜜柑 ID 或同一提供方的相同元数据 ID 返回 409。只有旧 bangumi_id 的请求也按该字段查重。
       operationId: createSubscription
-      security:
-        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/CreateSubscriptionRequest'
+            schema: {$ref: '#/components/schemas/CreateSubscriptionRequest'}
       responses:
         '201':
           description: 创建成功
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Subscription'
+              schema: {$ref: '#/components/schemas/Subscription'}
         '400':
           description: 参数校验失败
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
         '500':
           description: 创建失败
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: 状态冲突
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /subscriptions/batch:
     post:
       tags: [Subscriptions]
       summary: 批量创建订阅
-      description: 批量创建订阅，最多 20 部。
+      description: 批量创建订阅，最多 20 部。每项按单条创建相同的季号与来源标识规则查重，重复项计入 failed。
       operationId: batchCreateSubscriptions
-      security:
-        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/BatchSubscriptionRequest'
+            schema: {$ref: '#/components/schemas/BatchSubscriptionRequest'}
       responses:
         '201':
           description: 批量创建结果
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/BatchSubscriptionResponse'
+              schema: {$ref: '#/components/schemas/BatchSubscriptionResponse'}
         '400':
           description: 参数校验失败
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /subscriptions/batch-delete:
     post:
@@ -786,33 +1178,31 @@ paths:
       summary: 批量删除订阅
       description: 批量删除订阅及关联剧集，最多 100 个，使用事务。
       operationId: batchDeleteSubscriptions
-      security:
-        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/BatchDeleteRequest'
+            schema: {$ref: '#/components/schemas/BatchDeleteRequest'}
       responses:
         '200':
           description: 删除结果
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/BatchDeleteResponse'
+              schema: {$ref: '#/components/schemas/BatchDeleteResponse'}
         '400':
           description: 参数校验失败
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: 另有剧集或回收站记录使用相同下载任务 / Another episode or recoverable record shares the download
+        '502': {description: '下载器删除失败，可刷新后重试 / Downloader deletion failed, refresh before retrying'}
         '500':
           description: 删除失败
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /subscriptions/batch-restore:
     post:
@@ -820,27 +1210,28 @@ paths:
       summary: 批量恢复订阅
       description: 恢复已软删除的订阅及关联剧集，最多 100 个。
       operationId: batchRestoreSubscriptions
-      security:
-        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/BatchRestoreRequest'
+            schema: {$ref: '#/components/schemas/BatchRestoreRequest'}
       responses:
         '200':
           description: 恢复结果
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/BatchRestoreResponse'
+              schema: {$ref: '#/components/schemas/BatchRestoreResponse'}
         '400':
           description: 参数校验失败
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /subgroups:
     get:
@@ -848,8 +1239,6 @@ paths:
       summary: 获取字幕组列表
       description: 获取系统中已有的字幕组列表。
       operationId: getSubgroups
-      security:
-        - BearerAuth: []
       responses:
         '200':
           description: 字幕组列表
@@ -857,8 +1246,8 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  type: string
+                items: {type: string}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /subscriptions/{id}:
     get:
@@ -866,122 +1255,25 @@ paths:
       summary: 获取订阅详情
       description: 获取单个订阅详情，包含所有关联剧集。
       operationId: getSubscription
-      security:
-        - BearerAuth: []
       parameters:
         - name: id
           in: path
           required: true
-          schema:
-            type: integer
+          schema: {type: integer}
       responses:
         '200':
           description: 订阅详情
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/SubscriptionDetail'
-        '400':
-          description: 无效的订阅 ID
-        '404':
-          description: 订阅不存在
+              schema: {$ref: '#/components/schemas/SubscriptionDetail'}
+        '400': {description: 无效的订阅 ID}
+        '404': {description: 订阅不存在}
+        '401': {$ref: '#/components/responses/LoginRequired'}
     put:
       tags: [Subscriptions]
       summary: 更新订阅
       description: 部分更新订阅信息，仅更新提供的字段。
       operationId: updateSubscription
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateSubscriptionRequest'
-      responses:
-        '200':
-          description: 更新成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Subscription'
-        '400':
-          description: 无效的请求
-        '404':
-          description: 订阅不存在
-        '500':
-          description: 更新失败
-    delete:
-      tags: [Subscriptions]
-      summary: 删除订阅
-      description: 删除订阅及其关联剧集，可选同时删除文件和种子。
-      operationId: deleteSubscription
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: delete_files
-          in: query
-          schema:
-            type: boolean
-          description: 是否删除下载文件和种子
-      responses:
-        '200':
-          description: 删除成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
-        '400':
-          description: 无效的订阅 ID
-        '404':
-          description: 订阅不存在
-
-  /subscriptions/{id}/trigger-supplement:
-    post:
-      tags: [Subscriptions]
-      summary: 触发补全扫描
-      description: 手动触发单个订阅的后台补全扫描。
-      operationId: triggerSupplement
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '202':
-          description: 补全任务已触发
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
-        '400':
-          description: 无效的 ID 或订阅未启用
-        '404':
-          description: 订阅不存在
-        '500':
-          description: 补全调度器未配置
-
-  /subscriptions/{id}/episodes/batch-delete:
-    post:
-      tags: [Episodes]
-      summary: 删除指定订阅的选定剧集
-      operationId: deleteSubscriptionEpisodes
-      security:
-        - BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -991,41 +1283,126 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/BatchDeleteRequest'
+            schema: {$ref: '#/components/schemas/UpdateSubscriptionRequest'}
       responses:
         '200':
-          description: 返回本次实际删除数量
+          description: 更新成功
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/BatchDeleteResponse'
-        '400':
-          description: 参数错误或 ID 不属于当前订阅
-        '409':
-          description: 下载器未关联
-        '502':
-          description: 下载器未能删除文件
-
-  /episodes/{id}/status:
-    put:
-      tags: [Episodes]
-      summary: 更新剧集人工标记
-      operationId: updateEpisodeStatus
-      security:
-        - BearerAuth: []
+              schema: {$ref: '#/components/schemas/Subscription'}
+        '400': {description: 无效的请求}
+        '409': {description: 片名与季号或来源标识已由其他订阅使用，原记录保留。}
+        '404': {description: 订阅不存在}
+        '500': {description: 更新失败}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+    delete:
+      tags: [Subscriptions]
+      summary: 删除订阅
+      description: 删除订阅及其关联剧集，可选同时删除文件和种子。
+      operationId: deleteSubscription
       parameters:
         - name: id
           in: path
           required: true
-          schema:
-            type: integer
+          schema: {type: integer}
+        - name: delete_files
+          in: query
+          schema: {type: boolean}
+          description: 是否删除下载文件和种子
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessageResponse'}
+        '400': {description: 无效的订阅 ID}
+        '404': {description: 订阅不存在}
+        '409':
+          description: 另有剧集或回收站记录使用相同下载任务 / Another episode or recoverable record shares the download
+        '502': {description: '下载器删除失败，可刷新后重试 / Downloader deletion failed, refresh before retrying'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /subscriptions/{id}/trigger-supplement:
+    post:
+      tags: [Subscriptions]
+      summary: 触发补全扫描
+      description: 仅对启用中的订阅异步触发补全。
+      operationId: triggerSupplement
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '202':
+          description: 补全任务已触发
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessageResponse'}
+        '400': {description: 无效的 ID 或订阅未启用}
+        '404': {description: 订阅不存在}
+        '500': {description: 补全调度器未配置}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /subscriptions/{id}/episodes/batch-delete:
+    post:
+      tags: [Episodes]
+      summary: 删除指定订阅下选中的剧集 / Delete selected episodes of one subscription
+      operationId: batchDeleteEpisodes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateEpisodeStatusRequest'
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: {type: integer, minimum: 1}
+                delete_files: {type: boolean, default: false}
+      responses:
+        '200':
+          description: 实际删除的剧集记录数 / Number of episode records removed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BatchDeleteResponse'}
+        '400': {description: 请求格式或数量错误 / Invalid request or batch size}
+        '404':
+          description: 订阅不存在或剧集属于其他订阅 / Unknown subscription or episode belongs to another subscription
+        '409':
+          description: 另有剧集或回收站记录使用相同下载任务 / Another episode or recoverable record shares the download
+        '502': {description: '下载器删除失败，可刷新后重试 / Downloader deletion failed, refresh before retrying'}
+        '500': {description: 数据库操作失败 / Database operation failed}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /episodes/{id}/status:
+    put:
+      tags: [Episodes]
+      summary: 设置或清除剧集的手动标记
+      operationId: updateEpisodeStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateEpisodeStatusRequest'}
       responses:
         '200':
           description: 更新成功
@@ -1033,21 +1410,24 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [status, manual_status]
                 properties:
-                  status:
-                    type: string
-        '400':
-          description: 无效的 ID 或状态值
-        '500':
-          description: 更新失败
+                  status: {type: string, description: 本次写入的标记}
+                  manual_status: {type: string, description: 本次写入的标记，清除后为空字符串}
+        '400': {description: 无效的 ID 或状态值}
+        '500': {description: 更新失败}
+        '404':
+          description: 记录不存在
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /downloads:
     get:
       tags: [Downloads]
       summary: 获取下载队列
       operationId: listDownloads
-      security:
-        - BearerAuth: []
       responses:
         '200':
           description: 下载任务列表
@@ -1055,12 +1435,61 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/DownloadTask'
-        '503':
-          description: 下载器未配置
+                items: {$ref: '#/components/schemas/DownloadTask'}
+        '503': {description: 下载器未配置}
+        '502':
+          description: 上游服务失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+    post:
+      tags: [Downloads]
+      operationId: createDownload
+      summary: 添加独立下载任务
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: {type: string}
+                url: {type: string}
+                magnet: {type: string}
+                info_hash: {type: string}
+                save_path: {type: string}
+                group_name: {type: string}
+                resolution: {type: string}
+              anyOf:
+                - required: [url]
+                - required: [magnet]
+      responses:
+        '200':
+          description: 添加独立下载任务
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  title: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         '500':
-          description: 获取下载列表失败
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /settings:
     get:
@@ -1068,60 +1497,60 @@ paths:
       summary: 获取所有设置
       description: 敏感字段（含 PASS/SECRET/KEY）返回空值。
       operationId: getSettings
-      security:
-        - BearerAuth: []
       responses:
         '200':
           description: 设置键值对
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/SettingsResponse'
+              schema: {$ref: '#/components/schemas/SettingsResponse'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
     put:
       tags: [Settings]
       summary: 批量更新设置
       description: Upsert 模式更新设置。
       operationId: updateSettings
-      security:
-        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateSettingsRequest'
+            schema: {$ref: '#/components/schemas/UpdateSettingsRequest'}
       responses:
         '200':
           description: 更新成功
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
-        '400':
-          description: 参数校验失败
+              schema: {$ref: '#/components/schemas/MessageResponse'}
+        '400': {description: 参数校验失败}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /settings/custom-regex:
     get:
       tags: [Settings]
       summary: 获取自定义正则规则
       operationId: getCustomRegex
-      security:
-        - BearerAuth: []
       responses:
         '200':
           description: 正则规则
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/CustomRegexResponse'
+              schema: {$ref: '#/components/schemas/CustomRegexResponse'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /settings/custom-regex/reload:
     post:
       tags: [Settings]
       summary: 重新加载自定义正则
       operationId: reloadCustomRegex
-      security:
-        - BearerAuth: []
       responses:
         '200':
           description: 重新加载成功
@@ -1130,12 +1559,12 @@ paths:
               schema:
                 type: object
                 properties:
-                  message:
-                    type: string
+                  message: {type: string}
                   compiled:
                     type: array
-                    items:
-                      type: string
+                    items: {type: string}
+                    nullable: true
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /logs:
     get:
@@ -1143,23 +1572,35 @@ paths:
       summary: 获取系统日志
       description: 逆向读取日志文件尾部 N 行（类似 tail -n）。
       operationId: getLogs
-      security:
-        - BearerAuth: []
       parameters:
         - name: lines
           in: query
-          schema:
-            type: integer
-            default: 100
-            maximum: 500
+          schema: {type: integer, default: 100, maximum: 500}
           description: 返回行数
       responses:
         '200':
           description: 日志内容
           content:
             application/json:
+              schema: {$ref: '#/components/schemas/LogsResponse'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /search/capabilities:
+    get:
+      tags: [Search]
+      summary: 获取智能搜索可用性 / Read smart-search availability
+      operationId: getSearchCapabilities
+      responses:
+        '200':
+          description: 运行中 AI 查询扩展的可用状态 / Availability of AI query expansion in the running server
+          content:
+            application/json:
               schema:
-                $ref: '#/components/schemas/LogsResponse'
+                type: object
+                required: [smart_search]
+                properties:
+                  smart_search: {type: boolean}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /search:
     get:
@@ -1167,14 +1608,11 @@ paths:
       summary: 搜索番剧资源
       description: 聚合 Nyaa/ACG.RIP/AnimeTosho 搜索。
       operationId: searchAnime
-      security:
-        - BearerAuth: []
       parameters:
         - name: q
           in: query
           required: true
-          schema:
-            type: string
+          schema: {type: string}
           description: 搜索关键词
       responses:
         '200':
@@ -1183,14 +1621,11 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/TorrentItem'
-        '400':
-          description: 搜索关键词不能为空
-        '503':
-          description: 搜索服务未配置
-        '500':
-          description: 搜索失败
+                items: {$ref: '#/components/schemas/TorrentItem'}
+        '400': {description: 搜索关键词不能为空}
+        '503': {description: 搜索服务未配置}
+        '500': {description: 搜索失败}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /mikan/groups:
     get:
@@ -1198,14 +1633,11 @@ paths:
       summary: 获取 Mikan 字幕组
       description: 根据 BangumiID 获取 Mikan 字幕组列表及 RSS URL。
       operationId: getMikanGroups
-      security:
-        - BearerAuth: []
       parameters:
         - name: bangumi_id
           in: query
           required: true
-          schema:
-            type: string
+          schema: {type: string}
           description: Bangumi 番剧 ID
       responses:
         '200':
@@ -1214,28 +1646,22 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/SubgroupInfo'
-        '400':
-          description: bangumi_id 不能为空
-        '503':
-          description: Mikan 服务未初始化
-        '500':
-          description: 获取字幕组失败
+                items: {$ref: '#/components/schemas/SubgroupInfo'}
+        '400': {description: bangumi_id 不能为空}
+        '503': {description: Mikan 服务未初始化}
+        '500': {description: 获取字幕组失败}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /schedule:
     get:
       tags: [Search]
       summary: 获取新番时间表
-      description: 获取指定季度新番时间表，优先 yuc.wiki，回退 Mikan。自动标注已订阅番剧。
+      description: 默认使用蜜柑；source=yuc 且 Yuc 插件运行时优先取 Yuc。结果可带请求季度及回退季度。
       operationId: getSchedule
-      security:
-        - BearerAuth: []
       parameters:
         - name: year
           in: query
-          schema:
-            type: integer
+          schema: {type: integer}
           description: 年份
         - name: season
           in: query
@@ -1243,23 +1669,25 @@ paths:
             type: integer
             enum: [1, 2, 3, 4]
           description: 季度
+        - name: source
+          in: query
+          required: false
+          schema: {type: string}
+          description: 传 yuc 可优先使用已启用的 Yuc 数据源。
       responses:
         '200':
           description: 时间表数据
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ScheduleResponse'
-        '500':
-          description: 获取时间表失败
+              schema: {$ref: '#/components/schemas/ScheduleResponse'}
+        '500': {description: 获取时间表失败}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /mikan/test-mirrors:
     post:
       tags: [Mikan]
       summary: 测试 Mikan 镜像延迟
       operationId: testMirrors
-      security:
-        - BearerAuth: []
       responses:
         '200':
           description: 镜像测试结果
@@ -1267,10 +1695,9 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/MirrorResult'
-        '503':
-          description: Mikan 服务未初始化
+                items: {$ref: '#/components/schemas/MirrorResult'}
+        '503': {description: Mikan 服务未初始化}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /mikan/select-mirror:
     post:
@@ -1278,14 +1705,11 @@ paths:
       summary: 选择 Mikan 镜像
       description: 选择并保存 Mikan 镜像域名到数据库。
       operationId: selectMirror
-      security:
-        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/SelectMirrorRequest'
+            schema: {$ref: '#/components/schemas/SelectMirrorRequest'}
       responses:
         '200':
           description: 镜像已选择
@@ -1294,18 +1718,15 @@ paths:
               schema:
                 type: object
                 properties:
-                  domain:
-                    type: string
-        '400':
-          description: domain 不能为空
+                  domain: {type: string}
+        '400': {description: domain 不能为空}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /plugins:
     get:
       tags: [Plugins]
       summary: 获取插件列表
       operationId: getPlugins
-      security:
-        - BearerAuth: []
       responses:
         '200':
           description: 插件列表
@@ -1313,25 +1734,358 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  type: object
+                items: {$ref: '#/components/schemas/PluginInfo'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /plugins/save:
+    post:
+      tags: [Plugins]
+      summary: 保存或更新自定义 Webhook 清单
+      operationId: saveWebhookPlugin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WebhookManifest'}
+      responses:
+        '200':
+          description: 清单已保存
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PluginSaved'}
+        '400': {description: 无效的请求或清单}
+        '401': {description: Ani-Go 登录凭证无效}
+        '409': {description: 插件 ID 由内置插件保留}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+      description: 成功时返回服务端分配或规范化的 ID 及实际状态。编辑已停用清单将保留其停用状态。
+
+  /plugins/{id}/panel/credential:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      tags: [Plugins]
+      summary: 查询插件面板凭据状态和来源
+      operationId: getPluginPanelCredential
+      responses:
+        '200':
+          description: 仅返回状态与来源。社区清单可使用 stored 或 none，本地 Go 插件还可通过部署环境提供凭据。115 使用 CLOUD115_ACCESS_TOKEN。
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PanelCredentialState'}
+        '401': {description: Ani-Go 登录凭证无效}
+        '404': {description: 插件未声明面板或凭据}
+        '409': {description: 插件未启用或实例已停用}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      tags: [Plugins]
+      summary: 设置当前插件的面板访问令牌
+      operationId: setPluginPanelCredential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [access_token]
+              properties:
+                access_token: {type: string, format: password, writeOnly: true}
+      responses:
+        '200':
+          description: 配置已保存
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PanelCredentialState'}
+        '400': {description: 令牌或请求无效}
+        '401': {description: Ani-Go 登录凭证无效}
+        '404': {description: 插件未声明面板或凭据}
+        '409': {description: 面板未启用或环境变量已提供凭据}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    delete:
+      tags: [Plugins]
+      summary: 清除当前插件保存的面板凭据
+      operationId: deletePluginPanelCredential
+      responses:
+        '200':
+          description: 已清除保存的令牌
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PanelCredentialState'}
+        '401': {description: Ani-Go 登录凭证无效}
+        '404': {description: 插件未声明面板或凭据}
+        '409': {description: 面板未启用或环境变量已提供凭据}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /plugins/{id}/panel/actions/{action}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: action
+        required: true
+        schema: {type: string}
+    post:
+      tags: [Plugins]
+      summary: 执行当前插件面板声明的动作
+      operationId: runPluginPanelAction
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                input: {type: string, description: 声明输入框时必填}
+                placement: {type: string, enum: [search_result], description: 从搜索结果执行时与 expected_url 同时提供}
+                expected_url: {type: string, description: 用户确认的完整 Webhook 地址或内置插件的空字符串。只用于比对当前清单。}
+                page:
+                  type: integer
+                  minimum: 1
+                  maximum: 1000000
+                  default: 1
+                  description: 仅用于 tasks 动作
+      responses:
+        '200':
+          description: 返回声明的结果类型
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [message]
+                    additionalProperties: false
+                    properties:
+                      message: {type: string, minLength: 1, maxLength: 2048}
+                  - {$ref: '#/components/schemas/PanelTaskPage'}
+        '400': {description: 请求体、输入或页码无效}
+        '401': {description: Ani-Go 登录凭证无效}
+        '404': {description: 未找到面板或声明的动作}
+        '409': {description: 面板未就绪、已停用、缺少必需凭据或已变更目标/搜索入口}
+        '422': {description: 远端拒绝授权}
+        '429': {description: 远端频率限制}
+        '502': {description: 远端请求失败或返回的 JSON 不符合动作契约}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /plugins/cloud-115/config:
+    get:
+      tags: [Plugins]
+      summary: 查询 115 访问令牌的配置状态和来源
+      operationId: getCloud115Config
+      responses:
+        '200':
+          description: 只返回配置状态与来源
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Cloud115Config'}
+        '401': {description: Ani-Go 登录凭证缺失或无效}
+        '409': {description: 插件未启用或未就绪}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      tags: [Plugins]
+      summary: 保存或替换 115 开放平台 OAuth 访问令牌
+      description: 令牌需要云下载权限。CLOUD115_ACCESS_TOKEN 环境变量优先，生效时只能在部署环境中更换。
+      operationId: setCloud115Config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [access_token]
+              properties:
+                access_token: {type: string, format: password, writeOnly: true}
+      responses:
+        '200':
+          description: 令牌已保存
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Cloud115Config'}
+        '400': {description: 令牌无效}
+        '401': {description: Ani-Go 登录凭证缺失或无效}
+        '409': {description: 插件未就绪或部署环境已配置令牌}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    delete:
+      tags: [Plugins]
+      summary: 清除 Ani-Go 保存的 115 访问令牌
+      operationId: deleteCloud115Config
+      responses:
+        '200':
+          description: 已清除保存的令牌
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Cloud115Config'}
+        '401': {description: Ani-Go 登录凭证缺失或无效}
+        '409': {description: 插件未就绪或部署环境已配置令牌}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /plugins/cloud-115/tasks:
+    post:
+      tags: [Plugins]
+      summary: 向 115 云端提交一条磁力链接
+      operationId: createCloud115Task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [magnet]
+              properties:
+                magnet: {type: string, example: 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'}
+      responses:
+        '201':
+          description: 115 已接受这条链接，可查询云任务查看进度
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [submitted]
+                properties:
+                  submitted:
+                    type: boolean
+                    enum: [true]
+        '400': {description: 磁力链接无效}
+        '401': {description: Ani-Go 登录凭证缺失或无效}
+        '409': {description: 插件未就绪、115 令牌未配置或请求已取消}
+        '422': {description: 115 授权无效或已过期}
+        '429': {description: 115 请求频率受限}
+        '502': {description: 115 未确认提交成功，重试前请查询云任务}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    get:
+      tags: [Plugins]
+      summary: 按页查询 115 账号的云下载任务
+      operationId: listCloud115Tasks
+      parameters:
+        - in: query
+          name: page
+          schema: {type: integer, minimum: 1, default: 1}
+      responses:
+        '200':
+          description: 云任务列表和分页信息
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Cloud115TaskPage'}
+        '400': {description: 页码无效}
+        '401': {description: Ani-Go 登录凭证缺失或无效}
+        '409': {description: 插件未就绪、115 令牌未配置或请求已取消}
+        '422': {description: 115 授权无效或已过期}
+        '429': {description: 115 请求频率受限}
+        '502': {description: 无法从 115 获取云任务列表}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /plugins/reload:
     post:
       tags: [Plugins]
       summary: 重新加载插件
       operationId: reloadPlugins
-      security:
-        - BearerAuth: []
       responses:
         '200':
           description: 重新加载成功
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PluginReloadResponse'
-        '503':
-          description: 插件管理器未初始化
+              schema: {$ref: '#/components/schemas/PluginReloadResponse'}
+        '503': {description: 插件管理器未初始化}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /parse:
     post:
@@ -1339,95 +2093,1698 @@ paths:
       summary: 自然语言解析任务
       description: 解析自然语言指令为订阅操作（正则 + AI 回退）。
       operationId: parseTask
-      security:
-        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ParseRequest'
+            schema: {$ref: '#/components/schemas/ParseRequest'}
       responses:
         '200':
           description: 解析结果
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ParseResult'
-        '400':
-          description: 参数校验失败
-        '503':
-          description: 任务解析器未初始化
-        '500':
-          description: 解析失败
+              schema: {$ref: '#/components/schemas/ParseResult'}
+        '400': {description: 参数校验失败}
+        '503': {description: 任务解析器未初始化}
+        '500': {description: 解析失败}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /migrate:
     post:
       tags: [Migrate]
       summary: 数据迁移
-      description: 从 AutoBangumi / ani-rss SQLite 数据库迁移数据。
+      description: 导入 AutoBangumi SQLite 的历史记录，或 ani-rss 的 ani.v2.json / 官方 ZIP 中的订阅与进度。
       operationId: migrateData
-      security:
-        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
+            schema: {$ref: '#/components/schemas/MigrateRequest'}
+          multipart/form-data:
             schema:
-              $ref: '#/components/schemas/MigrateRequest'
+              type: object
+              properties:
+                file: {type: string, format: binary}
+              required: [file]
       responses:
         '200':
           description: 迁移成功
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/MigrateResponse'
-        '400':
-          description: 参数校验失败
-        '500':
-          description: 迁移失败
+              schema: {$ref: '#/components/schemas/MigrateResponse'}
+        '400': {description: 参数校验失败}
+        '500': {description: 迁移失败}
+        '403':
+          description: 操作未获授权
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '413':
+          description: 请求体超出大小限制
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /version:
     get:
       tags: [Version]
       summary: 获取版本信息
       operationId: getVersion
-      security:
-        - BearerAuth: []
       responses:
         '200':
           description: 版本信息
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/VersionResponse'
+              schema: {$ref: '#/components/schemas/VersionResponse'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
 
   /proxy/image:
     get:
       tags: [Proxy]
       summary: 图片代理
-      description: |
-        代理图片请求，绕过 CDN 热链保护。无需认证。
-        允许的域名: i0.hdslb.com, lain.bgm.tv, img.mikanani.me, image.tmdb.org, bilibili.com, bgm.tv, mikanime.tv
+      description: 代理允许站点的 HTTP(S) 图片并校验重定向、标准端口和实际图像格式。单图大小上限 20 MiB。
       operationId: proxyImage
       parameters:
         - name: url
           in: query
           required: true
-          schema:
-            type: string
+          schema: {type: string}
           description: 图片原始 URL
       responses:
         '200':
           description: 图片二进制流
           content:
             image/*:
-              schema:
-                type: string
-                format: binary
+              schema: {type: string, format: binary}
         '400':
           description: 缺少 url 或 url 无效
+          content:
+            text/plain:
+              schema: {type: string}
         '403':
-          description: 域名不在白名单
+          description: URL、主机或端口不在允许范围。
+          content:
+            text/plain:
+              schema: {type: string}
         '502':
           description: 获取图片失败
+          content:
+            text/plain:
+              schema: {type: string}
+        '415':
+          description: 不支持的媒体格式
+          content:
+            text/plain:
+              schema: {type: string}
+      security: []
+
+  /plugins/custom:
+    post:
+      tags: [Plugins]
+      summary: 通过兼容路径保存社区 Webhook 清单
+      operationId: saveCustomPlugin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WebhookManifest'}
+      responses:
+        '200':
+          description: 清单已保存
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PluginSaved'}
+        '400': {description: 无效的请求或清单}
+        '401': {description: Ani-Go 登录凭证无效}
+        '409': {description: 插件 ID 由内置插件保留}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+      description: 成功时返回服务端分配或规范化的 ID 及实际状态。编辑已停用清单将保留其停用状态。
+    get:
+      tags: [Plugins]
+      operationId: listCustomPlugins
+      summary: 获取已安装的社区插件清单
+      responses:
+        '200':
+          description: 获取已安装的社区插件清单
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PluginInfo'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /plugins/toggle:
+    post:
+      tags: [Plugins]
+      operationId: togglePlugin
+      summary: 切换插件启用状态
+      description: enabled 必须是 JSON 布尔值。路径中的 ID 优先。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: {type: string}
+                enabled: {type: boolean}
+              required: [id, enabled]
+      responses:
+        '200':
+          description: 切换插件启用状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  id: {type: string}
+                  enabled: {type: boolean}
+                  status:
+                    type: string
+                    enum: [inactive, loading, active, suspended, error, disposing]
+                  error: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: 记录不存在
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /plugins/{id}/toggle:
+    post:
+      tags: [Plugins]
+      operationId: togglePluginById
+      summary: 切换插件启用状态
+      description: enabled 必须是 JSON 布尔值。路径中的 ID 优先。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: {type: string}
+                enabled: {type: boolean}
+              required: [enabled]
+      responses:
+        '200':
+          description: 切换插件启用状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  id: {type: string}
+                  enabled: {type: boolean}
+                  status:
+                    type: string
+                    enum: [inactive, loading, active, suspended, error, disposing]
+                  error: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: 记录不存在
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /plugins/{id}:
+    delete:
+      tags: [Plugins]
+      operationId: deleteCustomPlugin
+      summary: 删除社区插件
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: 删除社区插件
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  id: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: 记录不存在
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: 状态冲突
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /downloads/{hash}:
+    delete:
+      tags: [Downloads]
+      operationId: deleteDownload
+      summary: 删除下载任务
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema: {type: string}
+        - name: delete_files
+          in: query
+          required: false
+          schema: {type: boolean}
+      responses:
+        '200':
+          description: 删除下载任务
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  hash: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /downloads/{hash}/pause:
+    post:
+      tags: [Downloads]
+      operationId: pauseDownload
+      summary: 暂停下载任务
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: 暂停下载任务
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  hash: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /downloads/{hash}/resume:
+    post:
+      tags: [Downloads]
+      operationId: resumeDownload
+      summary: 恢复下载任务
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: 恢复下载任务
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  hash: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /downloads/pause-all:
+    post:
+      tags: [Downloads]
+      operationId: pauseAllDownloads
+      summary: 批量暂停下载任务
+      description: 仅处理当前状态允许该操作的任务。count 是成功任务数。
+      responses:
+        '200':
+          description: 批量暂停下载任务
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  count: {type: integer}
+                  message: {type: string}
+        '502':
+          description: 读取下载器队列失败，或部分任务操作失败。部分失败时返回成功和失败数量。
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/Error'}
+                  - type: object
+                    properties:
+                      success: {type: boolean}
+                      count: {type: integer}
+                      failed: {type: integer}
+                      error: {type: string}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /downloads/resume-all:
+    post:
+      tags: [Downloads]
+      operationId: resumeAllDownloads
+      summary: 批量恢复下载任务
+      description: 仅处理当前状态允许该操作的任务。count 是成功任务数。
+      responses:
+        '200':
+          description: 批量恢复下载任务
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  count: {type: integer}
+                  message: {type: string}
+        '502':
+          description: 读取下载器队列失败，或部分任务操作失败。部分失败时返回成功和失败数量。
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/Error'}
+                  - type: object
+                    properties:
+                      success: {type: boolean}
+                      count: {type: integer}
+                      failed: {type: integer}
+                      error: {type: string}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /downloader/test:
+    post:
+      tags: [Downloads]
+      operationId: testDownloader
+      summary: 测试当前或临时下载器配置
+      description: 连通性与认证失败通过 HTTP 200 的 success=false 返回。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TestDownloader'}
+      responses:
+        '200':
+          description: 测试当前或临时下载器配置
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  name: {type: string}
+                  latency_ms: {type: integer}
+                  message: {type: string}
+                  error: {type: string}
+        '500':
+          description: 读取已保存的下载器配置失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /subscriptions/supplement-all:
+    post:
+      tags: [Subscriptions]
+      operationId: supplementAll
+      summary: 批量触发启用订阅的补全扫描
+      description: 跳过设置为完成后跳过批量补全的已完成订阅。
+      responses:
+        '202':
+          description: 批量触发启用订阅的补全扫描
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessageResponse'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /settings/custom-regex/test:
+    post:
+      tags: [Settings]
+      operationId: testCustomRegex
+      summary: 按当前规则解析测试标题
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: {type: string}
+              required: [title]
+      responses:
+        '200':
+          description: 按当前规则解析测试标题
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  title: {type: string}
+                  raw_title: {type: string}
+                  subgroup: {type: string}
+                  season: {type: integer}
+                  episode: {type: number}
+                  resolution: {type: string}
+                  is_batch: {type: boolean}
+                  is_special: {type: boolean}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /backup/list:
+    get:
+      tags: [Backup]
+      operationId: listBackups
+      summary: 列出可用备份
+      responses:
+        '200':
+          description: 列出可用备份
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/BackupFile'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /backup/create:
+    post:
+      tags: [Backup]
+      operationId: createBackup
+      summary: 创建管理员备份
+      description: 成功发布后与定时备份共用 BACKUP_KEEP_COUNT 保留策略，同秒创建可生成独立文件。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                include_episodes: {type: boolean, default: false}
+      responses:
+        '200':
+          description: 创建管理员备份
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessageResponse'}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /backup/restore:
+    post:
+      tags: [Backup]
+      operationId: restoreBackup
+      summary: 恢复选定备份
+      description: 新格式验证 SHA-256，旧格式无摘要可读取。完整清单按快照恢复插件与目标授权。本机 JWT 签名密钥保留。有插件开关但无清单的旧备份可恢复内置开关并保留本机社区插件。插件在成功提交后重新加载，其他启动配置建议重启生效。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+              required: [name]
+      responses:
+        '200':
+          description: 恢复选定备份
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessageResponse'}
+        '400':
+          description: 请求无效、快照版本不支持、摘要校验失败或记录归属不明确
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: 备份文件不存在
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 备份管理器不可用，或快照已提交但插件重新加载失败。响应的 error 会区分两种情况。
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /backup/{name}:
+    delete:
+      tags: [Backup]
+      operationId: deleteBackup
+      summary: 删除备份文件
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: 删除备份文件
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessageResponse'}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: 备份文件不存在
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /backup/download/{name}:
+    get:
+      tags: [Backup]
+      operationId: downloadBackup
+      summary: 下载备份 JSON 文件
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: 下载备份 JSON 文件
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BackupData'}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            text/plain:
+              schema: {type: string}
+        '404':
+          description: 记录不存在
+          content:
+            text/plain:
+              schema: {type: string}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            text/plain:
+              schema: {type: string}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /notifications/logs:
+    get:
+      tags: [Notifications]
+      operationId: listNotificationHistory
+      summary: 分页查询通知投递记录
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: {type: integer, default: 1}
+        - name: pageSize
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: channel
+          in: query
+          required: false
+          schema: {type: string}
+        - name: status
+          in: query
+          required: false
+          schema: {type: string}
+        - name: eventType
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        '200':
+          description: 分页查询通知投递记录
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: {type: integer}
+                  page: {type: integer}
+                  pageSize: {type: integer}
+                  logs:
+                    type: array
+                    items: {$ref: '#/components/schemas/NotificationLog'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+    delete:
+      tags: [Notifications]
+      operationId: clearNotificationHistory
+      summary: 清理通知投递记录
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema: {type: integer, minimum: 0, maximum: 2147483647}
+          description: 正数保留指定天数的记录。省略或传 0 会永久清空全部记录。
+      responses:
+        '200':
+          description: 清理通知投递记录
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+        '400': {description: 天数为空、为负数、超出范围、格式错误或传入多次}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /notifications/stats:
+    get:
+      tags: [Notifications]
+      operationId: getNotificationStats
+      summary: 获取通知投递统计
+      responses:
+        '200':
+          description: 获取通知投递统计
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationStats'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /notify/test:
+    post:
+      tags: [Notifications]
+      operationId: testNotification
+      summary: 发送测试通知
+      description: channel 为空时测试已配置渠道；投递结果在 HTTP 200 的 success 字段中。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TestNotify'}
+      responses:
+        '200':
+          description: 发送测试通知
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  error: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /notifications/templates:
+    get:
+      tags: [Notifications]
+      operationId: listNotificationTemplates
+      summary: 读取默认及自定义通知模板
+      responses:
+        '200':
+          description: 读取默认及自定义通知模板
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer}
+                  data: {$ref: '#/components/schemas/TemplateCatalog'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+    put:
+      tags: [Notifications]
+      operationId: updateNotificationTemplate
+      summary: 保存事件与渠道的通知模板
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event_type: {type: string}
+                channel: {type: string}
+                template: {type: string}
+              required: [event_type]
+      responses:
+        '200':
+          description: 保存事件与渠道的通知模板
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer}
+                  message: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /notifications/templates/preview:
+    post:
+      tags: [Notifications]
+      operationId: previewNotificationTemplate
+      summary: 预览通知模板的渲染结果
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event_type: {type: string}
+                channel: {type: string}
+                template: {type: string}
+                sample_data: {type: object, additionalProperties: true}
+      responses:
+        '200':
+          description: 预览通知模板的渲染结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer}
+                  data:
+                    type: object
+                    properties:
+                      rendered: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /notifications/templates/reset:
+    post:
+      tags: [Notifications]
+      operationId: resetNotificationTemplates
+      summary: 恢复指定范围的默认通知模板
+      description: 按事件及可选渠道移除一项自定义模板；省略渠道表示该事件的通用模板。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event_type: {type: string, minLength: 1}
+                channel: {type: string}
+              required: [event_type]
+      responses:
+        '200':
+          description: 恢复指定范围的默认通知模板
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer}
+                  message: {type: string}
+        '400':
+          description: 请求体无效或缺少非空 event_type
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 重置或持久化失败。
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /rss/preview:
+    post:
+      tags: [Search]
+      operationId: previewRSS
+      summary: 预览 RSS 订阅源及解析条目
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url: {type: string}
+              required: [url]
+      responses:
+        '200':
+          description: 预览 RSS 订阅源及解析条目
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  feed:
+                    type: object
+                    properties:
+                      title: {type: string}
+                      url: {type: string}
+                  total: {type: integer}
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/RSSPreviewItem'}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '502':
+          description: 上游服务失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /organize/preview:
+    post:
+      tags: [Organize]
+      operationId: previewOrganize
+      summary: 预览单个文件或批量整理结果
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                file_path: {type: string}
+                anime: {$ref: '#/components/schemas/Anime'}
+                episode: {$ref: '#/components/schemas/MetadataEpisode'}
+                items:
+                  type: array
+                  items: {$ref: '#/components/schemas/PreviewItem'}
+              anyOf:
+                - required: [file_path]
+                - required: [items]
+      responses:
+        '200':
+          description: 预览单个文件或批量整理结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer}
+                  data:
+                    oneOf:
+                      - {$ref: '#/components/schemas/PreviewResult'}
+                      - type: array
+                        items: {$ref: '#/components/schemas/PreviewResult'}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /subscriptions/merge-collections:
+    post:
+      tags: [Organize]
+      operationId: mergeCollections
+      summary: 生成或应用系列归并计划
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subscription_ids:
+                  type: array
+                  items: {type: integer}
+                apply: {type: boolean, default: false}
+                overwrite: {type: boolean, default: false}
+      responses:
+        '200':
+          description: 生成或应用系列归并计划
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer}
+                  data: {$ref: '#/components/schemas/CollectionMergeSummary'}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /subscriptions/{id}/resolve-collection:
+    post:
+      tags: [Organize]
+      operationId: resolveCollection
+      summary: 查询单部订阅的系列归属建议
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: 查询单部订阅的系列归属建议
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer}
+                  data: {$ref: '#/components/schemas/SeriesCollectionInfo'}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: 记录不存在
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /system/update/check:
+    get:
+      tags: [Version]
+      operationId: checkSystemUpdate
+      summary: 检查可用更新
+      description: 检查发布源失败时返回 HTTP 200 和 error 字段。
+      responses:
+        '200':
+          description: 检查可用更新
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/UpdateInfo'}
+                  - type: object
+                    properties:
+                      current_version: {type: string}
+                      has_update: {type: boolean}
+                      error: {type: string}
+                    required: [error]
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /system/update/progress:
+    get:
+      tags: [Version]
+      operationId: getUpdateProgress
+      summary: 读取更新进度
+      responses:
+        '200':
+          description: 读取更新进度
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UpdateProgress'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /system/update/execute:
+    post:
+      tags: [Version]
+      operationId: executeSystemUpdate
+      summary: 执行系统更新
+      responses:
+        '200':
+          description: 执行系统更新
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessageResponse'}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /bangumi/subject/{id}:
+    get:
+      tags: [Bangumi]
+      operationId: getBangumiSubject
+      summary: 获取 Bangumi 条目和剧集
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: 获取 Bangumi 条目和剧集
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  anime: {$ref: '#/components/schemas/Anime'}
+                  episodes:
+                    type: array
+                    items: {$ref: '#/components/schemas/MetadataEpisode'}
+                    nullable: true
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /schedule/bangumi:
+    get:
+      tags: [Bangumi]
+      operationId: getBangumiSchedule
+      summary: 获取 Bangumi 放送日历
+      parameters:
+        - name: year
+          in: query
+          required: false
+          schema: {type: integer}
+        - name: season
+          in: query
+          required: false
+          schema: {type: integer}
+      responses:
+        '200':
+          description: 获取 Bangumi 放送日历
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ScheduleResponse'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /bgm/test-mirrors:
+    post:
+      tags: [Bangumi]
+      summary: 测试 Bangumi 镜像延迟
+      operationId: testBangumiMirrors
+      responses:
+        '200':
+          description: 镜像测试结果
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/MirrorResult'}
+        '503': {description: Mikan 服务未初始化}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /bgm/select-mirror:
+    post:
+      tags: [Bangumi]
+      summary: 选择 Bangumi 镜像
+      operationId: selectBangumiMirror
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SelectMirrorRequest'}
+      responses:
+        '200':
+          description: 镜像已选择
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domain: {type: string}
+        '400': {description: domain 不能为空}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /bangumi/auth/link:
+    get:
+      tags: [Bangumi]
+      operationId: createBangumiAuthLink
+      summary: 开始 Bangumi 账户绑定
+      description: 在同一浏览器中打开返回的授权 URL。服务端同时设置一次性、仅回调路径可见的 HttpOnly 会话 Cookie。
+      responses:
+        '200':
+          description: 开始 Bangumi 账户绑定
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /bangumi/auth/callback:
+    get:
+      tags: [Bangumi]
+      operationId: completeBangumiAuth
+      summary: 接收 Bangumi 授权回调
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: {type: string}
+        - name: state
+          in: query
+          required: true
+          schema: {type: string}
+        - name: anigo_bangumi_flow
+          in: cookie
+          required: true
+          schema: {type: string}
+      responses:
+        '302':
+          description: 接收 Bangumi 授权回调
+          headers:
+            Location:
+              schema: {type: string}
+              description: 设置页的授权成功地址。
+        '400':
+          description: 请求格式或参数无效
+          content:
+            text/plain:
+              schema: {type: string}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            text/plain:
+              schema: {type: string}
+        '502':
+          description: 上游服务失败
+          content:
+            text/plain:
+              schema: {type: string}
+
+  /ai/models:
+    post:
+      tags: [Search]
+      operationId: listAIModels
+      summary: 查询指定 AI 服务支持的模型
+      description: 端点调用失败通过 HTTP 200 的 success=false 返回。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AIModelsRequest'}
+      responses:
+        '200':
+          description: 查询指定 AI 服务支持的模型
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  models:
+                    type: array
+                    items: {type: string}
+                  error: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /search/smart:
+    post:
+      tags: [Search]
+      operationId: smartSearch
+      summary: 聚合关键词扩展与多源搜索
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SmartSearchRequest'}
+      responses:
+        '200':
+          description: 聚合关键词扩展与多源搜索
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SmartSearchResponse'}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '502':
+          description: 上游服务失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /events/stream:
+    get:
+      tags: [Events]
+      operationId: streamEvents
+      summary: 订阅实时业务事件
+      description: 连接后先发送 connected 帧，后续业务事件通过 data 帧返回，空闲时每 15 秒发送注释心跳。
+      security:
+        - BearerAuth: []
+        - EventStreamJWT: []
+      responses:
+        '200':
+          description: 订阅实时业务事件
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '401':
+          description: 登录凭据无效或过期
+          content:
+            text/plain:
+              schema: {type: string}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            text/plain:
+              schema: {type: string}
+        '503':
+          description: 账户存储暂时不可用，可在恢复后重连
+          content:
+            text/plain:
+              schema: {type: string}
+
+  /mcp/token/generate:
+    post:
+      tags: [MCP]
+      operationId: rotateMcpToken
+      summary: 生成并轮换 MCP 访问令牌
+      responses:
+        '200':
+          description: 生成并轮换 MCP 访问令牌
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: {type: string}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+
+  /mcp/sse:
+    servers:
+      - url: /
+        description: MCP 传输使用站点根路径。
+    get:
+      tags: [MCP]
+      operationId: openMcpStream
+      summary: 建立 MCP SSE 会话
+      description: 首个 endpoint 事件给出会话的消息提交地址。RPC 结果在同一连接的 message 事件中返回。
+      security:
+        - McpBearer: []
+        - McpQueryToken: []
+      responses:
+        '200':
+          description: 建立 MCP SSE 会话
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '401':
+          description: 登录凭据无效或过期
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: 服务未配置或未就绪
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /mcp/messages:
+    servers:
+      - url: /
+        description: MCP 传输使用站点根路径。
+    post:
+      tags: [MCP]
+      operationId: submitMcpMessage
+      summary: 提交 JSON-RPC 2.0 消息
+      description: 接受后返回空响应，结果异步写入对应的 SSE 会话。请求体上限 1 MiB。
+      security:
+        - McpBearer: []
+        - McpQueryToken: []
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jsonrpc:
+                  type: string
+                  enum: ['2.0']
+                id:
+                  oneOf:
+                    - {type: string}
+                    - {type: number}
+                  nullable: true
+                method: {type: string}
+                params: {}
+              required: [jsonrpc, method]
+      responses:
+        '202': {description: 提交 JSON-RPC 2.0 消息}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            text/plain:
+              schema: {type: string}
+        '401':
+          description: 登录凭据无效或过期
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: 记录不存在
+          content:
+            text/plain:
+              schema: {type: string}
+        '413':
+          description: 请求体超出大小限制
+          content:
+            text/plain:
+              schema: {type: string}
+
+  /user/avatar:
+    get:
+      tags: [User]
+      operationId: getUserAvatar
+      summary: 读取当前头像图片
+      security: []
+      responses:
+        '200':
+          description: 读取当前头像图片
+          content:
+            image/*:
+              schema: {type: string, format: binary}
+        '404':
+          description: 记录不存在
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+      description: 支持 GET 与 HEAD。未带版本时读取当前头像；带 v 的版本 URL 只在该版本为当前版本时有效。
+      parameters:
+        - name: v
+          in: query
+          required: false
+          schema: {type: string}
+          description: 服务端返回的头像版本标识。
+    post:
+      tags: [User]
+      operationId: uploadUserAvatar
+      summary: 上传头像图片
+      responses:
+        '200':
+          description: 上传头像图片
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  avatar_url: {type: string}
+        '400':
+          description: 请求格式或参数无效
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: 服务执行或持久化失败
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+        '413':
+          description: 请求体超出大小限制
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                avatar: {type: string, format: binary}
+              required: [avatar]
+      description: avatar 必须为 PNG、JPEG、WebP、GIF 或 SVG，扩展名与内容应匹配。上限 5 MiB，另允许 64 KiB multipart 封装；后续请原样使用返回的 avatar_url。

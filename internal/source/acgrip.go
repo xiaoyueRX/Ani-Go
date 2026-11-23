@@ -95,38 +95,26 @@ func (a *ACGRIPSource) SearchAnime(ctx context.Context, title string) ([]core.To
 }
 
 func (a *ACGRIPSource) FetchHistory(ctx context.Context, bangumiID string, filter core.Filter) ([]core.TorrentItem, error) {
-	if filter.SearchTitle == "" {
-		return nil, nil
-	}
-	return a.SearchAnime(ctx, filter.SearchTitle)
+	return searchHistoryTitles(ctx, filter.Titles, a.SearchAnime)
 }
 
 func (a *ACGRIPSource) parseRSS(r io.Reader) ([]core.TorrentItem, error) {
-	body, err := io.ReadAll(r)
-	if err != nil {
-		return nil, fmt.Errorf("读取 ACG.RIP RSS 失败: %w", err)
-	}
-
 	var rss acgripRSS
-	if err := xml.Unmarshal(body, &rss); err != nil {
+	if err := xml.NewDecoder(r).Decode(&rss); err != nil {
 		return nil, fmt.Errorf("解析 ACG.RIP RSS 失败: %w", err)
 	}
 
 	items := make([]core.TorrentItem, 0, len(rss.Channel.Items))
 	for _, item := range rss.Channel.Items {
 		pubAt, _ := parsePubDate(item.PubDate)
-		torrentURL := item.Enclosure.URL
-		if torrentURL == "" {
-			torrentURL = item.Link
-		}
-
-		items = append(items, core.TorrentItem{
+		result := core.TorrentItem{
 			Title:       item.Title,
-			URL:         torrentURL,
 			Size:        item.Enclosure.Length,
 			PublishedAt: pubAt,
 			SourceName:  "ACG.RIP",
-		})
+		}
+		setSupplementalLinks(&result, item.Enclosure.URL, item.Link, "")
+		items = append(items, result)
 	}
 
 	return items, nil

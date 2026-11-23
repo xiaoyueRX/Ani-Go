@@ -3,17 +3,26 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 )
 
 var jwtSecret []byte
+var secretMu sync.RWMutex
+
+func publishSecret(secret []byte) { secretMu.Lock(); jwtSecret = secret; secretMu.Unlock() }
 
 // InitSecret 每次程序启动时动态生成 32 字节强随机密钥
 func InitSecret() error {
@@ -21,34 +30,37 @@ func InitSecret() error {
 	if _, err := rand.Read(secret); err != nil {
 		return fmt.Errorf("生成 JWT Secret 失败: %w", err)
 	}
-	jwtSecret = secret
+	publishSecret(secret)
 	return nil
 }
 
-// InitSecretFromDB 从数据库加载或生成 JWT Secret
-// 优先从 getter 读取已持久化的密钥，若不存在则生成新密钥并通过 setter 持久化
-// secret 以 hex 编码存储在 settings 表中
-func InitSecretFromDB(getter func(key string) (string, bool), setter func(key, value string)) error {
-	const settingKey = "jwt_secret"
-
-	if val, ok := getter(settingKey); ok && val != "" {
-		decoded, err := hex.DecodeString(val)
-		if err == nil && len(decoded) >= 32 {
-			jwtSecret = decoded
-			return nil
+// InitSecretFromDB 仅在密钥缺失时创建，签名始终采用 SQLite 中实际提交的值。
+func InitSecretFromDB(db *gorm.DB) error {
+	const key = "jwt_secret"
+	// 错误日志不能展开密钥的 SQL 绑定值。
+	store := db.Session(&gorm.Session{Logger: db.Logger.LogMode(logger.Silent)})
+	var setting database.Setting
+	read := func() error { return store.Where("key = ?", key).Take(&setting).Error }
+	err := read()
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		candidate := make([]byte, 32)
+		if _, err := rand.Read(candidate); err != nil {
+			return err
 		}
+		row := database.Setting{Key: key, Value: hex.EncodeToString(candidate)}
+		if err := store.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "key"}}, DoNothing: true}).Create(&row).Error; err != nil {
+			return fmt.Errorf("保存登录签名密钥失败: %w", err)
+		}
+		err = read()
 	}
-
-	// 不存在或无效，生成新密钥并持久化
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		return fmt.Errorf("生成 JWT Secret 失败: %w", err)
+	if err != nil {
+		return fmt.Errorf("读取登录签名密钥失败: %w", err)
 	}
-	jwtSecret = secret
-
-	if setter != nil {
-		setter(settingKey, hex.EncodeToString(secret))
+	decoded, err := hex.DecodeString(setting.Value)
+	if err != nil || len(decoded) < 32 {
+		return errors.New("数据库中的登录签名密钥格式无效")
 	}
+	publishSecret(decoded)
 	return nil
 }
 
@@ -85,7 +97,7 @@ func GenerateToken(username string, tokenVersion int) (string, error) {
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
+	return token.SignedString(GetSecretBytes())
 }
 
 // ValidateToken 校验 JWT 并返回 Claims
@@ -95,7 +107,7 @@ func ValidateToken(tokenString string) (*Claims, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("意外的签名方法: %v", token.Header["alg"])
 			}
-			return jwtSecret, nil
+			return GetSecretBytes(), nil
 		})
 	if err != nil {
 		return nil, err
@@ -109,5 +121,7 @@ func ValidateToken(tokenString string) (*Claims, error) {
 
 // GetSecretBytes 暴露 jwtSecret 给初始化验证（安全红线：仅用于检测是否已初始化）
 func GetSecretBytes() []byte {
-	return jwtSecret
+	secretMu.RLock()
+	defer secretMu.RUnlock()
+	return bytes.Clone(jwtSecret)
 }

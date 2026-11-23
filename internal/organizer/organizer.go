@@ -6,13 +6,13 @@ package organizer
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 )
@@ -32,6 +32,12 @@ type TVOrganizer struct {
 	eventBus      core.EventBus              // 事件总线，用于触发整理完成事件（松耦合）
 	hookManager   *core.WaterfallHookManager // Waterfall 钩子管理器
 }
+
+const (
+	fallbackTVTemplate      = "{title_cn}{year}/Season {season}/{title_en} [tmdbid={tmdb_id}] S{season:02}E{ep:02}{ext}"
+	fallbackMovieTemplate   = "{title_cn} ({year})/{title_en}{ext}"
+	fallbackSpecialTemplate = "{title_cn}{year}/Specials/{title_en} S00E{ep:02}{ext}"
+)
 
 var _ core.Organizer = (*TVOrganizer)(nil)
 
@@ -74,52 +80,59 @@ func (o *TVOrganizer) Name() string { return "TVOrganizer" }
 
 // Organize 整理单个文件：根据模板生成新路径，创建目录，移动/链接文件
 func (o *TVOrganizer) Organize(ctx context.Context, filePath string, anime core.Anime, episode core.Episode) (string, error) {
-	template := o.selectTemplate(anime)
-	values := o.buildVarValues(anime, episode)
-
-	// 初始渲染
-	initialPath := renderTemplate(template, values)
-
-	// 执行命名钩子链（Waterfall 模式）
-	finalPath, cancelled, reason := o.hookManager.ExecuteNamingHooks(ctx, core.NamingHookInput{
-		Anime:        anime,
-		Episode:      episode,
-		Template:     template,
-		VarValues:    values,
-		RenderedPath: initialPath,
+	return o.OrganizeAndCommit(ctx, filePath, anime, episode, func(path string, move *MoveSource) error {
+		if move != nil {
+			return move.Cleanup(ctx, path)
+		}
+		return nil
 	})
+}
 
-	if cancelled {
-		return "", fmt.Errorf("整理被钩子取消: %s", reason)
-	}
-
-	// 确保目标路径是绝对路径
-	basePath := o.getBasePath(anime.Type)
-	fullPath := filepath.Join(basePath, finalPath)
-
-	// 补充扩展名
-	if filepath.Ext(fullPath) == "" && filePath != "" {
-		fullPath += filepath.Ext(filePath)
-	}
-
-	// 边界检查：防御性防止任何非法路径穿越逃逸 basePath（必须在最终完整路径上校验）
-	if err := checkPathEscape(basePath, fullPath); err != nil {
+// OrganizeAndCommit 先完整发布库文件，再让调用方提交记录。提交失败时保留下载源供重试。
+func (o *TVOrganizer) OrganizeAndCommit(ctx context.Context, filePath string, anime core.Anime, episode core.Episode, commit func(string, *MoveSource) error) (string, error) {
+	plan, err := o.Preview(ctx, filePath, anime, episode)
+	if err != nil {
 		return "", err
 	}
-
-	// 创建目标目录
-	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", fmt.Errorf("创建目录失败: %w", err)
-	}
-
-	if err := installMediaFile(filePath, fullPath, o.isHardLinkEnabled()); err != nil {
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-
-	o.publishOrganizedEvent(filePath, fullPath, anime, episode)
-
-	return fullPath, nil
+	src, err := os.Lstat(filePath)
+	if err != nil {
+		return "", err
+	}
+	if !src.Mode().IsRegular() || src.Size() == 0 {
+		return "", fmt.Errorf("源文件不是非空普通文件: %s", filePath)
+	}
+	dst := plan.FinalPath
+	if err := makeMediaDir(filepath.Dir(dst)); err != nil {
+		return "", err
+	}
+	existing, err := os.Lstat(dst)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	if existing == nil || !os.SameFile(src, existing) {
+		if err := installMedia(ctx, filePath, dst); err != nil {
+			return "", err
+		}
+	}
+	if err := syncMediaDir(filepath.Dir(dst)); err != nil {
+		return "", err
+	}
+	var move *MoveSource
+	if plan.Action == "move" && !sameDirectoryEntry(filePath, dst) {
+		source, err := filepath.Abs(filePath)
+		if err != nil {
+			return "", err
+		}
+		move = &MoveSource{Path: source, ModTime: src.ModTime().UnixNano()}
+	}
+	if err := commit(dst, move); err != nil {
+		return "", err
+	}
+	o.publishOrganizedEvent(filePath, dst, anime, episode)
+	return dst, nil
 }
 
 func (o *TVOrganizer) publishOrganizedEvent(filePath, fullPath string, anime core.Anime, episode core.Episode) {
@@ -167,7 +180,7 @@ func (o *TVOrganizer) selectTemplate(anime core.Anime) string {
 		if o.movieTemplate != "" {
 			return o.movieTemplate
 		}
-		return "{title_cn} ({year})/{title_en}{ext}"
+		return fallbackMovieTemplate
 	case "tv":
 		if database.DB != nil {
 			var setting database.Setting
@@ -178,7 +191,7 @@ func (o *TVOrganizer) selectTemplate(anime core.Anime) string {
 		if o.tvTemplate != "" {
 			return o.tvTemplate
 		}
-		return "{title_cn}{year}/Season {season}/{title_en} [tmdbid={tmdb_id}] S{season:02}E{ep:02}{ext}"
+		return fallbackTVTemplate
 	default:
 		// OVA, Special, 或未指定类型 (other)
 		if database.DB != nil {
@@ -193,7 +206,7 @@ func (o *TVOrganizer) selectTemplate(anime core.Anime) string {
 		if o.tvTemplate != "" {
 			return o.tvTemplate
 		}
-		return "{title_cn}{year}/Specials/{title_en} S00E{ep:02}{ext}"
+		return fallbackSpecialTemplate
 	}
 }
 
@@ -249,7 +262,36 @@ func (o *TVOrganizer) isHardLinkEnabled() bool {
 	return useHardLink
 }
 
-// VarValues 保存模板变量名到值的映射
+// namingInput 为预览和实际整理构造相同的初始路径，并向钩子保留原始语言元数据。
+func (o *TVOrganizer) namingInput(filePath string, anime core.Anime, episode core.Episode) core.NamingHookInput {
+	template := o.selectTemplate(anime)
+	values := o.buildVarValues(anime, episode)
+	values.Ext = filepath.Ext(filePath)
+	renderValues := values
+	renderLayout := template
+	switch template {
+	case config.DefaultTVTemplate, config.DefaultMovieTemplate, fallbackTVTemplate, fallbackMovieTemplate, fallbackSpecialTemplate:
+		// 内置目录名优先中文，文件名优先英文。自定义模板中的语言占位符保持原义。
+		renderValues.TitleCN = firstTitle(anime.TitleCN, anime.TitleJP, anime.TitleEN)
+		renderValues.TitleEN = firstTitle(anime.TitleEN, anime.TitleCN, anime.TitleJP)
+		if template == fallbackTVTemplate && resolveVar("tmdb_id", values) == "" {
+			renderLayout = strings.Replace(template, " [tmdbid={tmdb_id}]", "", 1)
+		}
+	}
+	return core.NamingHookInput{
+		Anime: anime, Episode: episode, Template: template, VarValues: values,
+		RenderedPath: renderTemplate(renderLayout, renderValues),
+	}
+}
+
+func firstTitle(candidates ...string) string {
+	for _, candidate := range candidates {
+		if title := strings.TrimSpace(candidate); title != "" {
+			return title
+		}
+	}
+	return ""
+}
 
 // buildVarValues 从 anime 和 episode 构建模板变量值
 func (o *TVOrganizer) buildVarValues(anime core.Anime, episode core.Episode) core.VarValues {
@@ -410,63 +452,4 @@ func sanitizePath(path string) string {
 	result = strings.TrimSpace(result)
 	result = strings.Trim(result, ".")
 	return result
-}
-
-// installMediaFile 仅在新内容已准备好后替换库文件。跨卷复制和硬链接都在目标卷暂存。
-func installMediaFile(sourcePath, libraryPath string, hardlink bool) error {
-	source, err := os.Stat(sourcePath)
-	if err != nil {
-		return err
-	}
-	if !source.Mode().IsRegular() {
-		return fmt.Errorf("源路径不是普通文件: %s", sourcePath)
-	}
-	if target, err := os.Stat(libraryPath); err == nil && os.SameFile(source, target) {
-		return nil
-	}
-	if !hardlink {
-		// 同卷移动直接替换；失败时源文件和原目标仍保留。
-		if err := os.Rename(sourcePath, libraryPath); err == nil {
-			return nil
-		}
-	}
-	stageDir, err := os.MkdirTemp(filepath.Dir(libraryPath), ".anigo-")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(stageDir)
-	staged := filepath.Join(stageDir, "media")
-	defer os.Remove(staged)
-	if !hardlink || os.Link(sourcePath, staged) != nil {
-		if err := copyFile(sourcePath, staged); err != nil {
-			return err
-		}
-	}
-	if err := os.Rename(staged, libraryPath); err != nil {
-		return fmt.Errorf("替换库文件失败: %w", err)
-	}
-	if !hardlink {
-		return os.Remove(sourcePath)
-	}
-	return nil
-}
-
-func copyFile(srcPath, dstPath string) error {
-	src, err := os.Open(srcPath)
-	if err != nil {
-		return fmt.Errorf("打开源文件失败: %w", err)
-	}
-	defer src.Close()
-
-	dst, err := os.Create(dstPath)
-	if err != nil {
-		return fmt.Errorf("创建目标文件失败: %w", err)
-	}
-
-	if _, err := io.Copy(dst, src); err != nil {
-		dst.Close()
-		_ = os.Remove(dstPath)
-		return fmt.Errorf("复制文件数据失败: %w", err)
-	}
-	return dst.Close()
 }

@@ -25,7 +25,7 @@ import (
 // ============================================================
 
 type mikanRSS struct {
-	XMLName xml.Name     `xml:"rss"`
+	XMLName xml.Name   `xml:"rss"`
 	Channel mikanChannel `xml:"channel"`
 }
 
@@ -36,11 +36,10 @@ type mikanChannel struct {
 }
 
 type mikanItem struct {
-	Title       string         `xml:"title"`
-	Link        string         `xml:"link"`
-	GUID        string         `xml:"guid"`
-	PubDate     string         `xml:"pubDate"`
-	Description string         `xml:"description"`
+	Title       string       `xml:"title"`
+	Link        string       `xml:"link"`
+	GUID        string       `xml:"guid"`
+	PubDate     string       `xml:"pubDate"`
 	Enclosure   mikanEnclosure `xml:"enclosure"`
 }
 
@@ -55,7 +54,7 @@ type mikanEnclosure struct {
 // ============================================================
 
 const (
-	searchCacheMaxSize = 128 // 最大缓存条目数
+	searchCacheMaxSize = 128           // 最大缓存条目数
 	cacheEntryTTL      = 30 * time.Second
 )
 
@@ -67,7 +66,7 @@ type cacheEntry struct {
 // lruCache 简单 LRU 缓存（非线程安全，由调用方加锁）
 type lruCache struct {
 	maxSize int
-	keys    []string // 按访问顺序排列，尾部最新
+	keys    []string                // 按访问顺序排列，尾部最新
 	entries map[string]cacheEntry
 }
 
@@ -129,6 +128,7 @@ func (c *lruCache) touch(key string) {
 }
 
 var (
+	isHexHash     = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 	searchCacheMu sync.Mutex
 	searchCache   = newLRUCache(searchCacheMaxSize)
 )
@@ -172,8 +172,8 @@ func (m *MikanSource) SetDomain(domain string) {
 }
 
 // FetchRSS 解析 Mikan 个人 RSS 订阅源
-func (m *MikanSource) FetchRSS(ctx context.Context, url string) ([]core.TorrentItem, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (m *MikanSource) FetchRSS(ctx context.Context, feedURL string) ([]core.TorrentItem, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建 RSS 请求失败: %w", err)
 	}
@@ -189,13 +189,8 @@ func (m *MikanSource) FetchRSS(ctx context.Context, url string) ([]core.TorrentI
 		return nil, fmt.Errorf("RSS 请求返回状态码: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("读取 RSS 响应失败: %w", err)
-	}
-
 	var rss mikanRSS
-	if err := xml.Unmarshal(body, &rss); err != nil {
+	if err := xml.NewDecoder(resp.Body).Decode(&rss); err != nil {
 		return nil, fmt.Errorf("解析 RSS XML 失败: %w", err)
 	}
 
@@ -204,11 +199,40 @@ func (m *MikanSource) FetchRSS(ctx context.Context, url string) ([]core.TorrentI
 		pubAt, _ := parsePubDate(item.PubDate)
 		info := ParseMikanTitle(item.Title)
 
+		torrentURL := strings.TrimSpace(item.Enclosure.URL)
+		magnetURL := ""
+		for _, link := range []string{torrentURL, item.Link, item.GUID} {
+			if strings.HasPrefix(link, "magnet:?") {
+				magnetURL = link
+				break
+			}
+		}
+		if torrentURL == "" {
+			if magnetURL != "" {
+				torrentURL = magnetURL
+			} else if u, e := url.Parse(item.Link); e == nil && strings.HasSuffix(strings.ToLower(u.Path), ".torrent") {
+				torrentURL = item.Link
+			}
+		}
+		if torrentURL == "" {
+			continue
+		}
+		hash := extractInfoHash(magnetURL)
+		if hash == "" {
+			if detail, e := url.Parse(item.Link); e == nil && strings.HasPrefix(detail.Path, "/Home/Episode/") {
+				id := strings.TrimPrefix(detail.Path, "/Home/Episode/")
+				if isHexHash.MatchString(id) {
+					hash = strings.ToLower(id)
+				}
+			}
+		}
 		items = append(items, core.TorrentItem{
 			Title:       item.Title,
-			URL:         item.Enclosure.URL,
-			MagnetURL:   "",
-			InfoHash:    info.InfoHash,
+			URL:         torrentURL,
+			MagnetURL:   magnetURL,
+			InfoHash:    hash,
+			GroupName:   info.Subgroup,
+			Resolution:  info.Resolution,
 			Size:        item.Enclosure.Length,
 			PublishedAt: pubAt,
 			SourceName:  "Mikan",
@@ -227,17 +251,15 @@ func cleanSearchTitle(title string) string {
 }
 
 func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.TorrentItem, error) {
+	cacheKey := m.GetDomain() + "\x00" + title
 	searchCacheMu.Lock()
-	if cached, ok := searchCache.Get(title); ok {
+	if cached, ok := searchCache.Get(cacheKey); ok {
 		searchCacheMu.Unlock()
 		return cached.items, nil
 	}
 	searchCacheMu.Unlock()
 
-	m.mu.RLock()
-	domain := m.domain
-	m.mu.RUnlock()
-
+	var successfulPage bool
 	encodedTitle := url.QueryEscape(title)
 	path := "/Home/Search?searchstr=" + encodedTitle
 	resp, err := m.tryMirrors(ctx, path)
@@ -245,10 +267,11 @@ func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.Tor
 		defer resp.Body.Close()
 		body, err := io.ReadAll(resp.Body)
 		if err == nil {
-			items := parseMikanSearchHTML(string(body), domain)
+			successfulPage = true
+			items := parseMikanSearchHTML(string(body), resp.Request.URL.Host)
 			if len(items) > 0 {
 				searchCacheMu.Lock()
-				searchCache.Set(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+				searchCache.Set(cacheKey, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
 				searchCacheMu.Unlock()
 				return items, nil
 			}
@@ -265,10 +288,11 @@ func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.Tor
 			defer resp.Body.Close()
 			body, err := io.ReadAll(resp.Body)
 			if err == nil {
-				items := parseMikanSearchHTML(string(body), domain)
+				successfulPage = true
+				items := parseMikanSearchHTML(string(body), resp.Request.URL.Host)
 				if len(items) > 0 {
 					searchCacheMu.Lock()
-					searchCache.Set(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+					searchCache.Set(cacheKey, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
 					searchCacheMu.Unlock()
 					return items, nil
 				}
@@ -277,9 +301,12 @@ func (m *MikanSource) SearchAnime(ctx context.Context, title string) ([]core.Tor
 	}
 
 	items, err := m.searchBySeason(ctx, title)
+	if err != nil && successfulPage && ctx.Err() == nil {
+		return nil, nil
+	}
 	if err == nil && len(items) > 0 {
 		searchCacheMu.Lock()
-		searchCache.Set(title, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
+		searchCache.Set(cacheKey, cacheEntry{items: items, expiresAt: time.Now().Add(cacheEntryTTL)})
 		searchCacheMu.Unlock()
 	}
 	return items, err
@@ -293,6 +320,8 @@ func (m *MikanSource) searchBySeason(ctx context.Context, title string) ([]core.
 	season := getSeason(now.Month())
 
 	var allItems []core.TorrentItem
+	var lastErr error
+	var fetched bool
 
 	// 尝试当前季节和上一个季节
 	for i := 0; i < 2; i++ {
@@ -306,19 +335,25 @@ func (m *MikanSource) searchBySeason(ctx context.Context, title string) ([]core.
 		path := fmt.Sprintf("/Home/BangumiCoverFlowByDayOfWeek?year=%d&seasonStr=%s", y, url.QueryEscape(seasonToMikanStr(s)))
 		resp, err := m.tryMirrors(ctx, path)
 		if err != nil {
+			lastErr = err
 			continue
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
+			lastErr = err
 			continue
 		}
 
-		items := parseMikanSeasonHTML(string(body), m.domain, title)
+		fetched = true
+		items := parseMikanSeasonHTML(string(body), resp.Request.URL.Host, title)
 		allItems = append(allItems, items...)
 	}
 
+	if !fetched && lastErr != nil {
+		return nil, lastErr
+	}
 	return allItems, nil
 }
 
@@ -338,7 +373,7 @@ func getSeason(month time.Month) int {
 
 // FetchHistory 爬取 Mikan 番剧详情页获取全量历史种子
 func (m *MikanSource) FetchHistory(ctx context.Context, bangumiID string, filter core.Filter) ([]core.TorrentItem, error) {
-	if bangumiID == "" {
+	if strings.TrimSpace(bangumiID) == "" {
 		return nil, nil
 	}
 	resp, err := m.tryMirrors(ctx, "/Home/Bangumi/"+bangumiID)
@@ -589,11 +624,9 @@ func (m *MikanSource) ResolveFirstRSSURL(ctx context.Context, bangumiID string) 
 func BuildMikanRSSURL(tokenURL string) string {
 	return strings.TrimSpace(tokenURL)
 }
-
 // MikanAnimeInfo 从 Mikan 页面直接抓取的元数据
 type MikanAnimeInfo struct {
-	Title         string // 蜜柑详情页的正式标题
-	SubjectID     string // 蜜柑条目明确链接的 BGM.tv subject
+	SubjectID     string // 详情区链接的 Bangumi.tv 条目号
 	TotalEpisodes int
 	Year          int
 	AnimeType     string
@@ -627,22 +660,18 @@ func (m *MikanSource) GetAnimeInfo(ctx context.Context, bangumiID string) (*Mika
 		return nil, err
 	}
 
-	info := &MikanAnimeInfo{Title: strings.TrimSpace(doc.Find(".bangumi-title").First().Text())}
-	doc.Find("a[href*='/subject/']").EachWithBreak(func(_ int, a *goquery.Selection) bool {
+	info := &MikanAnimeInfo{}
+	doc.Find(".bangumi-info a[href]").EachWithBreak(func(_ int, a *goquery.Selection) bool {
 		href, _ := a.Attr("href")
 		link, err := url.Parse(href)
-		if err != nil {
+		if err != nil || (link.Scheme != "" && link.Scheme != "https" && link.Scheme != "http") {
 			return true
 		}
 		switch strings.ToLower(link.Hostname()) {
 		case "bgm.tv", "bangumi.tv", "chii.in":
-		default:
-			return true
-		}
-		parts := strings.Split(strings.Trim(link.Path, "/"), "/")
-		if len(parts) == 2 && parts[0] == "subject" {
-			if id, err := strconv.Atoi(parts[1]); err == nil && id > 0 {
-				info.SubjectID = parts[1]
+			id, ok := strings.CutPrefix(strings.TrimSuffix(link.Path, "/"), "/subject/")
+			if n, err := strconv.ParseUint(id, 10, 64); ok && err == nil && n > 0 {
+				info.SubjectID = id
 				return false
 			}
 		}

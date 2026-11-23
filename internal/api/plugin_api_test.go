@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
+	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 )
 
@@ -105,8 +106,8 @@ func TestPluginAPIs_CRUDAndToggle(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/api/plugins/save", bytes.NewReader(badBody))
 	w = httptest.NewRecorder()
 	s.handleSavePlugin(w, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("非法 URL 预期 500, 实际: %d", w.Code)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("非法 URL 预期 400, 实际: %d", w.Code)
 	}
 
 	// 创建合法自定义插件
@@ -192,6 +193,26 @@ func TestPluginAPIs_CRUDAndToggle(t *testing.T) {
 	}
 }
 
+func TestPluginReloadReportsUnreadableConfiguration(t *testing.T) {
+	setupTestDB(t)
+	manager := plugin.NewManager(&dummyEventBus{})
+	defer manager.StopAll()
+	if err := database.DB.Save(&database.Setting{Key: "plugin_status", Value: "{"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	server := &Server{pluginManager: manager}
+	recorder := httptest.NewRecorder()
+	server.handleReloadPlugins(recorder, httptest.NewRequest(http.MethodPost, "/api/plugins/reload", nil))
+	var response errorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusServiceUnavailable || response.Error == "" {
+		t.Fatalf("配置损坏时，重载返回状态 %d，错误 %q", recorder.Code, response.Error)
+	}
+}
+
 func TestPluginAPIs_ConcurrentReloadSafety(t *testing.T) {
 	setupTestDB(t)
 	bus := &dummyEventBus{}
@@ -230,4 +251,42 @@ func TestPluginAPIs_ConcurrentReloadSafety(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestPluginReservedIDsReturnConflict(t *testing.T) {
+	s := &Server{pluginManager: plugin.NewManager(&dummyEventBus{})}
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/save", bytes.NewBufferString(`{"id":"cloud-115","name":"同名插件","type":"script"}`))
+	w := httptest.NewRecorder()
+	s.handleSavePlugin(w, req)
+	if w.Code != http.StatusConflict {
+		t.Errorf("保存内置插件 ID 应返回 409，实际 %d", w.Code)
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/api/plugins/cloud-115", nil)
+	w = httptest.NewRecorder()
+	s.handleDeletePlugin(w, req)
+	if w.Code != http.StatusConflict {
+		t.Errorf("删除内置插件 ID 应返回 409，实际 %d", w.Code)
+	}
+}
+
+func TestPluginAPICustomImportKeepsAuthorAndReturnsCommunityOrigin(t *testing.T) {
+	setupTestDB(t)
+	pm := plugin.NewManager(&dummyEventBus{})
+	defer pm.StopAll()
+	s := &Server{pluginManager: pm}
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/save", bytes.NewBufferString(`{"id":"local-webhook","name":"作者的扩展","type":"webhook","url":"https://example.org/event","author":"xiaoyue","origin":"official","is_builtin":true}`))
+	w := httptest.NewRecorder()
+	s.handleSavePlugin(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	s.handleGetCustomPlugins(w, httptest.NewRequest(http.MethodGet, "/api/plugins/custom", nil))
+	var got []plugin.PluginInfo
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Origin != "community" || got[0].IsBuiltIn || got[0].Author != "xiaoyue" {
+		t.Fatalf("自定义列表返回了错误的来源或作者: %+v", got)
+	}
 }

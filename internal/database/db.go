@@ -1,19 +1,36 @@
 package database
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
 var DB *gorm.DB
 
 func Init(dbPath string) error {
+	// 普通磁盘路径可能位于首次挂载的空卷内。
+	if dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file:") {
+		filename, _, _ := strings.Cut(dbPath, "?")
+		if err := os.MkdirAll(filepath.Dir(filename), 0700); err != nil {
+			return fmt.Errorf("创建数据库目录: %w", err)
+		}
+	}
+	separator := "?"
+	if strings.Contains(dbPath, "?") {
+		separator = "&"
+	}
 	var err error
-	DB, err = gorm.Open(sqlite.Open(dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"), &gorm.Config{
+	DB, err = gorm.Open(sqlite.Open(dbPath+separator+"_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"), &gorm.Config{
 		PrepareStmt: true, // 复用预编译语句缓存，降低 SQLite 解析开销与 CPU 峰值
 		Logger:      logger.Default.LogMode(logger.Warn),
 	})
@@ -27,31 +44,35 @@ func Init(dbPath string) error {
 		sqlDB.SetMaxIdleConns(1)
 	}
 
-	err = DB.AutoMigrate(
-		&Subscription{},
-		&Episode{},
-		&DownloadRecord{},
-		&Setting{},
-		&User{},
-		&NotificationLog{},
-		&ParserCache{},
-	)
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		legacyEpisodeStatus := tx.Migrator().HasTable(&Episode{}) && !tx.Migrator().HasColumn(&Episode{}, "ManualStatus")
+		if tx.Migrator().HasIndex(&Episode{}, "idx_episodes_torrent_hash") {
+			if err := tx.Migrator().DropIndex(&Episode{}, "idx_episodes_torrent_hash"); err != nil {
+				return err
+			}
+		}
+		if err := tx.AutoMigrate(
+			&Subscription{},
+			&Episode{},
+			&DownloadRecord{},
+			&Setting{},
+			&User{},
+			&NotificationLog{},
+			&ParserCache{},
+		); err != nil {
+			return err
+		}
+		return migrateEpisodeLabels(tx, legacyEpisodeStatus)
+	})
 	if err != nil {
 		return err
 	}
 
-	// 旧版详情页将人工完成标记写进了下载状态；保留标记并恢复调度。
-	if err := DB.Unscoped().Model(&Episode{}).Where("status = ?", "completed").Updates(map[string]any{
-		"manual_status": "completed",
-		"status":        gorm.Expr("CASE WHEN final_path IS NOT NULL AND final_path <> '' THEN 'organized' ELSE 'downloading' END"),
-	}).Error; err != nil {
-		return err
-	}
 	log.Printf("✅ 数据库初始化完成: %s", dbPath)
 	return nil
 }
 
-// InitDefaultUser 首次启动时自动创建默认管理员 admin/admin
+// InitDefaultUser 只在空用户表中创建管理员，支持部署预置口令。
 // 密码使用 Bcrypt 加盐哈希存储，绝不保存明文
 func InitDefaultUser(hashFunc func(string) (string, error)) error {
 	var count int64
@@ -62,7 +83,18 @@ func InitDefaultUser(hashFunc func(string) (string, error)) error {
 		return nil // 已有用户，跳过
 	}
 
-	hash, err := hashFunc("admin")
+	password := os.Getenv("ANIGO_ADMIN_PASSWORD")
+	generated := password == ""
+	if generated {
+		var secret [24]byte
+		if _, err := rand.Read(secret[:]); err != nil {
+			return err
+		}
+		password = base64.RawURLEncoding.EncodeToString(secret[:])
+	} else if len(password) < 6 || len(password) > 72 {
+		return fmt.Errorf("ANIGO_ADMIN_PASSWORD 长度应为 6 到 72 字节")
+	}
+	hash, err := hashFunc(password)
 	if err != nil {
 		return err
 	}
@@ -71,11 +103,18 @@ func InitDefaultUser(hashFunc func(string) (string, error)) error {
 		Username:     "admin",
 		PasswordHash: hash,
 	}
-	if err := DB.Create(&user).Error; err != nil {
-		return err
+	result := DB.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "username"}}, DoNothing: true}).Create(&user)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil
 	}
 
-	log.Println("🔑 已创建默认管理员账号: admin / admin")
-	log.Println("⚠️  请尽快登录并修改密码！")
+	if generated {
+		// 仅向部署控制台显示一次，避免将口令写入 Web 可读取的应用日志。
+		fmt.Fprintf(os.Stderr, "Ani-Go 管理员 admin 的首次登录密码：%s\n", password)
+	}
+	log.Println("已创建管理员账号 admin")
 	return nil
 }

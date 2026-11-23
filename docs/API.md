@@ -1,61 +1,47 @@
-# Ani-Go API 文档
+# Ani-Go HTTP API
 
-> **版本**: v0.6.0  
-> **基础路径**: `/api`  
-> **认证方式**: JWT Bearer Token / MCP Bearer Token  
-> **内容类型**: `application/json; charset=utf-8`
+本文对应当前源码。部署实例的实际版本由 `GET /api/health` 返回。端点索引按功能列出请求方法、路径和鉴权；请求与响应的字段定义见 [OpenAPI 3.0](api.yaml)，路由注册见 [服务入口](../internal/api/server.go)。
 
----
+## 登录与认证
 
-## 目录
+首次启动会创建管理员。使用预置的 `ANIGO_ADMIN_PASSWORD` 或启动控制台输出的实例密码登录。以下 Bash 示例从终端读取密码，继续用同一会话的 JWT 查询插件。
 
-1. [快速开始](#快速开始)
-2. [认证与鉴权](#1-认证与鉴权)
-3. [健康检查](#2-健康检查)
-4. [用户信息](#3-用户信息)
-5. [订阅管理](#4-订阅管理)
-6. [剧集管理](#5-剧集管理)
-7. [下载队列](#6-下载队列)
-8. [设置管理](#7-设置管理)
-9. [搜索与发现](#8-搜索与发现)
-10. [Mikan 镜像管理](#9-mikan-镜像管理)
-11. [插件管理](#10-插件管理)
-12. [任务解析](#11-任务解析)
-13. [数据迁移](#12-数据迁移)
-14. [版本信息](#13-版本信息)
-15. [图片代理](#14-图片代理)
-16. [MCP 协议端点](#15-mcp-协议端点)
-17. [前端 API 调用参考](#16-前端-api-调用参考)
-18. [错误码说明](#17-错误码说明)
+```bash
+base=http://localhost:20001
+read -rsp 'Ani-Go 管理员密码: ' password
+echo
+jwt=$(printf '%s' "$password" | jq -Rs '{username:"admin",password:.}' |
+  curl -fsS -H 'Content-Type: application/json' --data-binary @- "$base/api/login" |
+  jq -er '.token')
+unset password
+curl -fsS -H "Authorization: Bearer $jwt" "$base/api/plugins"
+```
 
-- [端点总览（全部 69 条路由速查）](#端点总览全部-69-条路由速查)
+一般管理请求发送 `Authorization: Bearer <JWT>`，登录有效期为 24 小时。签名密钥保存在本机数据库，正常重启会保留有效会话。修改管理员密码会使旧会话失效，并发修改只有一次能提交。账户存储暂时不可用时，登录与会话查询返回 503，可在恢复后重试。MCP 使用独立的访问令牌；115 或第三方面板的服务凭据只用于对应服务。头像读取、图片代理、健康检查和 Bangumi 授权回调有公开入口，详见下表。
 
----
+## 端点总览
 
-## 端点总览（全部 69 条路由速查）
-
-下表覆盖 `internal/api/server.go` 中注册的**全部路由**。标 📖 的分组在下方有完整字段说明；未标 📖 的为速查索引，字段细节请查阅对应 Handler 源码。
-
-> 除 `GET /mcp/sse` 与 `POST /mcp/messages` 挂载于根路径外，其余端点均以 `/api` 为前缀。
-
-### 📖 认证与用户
+### 认证与用户
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
 | `POST` | `/api/login` | 公开 | 登录获取 JWT Token |
 | `GET` | `/api/me` | JWT | 当前用户信息 |
 | `POST` | `/api/user/change-password` | JWT | 修改当前用户密码 |
-| `POST` | `/api/user/avatar` | JWT | 上传用户头像 |
-| `GET` | `/api/user/avatar` | 公开 | 读取用户头像 |
+| `POST` | `/api/user/avatar` | JWT | 上传 `avatar` 表单文件（PNG、JPEG、WebP、GIF 或 SVG，最多 5 MiB）；超限返回 413 |
+| `GET` | `/api/user/avatar` | 公开 | 读取用户头像，保留旧 URL 兼容 |
 
-### 📖 健康检查与版本
+### 健康检查与版本
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
 | `GET` | `/api/health` | 公开 | 服务健康检查 |
 | `GET` | `/api/version` | JWT | 版本号与内置更新日志 |
+| `GET` | `/api/system/update/check` | JWT | 检查版本与部署环境的更新能力 |
+| `GET` | `/api/system/update/progress` | JWT | 查询已启动的更新任务 |
+| `POST` | `/api/system/update/execute` | JWT | 提交当前实例的更新任务 |
 
-### 📖 订阅与剧集
+### 订阅与剧集
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
@@ -64,16 +50,18 @@
 | `POST` | `/api/subscriptions/batch` | JWT | 批量创建订阅（最多 20 部） |
 | `GET` | `/api/subgroups` | JWT | 已有字幕组去重列表 |
 | `GET` | `/api/subscriptions/{id}` | JWT | 订阅详情 + 剧集列表 |
-| `PUT` | `/api/subscriptions/{id}` | JWT | 部分更新订阅 |
+| `PUT` | `/api/subscriptions/{id}` | JWT | 部分更新订阅。省略 `custom_path` 保留指定下载目录，空字符串或 `null` 恢复下载器默认目录。 |
 | `DELETE` | `/api/subscriptions/{id}` | JWT | 删除订阅（`?delete_files=` 可选） |
 | `POST` | `/api/subscriptions/batch-delete` | JWT | 批量删除（最多 100 部） |
 | `POST` | `/api/subscriptions/batch-restore` | JWT | 批量恢复软删除订阅 |
 | `POST` | `/api/subscriptions/{id}/trigger-supplement` | JWT | 触发单个订阅历史补全 |
 | `POST` | `/api/subscriptions/supplement-all` | JWT | 异步触发全部订阅补全（预过滤后立即返回） |
-| `POST` | `/api/subscriptions/{id}/episodes/batch-delete` | JWT | 删除指定订阅的选定剧集 |
-| `PUT` | `/api/episodes/{id}/status` | JWT | 设置剧集人工标记 |
+| `POST` | `/api/subscriptions/merge-collections` | JWT | 按合集归并订阅元数据 |
+| `POST` | `/api/subscriptions/{id}/resolve-collection` | JWT | 解析单个订阅所属的合集 |
+| `POST` | `/api/subscriptions/{id}/episodes/batch-delete` | JWT | 删除当前订阅下选中的剧集 |
+| `PUT` | `/api/episodes/{id}/status` | JWT | 设置或清除剧集的手动标记 |
 
-### 📖 下载队列
+### 下载队列
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
@@ -84,13 +72,13 @@
 | `DELETE` | `/api/downloads/{hash}` | JWT | 删除任务（可选同时删除文件） |
 | `POST` | `/api/downloads/{hash}/pause` | JWT | 暂停单个任务 |
 | `POST` | `/api/downloads/{hash}/resume` | JWT | 继续单个任务 |
-| `POST` | `/api/downloader/test` | JWT | 下载器连通性与时延测试 |
+| `POST` | `/api/downloader/test` | JWT | 下载器连通性与时延测试。空 JSON 对象测试当前实例。指定类型与地址时，传 `use_saved_credentials: true` 可在同一地址和账号使用已保存的凭据。Aria2 只匹配地址 |
 
-### 📖 设置、日志与自定义正则
+### 设置、日志与自定义正则
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
-| `GET` | `/api/settings` | JWT | 全部设置（敏感键返回空值） |
+| `GET` | `/api/settings` | JWT | 读取已保存设置、屏蔽凭据值与内部状态 |
 | `PUT` | `/api/settings` | JWT | 批量 Upsert 设置 |
 | `GET` | `/api/settings/custom-regex` | JWT | 当前自定义正则规则 |
 | `POST` | `/api/settings/custom-regex/reload` | JWT | 从数据库重载自定义正则 |
@@ -102,8 +90,8 @@
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
 | `GET` | `/api/backup/list` | JWT | 备份文件列表 |
-| `POST` | `/api/backup/create` | JWT | 创建数据库备份 |
-| `POST` | `/api/backup/restore` | JWT | 从备份恢复（全字段覆盖写） |
+| `POST` | `/api/backup/create` | JWT | 创建管理员 JSON 备份 |
+| `POST` | `/api/backup/restore` | JWT | 从指定备份恢复设置和订阅，随后重载插件 |
 | `DELETE` | `/api/backup/{name}` | JWT | 删除指定备份 |
 | `GET` | `/api/backup/download/{name}` | JWT | 下载备份文件 |
 
@@ -113,8 +101,12 @@
 |------|------|------|------|
 | `POST` | `/api/notify/test` | JWT | 指定渠道连通性测试 |
 | `GET` | `/api/notifications/logs` | JWT | 投递履历（按渠道/状态/事件筛选 + 分页） |
-| `DELETE` | `/api/notifications/logs` | JWT | 按保留天数清理履历 |
-| `GET` | `/api/notifications/stats` | JWT | 投递总量、成功率、失败数与死信积压 |
+| `DELETE` | `/api/notifications/logs` | JWT | 正整数 `days` 清理更早的记录；省略或传 0 永久清空全部，非法参数返回 400 |
+| `GET` | `/api/notifications/stats` | JWT | 投递总数、成功数、失败数、死信数与渠道分布 |
+| `GET` | `/api/notifications/templates` | JWT | 列出通知模板 |
+| `PUT` | `/api/notifications/templates` | JWT | 保存指定事件与渠道的模板 |
+| `POST` | `/api/notifications/templates/preview` | JWT | 预览模板渲染结果 |
+| `POST` | `/api/notifications/templates/reset` | JWT | 重置指定 `event_type` 与可选 `channel` 的模板，缺少事件返回 400 |
 
 ### 解析与整理预检
 
@@ -123,11 +115,12 @@
 | `POST` | `/api/rss/preview` | JWT | RSS 实时探针：抓取远程源并回显解析结果 |
 | `POST` | `/api/organize/preview` | JWT | 整理 Dry-Run：预测目标路径、操作类型与冲突（零写入） |
 
-### 📖 搜索与发现
+### 搜索与发现
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
 | `GET` | `/api/search` | JWT | 聚合搜索番剧资源 |
+| `GET` | `/api/search/capabilities` | JWT | 查询智能搜索可用性 |
 | `POST` | `/api/search/smart` | JWT | 智能搜索（搜索词扩展 + 结果分页） |
 | `GET` | `/api/mikan/groups` | JWT | 按 BangumiID 获取字幕组与 RSS 地址 |
 
@@ -137,11 +130,11 @@
 |------|------|------|------|
 | `GET` | `/api/schedule` | JWT | 季度新番时间表（`source=mikan` / `yuc`） |
 | `GET` | `/api/schedule/bangumi` | JWT | Bangumi 每日放送日历 |
-| `GET` | `/api/bangumi/subject/` | JWT | Bangumi 条目详情 |
+| `GET` | `/api/bangumi/subject/{id}` | JWT | Bangumi 条目详情 |
 | `GET` | `/api/bangumi/auth/link` | JWT | 生成 Bangumi OAuth 授权链接 |
 | `GET` | `/api/bangumi/auth/callback` | 公开 | Bangumi OAuth 回调 |
 
-### 📖 镜像测速与 AI
+### 镜像测速与 AI
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
@@ -151,31 +144,41 @@
 | `POST` | `/api/bgm/select-mirror` | JWT | 选定 Bangumi 镜像并持久化 |
 | `POST` | `/api/ai/models` | JWT | 拉取已配置 AI 端点的可用模型列表 |
 
-### 📖 插件管理
+### 插件管理
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
 | `GET` | `/api/plugins` | JWT | 插件总览（启用状态与关注事件） |
 | `POST` | `/api/plugins/toggle` | JWT | 启用/停用插件 |
+| `POST` | `/api/plugins/{id}/toggle` | JWT | 由路径指定目标的启停入口 |
+| `GET` | `/api/plugins/custom` | JWT | 列出可导出的自定义清单，省略共享密钥 |
+| `POST` | `/api/plugins/custom` | JWT | 保存单个自定义清单，与 `/api/plugins/save` 相同 |
 | `POST` | `/api/plugins/save` | JWT | 新增或更新自定义插件 |
 | `DELETE` | `/api/plugins/{id}` | JWT | 删除自定义插件 |
 | `POST` | `/api/plugins/reload` | JWT | 重载插件配置 |
+| `GET` / `PUT` / `DELETE` | `/api/plugins/{id}/panel/credential` | JWT | 查询凭据状态、保存或清除本插件的面板凭据 |
+| `POST` | `/api/plugins/{id}/panel/actions/{action}` | JWT | 执行当前插件声明的动作，返回消息或分页任务 |
+| `GET` | `/api/plugins/cloud-115/config` | JWT | 查看 115 令牌配置状态与来源 |
+| `PUT` | `/api/plugins/cloud-115/config` | JWT | 保存或替换 115 OAuth 访问令牌 |
+| `DELETE` | `/api/plugins/cloud-115/config` | JWT | 清除保存的 115 访问令牌 |
+| `POST` | `/api/plugins/cloud-115/tasks` | JWT | 向 115 提交一条磁力链接 |
+| `GET` | `/api/plugins/cloud-115/tasks` | JWT | 按页查询 115 账号的云下载任务 |
 
-### 📖 任务解析与数据迁移
+### 任务解析与数据迁移
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
 | `POST` | `/api/parse` | JWT | 自然语言解析订阅任务（正则 + AI 回退） |
-| `POST` | `/api/migrate` | JWT | 从 AutoBangumi / ani-rss 数据库导入数据 |
+| `POST` | `/api/migrate` | JWT | 导入 AutoBangumi SQLite、ani-rss 订阅 JSON 或备份 ZIP |
 
-### 📖 图片代理与实时事件
+### 图片代理与实时事件
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
 | `GET` | `/api/proxy/image` | 公开 | 图片代理（域名白名单，绕过防盗链） |
 | `GET` | `/api/events/stream` | JWT（可用 `?token=`） | SSE 实时事件流 |
 
-### 📖 MCP 协议端点
+### MCP 协议端点
 
 | 方法 | 路径 | 认证 | 用途 |
 |------|------|------|------|
@@ -183,1701 +186,63 @@
 | `POST` | `/mcp/messages` | MCP Token | MCP JSON-RPC 消息通道（`?session_id=`） |
 | `POST` | `/api/mcp/token/generate` | JWT | 生成/重置 MCP Token |
 
----
+## 订阅与剧集
 
-## 快速开始
-
-以下示例演示从登录到调用 API 的完整流程：
+使用 `POST /api/subscriptions` 手动添加订阅，至少提供 `title_cn`，可附上 `season`、`rss_url` 和字幕组限制。成功返回 201。同标题同季返回 409，同标题可分别创建不同季。省略季号或填 0 按第一季创建，旧数据中空或零季号也按第一季查重。相同蜜柑 ID、同一提供方的相同元数据 ID，或仅给出旧 `bangumi_id` 且该编号已存在时，也按重复订阅处理。蜜柑条目 ID 放在 `mikan_id`，外部元数据标识放在 `metadata_id` 并指定 `metadata_provider`。只有已知来源时再填提供方。详情包含按季集排序的剧集。部分更新时只发送改动字段。修改片名、季号或来源标识若与另一订阅冲突则返回 409，原记录保留。[订阅处理器](../internal/api/handlers.go)
 
 ```bash
-# 1. 登录获取 Token
-TOKEN=$(curl -s -X POST http://localhost:20001/api/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"123456"}' | jq -r '.token')
-
-# 2. 健康检查（无需认证）
-curl http://localhost:20001/api/health
-
-# 3. 获取订阅列表
-curl -H "Authorization: Bearer $TOKEN" http://localhost:20001/api/subscriptions
-
-# 4. 创建订阅
-curl -X POST http://localhost:20001/api/subscriptions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"title_cn":"某科学的超电磁炮","bangumi_id":"12345"}'
-
-# 5. 搜索番剧资源
-curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:20001/api/search?q=Railgun"
-
-# 6. 获取新番时间表
-curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:20001/api/schedule?year=2026&season=2"
-
-# 7. 查看系统日志
-curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:20001/api/logs?lines=20"
-```
-
-> **提示**: 将 `localhost:20001` 替换为实际部署地址。JWT 密钥持久化于数据库，重启后旧 Token 在 24 小时有效期内仍然可用；修改密码后旧 Token 立即失效。
-
----
-
-## 认证机制
-
-### 中间件链
-
-```
-请求 → ProxyHeadersMiddleware → CORSMiddleware → AuthMiddleware → Handler
-```
-
-### 认证规则
-
-| 路径 | 认证要求 |
-|------|---------|
-| `POST /api/login` | ❌ 无需认证 |
-| `GET /api/health` | ❌ 无需认证 |
-| `GET /api/proxy/image` | ❌ 无需认证 |
-| `GET /api/user/avatar`、`HEAD /api/user/avatar` | ❌ 无需认证（仅读取头像） |
-| `GET /api/bangumi/auth/callback` | ❌ 无需认证（Bangumi OAuth 回调） |
-| `GET /mcp/sse`、`POST /mcp/messages` | 🔑 需 MCP Bearer Token（不走 JWT 中间件） |
-| 其他 `/api/*` | ✅ 需要 JWT Token |
-
-### Token 使用方式
-
-```http
-Authorization: Bearer <your-jwt-token>
-```
-
-### Token 获取
-
-通过 `POST /api/login` 登录获取。Token 为 HS256 签名的 JWT，有效期 **24 小时**，载荷包含用户名与 `token_version`；密钥在首次启动时由 `crypto/rand` 生成 32 字节并持久化于 settings 表的 `jwt_secret` 键，因此重启不会使 Token 失效，而修改密码会递增 `token_version` 使旧 Token 立即失效。
-
----
-
-## 1. 认证与鉴权
-
-### POST /api/login
-
-用户登录，获取 JWT Token。
-
-**请求参数**: Body (JSON)
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `username` | string | ✅ | 用户名 |
-| `password` | string | ✅ | 密码 |
-
-**请求示例**:
-```json
-{
-  "username": "admin",
-  "password": "123456"
-}
-```
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"123456"}'
-```
-
-**响应格式**:
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIs...",
-  "username": "admin",
-  "message": "登录成功"
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 请求格式错误 / 用户名和密码不能为空 |
-| 401 | 用户名或密码错误 |
-| 500 | Token 生成失败 |
-
----
-
-### POST /api/user/change-password
-
-修改当前用户密码。修改后所有旧 Token 失效。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Body (JSON)
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `old_password` | string | ✅ | 旧密码 |
-| `new_password` | string | ✅ | 新密码（至少6位） |
-
-**请求示例**:
-```json
-{
-  "old_password": "123456",
-  "new_password": "newpass123"
-}
-```
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/user/change-password \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -d '{"old_password":"123456","new_password":"newpass123"}'
-```
-
-**响应示例**:
-```json
-{
-  "message": "密码修改成功",
-  "token": "<替换当前会话的 JWT>"
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 请求格式错误 / 密码不能为空 / 新密码不能少于6位 / 新旧密码相同 |
-| 401 | 未登录 |
-| 403 | 旧密码错误 |
-| 404 | 用户不存在 |
-| 500 | 密码加密失败 / 保存失败 |
-
----
-
-## 2. 健康检查
-
-### GET /api/health
-
-服务健康检查，无需认证。
-
-**curl 示例**:
-```bash
-curl http://localhost:20001/api/health
-```
-
-**响应示例**:
-```json
-{
-  "status": "ok",
-  "time": "2025-01-15T10:30:00+08:00"
-}
-```
-
----
-
-## 3. 用户信息
-
-### GET /api/me
-
-获取当前登录用户信息。
-
-**认证**: ✅ 需要 JWT Token
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer *** http://localhost:20001/api/me
-```
-
-**响应示例**:
-```json
-{
-  "username": "admin"
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 401 | Token 无效 |
-
----
-
-## 4. 订阅管理
-
-### GET /api/subscriptions
-
-获取所有订阅列表。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Query
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `enabled` | boolean | ❌ | 按启用状态过滤 |
-| `completed` | boolean | ❌ | 按完成状态过滤 |
-
-**请求示例**:
-```
-GET /api/subscriptions?enabled=true&completed=false
-```
-
-**curl 示例**:
-```bash
-# 获取所有订阅
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:20001/api/subscriptions
-
-# 按状态过滤
-curl -H "Authorization: Bearer YOUR_TOKEN" \
-  "http://localhost:20001/api/subscriptions?enabled=true&completed=false"
-```
-
-**响应示例**:
-```json
-[
-  {
-    "id": 1,
-    "title_cn": "某科学的超电磁炮",
-    "title_en": "A Certain Scientific Railgun",
-    "title_jp": "とある科学の超電磁砲",
-    "year": 2025,
-    "season": 1,
-    "bangumi_id": "12345",
-    "subgroup_name": "字幕组A",
-    "metadata_id": "tmdb:12345",
-    "metadata_provider": "tmdb",
-    "cover_url": "https://example.com/cover.jpg",
-    "description": "...",
-    "anime_type": "TV",
-    "total_episodes": 24,
-    "current_episodes": 12,
-    "enabled": true,
-    "completed": false,
-    "filter_json": "{}",
-    "custom_path": "",
-    "stalled_episodes": 0,
-    "created_at": "2025-01-01T00:00:00Z",
-    "updated_at": "2025-01-15T10:00:00Z"
-  }
-]
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 500 | 查询订阅失败 |
-
----
-
-### POST /api/subscriptions
-
-创建新订阅。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Body (JSON)
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `title_cn` | string | ✅ | 番剧中文标题 |
-| `bangumi_id` | string | ❌ | Bangumi 番剧 ID |
-| `subgroup_name` | string | ❌ | 字幕组名称 |
-| `rss_url` | string | ❌ | RSS 订阅地址 |
-| `filter_json` | string | ❌ | 过滤规则 JSON |
-| `custom_path` | string | ❌ | 自定义下载路径 |
-| `cover_url` | string | ❌ | 封面图片 URL |
-
-**请求示例**:
-```json
-{
-  "title_cn": "某科学的超电磁炮",
-  "bangumi_id": "12345",
-  "subgroup_name": "字幕组A",
-  "cover_url": "https://example.com/cover.jpg"
-}
-```
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/subscriptions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer *** \
-  -d '{"title_cn":"某科学的超电磁炮","bangumi_id":"12345","subgroup_name":"字幕组A","cover_url":"https://example.com/cover.jpg"}'
-```
-
-**响应示例**:
-```json
-{
-  "id": 1,
-  "title_cn": "某科学的超电磁炮",
-  "title_en": "",
-  "title_jp": "",
-  "year": 0,
-  "season": 0,
-  "bangumi_id": "12345",
-  "subgroup_name": "字幕组A",
-  "metadata_id": "",
-  "metadata_provider": "",
-  "cover_url": "https://example.com/cover.jpg",
-  "description": "",
-  "anime_type": "",
-  "total_episodes": 0,
-  "current_episodes": 0,
-  "enabled": true,
-  "completed": false,
-  "filter_json": "",
-  "custom_path": "",
-  "stalled_episodes": 0,
-  "created_at": "2025-01-15T10:00:00Z",
-  "updated_at": "2025-01-15T10:00:00Z"
-}
-```
-
-**行为说明**:
-- 创建后自动触发后台补全扫描（如果配置了调度器）
-- 如果提供了 `bangumi_id` 但未提供 `rss_url`，后台会自动解析 Mikan 字幕组 RSS
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 请求格式错误 / 番剧标题不能为空 |
-| 500 | 创建订阅失败 |
-
----
-
-### POST /api/subscriptions/batch
-
-批量创建订阅（最多 20 部）。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Body (JSON)
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `items` | array | ✅ | 订阅项数组 |
-
-每个 `item`:
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `title_cn` | string | ✅ | 番剧中文标题 |
-| `bangumi_id` | string | ❌ | Bangumi ID |
-| `cover_url` | string | ❌ | 封面 URL |
-| `subgroups` | string[] | ❌ | 字幕组列表 |
-
-**请求示例**:
-```json
-{
-  "items": [
-    {
-      "title_cn": "某科学的超电磁炮",
-      "bangumi_id": "12345",
-      "subgroups": ["字幕组A", "字幕组B"]
-    },
-    {
-      "title_cn": "进击的巨人",
-      "bangumi_id": "67890"
-    }
-  ]
-}
-```
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/subscriptions/batch \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer *** \
-  -d '{"items":[{"title_cn":"某科学的超电磁炮","bangumi_id":"12345","subgroups":["字幕组A","字幕组B"]},{"title_cn":"进击的巨人","bangumi_id":"67890"}]}'
-```
-
-**响应示例**:
-```json
-{
-  "success": [
-    { "title": "某科学的超电磁炮", "id": 1 }
-  ],
-  "failed": [
-    { "title": "进击的巨人", "error": "已存在订阅" }
-  ]
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 请求格式错误 / 批量订阅最多20部 / 未提供任何订阅项 |
-
----
-
-### GET /api/subgroups
-
-获取系统中已有的字幕组列表。
-
-**认证**: ✅ 需要 JWT Token
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer *** http://localhost:20001/api/subgroups
-```
-
-**响应示例**:
-```json
-["字幕组A", "字幕组B", "字幕组C"]
-```
-
----
-
-### GET /api/subscriptions/{id}
-
-获取单个订阅详情，包含剧集列表。
-
-**认证**: ✅ 需要 JWT Token
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `id` | uint | 订阅 ID |
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer *** http://localhost:20001/api/subscriptions/1
-```
-
-**响应示例**:
-```json
-{
-  "subscription": {
-    "id": 1,
-    "title_cn": "某科学的超电磁炮",
-    "title_en": "A Certain Scientific Railgun",
-    "title_jp": "とある科学の超電磁砲",
-    "year": 2025,
-    "season": 1,
-    "bangumi_id": "12345",
-    "subgroup_name": "字幕组A",
-    "metadata_id": "",
-    "metadata_provider": "",
-    "cover_url": "https://example.com/cover.jpg",
-    "description": "...",
-    "anime_type": "TV",
-    "total_episodes": 24,
-    "current_episodes": 12,
-    "enabled": true,
-    "completed": false,
-    "filter_json": "{}",
-    "custom_path": "",
-    "stalled_episodes": 2,
-    "created_at": "2025-01-01T00:00:00Z",
-    "updated_at": "2025-01-15T10:00:00Z"
-  },
-  "episodes": [
-    {
-      "id": 1,
-      "subscription_id": 1,
-      "season": 1,
-      "number": 1,
-      "title": "第1话",
-      "status": "completed",
-      "torrent_hash": "abc123",
-      "torrent_url": "https://...",
-      "original_name": "[SubGroup] Title - 01.mkv",
-      "final_path": "/downloads/某科学的超电磁炮/S01E01.mkv",
-      "file_size": 350000000,
-      "is_stalled": false,
-      "group_name": "字幕组A",
-      "download_started_at": "2025-01-02T00:00:00Z",
-      "created_at": "2025-01-01T00:00:00Z"
-    }
-  ]
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 无效的订阅 ID |
-| 404 | 订阅不存在 |
-
----
-
-### PUT /api/subscriptions/{id}
-
-更新订阅信息（部分更新，仅更新提供的字段）。
-
-**认证**: ✅ 需要 JWT Token
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `id` | uint | 订阅 ID |
-
-**请求参数**: Body (JSON)，所有字段均可选
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `title_cn` | string | 中文标题 |
-| `title_en` | string | 英文标题 |
-| `title_jp` | string | 日文标题 |
-| `year` | int | 年份 |
-| `season` | int | 季度 |
-| `bangumi_id` | string | Bangumi ID |
-| `subgroup_name` | string | 字幕组 |
-| `metadata_id` | string | 元数据 ID |
-| `metadata_provider` | string | 元数据提供者 |
-| `cover_url` | string | 封面 URL |
-| `description` | string | 描述 |
-| `anime_type` | string | 动画类型 |
-| `total_episodes` | int | 总集数 |
-| `enabled` | boolean | 是否启用 |
-| `completed` | boolean | 是否完成 |
-| `filter_json` | string | 过滤规则 |
-| `custom_path` | string | 自定义路径 |
-
-**请求示例**:
-```json
-{
-  "enabled": false,
-  "total_episodes": 24
-}
-```
-
-**curl 示例**:
-```bash
-curl -X PUT http://localhost:20001/api/subscriptions/1 \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer *** \
-  -d '{"enabled":false,"total_episodes":24}'
-```
-
-**响应示例**: 返回更新后的完整订阅对象（同 `GET /api/subscriptions/{id}` 的 `subscription` 部分）
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 无效的订阅 ID / 未提供任何更新字段 |
-| 404 | 订阅不存在 |
-| 500 | 更新订阅失败 |
-
----
-
-### DELETE /api/subscriptions/{id}
-
-删除订阅及其关联剧集。
-
-**认证**: ✅ 需要 JWT Token
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `id` | uint | 订阅 ID |
-
-**请求参数**: Query
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `delete_files` | boolean | 是否同时删除下载的文件和种子 |
-
-**请求示例**:
-```
-DELETE /api/subscriptions/1?delete_files=true
-```
-
-**curl 示例**:
-```bash
-# 删除订阅（保留文件）
-curl -X DELETE http://localhost:20001/api/subscriptions/1 \
-  -H "Authorization: Bearer ***
-
-# 删除订阅并删除文件和种子
-curl -X DELETE "http://localhost:20001/api/subscriptions/1?delete_files=true" \
-  -H "Authorization: Bearer ***
-
-**响应示例**:
-```json
-{
-  "message": "订阅已删除"
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 无效的订阅 ID |
-| 404 | 订阅不存在 |
-
----
-
-### POST /api/subscriptions/batch-delete
-
-批量删除订阅（最多 100 个，使用事务）。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Body (JSON)
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `ids` | uint[] | ✅ | 订阅 ID 列表 |
-| `delete_files` | boolean | ❌ | 是否删除文件和种子 |
-
-**请求示例**:
-```json
-{
-  "ids": [1, 2, 3],
-  "delete_files": true
-}
-```
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/subscriptions/batch-delete \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer *** \
-  -d '{"ids":[1,2,3],"delete_files":true}'
-```
-
-**响应示例**:
-```json
-{
-  "deleted": 3
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 无效的请求体 / ID列表不能为空 / 单次最多删除100个 |
-| 500 | 删除失败 |
-
----
-
-### POST /api/subscriptions/batch-restore
-
-批量恢复已软删除的订阅（最多 100 个）。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Body (JSON)
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `ids` | uint[] | ✅ | 订阅 ID 列表 |
-
-**请求示例**:
-```json
-{
-  "ids": [1, 2, 3]
-}
-```
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/subscriptions/batch-restore \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer *** \
-  -d '{"ids":[1,2,3]}'
-```
-
-**响应示例**:
-```json
-{
-  "restored": 3
-}
-```
-
----
-
-### POST /api/subscriptions/{id}/trigger-supplement
-
-手动触发单个订阅的补全扫描。
-
-**认证**: ✅ 需要 JWT Token
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `id` | uint | 订阅 ID |
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/subscriptions/1/trigger-supplement \
-  -H "Authorization: Bearer *** {
-  "message": "补全任务已触发，将在后台执行"
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 无效的订阅 ID / 订阅未启用 |
-| 404 | 订阅不存在 |
-| 500 | 补全调度器未配置 |
-
----
-
-## 5. 剧集管理
-
-### POST /api/subscriptions/{id}/episodes/batch-delete
-
-请求体为 `{"ids":[2,4],"delete_files":false}`。所有 ID 必须是当前订阅下的剧集 ID，一次最多 100 个。选择删除文件时，下载器会删除关联任务及其下载文件。接口返回本次实际删除的记录数。下载器发生错误时，已删除的项目可随剩余项目一起重试。
-
-### PUT /api/episodes/{id}/status
-
-设置剧集的人工标记。剧集详情中的 `manual_status` 保存人工标记，`status` 展示下载器与整理流程的进度。
-
-**认证**: ✅ 需要 JWT Token
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `id` | uint | 剧集 ID |
-
-**请求参数**: Body (JSON)
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `status` | string | ✅ | 状态值：`pending` / `downloading` / `completed` / `failed` |
-
-**请求示例**:
-```json
-{
-  "status": "completed"
-}
-```
-
-**curl 示例**:
-```bash
-curl -X PUT http://localhost:20001/api/episodes/1/status \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer *** \
-  -d '{"status":"completed"}'
-```
-
-**响应示例**:
-```json
-{
-  "status": "completed"
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 无效的剧集 ID / 请求格式错误 / 无效的状态值 |
-| 500 | 更新失败 |
-
----
-
-## 6. 下载队列
-
-### GET /api/downloads
-
-获取当前下载队列。
-
-**认证**: ✅ 需要 JWT Token
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer *** http://localhost:20001/api/downloads
-```
-
-**响应示例**:
-```json
-[
-  {
-    "hash": "abc123def456",
-    "name": "[SubGroup] Anime Title - 01.mkv",
-    "save_path": "/downloads/anime",
-    "status": "downloading",
-    "progress": 0.75,
-    "speed_down": 2048000,
-    "size": 350000000,
-    "done": 262500000
-  }
-]
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 503 | 下载器未配置 |
-| 500 | 获取下载列表失败 |
-
----
-
-## 7. 设置管理
-
-### GET /api/settings
-
-获取所有系统设置。敏感字段（含 `PASS`/`SECRET`/`KEY` 的键名）返回空值。
-
-**认证**: ✅ 需要 JWT Token
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer *** http://localhost:20001/api/settings
-```
-
-**响应示例**:
-```json
-{
-  "download_path": "/downloads",
-  "stall_timeout_hours": "48",
-  "mikan_domain": "mikanime.tv",
-  "qb_password": ""
-}
-```
-
----
-
-### PUT /api/settings
-
-批量更新设置（Upsert 模式）。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Body (JSON)
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `settings` | object | ✅ | 键值对，key 为设置名，value 为设置值 |
-
-**请求示例**:
-```json
-{
-  "settings": {
-    "download_path": "/new/downloads",
-    "stall_timeout_hours": "72"
-  }
-}
-```
-
-**curl 示例**:
-```bash
-curl -X PUT http://localhost:20001/api/settings \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer *** \
-  -d '{"settings":{"download_path":"/new/downloads","stall_timeout_hours":"72"}}'
-```
-
-**响应示例**:
-```json
-{
-  "message": "设置已更新"
-}
-```
-
----
-
-### GET /api/settings/custom-regex
-
-获取当前自定义正则规则。
-
-**认证**: ✅ 需要 JWT Token
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer *** http://localhost:20001/api/settings/custom-regex
-```
-
-**响应示例**:
-```json
-{
-  "patterns": ["[\\[\\【].*[\\]\\】].*\\d+"],
-  "compiled": ["[\\[\\【].*[\\]\\】].*\\d+"],
-  "builtin_count": 8
-}
-```
-
----
-
-### POST /api/settings/custom-regex/reload
-
-从数据库重新加载自定义正则规则。
-
-**认证**: ✅ 需要 JWT Token
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/settings/custom-regex/reload \
-  -H "Authorization: Bearer *** {
-  "message": "自定义正则已重新加载",
-  "compiled": ["pattern1", "pattern2"]
-}
-```
-
----
-
-### GET /api/logs
-
-获取系统日志（逆向读取，类似 `tail -n`）。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Query
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `lines` | int | ❌ | 返回行数，默认 100，最大 500 |
-
-**请求示例**:
-```
-GET /api/logs?lines=50
-```
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer ***   "http://localhost:20001/api/logs?lines=50"
-```
-
-**响应示例**:
-```json
-{
-  "lines": [
-    "2025/01/15 10:30:00 ✅ 用户 admin 登录成功",
-    "2025/01/15 10:31:00 🔍 搜索完成 [某科学的超电磁炮]: 找到 15 个结果"
-  ],
-  "total": 1024
-}
-```
-
----
-
-## 8. 搜索与发现
-
-### GET /api/search
-
-搜索番剧资源（聚合 Nyaa/ACG.RIP/AnimeTosho）。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Query
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `q` | string | ✅ | 搜索关键词 |
-
-**请求示例**:
-```
-GET /api/search?q=某科学的超电磁炮
-```
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer ***   "http://localhost:20001/api/search?q=%E6%9F%90%E7%A7%91%E5%AD%A6%E7%9A%84%E8%B6%85%E7%94%B5%E7%A3%81%E7%82%AE"
-```
-
-**响应示例**:
-```json
-[
-  {
-    "title": "[SubGroup] To Aru Kagaku no Railgun - 01 [1080p].mkv",
-    "url": "https://nyaa.si/view/12345",
-    "magnet": "magnet:?xt=urn:btih:abc123...",
-    "info_hash": "abc123def456",
-    "size": 350000000,
-    "pub_date": "2025-01-01T00:00:00Z",
-    "source": "nyaa",
-    "bangumi_id": "",
-    "episode_url": "",
-    "cover_url": "",
-    "aired_time": "",
-    "aired_date": "",
-    "group_name": "SubGroup"
-  }
-]
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 搜索关键词不能为空 |
-| 503 | 搜索服务未配置 |
-| 500 | 搜索失败 |
-
----
-
-### GET /api/mikan/groups
-
-根据 BangumiID 获取 Mikan 字幕组列表。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Query
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `bangumi_id` | string | ✅ | Bangumi 番剧 ID |
-
-**请求示例**:
-```
-GET /api/mikan/groups?bangumi_id=12345
-```
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer ***   "http://localhost:20001/api/mikan/groups?bangumi_id=12345"
-```
-
-**响应示例**:
-```json
-[
-  {
-    "name": "字幕组A",
-    "rss_url": "https://mikanime.tv/RSS/Bangumi?bangumiId=12345&subgroupid=678",
-    "subgroup_id": "678"
-  }
-]
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | bangumi_id 不能为空 |
-| 503 | Mikan 服务未初始化 |
-| 500 | 获取字幕组失败 |
-
----
-
-### GET /api/schedule
-
-获取季度新番时间表（默认使用蜜柑计划 Mikan 数据源；开启 `yuc_schedule` 插件后支持通过 `source=yuc` 切换至 yuc.wiki 数据源）。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Query
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `year` | int | ❌ | 年份（默认当前年，如 `2024`） |
-| `season` | int | ❌ | 季度 1-4（默认当前季度，1:冬, 2:春, 3:夏, 4:秋） |
-| `source` | string | ❌ | 数据源：`mikan`（默认）或 `yuc`（需启用 `yuc_schedule` 插件） |
-
-**请求示例**:
-```
-GET /api/schedule?year=2025&season=1&source=mikan
-```
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer ***" "http://localhost:20001/api/schedule?year=2026&season=2"
-```
-
----
-
-### GET /api/schedule/bangumi
-
-获取 Bangumi 放送时间表。当前季度返回实时每日放送日历；指定历史/未来年份和季度时，自动同步对应季度的放送列表。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Query
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `year` | int | ❌ | 年份（如 `2024`，默认当前年） |
-| `season` | int | ❌ | 季度 1-4（默认当前季度） |
-
-**请求示例**:
-```
-GET /api/schedule/bangumi?year=2024&season=4
-```
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer ***" "http://localhost:20001/api/schedule/bangumi?year=2024&season=4"
-```
-
-**响应示例**:
-```json
-{
-  "days": [
-    {
-      "day_of_week": 1,
-      "label": "周一",
-      "items": [
-        {
-          "title": "某科学的超电磁炮",
-          "bangumi_id": "12345",
-          "info_hash": "1",
-          "cover_url": "https://...",
-          "aired_time": "23:00",
-          "aired_date": "2025-01-06",
-          "group_name": ""
-        }
-      ]
-    }
-  ],
-  "subscribed": {
-    "12345": 1
-  },
-  "subscriptionCount": 5,
-  "sub_stats": {
-    "1": {
-      "downloaded": 12,
-      "total": 24
-    }
-  }
-}
-```
-
-**行为说明**:
-- `info_hash` 字段在时间表中被复用为已订阅番剧的 subscription_id
-- 自动匹配已订阅番剧（支持 BangumiID、标题、标准化标题模糊匹配）
-
----
-
-## 9. Mikan 镜像管理
-
-### POST /api/mikan/test-mirrors
-
-测试所有 Mikan 镜像延迟。
-
-**认证**: ✅ 需要 JWT Token
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/mikan/test-mirrors \
-  -H "Authorization: Bearer ***...\"
+curl -fsS -H "Authorization: Bearer $jwt" -H 'Content-Type: application/json' \
+  --data '{"title_cn":"示例节目","season":1}' "$base/api/subscriptions"
 ```
 
-**响应示例**:
-```json
-[
-  {
-    "domain": "mikanime.tv",
-    "latency": 120,
-    "ok": true
-  },
-  {
-    "domain": "mikanani.me",
-    "latency": 350,
-    "ok": true
-  }
-]
-```
-
----
-
-### POST /api/mikan/select-mirror
+- 搜索发布标题可向 `POST /api/settings/custom-regex/test` 发送 `{"title":"[CityLab] Harbor Story - 01 [1080p]"}` 预览作品名、季集、字幕组和分辨率。该接口只解析输入，适合在创建订阅前供用户校正结果。
+- 同时启用同名多季时，共享 RSS 及历史搜索遇到无法区分季的发布会跳过。资源标题中的明确季标、对应的蜜柑作品 ID 或分季独立的 RSS 可区分归属。
+- `current_episodes` 统计订阅季中状态为 `organized` 或 `completed` 的正片集号。同集多个字幕组只计一次，特典和小数集单列在剧集详情中。
+- 批量创建发送 `{"items":[…]}`，每批 1–20 项，各项可传 `season`，和单条创建采用相同的判重条件。按项读取 `success` 和 `failed`。单条或全量补全异步执行，202 表示已受理。全量补全最多同时处理三个订阅，同一订阅已有扫描时共享该次结果。
+- 批量删除与恢复订阅发送 `{"ids":[1,2]}`。删除剧集向所属订阅的 `episodes/batch-delete` 发送 `{"ids":[1],"delete_files":false}`，单次 1–1000 个剧集 ID。跨订阅选择返回 404。删除共享下载的文件时会返回 409；下载器执行失败返回 502。[删除与文件归属](../internal/api/episodes.go)
+- 写入手动标记时发送 `{"status":"completed"}`，可用值还有 `pending`、`downloading`、`failed`。发送 `{"status":""}` 可清除。成功响应中的 `status` 和 `manual_status` 均回显本次标记。读取订阅详情时，剧集的 `status` 是实际下载或整理状态，`manual_status` 是用户标记。整理进度和完结统计按实际状态计算。
 
-选择 Mikan 镜像域名（保存到数据库）。
+## 下载队列与媒体整理
 
-**认证**: ✅ 需要 JWT Token
+`GET /api/downloads` 返回数组，空队列为 `[]`。下载器未配置返回 503，连接或读取失败返回 502。每项保留下载器原始 `status`，跨客户端显示使用 `display_status`；用 `can_pause`、`can_resume` 决定可执行操作。`complete` 表示下载完成，`progress` 为 0–1 的进度，`size` 和 `done` 的单位为字节。完成下载、整理入库是不同的状态，最终路径和剧集状态从订阅详情读取。[下载完成判定](../internal/core/download_task.go)
 
-**请求参数**: Body (JSON)
+手动创建下载至少传 `url` 或 `magnet`。批量暂停与继续使用各自端点。可先向 `/api/organize/preview` 提交单项或批量样例，读取预测路径与冲突，再决定实际整理策略。[整理预览](../internal/organizer/preview.go)
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `domain` | string | ✅ | 镜像域名 |
+## 设置与管理员备份
 
-**请求示例**:
-```json
-{
-  "domain": "mikanime.tv"
-}
-```
+`GET /api/settings` 返回数据库已保存的键值，不代表全部进程环境。敏感值会屏蔽，插件清单、开关和社区面板凭据由插件专用接口管理。保存普通设置的请求格式是 `{"settings":{"RSS_INTERVAL":"15m"}}`。下载器配置实际改变时才会切换实例。通知与正则也有各自的重载行为。[配置处理](../internal/api/settings.go)
 
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/mikan/select-mirror \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer *** \
-  -d '{"domain":"mikanime.tv"}'
-```
+管理员 JSON 备份用于恢复本实例的配置和订阅，可含凭据，区别于可分发的插件清单。恢复含插件清单的快照会同步其面板授权并重载运行实例。未声明插件的旧快照保留本机面板授权。还原快照中的专有凭据时，内置面板以实际安装清单为准，115 保留原有键和环境变量优先级。若数据库已恢复而重载失败，接口返回 503，旧实例停止，待配置修复后可使用插件重载入口恢复。事务回滚则保留原实例。[备份实现](../internal/backup/backup.go)
 
-**响应示例**:
-```json
-{
-  "domain": "mikanime.tv"
-}
-```
+新建备份保留原有顶层字段，并写入 `format_version: 1` 和 `sha256`。恢复先核对设置、订阅及剧集的摘要和记录归属。无摘要的历史快照继续按旧格式读取。文件损坏、版本不支持或记录归属不明确时返回 HTTP 400，文件不存在时返回 404。恢复不会更换本机 JWT 签名密钥。可以重复恢复同一快照，目标实例中的其他订阅会保留。
 
----
+定时和手工创建共用 `BACKUP_KEEP_COUNT`，默认为 7，成功后按时间淘汰旧文件。`BACKUP_CRON` 支持五字段、带秒六字段和 `@daily` 等标准别名。设置接口接受正整数保留数和有效表达式，保存后运行中的备份任务会读取新值。部署环境中的同名变量优先。[定时调度](../internal/backup/schedule.go)
 
 ## 10. 插件管理
 
-### GET /api/plugins
+`GET /api/plugins` 返回当前插件及运行状态。服务端判定 `origin` 为 `official` 或 `community`。`is_builtin` 说明分发方式，`author` 保留署名。`enabled` 是用户开关，`status` 可为 `inactive`、`loading`、`active`、`suspended`、`error`、`disposing`。已启用的插件缺少服务时，`missing_dependencies` 列出缺项，服务恢复后会自动运行。
 
-获取已加载的插件列表。
+| 操作 | 约定 |
+| --- | --- |
+| 保存或更新 | 向 `POST /api/plugins/save` 或 `POST /api/plugins/custom` 发送单份 Webhook 清单。读取回执 `id`、`enabled` 和 `status`。省略 ID 时以服务端分配值为准。更新已有清单保留原开关。保留 ID 冲突返回 409。 |
+| 启停 | 向 `POST /api/plugins/toggle` 发送 `{"id":"cloud-115","enabled":true}`，或使用路径中的 ID 并发送 `{"enabled":true}`。未知 ID 返回 404。 |
+| 导出、删除与重载 | 自定义列表省略共享密钥。删除自定义插件一并清理其开关和面板凭据。重载成功返回 `message`、`count` 和 `plugins`。 |
+| 面板凭据 | 对 `/api/plugins/{id}/panel/credential` 使用 GET、PUT、DELETE。写入格式为 `{"access_token":"<服务令牌>"}`。读取只返回 `configured` 与 `source`。 |
+| 面板动作 | 向 `/api/plugins/{id}/panel/actions/{action}` 提交 `{"input":"…"}` 或任务列表查询 `{"page":2}`。回执为文字消息或含 `page`、`page_count`、`tasks` 的分页结果。 |
 
-**认证**: ✅ 需要 JWT Token
+搜索结果中的磁力动作另传 `placement:"search_result"` 与 `expected_url`。社区目标是用户确认的清单完整地址，内置插件使用空字符串。两项必须同时出现，输入错误返回 400，已变更的目标或入口返回 409。
 
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer *** http://localhost:20001/api/plugins
-```
+未找到插件、面板或声明的动作、凭据时返回 404。插件未运行或缺必需凭据返回 409。管理器未初始化返回 503。服务授权失败返回 422，限流返回 429，上游未确认或回执不符合协议返回 502。兼容的面板协议版本为 1。完整字段、事件格式和作者服务端收发示例见 [插件作者指南](02_PLUGIN_SPEC.md) 和 [示例清单](../examples/plugins/cloud-tasks.json)。
 
-**响应示例**:
-```json
-[
-  {
-    "name": "webhook-notify",
-    "type": "webhook",
-    "enabled": true
-  }
-]
-```
+### 115 云下载兼容接口
 
----
+先在「设置 → 插件与自动化」启用官方 115 插件。旧接口 `/api/plugins/cloud-115/config` 与通用面板读取同一份授权。部署环境配置 `CLOUD115_ACCESS_TOKEN` 时返回 `source:"environment"`，从网页替换或清除会返回 409。省略环境变量时可在页面保存具备云下载权限的 115 OAuth 令牌。
 
-### POST /api/plugins/reload
+`POST /api/plugins/cloud-115/tasks` 接收 `{"magnet":"<完整磁力链接>"}`，115 受理后返回 201 和 `{"submitted":true}`。用 `GET /api/plugins/cloud-115/tasks?page=1` 查看状态与 0–100 的整数百分比。提交结果不明时先查询列表。订阅下载和本地入库使用已配置的下载器。[115 适配器](../internal/cloud115/client.go)
 
-重新加载插件配置。
+## 搜索、迁移与实时消息
 
-**认证**: ✅ 需要 JWT Token
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/plugins/reload \
-  -H "Authorization: Bearer ***...\"
-```
-
-**响应示例**:
-```json
-{
-  "message": "插件已重新加载",
-  "count": 3
-}
-```
-
----
-
-## 11. 任务解析
-
-### POST /api/parse
-
-自然语言解析订阅任务（正则 + AI 回退）。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Body (JSON)
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `input` | string | ✅ | 自然语言指令 |
-
-**请求示例**:
-```json
-{
-  "input": "追番 某科学的超电磁炮 第一季 1080p"
-}
-```
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/parse \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer *** \
-  -d '{"input":"追番 某科学的超电磁炮 第一季 1080p"}'
-```
-
-**响应示例**:
-```json
-{
-  "action": "subscribe",
-  "title": "某科学的超电磁炮",
-  "season": 1,
-  "resolution": "1080p",
-  "subgroups": [],
-  "confidence": 0.95
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 请求格式错误 / 请输入指令 |
-| 503 | 任务解析器未初始化 |
-| 500 | 解析失败 |
-
----
-
-## 12. 数据迁移
-
-### POST /api/migrate
-
-从 AutoBangumi / ani-rss SQLite 数据库迁移数据。
-
-**认证**: ✅ 需要 JWT Token
-
-**请求参数**: Body (JSON)
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `source_path` | string | ✅ | 源数据库文件路径 |
-
-**请求示例**:
-```json
-{
-  "source_path": "data/anirss.db"
-}
-```
-
-**curl 示例**:
-```bash
-curl -X POST http://localhost:20001/api/migrate \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer *** \
-  -d '{"source_path":"data/anirss.db"}'
-```
-
-**响应示例**:
-```json
-{
-  "message": "迁移成功",
-  "stats": {
-    "subscriptions": 15,
-    "episodes": 240
-  }
-}
-```
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 请求格式错误 / 请提供 source_path |
-| 500 | 迁移失败 |
-
----
-
-## 13. 版本信息
-
-### GET /api/version
-
-获取应用版本信息和更新日志。
-
-**认证**: ✅ 需要 JWT Token
-
-**curl 示例**:
-```bash
-curl -H "Authorization: Bearer *** http://localhost:20001/api/version
-```
-
-**响应示例**:
-```json
-{
-  "version": "v0.6.0",
-  "changelog": [
-    "🏛️ 微内核与插件解耦架构：主干专注于五步极速流水线，周边生态全插拔，停用时 0 协程、0 网络、0 错误日志",
-    "🧠 智能消歧与 Token 熔断保护：Bangumi 放送时间对齐（0 Token 化解 95% 歧义）、终身唯一 SQLite 解析缓存与每日限额熔断",
-    "🤖 原生外部 AI 控制 (MCP Server)：标准 SSE + Bearer 强鉴权，暴露 6 项业务运维工具与 4 项系统治理工具",
-    "🛡️ 做种生命周期与磁盘防爆急停：完成做种仅删任务记录永不删物理硬链接，剩余空间 < 5GB 自动熔断阻断新增下载",
-    "👁️ 媒体整理 Dry-Run 预检：提供路径预览与冲突检测 API，无写入安全预测整理结果",
-    "⚡ 下载器高可用与深度加固：Aria2 / Transmission URL 自动清洗、qB 超时防护、下载器连通性一键测试"
-  ]
-}
-```
-
-> 说明：`version` 取自编译期注入的 `main.version`（当前 `v0.6.0`）；`changelog` 为该版本的内置变更摘要，与 `CHANGELOG.md` 详细版本履历互补。
-
----
-
-## 14. 图片代理
-
-### GET /api/proxy/image
-
-代理图片请求（绕过 CDN 热链保护），无需认证。
-
-**请求参数**: Query
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `url` | string | ✅ | 图片原始 URL |
-
-**允许的域名白名单**（与 `internal/api/handlers.go` 中的 `allowedDomains` 一致）:
-- `i0.hdslb.com`、`bilibili.com`（Bilibili）
-- `lain.bgm.tv`、`bgm.tv`（Bangumi）
-- `img.mikanani.me`、`mikanani.me`、`mikanani.kas.pub`、`mikanime.tv`（Mikan 及镜像）
-- `image.tmdb.org`（TMDB）
-- `yuc.wiki`、`yucc.wiki`、`yucwiki.net`（長門番堂）
-
-**请求示例**:
-```
-GET /api/proxy/image?url=https://i0.hdslb.com/bfs/archive/abc.jpg
-```
-
-**curl 示例**:
-```bash
-curl -o image.jpg \
-  "http://localhost:20001/api/proxy/image?url=https://i0.hdslb.com/bfs/archive/abc.jpg"
-```
-
-**响应**: 直接返回图片二进制流，`Content-Type` 透传，缓存 7 天。
-
-**错误码**:
-| 状态码 | 说明 |
-|--------|------|
-| 400 | missing url / invalid url |
-| 403 | domain not allowed |
-| 502 | fetch failed |
-
----
-
-## 15. MCP 协议端点
-
-Ani-Go 内置原生 Model Context Protocol (MCP) Server，用于 Claude Desktop、Cursor、Dify 等外部 AI 智能体直接调用。
-
-### 15.1 MCP SSE 建立连接
-
-- **路径**: `GET /mcp/sse`（挂载于根路径，**不存在** `/api/mcp/sse`）
-- **认证**: `Authorization: Bearer <MCP_TOKEN>`（或通过查询参数 `?token=<TOKEN>`）
-- **内容类型**: `text/event-stream`
-- **响应事件**:
-  - `endpoint`: 返回客户端发送 JSON-RPC 消息的目标 POST URL（形如 `/mcp/messages?session_id=xxx`）。
-
-### 15.2 MCP 消息通信
-
-- **路径**: `POST /mcp/messages?session_id=<SESSION_ID>`
-- **认证**: `Authorization: Bearer <MCP_TOKEN>`
-- **请求体**: 标准 JSON-RPC 2.0 格式（`initialize`, `tools/list`, `tools/call`, `resources/list` 等）。
-- **可用工具集 (Tools，固定 10 项)**:
-  - `search_anime`: 搜索番剧资源（`keyword` 必填，`source` 可选）
-  - `list_subscriptions`: 查询所有订阅与进度（`enabled_only` 可选）
-  - `add_subscription`: 添加新的番剧订阅（`title` 必填，`season` / `rss_url` / `subgroup` 可选）
-  - `remove_subscription`: 取消番剧订阅（`subscription_id` 必填，不删除已硬链接的媒体文件）
-  - `get_downloads`: 获取下载队列与进度（`status` 可选：all / downloading / completed）
-  - `trigger_refresh`: 触发 RSS 检查与全量扫描
-  - `list_plugins`: 查询所有插件状态与关注事件
-  - `toggle_plugin`: 启用或停用插件（`plugin_id`、`enabled`）
-  - `get_system_status`: 查询内存、Goroutine、下载器连通性、订阅数与版本
-  - `update_system_config`: 写入系统设置项（`key`、`value`）
-
-> 当前版本**不支持插件动态挂载私有 MCP 工具**，工具集恒为上述 10 项，详见 `docs/02_PLUGIN_SPEC.md` 第 6 节。
->
-> MCP Token 的生成/重置端点为 `POST /api/mcp/token/generate`（JWT 鉴权）。
-
----
-
-## 16. 前端 API 调用参考
-
-前端使用 `axios` 封装，基础路径 `/api`，自动附加 JWT Token。
-
-### 认证相关
-
-```typescript
-// 登录
-request.post('/login', { username, password })
-
-// 获取当前用户
-request.get('/me')
-
-// 修改密码
-request.post('/user/change-password', { old_password, new_password })
-```
-
-### 订阅管理
-
-```typescript
-// 获取订阅列表
-request.get('/subscriptions')
-
-// 创建订阅
-request.post('/subscriptions', { title_cn, bangumi_id, subgroup_name, cover_url })
-
-// 批量创建
-request.post('/subscriptions/batch', { items: [...] }, { timeout: 30000 })
-
-// 获取订阅详情
-request.get(`/subscriptions/${id}`)
-
-// 更新订阅
-request.put(`/subscriptions/${id}`, { enabled: !sub.enabled })
-
-// 删除订阅
-request.post('/subscriptions/batch-delete', { ids: [...], delete_files: true })
-
-// 触发补全
-request.post(`/subscriptions/${sub.id}/trigger-supplement`)
-```
-
-### 剧集管理
-
-```typescript
-// 更新剧集状态
-request.put(`/episodes/${ep.id}/status`, { status: nextStatus })
-```
-
-### 搜索
-
-```typescript
-// 搜索番剧
-request.get('/search', { params: { q: keyword } })
-
-// 获取字幕组
-request.get('/mikan/groups', { params: { bangumi_id } })
-```
-
-### 时间表
-
-```typescript
-// 获取时间表
-request.get('/schedule', { params: { year, season } })
-```
-
-### 设置
-
-```typescript
-// 获取设置
-request.get('/settings')
-
-// 更新设置
-request.put('/settings', { settings: changed })
-
-// 获取日志
-request.get('/logs', { params: { lines: 100 } })
-```
-
-### Mikan 镜像
-
-```typescript
-// 测试镜像
-request.post('/mikan/test-mirrors', {}, { timeout: 15000 })
-
-// 选择镜像
-request.post('/mikan/select-mirror', { domain })
-```
-
----
-
-## 17. 错误码说明
-
-### 通用错误响应格式
-
-```json
-{
-  "error": "错误描述信息"
-}
-```
-
-### HTTP 状态码
-
-| 状态码 | 含义 | 常见场景 |
-|--------|------|---------|
-| 200 | OK | 成功 |
-| 201 | Created | 创建成功（订阅） |
-| 202 | Accepted | 异步任务已接受（补全扫描） |
-| 400 | Bad Request | 参数缺失、格式错误、业务校验失败 |
-| 401 | Unauthorized | Token 缺失、无效、过期、版本不匹配 |
-| 403 | Forbidden | 旧密码错误、图片域名不在白名单 |
-| 404 | Not Found | 订阅不存在、用户不存在 |
-| 405 | Method Not Allowed | HTTP 方法不支持 |
-| 500 | Internal Server Error | 服务端异常 |
-| 502 | Bad Gateway | 图片代理获取失败 |
-| 503 | Service Unavailable | 下载器/搜索服务/插件管理器未配置 |
-
----
-
-## 附录：数据库模型
-
-> 模型定义见 `internal/database/models.go`，共 7 个实体；所有实体均内嵌 `gorm.Model`（含 `id` / `created_at` / `updated_at` / `deleted_at` 软删除字段）。
-
-### Subscription（订阅）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | uint | 主键 |
-| title_cn | string | 中文标题 |
-| title_en | string | 英文标题 |
-| title_jp | string | 日文标题 |
-| year | int | 年份 |
-| season | int | 季度（默认 1） |
-| source_name | string | 来源站点名 |
-| bangumi_id | string | Bangumi ID |
-| rss_url | string | RSS 地址 |
-| subgroup_name | string | 字幕组 |
-| subgroup_id | string | Mikan 字幕组 ID |
-| excluded_keywords | text | 排除关键词 |
-| allowed_subgroups | text | 允许的字幕组白名单（JSON 数组） |
-| skip_bulk_update | bool | 批量补全时跳过该订阅 |
-| metadata_id | string | 元数据 ID |
-| metadata_provider | string | 元数据提供者 |
-| cover_url | string | 封面 URL |
-| description | text | 描述 |
-| anime_type | string | 动画类型 |
-| total_episodes | int | 总集数 |
-| current_episodes | int | 当前集数 |
-| enabled | *bool | 是否启用（指针类型，默认 true） |
-| completed | bool | 是否完成 |
-| filter_json | text | 过滤规则 |
-| custom_path | string | 自定义路径 |
-| series_id | string | 系列归并 ID |
-| tmdb_id | string | TMDB ID（索引） |
-| imdb_id | string | IMDB ID（索引） |
-| stall_timeout_hours | int | 死种超时阈值（小时，默认 24） |
-| created_at / updated_at / deleted_at | time | 时间戳与软删除 |
-
-### Episode（剧集）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | uint | 主键 |
-| subscription_id | uint | 订阅 ID（索引） |
-| season | int | 季 |
-| number | float32 | 集号（支持 .5 半集） |
-| title | string | 标题 |
-| status | string | 状态：pending / downloading / downloaded / completed / failed |
-| torrent_hash | string | 种子哈希（唯一索引） |
-| torrent_url | string | 种子 URL |
-| original_name | string | 原始文件名 |
-| final_path | string | 最终路径 |
-| file_size | int64 | 文件大小 |
-| group_name | string | 字幕组 |
-| resolution | string | 分辨率 |
-| download_started_at / download_finished_at / organized_at | *time.Time | 下载与整理时间戳 |
-
-### DownloadRecord（下载去重）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | uint | 主键 |
-| torrent_hash | string | 种子哈希（唯一索引，用于避免重复下发） |
-| torrent_url | string | 种子 URL |
-| source_name | string | 来源站点 |
-| added_at | time | 记录时间 |
-
-### Setting（设置）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| key | string | 设置键名（主键） |
-| value | text | 设置值 |
-
-### User（用户）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | uint | 主键 |
-| username | string | 用户名（唯一索引） |
-| password_hash | string | Bcrypt 密码哈希 |
-| token_version | int | Token 版本号（修改密码后递增） |
-| avatar_url | string | 头像地址 |
-
-### NotificationLog（通知投递履历）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | uint | 主键 |
-| event_type | string | 事件类型（索引） |
-| channel | string | 推送渠道（索引） |
-| title | string | 通知标题 |
-| content | text | 通知正文 |
-| status | string | 投递状态：success / failed / dlq（索引） |
-| error_msg | text | 错误信息 |
-| retry_count | int | 重试次数 |
-
-### ParserCache（标题解析缓存）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | uint | 主键 |
-| raw_title | text | 原始种子标题（唯一索引，缓存主键） |
-| clean_title | text | 清洗后标题 |
-| season | int | 解析出的季号 |
-| episode | float32 | 解析出的集号 |
-| subgroup | string | 字幕组 |
-| resolution | string | 分辨率 |
-| confidence | float32 | 置信度 |
-| resolved_by | string | 解析来源：regex / airdate / ai |
+- 搜索返回的 `url` 和 `magnet` 用于下载。资源源同时给出普通下载地址和可用磁力时，`alternate_magnet` 供复制或发送到插件使用。只有磁力入口需要这个备用地址。
+- `GET /api/search/capabilities` 的 `smart_search` 反映当前运行服务能否智能搜索。时间表可按年份、季度和来源查询，使用 Yuc 需要相应插件运行。Bangumi 条目路径需携带条目 ID。
+- `POST /api/migrate` 需运行数据迁移插件。文件上传使用 multipart 字段 `file`，支持 AutoBangumi SQLite、ani-rss JSON 或其 ZIP 备份，文件上限 50 MiB。与 Ani-Go 自身的备份恢复使用不同入口。[迁移实现](../internal/migrate)
+- 浏览器通过 `/api/events/stream` 订阅 SSE。MCP 客户端先连接根路径 `/mcp/sse`，读取 `endpoint` 事件，再向该地址发送 JSON-RPC；HTTP 202 表示服务器接收消息，结果通过 SSE 返回。通过 `tools/list` 查看系统工具及参数。其中 `trigger_refresh` 为已启用的订阅安排历史补全。[MCP 协议](03_MCP_SPEC.md)

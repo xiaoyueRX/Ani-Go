@@ -1,68 +1,22 @@
-# Ani-Go 标题全自动消歧引擎与 Token 成本控制规范 (Auto-Disambiguation Engine)
+# 订阅资源的季集识别
 
-## 1. 为什么单纯靠正则与纯文本 AI 解析会失效？
+本页描述 RSS 和历史补全共用的订阅解析路径。自然语言指令使用单独的任务解析器。[订阅解析入口](../internal/scheduler/subscription_feeds.go) · [任务解析器](../internal/parser)
 
-在动漫 BT/RSS 抓取环境中，不同发布组的命名规则存在较大差异：
-1. **绝对集数混淆**：例如 `[喵萌奶茶屋] [咒术回战] [25] [1080P]`。单纯从标题字符串中无法直接确定是第 1 季的第 25 集，还是第 2 季的第 1 集；
-2. **合集与多版本干扰**：`[01-04v2]`、`全12集+SP`、`10月新番` 等文本标签容易造成集数提取偏离；
-3. **缺少上下文导致误判**：如果仅把单行标题文本送给大模型，由于缺乏发布周期与背景上下文，也容易出现推断偏差。
+多作品 RSS 和历史搜索按完整片名及中、日、英别名匹配。竖线或两侧留白的斜线可分隔译名；无空格的斜线要求两侧都与订阅别名相符。已有 Bangumi.tv 元数据 ID 的订阅会核对蜜柑详情页的条目链接，找不到对应关系时保留订阅，继续按片名查询支持搜索的来源。
 
-为减少人工介入并提高自动化识别准确率，Ani-Go 采用了**「三级流水线 + 官方放送日历对齐」**的消歧机制。
+| 输入或条件 | 调度器如何处理 |
+| --- | --- |
+| 标题带明确季号、特殊篇或合集标记，或命中自定义规则 | 保留本地解析结果。未明确标季的常规标题可采用订阅季度。 |
+| 集号未识别，或后续季度的集号超出已知本季总集数 | 查询按订阅 ID、季度和原始标题区分的持久化消歧缓存。 |
+| 缓存未命中，有发布时间、元数据 ID，且订阅的元数据来源与当前提供者相符 | 获取分集放送数据，用时间窗口和标题中的集号线索判定候选。缺少元数据时继续下一步。 |
+| 仍有歧义，开启 `AI_AUTO_DISAMBIGUATE` 且 AI 客户端可用 | 结合原始标题、订阅名及发布时间调用 AI。仅接受季集在允许范围且置信度至少 0.85 的结果，成功后缓存。其余情况保留本地结果。 |
 
----
+默认播出匹配窗口允许提前 6 小时与延后 72 小时。日期与标题线索用于处理例如「第 2 季、第 25 话」这样的绝对集号；解析器不会因发布时间较晚就改写普通历史重发的集号。[日期匹配](../internal/parser/airdate_matcher.go) · [缓存](../internal/parser/cache.go)
 
-## 2. 三级消歧流水线架构
+`AI_DAILY_QUOTA_LIMIT` 控制后台消歧的每日**调用次数**，默认 30。计数在进程内维护，重启会重置；SQLite 中的成功解析结果可跨重启复用。[调用配额](../internal/ai/quota.go) · [AI 请求](../internal/ai/client.go)
 
-```mermaid
-flowchart TD
-    A[抓取到 RSS 种子标题] --> B[第一级: 本地高精度正则清洗]
-    B --> C{是否高置信度匹配?}
-    C -- 是 (90% 标准标题) --> Z[输出结构化集数 ──► 派发下载]
-    
-    C -- 否 (模糊集数 / 提取失败) --> D[第二级: Bangumi 放送日历时间戳对齐]
-    D --> E{是否成功在放送窗口对齐?}
-    E -- 是 (95% 歧义化解) --> Z
-    
-    E -- 否 (复杂多版本/OVA/特殊篇) --> F{是否启用 AI 自动消歧?}
-    F -- 否 --> G[保底原样记录并发出低优先级提示]
-    F -- 是 --> H[检查今日 Token 配额与本地缓存]
-    H --> I[注入番剧背景上下文 ──► 调用大模型推断]
-    I --> J[写入本地持久化缓存]
-    J --> Z
-```
+## Episode matching in brief
 
----
+Shared RSS feeds and history searches match whole titles and their Chinese, Japanese and English aliases. When a subscription has a Bangumi.tv subject ID, automatic Mikan linking checks the subject linked from the Mikan detail page. An unverified subscription can still search other sources by title.
 
-## 3. 第二级核心：放送时间戳对齐算法 (Air Date Grounding)
-
-**该机制利用官方公开数据进行时间窗口比对，无需消耗大模型 Token。**
-
-### 3.1 对齐原理
-1. Ani-Go 在订阅番剧时，已同步了该番剧在 Bangumi.tv 的官方分集元数据：
-   - 包含每一集的官方播出日期（`airdate`，如 `2023-10-06`）与官方集数序号（`ep_sort: 1`）。
-2. RSS 种子发布时，每个条目必定携带绝对时间的发布时间戳（`pubDate`，如 `2023-10-06 23:30:00`）。
-3. **容差窗口对齐规则**：
-   若种子的 `pubDate` 落在某集的官方播出时间后 **0 小时 ~ 72 小时** 窗口内，且标题中包含与该集相近的数字标号，系统判定该种子对应此集。
-
----
-
-## 4. 第三级核心：AI 上下文注入与配额保护机制
-
-当遇到极少数特殊特番或时间错位的种子时，系统提供第三级 AI 兜底。针对大模型调用，Ani-Go 建立了三道保护机制：
-
-### 4.1 明确的 UI 成本提示 (Settings Banner)
-在前端设置的 AI 板块，提示相关信息：
-> ⚠️ **【提示：Token 消耗与成本控制】**
-> - 开启「后台自动 AI 消歧」后，遇到无法通过本地规则解析的标题时系统会调用配置的 LLM；
-> - 首次订阅历史全量 RSS 时，调用频次可能略高；
-> - 建议优先使用低成本模型（如 DeepSeek、Gemini Flash 或本地 Ollama）。
-
-### 4.2 本地持久化缓存 (Persistent Cache)
-- 数据库表 `parser_cache` 存储已解析的复杂标题哈希；
-- 相同标题解析过一次后，结果持久化于本地 SQLite；
-- 后续再次扫描该种子时直接读取缓存，无需重复调用。
-
-### 4.3 每日调用配额限额 (Daily Quota Cap)
-- 用户可在设置中配置 `AI_DAILY_QUOTA_LIMIT`（默认 30 次/天）；
-- 系统维护每日计数器，一旦单日自动消歧调用达到上限，自动暂停后续大模型调用并发出提示；
-- 避免异常 RSS 源造成非预期的 API 费用支出。
+RSS and historical supplements use the same subscription resolver. Explicit season numbers, specials, batches and custom matches retain their local result. Missing or out-of-range episode numbers may use a cached match, then the subscription's matching metadata provider and publication time. The default air-date window runs from six hours before to 72 hours after broadcast. If enabled, AI can resolve remaining cases at confidence 0.85 or higher within the allowed season and episode range. Otherwise the resolver returns the local result. Successful matches are cached by subscription, season and original title. The optional daily AI limit counts calls in the running process and defaults to 30. [Resolver](../internal/scheduler/subscription_feeds.go)

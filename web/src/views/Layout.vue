@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
@@ -7,7 +7,7 @@ import {
   Menu, LogOut, Antenna, Languages, ExternalLink,
   Calendar, LayoutGrid, Search, Download, Settings, Sparkles, X, TriangleAlert
 } from 'lucide-vue-next'
-import { useVersion } from '../composables/useVersion'
+import { loadCurrentVersion, useVersion } from '../composables/useVersion'
 
 const router = useRouter()
 const route = useRoute()
@@ -18,7 +18,7 @@ const isDrawerOpen = ref(false)
 const isDefaultPassword = ref(false)
 const dismissDefaultPasswordAlert = ref(false)
 
-const { currentVersion, latestVersion, hasNewVersion, checkGitHubUpdate, updating, updateProgress, triggerUpdate, canSelfUpdate, environment } = useVersion()
+const { currentVersion, latestVersion, hasNewVersion, checkGitHubUpdate, updating, updateProgress, triggerUpdate, canSelfUpdate } = useVersion()
 
 interface Toast {
   id: number
@@ -53,19 +53,21 @@ function toggleLanguage() {
   localStorage.setItem('lang', locale.value)
 }
 
+function updateAvatar(event: Event) {
+  const url = (event as CustomEvent).detail
+  if (typeof url === 'string') userAvatar.value = url
+}
+
+onUnmounted(() => window.removeEventListener('avatar-updated', updateAvatar))
 onMounted(async () => {
+  window.addEventListener('avatar-updated', updateAvatar)
+  void loadCurrentVersion()
   try {
     const { data } = await request.get('/me')
     username.value = data.username
     userAvatar.value = data.avatar_url || ''
     isDefaultPassword.value = !!data.is_default_password
   } catch { /* 401 handled by interceptor */ }
-
-  window.addEventListener('avatar-updated', ((e: CustomEvent) => {
-    if (e.detail) {
-      userAvatar.value = e.detail
-    }
-  }) as EventListener)
 
   // Check for updates if enabled in backend settings
   try {
@@ -110,7 +112,7 @@ function closeDrawer() {
           <div class="flex flex-col">
             <div class="flex items-center gap-1.5">
               <span class="text-xl font-black text-primary italic tracking-tight">Ani-Go</span>
-              <span class="badge badge-primary badge-xs font-mono font-bold">{{ currentVersion }}</span>
+              <span v-if="currentVersion" class="badge badge-primary badge-xs font-mono font-bold">{{ currentVersion }}</span>
             </div>
             <span class="text-[9px] font-bold text-base-content/40 uppercase tracking-[0.2em]">Anime Sync Engine</span>
           </div>
@@ -178,7 +180,7 @@ function closeDrawer() {
         <div class="flex items-center gap-2 cursor-pointer" @click="router.push('/schedule')">
           <img src="/logo.png" alt="Ani-Go" class="w-7 h-7 rounded-lg object-cover shadow-sm" />
           <span class="text-lg font-black text-primary italic">Ani-Go</span>
-          <span class="badge badge-neutral badge-xs font-mono font-bold opacity-60">{{ currentVersion }}</span>
+          <span v-if="currentVersion" class="badge badge-neutral badge-xs font-mono font-bold opacity-60">{{ currentVersion }}</span>
         </div>
         <div class="dropdown dropdown-end">
           <label tabindex="0" class="btn btn-ghost btn-circle btn-sm avatar online">
@@ -222,7 +224,7 @@ function closeDrawer() {
       <main class="flex-1 p-3 sm:p-5 md:p-8 max-w-[2000px] mx-auto w-full pb-24 lg:pb-8 overflow-x-hidden">
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in">
-            <component :is="Component" />
+            <component :is="Component" :key="route.name === 'subscription-detail' ? route.params.id as string : undefined" />
           </transition>
         </router-view>
       </main>
@@ -240,8 +242,10 @@ function closeDrawer() {
             <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
             <span>GitHub: xiaoyueRX/Ani-Go</span>
           </a>
-          <span class="opacity-30">•</span>
-          <span class="font-mono">{{ currentVersion }}</span>
+          <template v-if="currentVersion">
+            <span class="opacity-30">•</span>
+            <span class="font-mono">{{ currentVersion }}</span>
+          </template>
         </div>
       </footer>
 
@@ -379,9 +383,8 @@ function closeDrawer() {
         </div>
 
         <div v-else class="text-xs text-base-content/70 leading-relaxed font-medium">
-          <template v-if="environment === 'docker'">使用原部署配置重建容器。Compose 部署请在原目录执行 <code>docker compose pull ani-go &amp;&amp; docker compose up -d ani-go</code>。</template>
-          <template v-else-if="canSelfUpdate">可在此下载并安装新版本。</template>
-          <template v-else>请通过原部署方式更新。</template>
+          <span v-if="canSelfUpdate">发现新版本。更新后将检查服务版本与运行状态。</span>
+          <span v-else>在 Compose 部署目录运行 <code>docker compose pull ani-go</code>，然后运行 <code>docker compose up -d ani-go</code> 重建服务。</span>
         </div>
 
         <div class="flex items-center gap-2 pt-1">

@@ -1,0 +1,24 @@
+{
+  "id": "cloud-tasks-example",
+  "name": "Cloud Tasks",
+  "description": "Submit a magnet link to your service and list its cloud tasks.",
+  "version": "1.0.0",
+  "author": "Example Author",
+  "type": "webhook",
+  "url": "https://example.com/anigo/actions",
+  "events": [],
+  "panel": {
+    "version": 1,
+    "credential": { "label": "Service access token", "required": true },
+    "actions": [
+      {
+        "id": "submit",
+        "label": "Submit magnet",
+        "placement": "search_result",
+        "input": { "key": "magnet", "label": "Magnet link", "placeholder": "magnet:?xt=…", "format": "magnet" },
+        "result": "message"
+      },
+      { "id": "list", "label": "Refresh tasks", "result": "tasks" }
+    ]
+  }
+}

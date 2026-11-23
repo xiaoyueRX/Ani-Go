@@ -46,7 +46,7 @@ func CleanSatisfiedSeeds(ctx context.Context, dl core.Downloader, minSeedTime ti
 		}
 
 		// 1. 仅检查已 100% 下载完成且处于安全做种/完成状态的种子
-		if !IsDownloadComplete(task) {
+		if !isTaskReadyForSeedCleanup(task) {
 			continue
 		}
 
@@ -83,24 +83,8 @@ func CleanSatisfiedSeeds(ctx context.Context, dl core.Downloader, minSeedTime ti
 	return cleaned, nil
 }
 
-// IsDownloadComplete 确认进度已满，且下载器未处于校验、移动或异常状态
+// isTaskReadyForSeedCleanup 判断下载任务是否处于可进行做种生命周期清理的完成状态
 // 兼容 qBittorrent / Transmission / Aria2 的状态枚举，并放行单测中未填写 Status 的任务
-func IsDownloadComplete(task core.DownloadTask) bool {
-	if task.Progress < 1.0 {
-		return false
-	}
-
-	status := strings.ToLower(strings.TrimSpace(task.Status))
-	if status == "" {
-		return true
-	}
-
-	switch status {
-	case "uploading", "stalledup", "pausedup", "stoppedup", "queuedup", "forcedup",
-		"seeding", "stopped", "completed", "complete", "active", "paused":
-		return true
-	default:
-		// 显式排除 downloading / checking / moving / error / missingfiles / unknown 等中间或异常状态
-		return false
-	}
+func isTaskReadyForSeedCleanup(task core.DownloadTask) bool {
+	return task.IsComplete()
 }

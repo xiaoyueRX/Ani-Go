@@ -7,10 +7,11 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 )
 
-// PluginState 插件生命周期状态机常量 (Cordis / DSH 标准设计)
+// PluginState Ani-Go 插件的运行状态
 type PluginState string
 
 const (
+	StateSuspended PluginState = "suspended" // 已启用，等待依赖服务
 	StateInactive  PluginState = "inactive"  // 未启用 / 已休眠
 	StateLoading   PluginState = "loading"   // 正在初始化加载中
 	StateActive    PluginState = "active"    // 正常激活运行中
@@ -20,28 +21,32 @@ const (
 
 // PluginInfo 插件元数据契约，包含生命周期健康状态与错误信息
 type PluginInfo struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	Version     string      `json:"version"`
-	Author      string      `json:"author"`
-	AuthorURL   string      `json:"author_url"`
-	Icon        string      `json:"icon"` // Lucide 图标名称或 URL
-	Enabled     bool        `json:"enabled"`
-	IsBuiltIn   bool        `json:"is_builtin"`
-	Type        string      `json:"type"` // "builtin", "webhook", "script"
-	URL         string      `json:"url,omitempty"`
-	Secret      string      `json:"secret,omitempty"`
-	Events      []string    `json:"events"`
-	Status      PluginState `json:"status,omitempty"` // 生命周期状态: active, inactive, error, loading
-	Error       string      `json:"error,omitempty"`  // 最近错误信息（如有）
-	LoadedAt    *time.Time  `json:"loaded_at,omitempty"`
+	Panel               *Panel             `json:"panel,omitempty"`
+	ID                  string             `json:"id"`
+	Name                string             `json:"name"`
+	Description         string             `json:"description"`
+	Version             string             `json:"version"`
+	Author              string             `json:"author"`
+	AuthorURL           string             `json:"author_url"`
+	Icon                string             `json:"icon"` // Lucide 图标名称或 URL
+	Enabled             bool               `json:"enabled"`
+	IsBuiltIn           bool               `json:"is_builtin"`
+	Origin              string             `json:"origin"` // 服务端判定的维护来源
+	Type                string             `json:"type"`   // 内置插件或可导入的事件 Webhook
+	URL                 string             `json:"url,omitempty"`
+	Secret              string             `json:"secret,omitempty"`
+	Dependencies        []core.ServiceType `json:"dependencies,omitempty"`
+	MissingDependencies []core.ServiceType `json:"missing_dependencies,omitempty"`
+	Events              []string           `json:"events"`
+	Status              PluginState        `json:"status,omitempty"` // 插件的实际运行状态
+	Error               string             `json:"error,omitempty"`  // 最近错误信息（如有）
+	LoadedAt            *time.Time         `json:"loaded_at,omitempty"`
 }
 
 // DisposableFunc 资源清理销毁函数
 type DisposableFunc func()
 
-// PluginContext 现代 DSH/Cordis 规范的插件上下文，提供生命周期销毁追踪、服务注册与作用域日志
+// PluginContext 为 Ani-Go 插件登记受生命周期管理的资源、服务和日志
 type PluginContext interface {
 	core.Context // 继承核心万能上下文，获得服务发现与基础核心资源能力
 
@@ -81,3 +86,6 @@ type BuiltInPlugin interface {
 	Init(bus core.EventBus, ctx core.Context) error
 	Stop(bus core.EventBus) error
 }
+
+// DependencyPlugin 可选地声明启动所需的服务，原有插件无需实现。
+type DependencyPlugin interface{ Dependencies() []core.ServiceType }

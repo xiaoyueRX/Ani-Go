@@ -218,20 +218,12 @@ func TestScheduler_NilDBGuards(t *testing.T) {
 	if isDuplicate("https://example.com/test.torrent") != false {
 		t.Error("nil DB 下 isDuplicate 应返回 false")
 	}
-	if episodeNumberExists(1, 1, 1) != false {
-		t.Error("nil DB 下 episodeNumberExists 应返回 false")
-	}
 	if isEpisodeExists("abc") != false {
 		t.Error("nil DB 下 isEpisodeExists 应返回 false")
 	}
 	if episodeGroupExists(1, 1, 1, "group") != false {
 		t.Error("nil DB 下 episodeGroupExists 应返回 false")
 	}
-
-	// 写入函数静默安全返回
-	recordDownload(core.TorrentItem{Title: "Test", URL: "http://test"})
-	createEpisodeRecord(1, core.TorrentItem{Title: "Test"})
-	createEpisodeRecordWithParsed(1, core.TorrentItem{Title: "Test"}, 1, 1)
 
 	// pollSyncBangumi / autoSubscribe 安全返回错误而非 panic
 	sched := &Scheduler{}
@@ -266,3 +258,10 @@ func (m *mockSchedDownloader) Delete(ctx context.Context, hash string, deleteFil
 func (m *mockSchedDownloader) Pause(ctx context.Context, hash string) error  { return nil }
 func (m *mockSchedDownloader) Resume(ctx context.Context, hash string) error { return nil }
 func (m *mockSchedDownloader) IsAvailable(ctx context.Context) bool          { return true }
+
+func TestBuildFilterLegacyCommaSeparatedGroups(t *testing.T) {
+	filter := buildFilter(database.Subscription{SubgroupName: "ANi, LoliHouse"})
+	if filter.PreferSubgroup != "" || len(filter.AllowedSubgroups) != 2 || filter.AllowedSubgroups[1] != "LoliHouse" {
+		t.Fatalf("旧版多选组排除了各组单独发布的资源: %+v", filter)
+	}
+}

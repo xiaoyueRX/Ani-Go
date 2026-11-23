@@ -1,11 +1,24 @@
 import { ref } from "vue"
 import request from "../utils/request"
 
-export const CURRENT_VERSION = "v0.6.0"
 const VERSION_KEY = "ani-go-last-version"
 
-export const currentVersion = ref(CURRENT_VERSION)
-export const formatVersion = (v: string) => (v ? (v.startsWith("v") ? v : `v${v}`) : "v0.6.0")
+export const currentVersion = ref("")
+
+async function readRunningVersion(): Promise<string> {
+  try {
+    const response = await fetch("/api/health", { cache: "no-store" })
+    const health = response.ok ? await response.json() : null
+    if (health?.status === "ok" && typeof health.version === "string") {
+      return health.version.trim()
+    }
+  } catch { /* 服务未响应时保留未知状态 */ }
+  return ""
+}
+
+export async function loadCurrentVersion() {
+  currentVersion.value = await readRunningVersion()
+}
 
 export interface VersionInfo {
   version: string
@@ -49,9 +62,7 @@ export function useVersion() {
   const checkVersion = async () => {
     try {
       const { data } = await request.get<VersionInfo>("/version")
-      if (data?.version) {
-        currentVersion.value = data.version
-      }
+      if (!data?.version) return
       const lastVersion = localStorage.getItem(VERSION_KEY)
       if (lastVersion && lastVersion !== data.version) {
         changelog.value = data.changelog
@@ -66,16 +77,15 @@ export function useVersion() {
   const checkGitHubUpdate = async (_force: boolean = false) => {
     try {
       const { data } = await request.get<BackendUpdateInfo>("/system/update/check")
-      if (data) {
-        if (data.current_version) currentVersion.value = data.current_version
-        if (data.latest_version) latestVersion.value = data.latest_version
-        hasNewVersion.value = !!data.has_update
-        releaseNotes.value = data.release_notes || ""
-        canSelfUpdate.value = data.can_self_update
-        environment.value = data.environment
-        return { checked: true, hasUpdate: !!data.has_update, latest: data.latest_version }
+      if (data?.error || !data?.latest_version || typeof data.has_update !== "boolean") {
+        return { checked: false, hasUpdate: false, error: data?.error || "更新服务未返回版本信息" }
       }
-      return { checked: false, hasUpdate: false }
+      latestVersion.value = data.latest_version
+      hasNewVersion.value = data.has_update
+      releaseNotes.value = data.release_notes || ""
+      canSelfUpdate.value = data.can_self_update
+      environment.value = data.environment
+      return { checked: true, hasUpdate: data.has_update, latest: data.latest_version }
     } catch (e: any) {
       console.error("Failed to check update via backend:", e)
       return { checked: false, hasUpdate: false, error: e?.message || "检查更新失败" }
@@ -89,7 +99,7 @@ export function useVersion() {
       const { data } = await request.get<UpdateProgress>("/system/update/progress")
       if (data) {
         updateProgress.value = data
-        if (data.status === "success" || data.status === "restarting") {
+        if (data.status === "success" || data.status === "restarting" || (data.status === "idle" && updating.value)) {
           // 服务正在重启，轮询等待服务恢复后刷新页面
           clearInterval(progressTimer)
           pollHealthAndReload()
@@ -105,16 +115,17 @@ export function useVersion() {
     let attempts = 0
     const healthTimer = setInterval(async () => {
       attempts++
-      try {
-        const res = await fetch("/api/health", { cache: "no-store" })
-        if (res.ok && attempts > 2) {
-          clearInterval(healthTimer)
-          window.location.reload()
-        }
-      } catch {}
-      if (attempts > 60) {
+      const runningVersion = await readRunningVersion()
+      if (runningVersion && runningVersion === latestVersion.value) {
         clearInterval(healthTimer)
         window.location.reload()
+        return
+      }
+      if (attempts > 60) {
+        clearInterval(healthTimer)
+        updating.value = false
+        updateProgress.value = { status: "failed", progress: 0, message: "未确认目标版本启动，请检查服务日志与回滚结果" }
+        window.showToast?.(updateProgress.value.message, "error")
       }
     }, 1500)
   }

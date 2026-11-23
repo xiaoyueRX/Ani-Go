@@ -16,10 +16,10 @@ export function downloaderForms(settings: Record<string, string>): Record<Downlo
   const empty = { username: '', password: '', category: '', secret: '' }
   return {
     qbittorrent: {
-      ...empty, host: settings.QB_HOST || 'http://localhost:8081', username: settings.QB_USER ?? 'admin',
+      ...empty, host: settings.QB_HOST || 'http://localhost:8081', username: settings.QB_USER ?? settings.QB_USERNAME ?? 'admin',
       category: settings.QB_CATEGORY ?? 'ani-go',
     },
-    transmission: { ...empty, host: settings.TR_HOST || 'http://localhost:9091', username: settings.TR_USER || '' },
+    transmission: { ...empty, host: settings.TR_HOST || 'http://localhost:9091', username: settings.TR_USER ?? settings.TR_USERNAME ?? '' },
     aria2: { ...empty, host: settings.ARIA2_HOST || 'http://localhost:6800/jsonrpc' },
   }
 }
@@ -37,4 +37,16 @@ export function downloaderSettings(type: DownloaderType, form: DownloaderForm): 
     if (type === 'qbittorrent') settings.QB_CATEGORY = form.category
   }
   return settings
+}
+
+export function downloaderProbe(type: DownloaderType, form: DownloaderForm) {
+  const target = { type, host: form.host }
+  if (type === 'aria2') {
+    return { ...target, ...(form.secret ? { secret: form.secret } : { use_saved_credentials: true }) }
+  }
+  return {
+    ...target, username: form.username,
+    ...(type === 'qbittorrent' ? { category: form.category } : {}),
+    ...(form.password ? { password: form.password } : { use_saved_credentials: true }),
+  }
 }

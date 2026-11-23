@@ -1,83 +1,20 @@
-# Ani-Go 微内核架构白皮书 (Microkernel Architecture)
+# Ani-Go 系统架构
 
-## 1. 设计哲学与核心原则
+[English](01_ARCHITECTURE_EN.md) · [目录索引](DIRECTORY_STRUCTURE.md)
 
-Ani-Go 是专为动漫追番与自动化 NAS 媒体整理而设计的轻量化工具。其架构设计遵循以下核心原则：
+## 从订阅到媒体库
 
-1. **微内核极简设计 (Microkernel Core)**：
-   主干链路专注实现核心闭环：**「订阅源抓取 ──► 标题与集数消歧 ──► 下载器任务派发 ──► 媒体库规范硬链接 ──► 触发播放器即开即播」**。
-   主干采用纯 Go 编写，编译为零外部运行时依赖的单文件二进制。
-   常驻运行内存控制在 **15MB ~ 30MB**，空载 CPU 占用保持在 **0.0%**，即使在低功耗硬件（如 J1900、N3450、树莓派等轻量设备）上也能稳定运行。
+1. 调度器读取已启用的订阅和 RSS 配置。它按订阅源、标题及字幕组等条件筛选资源。历史补全还可按标题检索其他已配置的资源站。[订阅匹配](../internal/scheduler/subscription_feeds.go) · [调度器](../internal/scheduler/scheduler.go)
+2. 本地解析器提取季集、特别篇和合集。遇到歧义，调度器在满足条件时按播出日期比对，或者调用可选 AI。蜜柑、Bangumi 与 TMDB 的条目标识分别对应各自的数据源。[季集识别](04_AUTOPARSER_SPEC.md)
+3. 调度器记录下载任务，交给选中的 qBittorrent、Transmission 或 Aria2。完成后读取下载器报告的文件路径。合集可能对应多集。[下载队列](../internal/scheduler/queue.go) · [下载器](../internal/downloader)
+4. 整理器应用命名模板和已登记的命名钩子，生成 TV、电影和特别篇路径。硬链接模式保留下载源，必要时复制；移动模式会迁移源文件。媒体服务器扫描自己的媒体库目录。[整理器](../internal/organizer/organizer.go) · [整理预览](../internal/organizer/preview.go)
 
-2. **插件化解耦与资源释放机制 (Pluggable & Zero-Overhead Killswitch)**：
-   核心流水线之外的功能（包括多渠道消息推送、本地 NFO 刮削、数据迁移、备份归档以及外部智能体接入）均作为独立插件实现。
-   **停用原则**：插件禁用时，系统立即销毁后台协程、注销事件监听、注销 MCP 工具，不发起网络请求，不产生冗余日志，及时释放内存。
+网页单条、批量和 MCP 新建订阅共用同一数据库事务。同名作品可分别追不同季，并发创建同一季只保存一条记录。若启用了同名多季，共享 RSS 与历史补全采用明确季号或已确认的作品来源，单独绑定在某季的 RSS 仍可接受未标季的发布。时间表优先按来源 ID 关联订阅；按标题回退时只关联唯一匹配的订阅。[订阅创建](../internal/database/subscription.go) · [时间表关联](../internal/api/schedule_subscriptions.go)
 
----
+修改轮询周期后，调度器会在设置提交时重新设置对应计时器。同一订阅的手工和定时补全会共享正在执行的历史查询。进度按订阅季的正片集号去重，已整理和手工完成的剧集均可计入。退出时会取消并等待已接纳的工作，再释放插件。[后台调度](../internal/scheduler/runtime.go) · [剧集计数](../internal/database/progress.go)
 
-## 2. 核心主干全流程数据流图
+## 运行时与控制接口
 
-```mermaid
-flowchart TD
-    subgraph Scheduler ["定时调度中心 (Cron & Interval)"]
-        A[Tick 触发] --> B{是否在免打扰或暂停?}
-        B -- 否 --> C[读取活跃番剧订阅列表]
-    end
+宿主装配数据源、元数据、下载器、SQLite、调度器和插件管理器。插件可订阅整理事件，或声明所需服务。启用开关表示用户意图，运行状态反映插件能否工作。缺少依赖的插件进入 `suspended`，服务恢复后可重新激活。[启动装配](../main.go) · [插件规范](02_PLUGIN_SPEC.md)
 
-    subgraph Pipeline ["四级微内核管道 (Four-Stage Core Pipeline)"]
-        C --> D[第一级: 订阅源抓取 (Mikan / Bangumi / ACG.RIP)]
-        D --> E[第二级: 三级消歧解析引擎 (Regex + AirDate + AI)]
-        E --> F[第三级: 下载器调度派发 (qBittorrent / Aria2)]
-        F --> G[第四级: 规范硬链接与媒体库归档 (TV / Movie / SP)]
-    end
-
-    subgraph NotifyPlay ["交付与通知 (Delivery)"]
-        G --> H[刷新媒体库 (Jellyfin / Emby API)]
-        G -. 触发事件 .-> I[事件总线 (EventBus)]
-        I -.-> J[可选插件: 消息推送 / NFO刮削 / 自定义脚本]
-    end
-```
-
----
-
-## 3. 核心分层架构
-
-### 3.1 数据接入层 (Data Sources)
-- 负责对接外部 RSS 或 API 数据源（Mikan 蜜柑计划、Bangumi.tv、AnimeTosho 等）；
-- 内置镜像源回退（GFW 穿透）与连接池复用机制；
-- 抓取结果标准化为统一的 `TorrentItem` 结构体。
-
-### 3.2 解析与消歧层 (Parser & Disambiguation)
-- **第一级（本地正则）**：0ms 极速排除压制、分辨率、年份标签，提取基础季集；
-- **第二级（时间戳对齐）**：遇到模糊集数时，自动将种子发布时间（`pubDate`）与 Bangumi 官方单集放送日历对齐，无需消耗 Token 即可解析绝大多数歧义；
-- **第三级（AI 上下文兜底）**：针对极少数特殊非标准标题，在具备调用限额和持久化缓存保护的前提下调用大模型辅助解析。
-
-### 3.3 下载调度层 (Downloader Dispatcher)
-- 抽象统一 `Downloader` 接口，默认原生驱动 qBittorrent Web API 与 Aria2 RPC；
-- 支持做种配额控制（分享率上限/做种时间上限回收任务，严禁删除媒体库文件）；
-- 支持死种检测（24小时 0 Peers 疑似死种标记）。
-
-### 3.4 媒体归档层 (Media Organizer)
-- **单卷硬链接优先 (Zero IO)**：源文件与目标文件共享物理数据块，秒级整理且完全不占用双倍硬盘空间；
-- **源数据保护机制**：整理过程提供前置预览（Dry-run），重整时仅清理并重建目标硬链接，绝不修改、移动或删除源下载目录中的任何原始文件。
-
----
-
-## 4. 健壮性与隔离保障规范 (Robustness & Safety)
-
-### 4.1 Goroutine Panic 故障隔离
-在 Go 语言中，未捕获的 goroutine panic 会导致整个进程崩溃。Ani-Go 在调用所有外部模块、插件以及用户脚本时，**统一采用 `defer recover()` 保护**：
-```go
-func SafeExecute(name string, fn func() error) (err error) {
-    defer func() {
-        if r := recover(); r != nil {
-            err = fmt.Errorf("module [%s] panic recovered: %v\nstack: %s", name, r, debug.Stack())
-            log.Printf("🚨 [CRITICAL ERROR] %v", err)
-        }
-    }()
-    return fn()
-}
-```
-
-### 4.2 网络超时与熔断保护 (Circuit Breaker)
-所有对外网络请求设置严格的 Context 超时时间（默认 10~15 秒）。当某个外部推送渠道或 RSS 站点连续失败达到阈值（如 3 次），自动进入冷却熔断状态，绝不允许高频死循环重试刷爆磁盘日志。
+Web 静态资源嵌入 Go 二进制。管理界面通过 REST API 操作宿主；MCP 客户端通过 SSE 连接并调用服务器注册的工具。事件总线在进程内异步广播，命名拦截器同步参与整理。备份和数据恢复通过单独的宿主服务处理。[HTTP 路由](../internal/api/server.go) · [MCP](03_MCP_SPEC.md) · [备份](../internal/backup)

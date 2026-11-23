@@ -149,13 +149,8 @@ func (d *DingTalkNotifier) Send(ctx context.Context, title, message string) erro
 	}
 	defer resp.Body.Close()
 
-	var result struct {
-		Errcode int    `json:"errcode"`
-		Errmsg  string `json:"errmsg"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-	if result.Errcode != 0 {
-		return fmt.Errorf("[钉钉] 返回错误: %d - %s", result.Errcode, result.Errmsg)
+	if err := checkWebhookReceipt(resp, "errcode"); err != nil {
+		return fmt.Errorf("[钉钉] %w", err)
 	}
 
 	log.Printf("🔔 [钉钉] 通知已发送: %s", title)
@@ -188,7 +183,7 @@ func (w *WeComNotifier) Send(ctx context.Context, title, message string) error {
 	payload, _ := json.Marshal(map[string]interface{}{
 		"msgtype": "text",
 		"text": map[string]interface{}{
-			"content": fmt.Sprintf("%s\n%s", title, message),
+			"content":        fmt.Sprintf("%s\n%s", title, message),
 			"mentioned_list": []string{"@all"},
 		},
 	})
@@ -205,13 +200,8 @@ func (w *WeComNotifier) Send(ctx context.Context, title, message string) error {
 	}
 	defer resp.Body.Close()
 
-	var result struct {
-		Errcode int    `json:"errcode"`
-		Errmsg  string `json:"errmsg"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-	if result.Errcode != 0 {
-		return fmt.Errorf("[企业微信] 返回错误: %d - %s", result.Errcode, result.Errmsg)
+	if err := checkWebhookReceipt(resp, "errcode"); err != nil {
+		return fmt.Errorf("[企业微信] %w", err)
 	}
 
 	log.Printf("🔔 [企业微信] 通知已发送: %s", title)
@@ -267,16 +257,38 @@ func (f *FeishuNotifier) Send(ctx context.Context, title, message string) error 
 	}
 	defer resp.Body.Close()
 
-	var result struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-	if result.Code != 0 {
-		return fmt.Errorf("[飞书] 返回错误: %d - %s", result.Code, result.Msg)
+	if err := checkWebhookReceipt(resp, "code"); err != nil {
+		return fmt.Errorf("[飞书] %w", err)
 	}
 
 	log.Printf("🔔 [飞书] 通知已发送: %s", title)
+	return nil
+}
+
+// checkWebhookReceipt 校验网关状态与平台回执，避免将无效或缺失的业务码当作成功。
+func checkWebhookReceipt(resp *http.Response, codeField string) error {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("HTTP 状态码 %d", resp.StatusCode)
+	}
+	var receipt struct {
+		ErrCode *int   `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+		Code    *int   `json:"code"`
+		Msg     string `json:"msg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&receipt); err != nil {
+		return fmt.Errorf("无法解析投递回执: %w", err)
+	}
+	code, message := receipt.ErrCode, receipt.ErrMsg
+	if codeField == "code" {
+		code, message = receipt.Code, receipt.Msg
+	}
+	if code == nil {
+		return fmt.Errorf("回执缺少 %s", codeField)
+	}
+	if *code != 0 {
+		return fmt.Errorf("投递失败: %d - %s", *code, message)
+	}
 	return nil
 }
 
@@ -391,9 +403,9 @@ type NotifierConfig struct {
 	// 飞书
 	FeishuWebhook string
 	// OneBot (QQ)
-	OneBotHost   string
-	OneBotToken  string
-	OneBotUserID int64
+	OneBotHost    string
+	OneBotToken   string
+	OneBotUserID  int64
 	OneBotGroupID int64
 }
 

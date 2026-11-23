@@ -1,68 +1,38 @@
 # Ani-Go Web 前端
 
-基于 Vue3 + Vite + TypeScript 构建的 Ani-Go 管理面板前端。
+[English](README_EN.md) · [安装与运行](../README.md)
 
-## 技术栈
+管理界面使用 Vue 3、Vue Router、TypeScript 和 Vite。设置页的「插件与自动化」负责清单导入、启停和来源筛选。`PluginPanel.vue` 按 Ani-Go 面板声明渲染凭据、操作和任务列表。[作者指南](../docs/02_PLUGIN_SPEC.md) · [导入示例](../examples/plugins/cloud-tasks.json)
 
-- **框架**: Vue 3.5+ (Composition API + `<script setup>`)
-- **构建工具**: Vite 8
-- **语言**: TypeScript 6
-- **CSS**: TailwindCSS v4 + DaisyUI v5（暗色主题）
-- **路由**: Vue Router 4（History 模式 + JWT 路由守卫）
-- **HTTP**: Axios（拦截器自动注入 Bearer Token、401 重定向）
+## 本地开发
 
-## 开发
+在仓库的 `web` 目录使用 Node 24。
 
-```bash
-cd web
-
-# 安装依赖（首次）
-npm install
-
-# 启动开发服务器（热更新）
+```sh
+npm ci
 npm run dev
+```
 
-# 生产构建（输出到 dist/）
+默认从 npm 官方注册表安装。使用组织镜像时，可为 `npm ci` 指定 `--registry`，或通过本地 npm 配置设置 `registry`。
+
+Vite 默认从 `http://localhost:5173` 提供页面，已配置将 `/api` 代理到 `http://localhost:20001`。与运行中的 Go 服务联调时使用该服务的管理员登录。API 客户端在 `src/utils/request.ts` 中附加 JWT 并处理过期会话。
+
+同一站点的浏览器页签同步登录状态。一个页签退出时，其他管理页会关闭当前内容并返回登录页；再次登录后，各页签会回到原先打开的站内页面。管理员账户由后端在首次启动时创建。
+
+从搜索结果追番时，普通单集会先显示原始发布标题与建议的作品名、季数、字幕组和分辨率。核对后确认，可选填系列 RSS。批量追番会合并同一作品同一季的发布，混合字幕组或画质相应留空，提交失败的作品保留在对话框内。蜜柑系列条目可直接挑选字幕组。
+
+剧集列表分别显示实际下载或整理状态和手动标记。单集可用下拉框设置或清除标记，勾选多集可批量操作。
+
+订阅详情在可见时每 30 秒刷新，切回页签时也会刷新。编辑订阅或执行剧集操作期间会暂停后台刷新。设置页在重新取得 Bangumi 授权状态时保留未保存的本地修改。
+
+在下载页，新建任务后可按 Enter 提交表单。弹窗空闲时按 Escape 可关闭并返回原按钮。启用自动刷新后，只有可见页签会轮询下载队列；上一次读取尚未返回时会跳过本次轮询。
+
+## 测试与构建
+
+```sh
+npm test
+npm run typecheck
 npm run build
-
-# 类型检查
-vue-tsc -b
 ```
 
-开发服务器默认运行在 `http://localhost:5173`，API 请求代理到 Go 后端（需在 `vite.config.ts` 中配置 proxy）。
-
-## 项目结构
-
-```
-web/
-├── src/
-│   ├── App.vue              # 根组件
-│   ├── main.ts              # 入口（挂载 App + Router）
-│   ├── style.css            # 全局样式（Tailwind + DaisyUI）
-│   ├── router/index.ts      # 路由定义（登录 / 订阅 / 下载 / 设置）
-│   ├── utils/request.ts     # Axios 封装（Token 注入 + 401 拦截）
-│   ├── components/          # 可复用组件
-│   │   └── SubscriptionEditForm.vue  # 订阅编辑表单
-│   └── views/               # 页面组件
-│       ├── Login.vue        # 登录页
-│       ├── Layout.vue       # 布局壳（侧边栏导航 + 顶栏）
-│       ├── Subscriptions.vue      # 订阅列表
-│       ├── SubscriptionDetail.vue # 订阅详情 + 剧集
-│       ├── SubscriptionForm.vue   # 新建订阅
-│       ├── Downloads.vue    # 下载队列
-│       └── SettingsPage.vue # 设置管理
-├── index.html               # HTML 入口
-├── vite.config.ts           # Vite 配置
-├── tsconfig.json            # TypeScript 配置
-└── package.json             # 依赖与脚本
-```
-
-## 生产部署
-
-前端构建产物（`dist/`）通过 Go 后端的 `//go:embed` 嵌入到二进制中，无需单独部署。详见项目根目录的 README.md。
-
-## 注意事项
-
-- DaisyUI v5 在 Node 24 下，CSS 中的 `@plugin "daisyui"` 会报错，已在 `style.css` 中改用 `@import "daisyui/daisyui.css"`
-- `index.html` 设置 `data-theme="dark"` 以启用 DaisyUI 暗色模式
-- Vue Router 使用 History 模式，Go 后端的静态文件处理器会将所有非 `/api/*` 路径回退到 `index.html`
+`npm run build` 会先执行类型检查，再输出 `web/dist`。从仓库根目录构建 Go 二进制会嵌入这份资源。界面版本来自运行服务的 `/api/health`。[构建配置](vite.config.ts) · [路由](src/router/index.ts) · [HTTP 接口](../docs/API.md)

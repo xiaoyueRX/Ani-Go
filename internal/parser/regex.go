@@ -39,12 +39,12 @@ var (
 	reYear       = regexp.MustCompile(`\((?:19|20)\d{2}\)|（(?:19|20)\d{2}）`)
 
 	// 种子标题多季/特别篇/版本号/合集识别正则
-	reTorrentSxxExx     = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])S(?:eason)?\s*0*(\d{1,2})\s*[Ee](?:p(?:isode)?)?\s*0*(\d{1,4}(?:\.5)?)(?:\s*[vV](\d))?(?:\s*(?:END|FIN|完))?(?:$|[^A-Za-z0-9])`)
-	reTorrentSeason     = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(?:S|Season)\s*0*(\d{1,2})(?:$|[^A-Za-z0-9])`)
-	reTorrentSpecial    = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(OVA[Ds]?|OAD|OAV|SP(?:\s*0*\d{1,3})?|Special|特别篇|特別篇|特典)(?:$|[^A-Za-z0-9])`)
+	reTorrentSxxExx = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])S(?:eason)?\s*0*(\d{1,2})\s*[Ee](?:p(?:isode)?)?\s*0*(\d{1,4}(?:\.5)?)(?:\s*[vV](\d))?(?:\s*(?:END|FIN|完))?(?:$|[^A-Za-z0-9])`)
+	reTorrentSeason = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(?:S|Season)\s*0*(\d{1,2})(?:$|[^A-Za-z0-9])`)
+	reTorrentSpecial = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(OVA[Ds]?|OAD|OAV|SP(?:\s*0*\d{1,3})?|Special|特别篇|特別篇|特典)(?:$|[^A-Za-z0-9])`)
 	reTorrentSpecialNum = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(?:OVA|OAD|OAV|SP)\s*0*(\d{1,3}(?:\.5)?)(?:\s*[vV](\d))?(?:\s*(?:END|FIN|完))?(?:$|[^A-Za-z0-9])`)
-	reTorrentVersion    = regexp.MustCompile(`(?i)(?:^|[\s\d\[【])[vV](\d)(?:$|[\s\]】\)])`)
-	reTorrentEnd        = regexp.MustCompile(`(?i)(?:^|[\s\d\[【\(])(?:END|FIN|完结|完)(?:$|[\s\]】\)])`)
+	reTorrentVersion = regexp.MustCompile(`(?i)(?:^|[\s\d\[【])[vV](\d)(?:$|[\s\]】\)])`)
+	reTorrentEnd     = regexp.MustCompile(`(?i)(?:^|[\s\d\[【\(])(?:END|FIN|完结|完)(?:$|[\s\]】\)])`)
 
 	// 合集/范围匹配（如 [01-12], [01~24], [SP01-04], 第01-12集, 全12集, 合集）
 	reTorrentBatchBracket = regexp.MustCompile(`(?i)[\[\(【（]\s*(?:SP|OVA|OAD|EP?)?\s*0*(\d{1,3})\s*[-~～]\s*0*(\d{1,3})(?:\s*(?:END|FIN|完|[vV]\d))?\s*[\]\)】）]`)
@@ -80,7 +80,6 @@ var cnNum = map[rune]int{
 
 // TorrentEpisodeInfo 种子标题结构化解析详细信息
 type TorrentEpisodeInfo struct {
-	ExplicitSeason bool
 	Season         int
 	Episode        float32
 	Version        int
@@ -89,6 +88,8 @@ type TorrentEpisodeInfo struct {
 	IsEnd          bool
 	Resolution     string
 	MatchedBy      string
+	MatchedToken   string // 自定义规则命中的原文，供标题清洗复用
+	ExplicitSeason bool   // 区分明确的第一季与缺省季号
 }
 
 type RegexParser struct{}
@@ -413,7 +414,6 @@ func ExtractEpisodeDetailed(title string) TorrentEpisodeInfo {
 	}
 
 	info.ExplicitSeason = explicitSeason
-
 	// 1. 最高优先级：用户自定义正则槽位（支持 1 捕获组=Episode 或 2 捕获组=Season+Episode）
 	for _, re := range snapshotCustomRegexSlots() {
 		m := re.FindStringSubmatch(work)
@@ -439,9 +439,11 @@ func ExtractEpisodeDetailed(title string) TorrentEpisodeInfo {
 		if parsedEp > 0 {
 			if hasSeason {
 				info.Season = parsedSeason
+				info.ExplicitSeason = true
 			}
 			info.Episode = parsedEp
 			info.MatchedBy = "custom"
+			info.MatchedToken = m[0]
 			return info
 		}
 	}
@@ -458,8 +460,8 @@ func ExtractEpisodeDetailed(title string) TorrentEpisodeInfo {
 					info.Version = v
 				}
 			}
-			info.ExplicitSeason = true
 			info.MatchedBy = "sxxexx"
+			info.ExplicitSeason = true
 			return info
 		}
 	}

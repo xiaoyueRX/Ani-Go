@@ -513,6 +513,7 @@ func TestHandleBatchDownloadActions(t *testing.T) {
 }
 
 func TestHandleNotificationLogsAndStats(t *testing.T) {
+	setupTestDB(t)
 	s := &Server{}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/notifications/logs?page=1&pageSize=10", nil)

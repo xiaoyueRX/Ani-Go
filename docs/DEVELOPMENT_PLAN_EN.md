@@ -1,198 +1,22 @@
-# Ani-Go Development Plan
+# Ani-Go milestones and current work
 
-## 🎯 Core Positioning & Tech Stack
-- **Language**: Go (single binary, fast startup, low memory footprint)
-- **Deployment**: Docker one-click deployment, image size ~20MB; supports Windows, Mac, Linux, Docker, Go binary.
-- **Open Source**: Published to GitHub under MIT License
-- **Learning-Oriented**: Designed for programming beginners, learning by doing through AI assistance; code must be modular, well-commented, and conceptually explainable.
+[简体中文](DEVELOPMENT_PLAN.md) · [Release history](../CHANGELOG.md)
 
-## 📥 Subscription & Resource Acquisition
-- **Mikan Personal RSS Auto-Subscription**: Provide one personal RSS URL (with Token), the system automatically parses and syncs all Mikan web subscriptions.
-- **Manual Search Subscription**: Web UI with built-in Mikan search; manually search for anime, choose subgroup, one-click subscribe.
-- **Multiple Source Sites**: Mikan as primary, later expand to Nyaa, ACG.RIP, Anime Tosho, etc.
-- **Subgroup Recognition & Filtering**: Identify different subgroup resources for the same anime, support priority settings or manual subgroup selection.
+## Released milestones
 
-## ⬇️ Download & File Organization
-- **Multiple Downloaders**: qBittorrent (required), Transmission, Aria2, expandable to 115 cloud, etc.
-- **Historical Batch Completion (Core Pain Point)**: When detected downloaded episodes < total episodes, crawl Mikan anime detail pages for all historical torrents, filter by subgroup, deduplicate, and batch dispatch downloads.
-- **Smart File Organization**: Auto-create complete directory structures (e.g., `Anime Title (Year)/Season 1/`, `Specials/`, standalone movie directories, etc.).
-- **Fully Customizable Paths & Naming**: Template variable system (e.g., `{title_cn}`, `{title_en}`, `{year}`, `{season:02}`, `{ep:02}`, `{ext}`) to perfectly match existing fnOS/Jellyfin directory structures.
-- **Media Library Compatible**: Organized files and directories must be directly scrapable by Jellyfin/fnOS.
+| Stage | Delivered work |
+| --- | --- |
+| Early development through v0.5.x | RSS subscriptions, historical supplements, multiple downloaders and sources, organization, the web interface, migration and notifications. The v0.5.x releases added downloader switching, notification history and RSS inspection. |
+| v0.6.0–v0.6.1 | Native MCP service and air-date-assisted episode matching, followed by notification templates, WeChat and Signal support, and TMDB collection grouping. |
+| v0.6.2 | Scoped Go plugin contexts, reversible resource registration and lifecycle status. Core interfaces were defined for naming, filtering and parsing. The architecture guide identifies the current integration points. |
+| v0.7.0 | qBittorrent 5.x pause/resume endpoints, SSE adjustments and the multi-platform release workflow. |
 
-## 🤖 AI & LLM Integration
-- **Optional Toggle**: AI is an optional module; all core functions must work correctly when it is disabled.
-- **Multi-Model Compatible**: Supports OpenAI-compatible API, Gemini, local Ollama, and other mainstream AI.
-- **AI-Assisted Classification**: Auto-detect TV, Movie, OVA, Special, Extra, etc.
-- **Smart Series Merging**: Cross-source-station, different seasons, movies/OVAs auto-identified as same series, unified into one parent directory with auto-season-sorting.
-- **Natural Language Task Parsing**: Send messages (e.g., "subscribe Demon Slayer Season 2") via QQ/WeChat/Feishu/DingTalk/Telegram; AI parses into structured tracking tasks and auto-creates subscriptions.
-- **Rule-Based Fallback**: When AI is disabled, uses TMDB Collection/Series ID, title normalization, BGM.tv associations, and regex rules.
+Published versions, archives and checksums are available on [GitHub Releases](https://github.com/xiaoyueRX/Ani-Go/releases).
 
-## 🧩 Architecture Design & Extensibility
-- **Interface-First**: All core modules abstracted as interfaces (Source / Downloader / Metadata / Organizer / Notifier); main program only depends on contracts, not implementations.
-- **Highly Customizable Framework**: Configuration-driven behavior; pipeline steps are pluggable, order-adjustable, and individually replaceable.
-- **Plugin System (V3 Focus)**: Fully open, highly customizable; supports third-party plugin repositories, online browsing and installation, complete plugin development documentation and SDK.
-- **Event Bus**: Plugins/external scripts can listen to events (download start, completion, organization complete) and trigger custom logic.
+## Current source tree
 
-## 🌐 Web UI & Interactive Experience
-- **Anime Display**: Show anime cover, title, description, episode progress bar.
-- **Core Pages**: Dashboard, subscription management, download queue, settings, plugin management.
-- **Dual Metadata Sources**: Supports both TMDB and BGM.tv; users can switch preferred source in settings.
-- **Manual Control**: Support pause/resume subscriptions, manually trigger historical completion for single anime, switch subgroups.
-- **Timeout Warning & Suggestions**: If an anime hasn't finished downloading after 2+ days (possible dead torrent), system displays error hint on the anime card suggesting subgroup change.
+- **Downloads and organization.** RSS uses subscription feeds. Historical supplements apply title and subtitle-group matching. Download records, batch files and organization use episode information. A release-to-library check should compare the downloader's actual file with the final media path. [Architecture](01_ARCHITECTURE_EN.md)
+- **Plugins and MCP.** The source implements official plugin attribution, service dependencies with suspension and recovery, declarative JSON panels and the official 115 magnet cloud plugin. Plugin controls report missing dependencies. Features available in a deployment depend on its build. [Plugin authoring](02_PLUGIN_SPEC_EN.md) · [MCP tools](03_MCP_SPEC_EN.md)
+- **Release checks.** CI runs frontend tests and builds, Go race tests and compilation. Separate workflows produce container images and platform archives. [CI](../.github/workflows/ci.yml) · [Container builds](../.github/workflows/docker-build.yml) · [Release archives](../.github/workflows/release.yml)
 
-## 🛠 Development, Deployment & Security Standards
-- **Sensitive Data Isolation**: Mikan Token, downloader passwords strictly forbidden from hardcoding; must be injected via environment variables or `.env`.
-- **Multi-Device Sync Development**: Based on Git workflow; switch computers by `git clone` + reading `docs/PROJECT_CONTEXT.md` to quickly restore full context.
-- **CI/CD Automation**: Reserved GitHub Actions pipeline; auto-compile, build multi-architecture Docker images and push to GHCR on code push.
-- **Encoding Standards**: All source files unified UTF-8 (no BOM); avoid Windows PowerShell default encoding corruption.
-- **Data Migration**: Optionally add data migration from the original ani-rss (as optional enhancement).
-
----
-
-## 📅 Development Roadmap
-
-### Phase 0: Project Initialization & Architecture Setup
-- [x] Determine project name (`Ani-Go`) and tech stack (Go + SQLite + GORM).
-- [x] Initialize Go module and directory structure.
-- [x] Define core interfaces (`internal/core/interfaces.go`).
-- [x] Implement config loading system (environment variables first).
-- [x] Implement database initialization and ORM models.
-- [x] Create GitHub repository and complete first code push.
-- [x] Create project memory document (`docs/PROJECT_CONTEXT.md`).
-- [x] **Reference open source code**: Use AutoBangumi and original ani-rss as references for source code to avoid reinventing the wheel.
-- [x] **Bilingual Documentation**: Generate pure Chinese and pure English versions for all `.md` and documentation files for international users.
-- [x] **Chinese Comment Standard**: All Go source code comments use Chinese.
-
-### Phase 1: Core Engine Implementation (MVP)
-- [x] **Mikan RSS Parser**: Implement `Source` interface, parse Mikan personal RSS, auto-discover subscriptions.
-- [x] **qBittorrent Client Integration**: Implement `Downloader` interface, interact with qBittorrent API.
-- [x] **Basic Scheduler**: Implement periodic RSS polling and dispatch download tasks.
-- [x] **Basic File Organization**: Implement simple rename and directory creation logic.
-- [x] **EventBus**: Implement publish/subscribe pattern for decoupled inter-module communication.
-- [x] **Title Parsing Enhancement**: 8 regex patterns covering Vol/【】/[]/SxxExx/.5/version/batch/special, referenced from ani-rss and AutoBangumi.
-
-### Phase 2: Historical Completion & Metadata
-- [x] **Mikan Full-Page Crawling**: Implement historical batch completion logic (core innovation).
-- [x] **TMDB/BGM.tv Integration**: Implement `MetadataProvider` interface, fetch anime metadata.
-- [x] **GFW Mirror/Proxy Support**: Multi-domain mirror auto-fallback for Mikan, BGM.tv, TMDB; GitHub proxy configuration.
-- [x] **Supplement Scheduler** (ref AutoBangumi): Auto-detect episode gaps for incomplete subscriptions, crawl historical torrents for backfill.
-- [x] **Dead Torrent Timeout Warning** (ref AutoBangumi): Auto-flag stalled downloads after N days, default 48h threshold adjustable via `stall_timeout_hours` setting.
-- [x] **User-Customizable Regex** (ref AutoBangumi): Allow advanced users to add custom title parsing rules via settings table `custom_regex_N`, running alongside 8 built-in patterns with custom rules taking priority.
-
-### Phase 3: Web UI & Deployment
-- [x] **Basic Web UI**: Vue3 + Vite + DaisyUI login page, dashboard, subscription management, downloads queue, settings page.
-- [x] **RESTful API**: Subscription CRUD (GET/POST/PUT/DELETE), download queue, settings management, supplement trigger.
-- [x] **Docker Deployment**: Multi-stage Dockerfile (Node → Go → Alpine) + docker-compose.yml one-click startup.
-- [x] **CI/CD**: Configure GitHub Actions for multi-arch (amd64/arm64) image building and GHCR push.
-
-### Phase 4: Advanced Features (V2/V3)
-- [x] **AI-Assisted Module**: Integrate LLMs for classification and series merging. Supports 4 protocols: OpenAI / Gemini / Claude / Ollama with auto-detection.
-- [x] **Multiple Downloaders**: qBittorrent / Transmission / Aria2 implemented, switchable via env vars.
-- [x] **Plugin System**: EventBus-driven plugin mechanism with built-in plugin lifecycle management plus custom Webhook plugins and API management endpoints (`script` type and `ConfigSchema` self-description are planned, not implemented).
-- [x] **Dead Torrent Detection**: Batch query for stalled episodes, frontend warning badges, configurable threshold.
-- [x] **Custom Regex Patterns**: DB-stored user regex patterns with higher priority than built-in patterns, API reload.
-- [x] **Multiple Source Sites**: Nyaa / ACG.RIP / AnimeTosho + MultiSource aggregator with dedup merge.
-- [x] **Data Migration Tool**: Support importing data from original AutoBangumi.
-
-### Phase 5: External Messaging Platform & AI Notification System
-- [x] **Multi-Platform Messaging**: Unified `Notifier` interface with EventBus-driven auto-push, 18 platforms + `MultiNotifier` aggregated broadcast:
-  - **Chinese IM**:
-    - [x] **QQ**: OneBot protocol (NapCat/go-cqhttp/Lagrange/LLOneBot)
-    - [x] **WeChat Official Account**: Customer service message API (`cgi-bin/message/custom/send`) and template message API (`cgi-bin/message/template/send`), with token auto-refresh and short expiry protection (`WECHAT_APP_ID`, `WECHAT_APP_SECRET`, `WECHAT_USER_ID`, `WECHAT_TEMPLATE_ID`)
-    - [x] **WeCom (Enterprise WeChat)**: Webhook bot
-    - [x] **Feishu/Lark**: Webhook bot
-    - [x] **DingTalk**: Webhook bot
-  - **International IM**:
-    - [x] **Telegram**: Bot API + Markdown
-    - [x] **Discord**: Webhook
-    - [x] **Slack**: Webhook + Block Kit
-    - [x] **LINE**: Messaging API / push message
-    - [x] **WhatsApp**: Meta Cloud API (graph.facebook.com)
-    - [x] **Signal**: signal-cli REST API (`{SIGNAL_API_URL}/v2/send`, URL validation, recipient normalization/deduplication, and HTTP 4xx error snippet extraction; `SIGNAL_API_URL`, `SIGNAL_SENDER`, `SIGNAL_RECIPIENTS`)
-  - **Push Notification Services**:
-    - [x] **Email**: SMTP send notifications (goroutine + context timeout)
-    - [x] **ServerChan**: HTTP API (WeChat push)
-    - [x] **Bark**: HTTP API (iOS push)
-    - [x] **Pushover**: HTTP API
-    - [x] **Gotify**: HTTP API (self-hosted)
-    - [x] **ntfy**: HTTP API (self-hosted open source push)
-    - [x] **Matrix**: Client-Server API / PUT message
-- [x] **Task Parser (Dual Mode)**:
-  - [x] **Rule Engine (Default)**: Based on regex + keyword matching, zero dependencies, works without AI. Built-in patterns for subscribe/search/status commands.
-  - [x] **AI Enhancement (Optional)**: Integrates OpenAI/Gemini/Ollama for higher accuracy (fuzzy expressions, synonym correction), auto-fallbacks to rule engine when AI is disabled.
-- [x] **Notification Manager**: Listen to EventBus events (download complete/failed/supplement done, etc.), push notifications through all above platforms.
-- [x] **Notification Template System**: Safe template engine (no panics), 3-tier inheritance fallback (`(eventType, channel)` -> `(eventType, "")` -> system defaults), structured context, safe functions (`default`/`upper`/`lower`/`truncate`), database persistence (`NOTIFY_TEMPLATES_JSON`), and API preview/CRUD.
-- [x] **Full Platform Integration Testing & Channel Hardening**: 18-channel mock and integration test coverage, strict precedence alignment (environment variables > database), multi-channel parallel dispatch with graceful fallback.
-
-### Phase 6: Data Migration ✅
-- [x] **AutoBangumi / ani-rss SQLite Import**: `internal/migrate` parses the legacy database and imports subscriptions and episodes, exposed via `POST /api/migrate`.
-- [x] **Migration Safety Hardening**: Rejects absolute and relative path traversal, and closes the source database handle after migration to prevent handle leaks.
-
-### Phase 7: Frontend Polish + Search Fix + Schedule + Mirror Speed Test ✅
-- [x] **Mikan Chinese Search Fix**: URL-encode Chinese keywords (`url.QueryEscape`) to fix Mikan 400 error; fallback CSS selector for Mikan's updated page structure.
-- [x] **IconSax Component System**: Created `web/src/components/IconSax.vue`, 20+ Iconsax Linear icons replacing all inline SVGs and emoji.
-- [x] **UI Polish**: Login page gradient background + brand icon, sidebar nav icons, subscription card SVG status indicators + hover effects, download list status badge icons, settings page restructure.
-- [x] **Settings Page Restructure**: Vertical sidebar tabs, section grouping (downloader 4 groups / notification 5 groups), configured status ✓ badge, password visibility toggle, config progress indicator.
-- [x] **New Season Schedule**: yuc.wiki data source, weekday grouping, standard poster images, 30-min auto-refresh.
-- [x] **Search → Subscribe Flow**: Subtitle group selection modal + RSS URL auto-resolution + search cache.
-- [x] **PWA Support**: manifest.json + service worker, Chrome/Edge installable as standalone app.
-- [x] **Remember Password**: localStorage save, auto-fill on next visit.
-- [x] **Episode Status Management**: `PUT /api/episodes/{id}/status` manual status toggle.
-- [x] **Mikan Mirror Speed Test**: Auto speed test on startup to select fastest mirror + manual speed test in settings page (show latency but don't auto-select).
-
-### Phase 8: Internationalization + Batch Operations + Code Review ✅
-- [x] **Internationalization (i18n)**: Full Chinese/English bilingual support with `web/src/locales/zh.ts` + `en.ts`, instant language switching, covering all pages.
-- [x] **Lucide Icon Migration**: Migrated from IconSax to `lucide-vue-next` for unified icon style, removed legacy component.
-- [x] **Onboarding Modal**: First-login guidance modal to help new users get started quickly.
-- [x] **Changelog Modal**: Built-in version change viewer + `useVersion` composable for version detection and update reminders.
-- [x] **Batch Subscription Operations**: Batch create (`POST /api/subscriptions/batch`), batch delete (`POST /api/subscriptions/batch-delete`), batch restore (`POST /api/subscriptions/batch-restore`).
-- [x] **Episode Subgroup Name**: Episode API adds `group_name` field, frontend displays subgroup attribution.
-- [x] **Frontend Full Rewrite**: 8 major pages restructured (Schedule / Subscriptions / Settings / Search / SubscriptionDetail / Layout / Login / Downloads), new SubscriptionCard / SubscriptionEditForm / ScheduleCard components.
-- [x] **CORS Security Hardening**: Origin whitelist from config file, wildcard disabled in non-Debug mode.
-- [x] **Settings Password Masking**: API hides sensitive password fields in responses.
-- [x] **EventBus Reliability**: Subscribe returns ID for precise Unsubscribe, Publish handler 5s timeout protection.
-- [x] **Concurrency Safety Fixes**: Transmission sync/atomic race condition, MikanSource RWMutex protection.
-- [x] **JWT Secret Persistence**: Secret stored in SQLite settings table, survives restarts.
-- [x] **13 Code Review Fixes**: CORS / EventBus / Transmission / Schedule N+1 / MikanSource RWMutex / JWT persistence / MultiNotifier error aggregation / Shell audit logging / LRU search cache / Logger file handle / QBittorrent Hash / empty Hash unique constraint / scheduler infinite loop.
-
-### Phase 9: v0.5.0 Stability Hardening + Plugin Management Loop ✅
-- [x] **Download Decoupling**: Fixed so a matched torrent is dispatched immediately without waiting for BangumiID completion.
-- [x] **Metadata Compensation**: Added the Mikan detail-page crawler to fall back on `data-bangumiid` and cover image when Bangumi/TMDB APIs fail.
-- [x] **Backup Restore Zero-Value Coverage**: Fixed `Enabled: false` being skipped on restore by forcing `Select("*")` updates.
-- [x] **Schedule Navigation Guard**: Added a subscription existence check before navigation to handle soft-deleted subscriptions.
-- [x] **Type Assertion Panic Fix**: Replaced the unsafe `data["size"]` assertion in the notification manager with a safe one.
-- [x] **Stall Timeout Field**: Added `StallTimeoutHours` to the subscription model for per-anime override (global default 24h).
-- [x] **Plugin Management Tab**: Added the plugin tab in Settings, wiring `GET /api/plugins` and `POST /api/plugins/reload`.
-- [x] **Async Batch Supplement**: Rewrote `handleSupplementAll` to trigger asynchronously with pre-filtering, avoiding HTTP timeouts.
-- [x] **i18n Completion**: Completed Chinese/English translations for the new plugin management and backup pages.
-
-### Phase 10: v0.5.2 ~ v0.5.4 Architecture Optimization & Full Code Audit ✅
-- [x] **Dynamic Downloader Dispatch**: Implemented `DynamicDownloader`, supporting runtime hot-swap of qBittorrent, Transmission, and Aria2 with active health probing.
-- [x] **GORM Statement Caching & Query Optimization**: Enabled `PrepareStmt: true` and WAL mode, significantly decreasing database CPU load during high-concurrency reads.
-- [x] **Configuration Precedence 3-Tier Precedence Refactor**: Rewrote `MergeFromSettings` to fix the critical bug where default values overwrote database settings; added alias compatibility.
-- [x] **Full 20-Package Audit & Zero-Defect Bug Elimination**: Surgically fixed qB concurrent data race, Aria2 disk file leakage, TMDB numeric ID 404, organizer path traversal, passing `go test -race ./...` 100%.
-
-### Phase 11: v0.6.0 Next-Gen Microkernel Architecture & Full Ecosystem ✅
-- [x] **Microkernel 5-Step Pipeline & Physical Power-Cut Isolation**: Formulated the microkernel constitution; peripheral features are pluggable and release 100% of goroutines, network connections, and logs when disabled.
-- [x] **Native MCP Server Protocol Gateway**: Built-in SSE + Bearer Auth MCP server exposing 6 anime-ops tools and 4 governance tools (plugins cannot register private tools yet — that capability is planned, see `docs/02_PLUGIN_SPEC.md` section 6).
-- [x] **Automatic 3-Tier Disambiguation Funnel**: Pioneered Regex ➔ Bangumi Airdate Timestamp Matcher ➔ AI Fallback + Blowout Shield, resolving 95% of Chinese subgroup title ambiguities at 0 token cost.
-- [x] **Go 1.25+ Alignment & Multi-Arch Docker CI/CD**: Upgraded Dockerfile to `golang:1.25-alpine`, automated GitHub Actions multi-arch builds (`amd64`/`arm64`) to GHCR, published 7-platform precompiled release binaries on GitHub Releases.
-
-### Phase 12: v0.6.1 Series Auto-Merge, Notification Templates & Full-Stack Hardening ✅
-- [x] **TMDB Collection Auto-Merge Service**: Automatically detects entries belonging to the same franchise via Union-Find disjoint sets and TMDB metadata, assigning a unified `SeriesID` for cross-season and movie/special collection grouping without overwriting custom IDs.
-- [x] **Notification Template Engine & WeChat/Signal Hardening**: Panic-free template engine, 3-tier channel alias inheritance, WeChat dual-mode (customer service + template messages) with self-healing token refresh, Signal protocol validation, and structured data injection.
-- [x] **Seeding Lifecycle & Disk Killswitch Hardening**: Safe seeding task reclamation, hardlink `SameFile` zero-I/O validation, and cross-platform free space circuit breaker protection.
-- [x] **Native MCP Server Production Audit**: SSE idle session eviction (`EvictStaleSessions`), constant-time token comparison, strict sensitive config key interception, and comprehensive nil-service guards.
-- [x] **3-Tier Disambiguation Anti-Poisoning & Edge Coverage**: Deep filtering of year/resolution vs episode confusion, v2/v3 and decimal episode parsing, airdate window tolerance alignment, and thread-safe AI daily quota guard.
-
-### Phase 13: v0.6.2 DSH/Cordis Modern Plugin Architecture & Full-Repo Audit ✅
-- [x] **DSH / Cordis Reversible Effects Engine**: Introduced `PluginContext` with LIFO `OnDispose(fn)` cleanup stack, automatically unregistering event listeners and releasing resources upon disable/reload, completely eliminating goroutine and listener leaks.
-- [x] **Microkernel Pipeline Interceptors Dual-Track Architecture**: Exposed strongly-typed pipeline interceptors (`OrganizeInterceptor`, `FilterInterceptor`, `ParseInterceptor`) in `internal/core/interfaces.go` and `hooks.go`, completely severing `TVOrganizer`'s reverse dependency on `internal/plugin`.
-- [x] **EventBus Hardening & Concurrency Safeguards**: Eliminated Go runtime timer heap leakage caused by `time.After` (using `time.NewTimer` + Stop/Drain), resolved `Unsubscribe` slice mutation race, and added a 128-concurrency semaphore pool with elastic overflow to guarantee zero event loss.
-- [x] **Plugin Health State Machine & Enhanced UI**: Introduced 6-state lifecycle (`Inactive`, `Loading`, `Active`, `Suspended`, `Error`, `Disposing`), upgraded REST API and MCP governance tools, and updated `SettingsPage.vue` with reactive health badges, error traces, and disposable metric cards.
-
-### Phase 14: v0.7.0 qBittorrent 5.x Adaptive Engine, MCP Protocol Hardening & Automated Multi-Platform Release CI ✅
-- [x] **qBittorrent 5.x Adaptive Downloader**: Fully adaptive integration supporting `/api/v2/torrents/stop` and `start` for qB 5.x while maintaining seamless fallback to legacy 4.x `pause`/`resume`.
-- [x] **Native MCP Server Protocol Hardening**: Added `charset=utf-8` to SSE headers and verified 100% success rate under 20-session high-pressure testing.
-- [x] **Automated GitHub Actions Multi-Platform Release CI**: Automatic multi-platform cross-compilation for 7 architectures (Windows, Linux, macOS) with clean source archives and SHA256 checksums.
-- [x] **Storage Resilience & UI Localization**: Auto-creating missing backup folders and completing storage configuration translations.
+Open feature requests and defects are tracked in [project issues](https://github.com/xiaoyueRX/Ani-Go/issues).

@@ -282,7 +282,7 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 			Enabled:      &enabled,
 		}
 
-		if err := database.DB.WithContext(ctx).Create(&sub).Error; err != nil {
+		if err := database.CreateSubscription(database.DB.WithContext(ctx), &sub); err != nil {
 			return ErrorResult(fmt.Sprintf("创建订阅失败: %v", err)), nil
 		}
 
@@ -396,10 +396,10 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 
 		var filtered []core.DownloadTask
 		for _, t := range tasks {
-			if statusFilter == "downloading" && t.Progress >= 1.0 {
+			if statusFilter == "downloading" && t.IsComplete() {
 				continue
 			}
-			if statusFilter == "completed" && t.Progress < 1.0 {
+			if statusFilter == "completed" && !t.IsComplete() {
 				continue
 			}
 			filtered = append(filtered, t)
@@ -436,7 +436,7 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 	// 6. trigger_refresh
 	s.RegisterTool(Tool{
 		Name:        "trigger_refresh",
-		Description: "手动触发一次全系统 RSS 订阅源检查与自动下载调度",
+		Description: "为已启用的订阅安排历史补全",
 		InputSchema: InputSchema{
 			Type:       "object",
 			Properties: map[string]Property{},
@@ -445,7 +445,7 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 		if deps.TriggerRefresh == nil {
 			return ErrorResult("刷新触发器未配置"), nil
 		}
-		// 后台异步触发全量刷新，并挂载 recover 防止回调 panic 影响主进程
+		// 后台执行历史补全并捕获回调异常
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -454,7 +454,7 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 			}()
 			deps.TriggerRefresh()
 		}()
-		return TextResult("🚀 已触发全量 RSS 检查任务，后台正在更新中..."), nil
+		return TextResult("已提交已启用订阅的历史补全任务。"), nil
 	})
 }
 

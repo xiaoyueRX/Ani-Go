@@ -1,115 +1,101 @@
-name: Docker Build & Push
+name: Container image
 
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
-  pull_request:
-    branches: [main]
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  workflow_call:
+    inputs:
+      revision:
+        type: string
+        required: true
+      publish:
+        type: boolean
+        required: true
+      version:
+        type: string
+        default: ''
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: false
+      DOCKERHUB_TOKEN:
+        required: false
 
 jobs:
-  # ---- 测试 ----
-  test:
+  image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-
-      - name: 构建前端
-        working-directory: web
-        run: npm ci && npm run build
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-          cache: true
-
-      - name: 运行 Go 单元与竞态测试
-        run: go test -race ./...
-
-  # ---- 构建与推送 ----
-  build-and-push:
-    needs: test
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      # 检查是否配置了 Docker Hub 凭据
-      - name: 检查 Docker Hub 配置
-        id: dockerhub-check
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - name: Configure image names
+        id: names
+        env:
+          HUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          MAIN_BUILD: ${{ inputs.publish && inputs.version == '' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            echo "enabled=true" >> $GITHUB_OUTPUT
-            echo "image=${{ secrets.DOCKERHUB_USERNAME }}/ani-go" >> $GITHUB_OUTPUT
-            echo "Docker Hub 凭据已检测到，将同时推送到 Docker Hub: ${{ secrets.DOCKERHUB_USERNAME }}/ani-go"
-          else
-            echo "enabled=false" >> $GITHUB_OUTPUT
-            echo "image=" >> $GITHUB_OUTPUT
-            echo "未配置 DOCKERHUB_USERNAME / DOCKERHUB_TOKEN，仅推送到 GHCR"
+          echo "short_sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+          if [[ "$MAIN_BUILD" == true ]]; then
+            head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+            if [[ "$head" == "$(git rev-parse HEAD)" ]]; then echo 'main=true' >> "$GITHUB_OUTPUT"; fi
           fi
-
-      # Docker 元数据（多仓库标签与注解）
-      - name: Docker 元数据
+          if [[ -n "$HUB_USER" && -n "$HUB_TOKEN" ]]; then
+            echo "hub=$HUB_USER/ani-go" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Generate image tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            ${{ steps.dockerhub-check.outputs.image }}
+            ghcr.io/${{ github.repository }}
+            ${{ steps.names.outputs.hub }}
+          flavor: latest=false
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      # QEMU（arm64 模拟）
-      - name: 安装 QEMU
-        uses: docker/setup-qemu-action@v3
-
-      # Buildx（多架构构建）
-      - name: 安装 Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # 登录 GHCR
-      - name: 登录 GHCR
-        uses: docker/login-action@v3
+            type=raw,value=sha-${{ steps.names.outputs.short_sha }},enable=${{ inputs.version == '' }}
+            type=raw,value=main,enable=${{ steps.names.outputs.main == 'true' }}
+            type=raw,value=latest,enable=${{ steps.names.outputs.main == 'true' }}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        if: inputs.publish
         with:
-          registry: ${{ env.REGISTRY }}
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Log in to GHCR
+        if: inputs.publish
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # 登录 Docker Hub (如果配置了 DOCKERHUB_USERNAME 与 DOCKERHUB_TOKEN)
-      - name: 登录 Docker Hub
-        if: steps.dockerhub-check.outputs.enabled == 'true'
-        uses: docker/login-action@v3
+          password: ${{ github.token }}
+      - name: Log in to Docker Hub
+        if: inputs.publish && steps.names.outputs.hub != ''
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # 构建并推送多架构镜像（同时支持 GHCR 和 Docker Hub）
-      - name: 构建并推送
-        uses: docker/build-push-action@v6
+      - name: Build container image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ inputs.publish && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ inputs.publish }}
+          load: ${{ !inputs.publish }}
+          build-args: APP_VERSION=${{ inputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Start the image and check the API and embedded UI
+        if: ${{ !inputs.publish }}
+        env:
+          IMAGE_ID: ${{ steps.build.outputs.imageid }}
+        run: |
+          container=$(docker run -d -p 127.0.0.1::20001 "$IMAGE_ID")
+          trap 'docker rm -f "$container" >/dev/null' EXIT
+          address=$(docker port "$container" 20001/tcp)
+          curl -fsS --retry 15 --retry-all-errors --retry-delay 1 "http://$address/api/health" > "$RUNNER_TEMP/health.json"
+          jq -e '.status == "ok"' "$RUNNER_TEMP/health.json"
+          curl -fsS "http://$address/" > "$RUNNER_TEMP/anigo-index.html"
+          grep -q 'id="app"' "$RUNNER_TEMP/anigo-index.html"

@@ -5,14 +5,10 @@ const isAuthenticated = ref(false)
 const token = ref<string | null>(null)
 const isLoading = ref(true)
 
-let initPromise: Promise<void> | null = null
+let initialization: { token: string | null; promise: Promise<void> } | null = null
 
 function getToken(): string | null {
-  if (token.value) return token.value
-  const stored = localStorage.getItem('token')
-  if (stored) {
-    token.value = stored
-  }
+  token.value = localStorage.getItem('token')
   return token.value
 }
 
@@ -35,6 +31,7 @@ async function checkAuth(): Promise<boolean> {
     return false
   }
 
+  isLoading.value = true
   try {
     // 验证 token 有效性
     const response = await fetch('/api/me', {
@@ -43,34 +40,40 @@ async function checkAuth(): Promise<boolean> {
         'Content-Type': 'application/json'
       }
     })
-    
+
+    if (getToken() !== t) return false
     if (response.ok) {
       isAuthenticated.value = true
       return true
     } else if (response.status === 401) {
       // Token 过期
       setToken(null)
+      isLoading.value = false
       return false
     }
+    isAuthenticated.value = false
     return false
   } catch {
+    if (getToken() !== t) return false
     // 网络错误或服务不可用，降级为离线模式
     // 保留 token 但不标记为已认证
     isAuthenticated.value = false
     return false
   } finally {
-    isLoading.value = false
+    if (getToken() === t) isLoading.value = false
   }
 }
 
 async function initAuth(): Promise<void> {
-  if (initPromise) return initPromise
-  
-  initPromise = (async () => {
-    await checkAuth()
-  })()
-  
-  return initPromise
+  const current = getToken()
+  if (initialization?.token === current) return initialization.promise
+  const active = { token: current, promise: checkAuth().then(() => {}) }
+  initialization = active
+  try {
+    await active.promise
+  } finally {
+    if (initialization === active) initialization = null
+  }
 }
 
 function logout() {

@@ -50,13 +50,16 @@ func NewExpander(client aiChatClient, enabled bool) *Expander {
 	return &Expander{client: client, enabled: enabled, sem: semaphore.NewWeighted(maxExpandConcurrency)}
 }
 
+// Enabled 表示服务已启用智能搜索并加载了可用客户端。
+func (e *Expander) Enabled() bool { return e != nil && e.enabled && e.client != nil }
+
 // Expand returns candidate queries. It never returns download links.
 func (e *Expander) Expand(ctx context.Context, input string) ([]string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return []string{input}, nil
 	}
-	if !e.enabled || e.client == nil || e.CircuitOpen() {
+	if !e.Enabled() || e.CircuitOpen() {
 		return []string{input}, nil
 	}
 

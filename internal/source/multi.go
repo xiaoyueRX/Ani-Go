@@ -3,8 +3,10 @@ package source
 import (
 	"context"
 	"log"
+	"strings"
 	"sync"
 
+	"github.com/xiaoyueRX/Ani-Go/internal/config"
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 )
@@ -12,7 +14,9 @@ import (
 // MultiSource 聚合多个资源站，按优先级依次查询
 
 type MultiSource struct {
-	sources []core.Source
+	sources         []core.Source
+	initSearchSlots sync.Once
+	searchSlots     chan struct{}
 }
 
 func NewMultiSource(sources ...core.Source) *MultiSource {
@@ -33,70 +37,44 @@ func NewMultiSource(sources ...core.Source) *MultiSource {
 	return ms
 }
 
-func (ms *MultiSource) isSourceEnabled(key string, defaultVal bool) bool {
-	if database.DB == nil {
-		return defaultVal
-	}
-	var s database.Setting
-	if err := database.DB.Where("key = ?", key).First(&s).Error; err == nil {
-		return s.Value == "true" || s.Value == "1"
-	}
-	return defaultVal
-}
-
-func (ms *MultiSource) getSetting(key string, defaultVal string) string {
-	if database.DB == nil {
-		return defaultVal
-	}
-	var s database.Setting
-	if err := database.DB.Where("key = ?", key).First(&s).Error; err == nil && s.Value != "" {
-		return s.Value
-	}
-	return defaultVal
-}
-
 func (ms *MultiSource) getActiveSources() []core.Source {
 	if database.DB == nil {
 		return ms.sources
 	}
-
-	var baseSources []core.Source
-	hasNyaa := false
-	hasACGRIP := false
-	hasAnimeTosho := false
-
-	for _, s := range ms.sources {
-		name := s.Name()
-		if name == "Nyaa" {
-			hasNyaa = true
-		} else if name == "ACG.RIP" {
-			hasACGRIP = true
-		} else if name == "AnimeTosho" {
-			hasAnimeTosho = true
-		} else {
-			baseSources = append(baseSources, s)
+	var defaults config.SourcesConfig
+	active := make([]core.Source, 0, len(ms.sources))
+	for _, src := range ms.sources {
+		switch src := src.(type) {
+		case *NyaaSource:
+			defaults.Nyaa = config.SourceConfig{Enabled: true, Domain: src.domain}
+		case *ACGRIPSource:
+			defaults.ACGRIP = config.SourceConfig{Enabled: true, Domain: src.domain}
+		case *AnimeToshoSource:
+			defaults.AnimeTosho = config.SourceConfig{Enabled: true, Domain: src.domain}
+		default:
+			active = append(active, src)
 		}
 	}
 
-	active := append([]core.Source{}, baseSources...)
-
-	if ms.isSourceEnabled("NYAA_ENABLED", hasNyaa) {
-		domain := ms.getSetting("NYAA_DOMAIN", "nyaa.si")
-		active = append(active, NewNyaaSource(domain))
+	var rows []database.Setting
+	keys := []string{"NYAA_ENABLED", "NYAA_DOMAIN", "ACGRIP_ENABLED", "ACGRIP_DOMAIN", "ANIMETOSHO_ENABLED", "ANIMETOSHO_DOMAIN"}
+	database.DB.Where("key IN ?", keys).Find(&rows)
+	settings := make(map[string]string, len(rows))
+	for _, row := range rows {
+		settings[row.Key] = row.Value
 	}
-
-	if ms.isSourceEnabled("ACGRIP_ENABLED", hasACGRIP) {
-		domain := ms.getSetting("ACGRIP_DOMAIN", "acg.rip")
-		active = append(active, NewACGRIPSource(domain))
+	defaults.ApplySettings(func(key string) (string, bool) {
+		value, ok := settings[key]
+		return value, ok
+	})
+	if defaults.Nyaa.Enabled {
+		active = append(active, NewNyaaSource(defaults.Nyaa.Domain))
 	}
-
-	if ms.isSourceEnabled("ANIMETOSHO_ENABLED", hasAnimeTosho) {
-		domain := ms.getSetting("ANIMETOSHO_DOMAIN", "animetosho.org")
-		active = append(active, NewAnimeToshoSource(domain))
+	if defaults.ACGRIP.Enabled {
+		active = append(active, NewACGRIPSource(defaults.ACGRIP.Domain))
 	}
-
-	if len(active) == 0 {
-		return ms.sources
+	if defaults.AnimeTosho.Enabled {
+		active = append(active, NewAnimeToshoSource(defaults.AnimeTosho.Domain))
 	}
 	return active
 }
@@ -123,22 +101,16 @@ func (ms *MultiSource) Sources() []core.Source {
 }
 
 func (ms *MultiSource) FetchRSS(ctx context.Context, url string) ([]core.TorrentItem, error) {
-	// 依次尝试所有资源站，第一个成功的返回
-	var lastErr error
-	for _, s := range ms.getActiveSources() {
-		if !s.IsAvailable(ctx) {
-			continue
-		}
-		items, err := s.FetchRSS(ctx, url)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if len(items) > 0 {
-			return items, nil
+	// 一个订阅地址只向其主机发起一次请求，独立 RSS 不依赖站点首页可用性。
+	for _, src := range ms.sources {
+		if src.Name() == "Mikan" {
+			return src.FetchRSS(ctx, url)
 		}
 	}
-	return nil, lastErr
+	if len(ms.sources) > 0 {
+		return ms.sources[0].FetchRSS(ctx, url)
+	}
+	return nil, nil
 }
 
 func (ms *MultiSource) SearchAnime(ctx context.Context, title string) ([]core.TorrentItem, error) {
@@ -155,6 +127,9 @@ func (ms *MultiSource) FetchHistory(ctx context.Context, bangumiID string, filte
 
 // searchAll 在所有可用资源站上并发执行搜索，合并结果
 func (ms *MultiSource) searchAll(ctx context.Context, search func(core.Source) ([]core.TorrentItem, error), query string) ([]core.TorrentItem, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sources := ms.getActiveSources()
 	if len(sources) == 0 {
 		return nil, nil
@@ -166,13 +141,25 @@ func (ms *MultiSource) searchAll(ctx context.Context, search func(core.Source) (
 		err   error
 	}
 
+	// 同一服务的搜索与订阅补全共享额度，一个查询仍能并行访问所有内置来源。
+	ms.initSearchSlots.Do(func() { ms.searchSlots = make(chan struct{}, 8) })
 	resChan := make(chan sourceResult, len(sources))
 	var wg sync.WaitGroup
 
+startSources:
 	for _, s := range sources {
+		select {
+		case ms.searchSlots <- struct{}{}:
+		case <-ctx.Done():
+			break startSources
+		}
 		wg.Add(1)
 		go func(src core.Source) {
 			defer wg.Done()
+			defer func() { <-ms.searchSlots }()
+			if ctx.Err() != nil {
+				return
+			}
 			items, err := search(src)
 			resChan <- sourceResult{name: src.Name(), items: items, err: err}
 		}(s)
@@ -205,9 +192,59 @@ func (ms *MultiSource) searchAll(ctx context.Context, search func(core.Source) (
 		}
 	}
 
-	if len(allItems) == 0 && lastErr != nil {
-		return nil, lastErr
+	if len(allItems) == 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if lastErr != nil {
+			return nil, lastErr
+		}
 	}
-
 	return allItems, nil
+}
+
+// 无站内作品 ID 的源按订阅别名查找，禁止将字幕组或其他站点的 ID 作为作品名。
+func searchHistoryTitles(ctx context.Context, titles []string, search func(context.Context, string) ([]core.TorrentItem, error)) ([]core.TorrentItem, error) {
+	var lastErr error
+	succeeded := false
+	seen := make(map[string]bool)
+	for _, title := range titles {
+		title = strings.TrimSpace(title)
+		key := core.NormalizeTitle(title)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		items, err := search(ctx, title)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		succeeded = true
+		if len(items) > 0 {
+			return items, nil
+		}
+	}
+	if succeeded {
+		return nil, nil
+	}
+	return nil, lastErr
+}
+
+// MikanFrom 从聚合源或单一源取得已配置的蜜柑客户端。
+func MikanFrom(src core.Source) *MikanSource {
+	if m, ok := src.(*MikanSource); ok {
+		return m
+	}
+	if multi, ok := src.(*MultiSource); ok {
+		for _, s := range multi.sources {
+			if m, ok := s.(*MikanSource); ok {
+				return m
+			}
+		}
+	}
+	return nil
 }

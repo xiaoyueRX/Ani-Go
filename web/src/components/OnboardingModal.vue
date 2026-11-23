@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue"
-import { useAuth } from "../composables/useAuth"
-import { activeDownloader, downloaderForms, downloaderSettings, type DownloaderType } from "../utils/setupDownloader"
+import { computed, onMounted, ref, watch } from "vue"
+import { activeDownloader, downloaderForms, downloaderProbe, downloaderSettings, type DownloaderType } from "../utils/setupDownloader"
 import request from "../utils/request"
 import {
   ShieldCheck,
@@ -17,7 +16,6 @@ import {
   HardDrive
 } from "lucide-vue-next"
 
-const { setToken } = useAuth()
 const show = ref(false)
 const currentStep = ref(0)
 const saving = ref(false)
@@ -49,28 +47,30 @@ function applyPreset(key: "fnos" | "synology" | "linux" | "windows") {
   }
 }
 
-const storedSettings = ref<Record<string, string>>({})
 const dlType = ref<DownloaderType>("qbittorrent")
 const forms = ref(downloaderForms({}))
 const downloader = computed(() => forms.value[dlType.value])
 const dlTesting = ref(false)
 const dlTestResult = ref<{ success?: boolean; error?: string } | null>(null)
+let probeRevision = 0
+
+watch(downloader, () => {
+  probeRevision++
+  dlTesting.value = false
+  dlTestResult.value = null
+}, { deep: true, flush: "sync" })
 
 async function testDownloader() {
+  const revision = ++probeRevision
   dlTesting.value = true
   dlTestResult.value = null
   try {
-    const form = downloader.value
-    const saved = downloaderForms(storedSettings.value)[dlType.value]
-    const useActive = dlType.value === activeDownloader(storedSettings.value)
-      && form.host === saved.host && form.username === saved.username && form.category === saved.category
-      && !form.password && !form.secret
-    const { data } = await request.post("/downloader/test", useActive ? {} : { type: dlType.value, ...form })
-    dlTestResult.value = data
+    const { data } = await request.post("/downloader/test", downloaderProbe(dlType.value, downloader.value))
+    if (revision === probeRevision) dlTestResult.value = data
   } catch (e: any) {
-    dlTestResult.value = { success: false, error: e.response?.data?.error || e.message }
+    if (revision === probeRevision) dlTestResult.value = { success: false, error: e.response?.data?.error || e.message }
   } finally {
-    dlTesting.value = false
+    if (revision === probeRevision) dlTesting.value = false
   }
 }
 
@@ -89,13 +89,12 @@ onMounted(async () => {
       if (s.TV_BASE_PATH) tvBasePath.value = s.TV_BASE_PATH
       if (s.MOVIE_BASE_PATH) movieBasePath.value = s.MOVIE_BASE_PATH
       if (s.USE_HARDLINK !== undefined) useHardLink.value = s.USE_HARDLINK
-      storedSettings.value = s
       dlType.value = activeDownloader(s)
       forms.value = downloaderForms(s)
       if (s.MIKAN_RSS_URL) mikanRssUrl.value = s.MIKAN_RSS_URL
       if (s.BGMTV_USER_TOKEN) bgmUserToken.value = s.BGMTV_USER_TOKEN
     }
-    const hostKey = { qbittorrent: "QB_HOST", transmission: "TR_HOST", aria2: "ARIA2_HOST" }[dlType.value]
+    const hostKey = dlType.value === "aria2" ? "ARIA2_HOST" : dlType.value === "transmission" ? "TR_HOST" : "QB_HOST"
     if (isDefaultPassword.value || !s?.[hostKey] || !s?.MIKAN_RSS_URL) {
       show.value = true
     }
@@ -135,14 +134,6 @@ async function finishSetup() {
   saving.value = true
   errorMsg.value = ""
   try {
-    if (isDefaultPassword.value && !keepDefaultPassword.value && newPassword.value) {
-      const { data } = await request.post("/user/change-password", {
-        old_password: "admin",
-        new_password: newPassword.value,
-      })
-      setToken(data.token)
-      isDefaultPassword.value = false
-    }
     const payload: Record<string, string> = {
       TV_BASE_PATH: tvBasePath.value,
       MOVIE_BASE_PATH: movieBasePath.value,
@@ -153,11 +144,19 @@ async function finishSetup() {
     if (bgmUserToken.value) payload.BGMTV_USER_TOKEN = bgmUserToken.value
 
     await request.put("/settings", { settings: payload })
+    const changePassword = isDefaultPassword.value && !keepDefaultPassword.value && !!newPassword.value
+    if (changePassword) {
+      await request.post("/user/change-password", {
+        old_password: "admin",
+        new_password: newPassword.value,
+      })
+    }
     window.showToast?.("🎉 系统配置已成功初始化！", "success")
     localStorage.setItem(STORAGE_KEY, "true")
     show.value = false
-    if (newPassword.value) {
-      setTimeout(() => window.location.reload(), 1000)
+    if (changePassword) {
+      localStorage.removeItem("token")
+      setTimeout(() => window.location.assign("/login"), 1000)
     }
   } catch (e: any) {
     errorMsg.value = e.response?.data?.error || e.message || "保存配置失败"

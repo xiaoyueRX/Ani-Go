@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
+import PluginPanel from '../components/PluginPanel.vue'
 import { 
   Check, Antenna, Download, 
   Folder, Bell, Cpu, 
@@ -23,6 +24,10 @@ const route = useRoute()
 
 // 全局配置数据
 const settings = ref<Record<string, string>>({})
+let savedSettings: Record<string, string> = {}
+const savingSettings = ref(false)
+let settingsRead = 0
+const settingsReady = ref(false)
 const loading = ref(true)
 const error = ref('')
 const saved = ref(false)
@@ -49,7 +54,7 @@ const passwordMsg = ref('')
 const passwordError = ref('')
 
 // 版本与更新检测
-const { latestVersion, hasNewVersion, checkGitHubUpdate, updating, triggerUpdate, canSelfUpdate, environment } = useVersion()
+const { latestVersion, hasNewVersion, checkGitHubUpdate, updating, triggerUpdate, canSelfUpdate } = useVersion()
 const checkingUpdate = ref(false)
 const manualCheckMsg = ref('')
 const manualCheckMsgType = ref<'success' | 'error'>('success')
@@ -64,7 +69,7 @@ async function triggerManualCheckUpdate() {
     if (res?.hasUpdate) {
       manualCheckResult.value = 'update'
       manualCheckMsgType.value = 'success'
-      manualCheckMsg.value = `发现新版本 ${res.latest}`
+      manualCheckMsg.value = `🎉 发现新版本：${res.latest}！请前往 GitHub Releases 下载并更新。`
     } else if (res?.error) {
       manualCheckResult.value = 'error'
       manualCheckMsgType.value = 'error'
@@ -72,7 +77,7 @@ async function triggerManualCheckUpdate() {
     } else {
       manualCheckResult.value = 'latest'
       manualCheckMsgType.value = 'success'
-      manualCheckMsg.value = `✅ 当前已是最新版本 (${currentVersion.value})，暂无更新。`
+      manualCheckMsg.value = currentVersion.value ? `✅ 当前已是最新版本 (${currentVersion.value})，暂无更新。` : '✅ 当前已是最新版本，暂无更新。'
     }
   } catch (e: any) {
     manualCheckMsgType.value = 'error'
@@ -103,6 +108,15 @@ const showBackupEpisodes = ref(false)
 // 插件管理
 const pluginLoading = ref(false)
 const pluginList = ref<any[]>([])
+const pluginListError = ref('')
+const customPlugins = computed(() => pluginList.value.filter(p => !p.is_builtin))
+let pluginListRequest = 0
+const pendingPlugins = ref(new Set<string>())
+const pluginSourceFilter = ref<'all' | 'official' | 'community'>('all')
+const visiblePlugins = computed(() => pluginList.value.filter(plugin =>
+  pluginSourceFilter.value === 'all' ||
+  (plugin.origin === 'official' ? 'official' : 'community') === pluginSourceFilter.value
+))
 const showPluginModal = ref(false)
 const pluginModalTab = ref<'webhook' | 'json'>('webhook')
 const pluginForm = ref({
@@ -120,14 +134,16 @@ const pluginForm = ref({
 const pluginJsonText = ref('')
 const pluginJsonError = ref('')
 const pluginSaving = ref(false)
+const pluginFileReading = ref(false)
+let pluginFileRequest = 0
 
 const availablePluginEvents = [
-  { id: 'subscription.added', label: '订阅添加 (subscription.added)' },
-  { id: 'download.started', label: '下载开始 (download.started)' },
-  { id: 'download.completed', label: '下载完成 (download.completed)' },
-  { id: 'file.organized', label: '文件整理完毕 (file.organized)' },
-  { id: 'episode.missing', label: '剧集缺失检测 (episode.missing)' },
-  { id: 'error', label: '系统异常报警 (error)' }
+  { id: 'subscription.added', label: 'subscriptionAdded' },
+  { id: 'download.started', label: 'downloadStarted' },
+  { id: 'download.completed', label: 'downloadCompleted' },
+  { id: 'file.organized', label: 'fileOrganized' },
+  { id: 'supplement.completed', label: 'supplementCompleted' },
+  { id: 'download.failed', label: 'downloadFailed' },
 ]
 
 // 日志管理
@@ -476,13 +492,16 @@ const allFields = computed(() => {
   }
   m['USER_AVATAR_URL'] = { label: '管理员头像', key: 'USER_AVATAR_URL', placeholder: '' }
   m['AUTO_CHECK_UPDATE'] = { label: '自动检测更新', key: 'AUTO_CHECK_UPDATE', placeholder: '' }
-  m['MCP_TOKEN'] = { label: 'MCP Token', key: 'MCP_TOKEN', placeholder: '' }
   return m
 })
 
+function pluginRunning(plugin: { enabled: boolean; status?: string }) {
+  return plugin.enabled && (!plugin.status || plugin.status === 'active')
+}
+
 function isPluginActive(id: string): boolean {
   const p = pluginList.value.find(item => item.id === id)
-  return p ? !!p.enabled : false
+  return p ? pluginRunning(p) : false
 }
 
 const currentTabSections = computed<SectionDef[]>(() => {
@@ -507,10 +526,7 @@ watch(() => isPluginActive('extended-notifiers'), (active) => {
 
 async function enableNotifyPlugin() {
   const p = pluginList.value.find(item => item.id === 'extended-notifiers')
-  if (p) {
-    p.enabled = false
-    await togglePlugin(p)
-  }
+  if (p && !p.enabled) await togglePlugin(p)
 }
 
 function getVal(key: string): string { return settings.value[key] || '' }
@@ -542,6 +558,8 @@ function proxyImage(url: string | undefined): string {
 
 // MCP Server 状态与操作
 const showMcpToken = ref(false)
+const generatedMcpToken = ref('')
+const mcpConfigured = computed(() => !!generatedMcpToken.value || settings.value.MCP_TOKEN_CONFIGURED === 'true')
 const mcpGeneratingToken = ref(false)
 
 const mcpEndpointUrl = computed(() => {
@@ -550,7 +568,7 @@ const mcpEndpointUrl = computed(() => {
 })
 
 const mcpClaudeConfigJson = computed(() => {
-  const token = settings.value['MCP_TOKEN'] || 'YOUR_MCP_TOKEN'
+  const token = generatedMcpToken.value || 'YOUR_MCP_TOKEN'
   const config = {
     mcpServers: {
       'ani-go': {
@@ -569,7 +587,7 @@ async function generateMCPToken() {
   try {
     const { data } = await request.post('/mcp/token/generate')
     if (data?.token) {
-      settings.value['MCP_TOKEN'] = data.token
+      generatedMcpToken.value = data.token
       showMcpToken.value = true
       saved.value = true
       setTimeout(() => { saved.value = false }, 2500)
@@ -609,23 +627,32 @@ function copyCursorConfig() {
 
 // 基础网络请求
 async function fetchSettings() {
-  loading.value = true
-  error.value = ''
+  if (savingSettings.value) return
+  const sequence = ++settingsRead
+  if (!settingsReady.value) loading.value = true
   try {
     const { data } = await request.get('/settings')
-    settings.value = (data as Record<string, string>) || {}
-    if (settings.value['AUTO_CHECK_UPDATE'] === undefined) {
-      settings.value['AUTO_CHECK_UPDATE'] = localStorage.getItem('ani-go-auto-update') !== 'false' ? 'true' : 'false'
+    if (sequence !== settingsRead) return
+    const incoming = { ...data } as Record<string, string>
+    incoming.AUTO_CHECK_UPDATE ??= localStorage.getItem('ani-go-auto-update') !== 'false' ? 'true' : 'false'
+    const next = { ...incoming }
+    for (const [key, value] of Object.entries(settings.value)) {
+      if (value !== savedSettings[key]) next[key] = value
     }
+    savedSettings = incoming
+    settings.value = next
+    settingsReady.value = true
   } catch (e: any) {
-    error.value = e.response?.data?.error || '加载系统设置失败'
+    if (sequence === settingsRead) error.value = e.response?.data?.error || '加载系统设置失败'
   } finally {
-    loading.value = false
+    if (sequence === settingsRead) loading.value = false
   }
 }
 
 // 自定义正则配置与测试
 const customRegexList = ref<string[]>(Array(10).fill(''))
+let savedRegex: string[] = Array(10).fill('')
+let regexRead = 0
 const customRegexCompiled = ref<string[]>([])
 const customRegexLoading = ref(false)
 const customRegexSaved = ref(false)
@@ -634,14 +661,18 @@ const regexTestResult = ref<any>(null)
 const regexTesting = ref(false)
 
 async function fetchCustomRegex() {
+  if (savingSettings.value || customRegexLoading.value) return
+  const sequence = ++regexRead
   try {
     const { data } = await request.get('/settings/custom-regex')
+    if (sequence !== regexRead) return
     if (data.patterns && Array.isArray(data.patterns)) {
       const list = Array(10).fill('')
       for (let i = 0; i < 10; i++) {
         list[i] = data.patterns[i] || ''
       }
-      customRegexList.value = list
+      customRegexList.value = list.map((value, i) => customRegexList.value[i] === savedRegex[i] ? value : customRegexList.value[i])
+      savedRegex = list
     }
     if (data.compiled && Array.isArray(data.compiled)) {
       customRegexCompiled.value = data.compiled
@@ -651,16 +682,34 @@ async function fetchCustomRegex() {
   }
 }
 
+function changedRegexSettings(): Record<string, string> {
+  const updates: Record<string, string> = {}
+  for (let i = 0; i < savedRegex.length; i++) {
+    const value = customRegexList.value[i] || ''
+    if (value !== savedRegex[i]) updates[`custom_regex_${i}`] = value
+  }
+  return updates
+}
+
+function rememberSavedRegex(changes: Record<string, string>) {
+  for (let i = 0; i < savedRegex.length; i++) {
+    const key = `custom_regex_${i}`
+    if (key in changes) savedRegex[i] = changes[key]
+  }
+}
+
 async function saveCustomRegex() {
+  if (savingSettings.value || customRegexLoading.value) return
+  ++regexRead
   customRegexLoading.value = true
   customRegexSaved.value = false
   error.value = ''
   try {
-    const updates: Record<string, string> = {}
-    for (let i = 0; i < 10; i++) {
-      updates[`custom_regex_${i}`] = customRegexList.value[i] || ''
+    const updates = changedRegexSettings()
+    if (Object.keys(updates).length) {
+      await request.put('/settings', { settings: updates })
+      rememberSavedRegex(updates)
     }
-    await request.put('/settings', { settings: updates })
     const { data } = await request.post('/settings/custom-regex/reload')
     if (data.compiled && Array.isArray(data.compiled)) {
       customRegexCompiled.value = data.compiled
@@ -691,6 +740,10 @@ async function runRegexTest() {
 }
 
 async function saveAll() {
+  if (!settingsReady.value || savingSettings.value || customRegexLoading.value) return
+  savingSettings.value = true
+  ++settingsRead
+  ++regexRead
   error.value = ''
   saved.value = false
   const changed: Record<string, string> = {}
@@ -700,26 +753,33 @@ async function saveAll() {
     if (field.type === 'password' && (val === '' || val === undefined)) {
       continue
     }
-    if (val !== undefined && val !== '') {
+    if (val !== undefined && val !== (savedSettings[key] ?? '')) {
       changed[key] = val
     }
   }
-  for (let i = 0; i < 10; i++) {
-    changed[`custom_regex_${i}`] = customRegexList.value[i] || ''
-  }
+  const regexUpdates = changedRegexSettings()
+  Object.assign(changed, regexUpdates)
   try {
-    await request.put('/settings', { settings: changed })
+    if (Object.keys(changed).length) {
+      await request.put('/settings', { settings: changed })
+      Object.assign(savedSettings, changed)
+      rememberSavedRegex(regexUpdates)
+    }
     saved.value = true
     setTimeout(() => { saved.value = false }, 3000)
-    fetchCustomRegex()
   } catch (e: any) {
     error.value = e.response?.data?.error || '保存设置失败'
+    window.showToast?.(error.value, 'error')
+  } finally {
+    savingSettings.value = false
   }
+  if (saved.value && Object.keys(regexUpdates).length) void fetchCustomRegex()
 }
 
 // 通知投递历史与健康度分析
 const notifyLogs = ref<any[]>([])
 const notifyLogsLoading = ref(false)
+let notifyRead = 0
 const notifyLogsTotal = ref(0)
 const notifyLogsPage = ref(1)
 const notifyLogsPageSize = ref(10)
@@ -740,6 +800,7 @@ async function fetchNotifyStats() {
 }
 
 async function fetchNotifyLogs() {
+  const sequence = ++notifyRead
   notifyLogsLoading.value = true
   try {
     const { data } = await request.get('/notifications/logs', {
@@ -750,12 +811,13 @@ async function fetchNotifyLogs() {
         status: notifyFilterStatus.value === 'all' ? undefined : notifyFilterStatus.value,
       }
     })
+    if (sequence !== notifyRead) return
     notifyLogs.value = data.logs || []
     notifyLogsTotal.value = data.total || 0
   } catch (e) {
-    console.error('获取通知日志失败', e)
+    if (sequence === notifyRead) console.error('获取通知日志失败', e)
   } finally {
-    notifyLogsLoading.value = false
+    if (sequence === notifyRead) notifyLogsLoading.value = false
   }
 }
 
@@ -949,15 +1011,26 @@ async function testDownloader(type: string) {
 }
 
 // 插件管理逻辑
-async function fetchPlugins() {
+async function fetchPlugins(afterChange = false) {
+  const currentRequest = ++pluginListRequest
   pluginLoading.value = true
   try {
     const { data } = await request.get('/plugins')
-    pluginList.value = data || []
-  } catch (e: any) {
-    error.value = '获取插件列表失败'
+    if (currentRequest !== pluginListRequest) return false
+    if (!Array.isArray(data)) throw new Error()
+    pluginList.value = data
+    pluginListError.value = ''
+    if (activeTab.value === 'notify' && pluginList.value.some(p => p.id === 'extended-notifiers' && p.enabled && !pluginRunning(p))) {
+      activeTab.value = 'plugins'
+    }
+    return true
+  } catch {
+    if (currentRequest === pluginListRequest) {
+      pluginListError.value = afterChange ? 'settings.plugins.refreshFailed' : 'settings.plugins.listFailed'
+    }
+    return false
   } finally {
-    pluginLoading.value = false
+    if (currentRequest === pluginListRequest) pluginLoading.value = false
   }
 }
 
@@ -965,7 +1038,7 @@ async function reloadPlugins() {
   pluginLoading.value = true
   try {
     await request.post('/plugins/reload')
-    await fetchPlugins()
+    if (!await fetchPlugins(true)) return
     saved.value = true
     setTimeout(() => { saved.value = false }, 2500)
   } catch (e: any) {
@@ -975,33 +1048,44 @@ async function reloadPlugins() {
   }
 }
 
-async function togglePlugin(p: any) {
-  const previousState = p.enabled
-  const targetState = !previousState
-  p.enabled = targetState
+async function togglePlugin(p: { id: string; enabled: boolean; status?: string; error?: string }) {
+  if (pendingPlugins.value.has(p.id)) return
+  pendingPlugins.value.add(p.id)
+  const targetState = !p.enabled
   try {
-    await request.post('/plugins/toggle', { id: p.id, enabled: targetState })
+    const { data } = await request.post('/plugins/toggle', { id: p.id, enabled: targetState })
+    p.enabled = data.enabled
+    p.status = data.status
+    p.error = data.error
+    if (!await fetchPlugins(true)) return
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
   } catch (e: any) {
-    p.enabled = previousState
     error.value = e.response?.data?.error || t('settings.plugins.toggleFailed')
+  } finally {
+    pendingPlugins.value.delete(p.id)
   }
 }
 
 async function deletePlugin(id: string) {
-  if (!confirm(t('settings.plugins.deleteConfirm'))) return
+  if (pendingPlugins.value.has(id) || !confirm(t('settings.plugins.deleteConfirm'))) return
+  pendingPlugins.value.add(id)
   try {
-    await request.delete(`/plugins/${id}`)
-    await fetchPlugins()
+    await request.delete(`/plugins/${encodeURIComponent(id)}`)
+    if (!await fetchPlugins(true)) return
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
   } catch (e: any) {
     error.value = e.response?.data?.error || t('settings.plugins.deleteFailed')
+  } finally {
+    pendingPlugins.value.delete(id)
   }
 }
 
 function openAddPluginModal() {
+  if (pluginSaving.value) return
+  ++pluginFileRequest
+  pluginFileReading.value = false
   pluginForm.value = {
     id: '',
     name: '',
@@ -1015,8 +1099,8 @@ function openAddPluginModal() {
     events: ['download.completed', 'file.organized']
   }
   pluginJsonText.value = JSON.stringify({
-    name: "示例 Webhook 插件",
-    description: "接收 Ani-Go 下载与整理事件",
+    name: t('settings.plugins.exampleName'),
+    description: t('settings.plugins.exampleDescription'),
     version: "1.0.0",
     type: "webhook",
     url: "https://your-server.com/webhook",
@@ -1026,7 +1110,13 @@ function openAddPluginModal() {
   showPluginModal.value = true
 }
 
+function newCustomPluginID() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return 'custom-' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+}
+
 async function submitPluginForm() {
+  if (pluginSaving.value || pluginFileReading.value) return
   pluginSaving.value = true
   pluginJsonError.value = ''
   try {
@@ -1034,26 +1124,38 @@ async function submitPluginForm() {
       if (!pluginForm.value.name.trim()) throw new Error(t('settings.plugins.nameRequired'))
       if (!pluginForm.value.url.trim()) throw new Error(t('settings.plugins.urlRequired'))
       if (pluginForm.value.events.length === 0) throw new Error(t('settings.plugins.eventsRequired'))
+      pluginForm.value.id ||= newCustomPluginID()
       await request.post('/plugins/save', pluginForm.value)
     } else {
-      let parsed: any
-      try {
-        parsed = JSON.parse(pluginJsonText.value)
-      } catch (err: any) {
-        throw new Error('JSON: ' + err.message)
+      const parsed = JSON.parse(pluginJsonText.value)
+      const isBundle = Array.isArray(parsed)
+      const items = isBundle ? parsed : [parsed]
+      if (!items.length || items.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+        throw new Error(t('settings.plugins.invalidManifest'))
       }
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) await request.post('/plugins/save', item)
-      } else {
-        await request.post('/plugins/save', parsed)
+      for (const item of items) {
+        if (item.id == null || (typeof item.id === 'string' && !item.id.trim())) item.id = newCustomPluginID()
+      }
+      for (const [index, item] of items.entries()) {
+        try {
+          await request.post('/plugins/save', item)
+        } catch (e: any) {
+          // Keep stable IDs even when the server committed a request whose reply was lost.
+          pluginJsonText.value = JSON.stringify(isBundle ? items.slice(index) : item, null, 2)
+          if (!index) throw e
+          const reason = e.response?.data?.error || e.message || t('settings.plugins.saveFailed')
+          pluginJsonError.value = t('settings.plugins.partialImport', { count: index, total: items.length, reason })
+          await fetchPlugins(true)
+          return
+        }
       }
     }
     showPluginModal.value = false
-    await fetchPlugins()
+    if (!await fetchPlugins(true)) return
     saved.value = true
     setTimeout(() => { saved.value = false }, 2500)
   } catch (e: any) {
-    pluginJsonError.value = e.message || e.response?.data?.error || t('settings.plugins.saveFailed')
+    pluginJsonError.value = e.response?.data?.error || e.message || t('settings.plugins.saveFailed')
   } finally {
     pluginSaving.value = false
   }
@@ -1091,7 +1193,7 @@ async function executeMigration() {
   try {
     if (migrateMode.value === 'upload') {
       if (!migrateFile.value) {
-        throw new Error('请先选择要上传的数据库文件 (.db / .sqlite)')
+        throw new Error('请选择 AutoBangumi SQLite、ani.v2.json 或 ani-rss ZIP 备份')
       }
       const formData = new FormData()
       formData.append('file', migrateFile.value)
@@ -1119,27 +1221,30 @@ async function executeMigration() {
 }
 
 function exportPluginsJSON() {
-  const customOnly = pluginList.value.filter(p => !p.is_builtin)
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(customOnly.length ? customOnly : pluginList.value, null, 2))
+  if (!customPlugins.value.length || pluginListError.value) return
+  const dataStr = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(customPlugins.value, null, 2))
   const dlAnchor = document.createElement('a')
   dlAnchor.setAttribute("href", dataStr)
   dlAnchor.setAttribute("download", `anigo-plugins-${new Date().toISOString().slice(0, 10)}.json`)
   dlAnchor.click()
 }
 
-function handlePluginFileImport(e: any) {
-  const file = e.target.files?.[0]
-  if (!file) return
-  const reader = new FileReader()
-  reader.onload = (evt) => {
-    try {
-      pluginJsonText.value = evt.target?.result as string
-      pluginModalTab.value = 'json'
-    } catch (err) {
-      pluginJsonError.value = '读取文件失败'
-    }
+async function handlePluginFileImport(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || pluginSaving.value) return
+  input.value = ''
+  const current = ++pluginFileRequest
+  pluginFileReading.value = true
+  pluginJsonError.value = ''
+  try {
+    const contents = await file.text()
+    if (current === pluginFileRequest) pluginJsonText.value = contents
+  } catch {
+    if (current === pluginFileRequest) pluginJsonError.value = t('settings.plugins.fileReadFailed')
+  } finally {
+    if (current === pluginFileRequest) pluginFileReading.value = false
   }
-  reader.readAsText(file)
 }
 
 // 备份逻辑
@@ -1228,6 +1333,7 @@ function formatBackupTime(timeStr: string): string {
 
 // 系统日志逻辑
 async function fetchLogs() {
+  if (logLoading.value) return
   logLoading.value = true
   try {
     const { data } = await request.get('/logs?lines=300')
@@ -1259,7 +1365,7 @@ function copyAllLogs() {
   setTimeout(() => { saved.value = false }, 2000)
 }
 
-watch(autoRefreshLogs, (val) => {
+watch(() => activeTab.value === 'logs' && autoRefreshLogs.value, (val) => {
   if (val) {
     logTimer = setInterval(() => fetchLogs(), 3000)
   } else if (logTimer) {
@@ -1278,14 +1384,15 @@ async function handleAvatarFileChange(e: Event) {
   const file = target.files?.[0]
   if (!file) return
 
+  avatarError.value = ''
+  avatarSuccess.value = ''
+  target.value = ''
   if (file.size > 5 * 1024 * 1024) {
-    avatarError.value = '图片大小不能超过 5MB'
+    avatarError.value = '图片大小不能超过 5 MiB'
     return
   }
 
   avatarUploading.value = true
-  avatarError.value = ''
-  avatarSuccess.value = ''
 
   const formData = new FormData()
   formData.append('avatar', file)
@@ -1304,7 +1411,6 @@ async function handleAvatarFileChange(e: Event) {
     avatarError.value = err?.response?.data?.error || '头像上传失败'
   } finally {
     avatarUploading.value = false
-    if (target) target.value = ''
   }
 }
 
@@ -1322,9 +1428,11 @@ async function saveAvatarUrl() {
 }
 
 async function clearAvatar() {
-  setVal('USER_AVATAR_URL', '')
+  avatarError.value = ''
+  avatarSuccess.value = ''
   try {
     await request.put('/settings', { settings: { USER_AVATAR_URL: '' } })
+    setVal('USER_AVATAR_URL', '')
     window.dispatchEvent(new CustomEvent('avatar-updated', { detail: '' }))
     avatarSuccess.value = '头像已重置为默认'
     setTimeout(() => { avatarSuccess.value = '' }, 2500)
@@ -1372,24 +1480,27 @@ watch(activeTab, (newTab) => {
   }
 })
 
+function refreshBangumiSettings() {
+  if (activeTab.value === 'bangumi') void fetchSettings()
+}
+
 onMounted(() => {
   fetchSettings()
   fetchPlugins()
   fetchBackupList()
-  fetchLogs()
+  if (activeTab.value === 'logs') fetchLogs()
   fetchCustomRegex()
   if (activeTab.value === 'notify') {
     fetchNotifyStats()
     fetchNotifyLogs()
   }
   window.addEventListener('keydown', handleGlobalKeydown)
-  window.addEventListener('focus', () => {
-    if (activeTab.value === 'bangumi') fetchSettings()
-  })
+  window.addEventListener('focus', refreshBangumiSettings)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('focus', refreshBangumiSettings)
   if (logTimer) clearInterval(logTimer)
 })
 </script>
@@ -1405,7 +1516,7 @@ onUnmounted(() => {
             <Settings :size="20" />
           </div>
           <h1 class="text-2xl sm:text-3xl font-black tracking-tight italic">{{ $t('settings.title') }}</h1>
-          <span class="badge badge-neutral text-xs font-mono font-bold">{{ currentVersion }}</span>
+          <span v-if="currentVersion" class="badge badge-neutral text-xs font-mono font-bold">{{ currentVersion }}</span>
         </div>
         <p class="text-xs text-base-content/60 font-medium">{{ $t('settings.subtitle') }}</p>
       </div>
@@ -1414,7 +1525,7 @@ onUnmounted(() => {
         <button 
           @click="saveAll" 
           class="btn btn-primary rounded-xl px-7 gap-2 shadow-lg shadow-primary/25 hover:scale-[1.02] active:scale-95 transition-all"
-          :disabled="loading"
+          :disabled="loading || !settingsReady || savingSettings || customRegexLoading"
         >
           <Check :size="18" />
           <span class="text-xs font-black uppercase tracking-wider">{{ $t('settings.saveAll') }}</span>
@@ -1727,7 +1838,7 @@ onUnmounted(() => {
             >
               <RefreshCw v-if="mcpGeneratingToken" :size="14" class="animate-spin" />
               <Sparkles v-else :size="14" />
-              <span class="text-xs font-bold">{{ settings['MCP_TOKEN'] ? $t('settings.mcp.regenToken') : $t('settings.mcp.generateToken') }}</span>
+              <span class="text-xs font-bold">{{ mcpConfigured ? $t('settings.mcp.regenToken') : $t('settings.mcp.generateToken') }}</span>
             </button>
           </div>
 
@@ -1758,15 +1869,15 @@ onUnmounted(() => {
             <div class="space-y-1.5">
               <label class="text-xs font-bold text-base-content/75 flex items-center justify-between">
                 <span>{{ $t('settings.mcp.tokenLabel') }}</span>
-                <span v-if="settings['MCP_TOKEN']" class="text-[10px] text-success font-semibold">Bearer Auth</span>
+                <span v-if="mcpConfigured" class="text-[10px] text-success font-semibold">Bearer Auth</span>
                 <span v-else class="text-[10px] text-warning font-semibold">{{ $t('settings.mcp.notConfigured') }}</span>
               </label>
               <div class="join w-full">
                 <input 
                   :type="showMcpToken ? 'text' : 'password'" 
                   readonly 
-                  :value="settings['MCP_TOKEN'] || ''" 
-                  :placeholder="$t('settings.mcp.tokenPlaceholder')"
+                  :value="generatedMcpToken"
+                  :placeholder="$t(mcpConfigured ? 'settings.mcp.tokenHidden' : 'settings.mcp.tokenPlaceholder')"
                   class="input input-bordered join-item w-full text-xs font-mono bg-base-200/50" 
                 />
                 <button 
@@ -1777,8 +1888,8 @@ onUnmounted(() => {
                   <Eye v-else :size="14" />
                 </button>
                 <button 
-                  @click="copyText(settings['MCP_TOKEN'] || '')" 
-                  :disabled="!settings['MCP_TOKEN']"
+                  @click="copyText(generatedMcpToken)"
+                  :disabled="!generatedMcpToken"
                   class="btn join-item btn-square btn-outline border-base-300"
                   :title="$t('settings.mcp.copyTooltip')"
                 >
@@ -1798,7 +1909,7 @@ onUnmounted(() => {
               <div class="flex items-center gap-2">
                 <button 
                   @click="copyClaudeConfig" 
-                  :disabled="!settings['MCP_TOKEN']"
+                  :disabled="!generatedMcpToken"
                   class="btn btn-xs btn-primary rounded-lg gap-1.5 font-bold"
                 >
                   <Copy :size="12" />
@@ -1806,7 +1917,7 @@ onUnmounted(() => {
                 </button>
                 <button 
                   @click="copyCursorConfig" 
-                  :disabled="!settings['MCP_TOKEN']"
+                  :disabled="!generatedMcpToken"
                   class="btn btn-xs btn-ghost border border-base-300 rounded-lg gap-1.5 font-bold"
                 >
                   <Copy :size="12" />
@@ -2055,7 +2166,7 @@ onUnmounted(() => {
                 <button 
                   class="btn btn-primary btn-sm rounded-xl px-5 gap-2 shadow-md shadow-primary/20" 
                   @click="saveCustomRegex" 
-                  :disabled="customRegexLoading"
+                  :disabled="customRegexLoading || savingSettings"
                 >
                   <RefreshCw v-if="customRegexLoading" :size="14" class="animate-spin" />
                   <Check v-else :size="14" />
@@ -2266,11 +2377,11 @@ onUnmounted(() => {
               <p class="text-xs opacity-50 mt-0.5">{{ $t('settings.plugins.desc') }}</p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
-              <button class="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-300" @click="exportPluginsJSON">
+              <button class="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-300" @click="exportPluginsJSON" :disabled="!customPlugins.length || pluginLoading || !!pluginListError">
                 <Download :size="14" />
                 <span class="text-xs font-bold">{{ $t('settings.plugins.exportConfig') }}</span>
               </button>
-              <button class="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-300" @click="reloadPlugins" :disabled="pluginLoading">
+              <button class="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-300" @click="reloadPlugins" :disabled="pluginLoading || pendingPlugins.size > 0">
                 <RefreshCw :size="14" :class="{ 'animate-spin': pluginLoading }" />
                 <span class="text-xs font-bold">{{ $t('settings.plugins.reload') }}</span>
               </button>
@@ -2281,36 +2392,54 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <label class="flex items-center gap-2 text-xs font-medium">
+            {{ $t('settings.plugins.sourceFilter') }}
+            <select v-model="pluginSourceFilter" class="select select-bordered select-sm w-auto">
+              <option value="all">{{ $t('settings.plugins.allSources') }}</option>
+              <option value="official">{{ $t('settings.plugins.official') }}</option>
+              <option value="community">{{ $t('settings.plugins.community') }}</option>
+            </select>
+          </label>
+
           <!-- 插件列表网格 -->
-          <div v-if="pluginLoading && pluginList.length === 0" class="flex justify-center py-12">
+          <div v-if="pluginListError" role="alert" class="flex flex-wrap items-center gap-2 text-sm text-error">
+            {{ $t(pluginListError) }}
+            <button type="button" class="btn btn-outline btn-xs" :disabled="pluginLoading" @click="fetchPlugins()">{{ $t('common.refresh') }}</button>
+          </div>
+          <div v-else-if="pluginLoading && pluginList.length === 0" class="flex justify-center py-12">
             <span class="loading loading-spinner text-primary"></span>
           </div>
+          <p v-else-if="!visiblePlugins.length" class="py-8 text-center text-sm text-base-content/60">{{ $t('settings.plugins.noPluginsFromSource') }}</p>
           <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div 
-              v-for="plugin in pluginList" 
+            <div
+              v-for="plugin in visiblePlugins"
               :key="plugin.id"
-              class="p-5 rounded-2xl border bg-base-200/30 flex flex-col justify-between gap-4 transition-all"
+              class="min-w-0 [overflow-wrap:anywhere] p-5 rounded-2xl border bg-base-200/30 flex flex-col justify-between gap-4 transition-all"
               :class="plugin.enabled ? 'border-primary/30 shadow-sm' : 'border-base-300/40 opacity-70'"
             >
               <div>
                 <div class="flex items-start justify-between gap-3 mb-2">
-                  <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow-inner"
+                  <div class="flex min-w-0 items-start gap-2 sm:gap-3">
+                    <div class="hidden sm:flex shrink-0 w-10 h-10 rounded-xl items-center justify-center shadow-inner"
                       :class="plugin.is_builtin ? 'bg-primary/10 text-primary' : 'bg-secondary/10 text-secondary'">
                       <Sparkles v-if="plugin.is_builtin" :size="18" />
                       <Antenna v-else :size="18" />
                     </div>
-                    <div>
-                      <div class="flex items-center gap-2">
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <h4 class="font-black text-sm">{{ plugin.name }}</h4>
-                        <span class="badge badge-neutral badge-xs font-mono">v{{ plugin.version || '1.0' }}</span>
+                        <span class="badge badge-neutral badge-xs max-w-full h-auto whitespace-normal font-mono">v{{ plugin.version || '1.0' }}</span>
                       </div>
-                      <div class="flex items-center gap-1.5 mt-0.5">
-                        <span class="badge badge-xs text-[9px]" :class="plugin.is_builtin ? 'badge-primary' : 'badge-secondary'">
-                          {{ plugin.is_builtin ? $t('settings.plugins.builtin') : $t('settings.plugins.webhookType') }}
+                      <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
+                        <span class="badge badge-xs text-[9px]" :class="plugin.origin === 'official' ? 'badge-primary' : 'badge-secondary'">
+                          {{ plugin.origin === 'official' ? $t('settings.plugins.official') : $t('settings.plugins.community') }}
+                        </span>
+                        <span class="text-[10px] text-base-content/60">
+                          {{ plugin.is_builtin ? $t('settings.plugins.builtin') : (plugin.type === 'webhook' ? $t('settings.plugins.webhookType') : $t('settings.plugins.customType')) }}
                         </span>
                         <!-- 插件生命周期六状态健康指示 -->
-                        <span v-if="plugin.status === 'error' || (plugin.enabled && plugin.error)" class="badge badge-xs text-[9px] font-bold badge-error gap-1">
+                        <span v-if="plugin.status === 'suspended'" class="badge badge-xs text-[9px] font-bold badge-warning">{{ $t('settings.plugins.statusSuspended') }}</span>
+                        <span v-else-if="plugin.status === 'error' || (plugin.enabled && plugin.error)" class="badge badge-xs text-[9px] font-bold badge-error gap-1">
                           <AlertCircle :size="10" /> {{ $t('settings.plugins.statusError') }}
                         </span>
                         <span v-else-if="plugin.status === 'loading'" class="badge badge-xs text-[9px] font-bold badge-warning gap-1">
@@ -2319,7 +2448,7 @@ onUnmounted(() => {
                         <span v-else-if="plugin.status === 'disposing'" class="badge badge-xs text-[9px] font-bold badge-warning">
                           {{ $t('settings.plugins.statusDisposing') }}
                         </span>
-                        <span v-else-if="plugin.enabled || plugin.status === 'active'" class="badge badge-xs text-[9px] font-bold badge-success text-success-content gap-1">
+                        <span v-else-if="pluginRunning(plugin)" class="badge badge-xs text-[9px] font-bold badge-success text-success-content gap-1">
                           <span class="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span> {{ $t('settings.plugins.statusRunning') }}
                         </span>
                         <span v-else class="badge badge-xs text-[9px] font-bold badge-ghost opacity-60">
@@ -2331,16 +2460,19 @@ onUnmounted(() => {
                   </div>
 
                   <!-- 启用切换与删除 -->
-                  <div class="flex items-center gap-2">
+                  <div class="flex shrink-0 items-center gap-2">
                     <input 
                       type="checkbox" 
                       class="toggle toggle-primary toggle-sm"
                       :checked="plugin.enabled"
-                      @change="togglePlugin(plugin)" 
+                      :disabled="pluginLoading || pendingPlugins.has(plugin.id)"
+                      @click.prevent="togglePlugin(plugin)"
                       :title="plugin.enabled ? $t('settings.plugins.disableTip') : $t('settings.plugins.enableTip')"
                     />
                     <button 
                       v-if="!plugin.is_builtin" 
+                      :disabled="pluginLoading || pendingPlugins.has(plugin.id)"
+                      :aria-label="$t('settings.plugins.deleteNamed', { name: plugin.name })"
                       @click="deletePlugin(plugin.id)" 
                       class="btn btn-ghost btn-xs btn-circle text-error/50 hover:text-error"
                     >
@@ -2354,7 +2486,10 @@ onUnmounted(() => {
                 </p>
 
                 <!-- 异常报错报警展示 -->
-                <div v-if="plugin.status === 'error' || plugin.error" class="mt-2.5 p-2.5 rounded-xl bg-error/10 border border-error/20 text-error text-xs flex items-start gap-2">
+                <p v-if="plugin.status === 'suspended' && plugin.missing_dependencies?.length" class="mt-2.5 rounded-xl bg-warning/10 p-2.5 text-xs">
+                  {{ $t('settings.plugins.missingDependencies', { names: plugin.missing_dependencies.join(', ') }) }}
+                </p>
+                <div v-else-if="plugin.status === 'error' || plugin.error" class="mt-2.5 p-2.5 rounded-xl bg-error/10 border border-error/20 text-error text-xs flex items-start gap-2">
                   <AlertCircle :size="14" class="shrink-0 mt-0.5" />
                   <div class="space-y-0.5 overflow-hidden">
                     <div class="font-bold text-[11px]">{{ $t('settings.plugins.healthErrorTitle') }}</div>
@@ -2365,7 +2500,7 @@ onUnmounted(() => {
 
               <!-- 底部事件与目标 URL -->
               <div class="space-y-2 pt-2 border-t border-base-content/5 text-xs">
-                <div v-if="plugin.url" class="space-y-0.5">
+                <div v-if="plugin.url && !(plugin.panel?.credential && pluginRunning(plugin))" class="space-y-0.5">
                   <span class="text-[9px] font-black uppercase tracking-wider opacity-40">{{ $t('settings.plugins.targetWebhook') }}</span>
                   <div class="bg-base-300/60 px-2.5 py-1 rounded-lg font-mono text-[11px] truncate select-all">
                     {{ plugin.url }}
@@ -2375,8 +2510,8 @@ onUnmounted(() => {
                 <div v-if="plugin.events && plugin.events.length" class="space-y-1">
                   <div class="flex items-center justify-between">
                     <span class="text-[9px] font-black uppercase tracking-wider opacity-40">{{ $t('settings.plugins.listenEvents') }}</span>
-                    <span class="text-[9px] font-mono opacity-50" :class="plugin.enabled ? 'text-success' : 'text-base-content/40'">
-                      {{ plugin.enabled ? $t('settings.plugins.eventsBound', { count: plugin.events.length }) : $t('settings.plugins.eventsDisposed') }}
+                    <span class="text-[9px] font-mono opacity-50" :class="pluginRunning(plugin) ? 'text-success' : 'text-base-content/40'">
+                      {{ pluginRunning(plugin) ? $t('settings.plugins.eventsBound', { count: plugin.events.length }) : $t('settings.plugins.eventsDisposed') }}
                     </span>
                   </div>
                   <div class="flex flex-wrap gap-1">
@@ -2386,8 +2521,9 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <!-- 插件专属操作入口 (仅在启用时呈现对应操作，停用时明确标识休眠) -->
-                <div v-if="plugin.enabled">
-                  <div v-if="plugin.id === 'data-migrate'" class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5">
+                <fieldset v-if="pluginRunning(plugin)" class="min-w-0" :disabled="pluginLoading || pluginSaving || pendingPlugins.has(plugin.id)">
+                  <PluginPanel v-if="plugin.panel" :key="JSON.stringify([plugin.url, plugin.panel])" :plugin="plugin" />
+                  <div v-else-if="plugin.id === 'data-migrate'" class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5">
                     <span class="text-[10px] opacity-60">{{ $t('settings.plugins.dataMigrateDesc') }}</span>
                     <button class="btn btn-primary btn-xs rounded-xl gap-1 font-bold shadow-sm" @click="openMigrateModal">
                       <Upload :size="12" />
@@ -2441,8 +2577,8 @@ onUnmounted(() => {
                     </span>
                     <span class="badge badge-success badge-outline badge-xs text-[9px] font-bold">{{ $t('settings.plugins.statusRunning') }}</span>
                   </div>
-                </div>
-                <div v-else class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5 opacity-50">
+                </fieldset>
+                <div v-else-if="!plugin.enabled" class="pt-2 flex items-center justify-between gap-2 border-t border-base-content/5 opacity-50">
                   <span class="text-[10px] opacity-60 italic">{{ $t('settings.plugins.serviceDormant') }}</span>
                   <span class="badge badge-ghost badge-xs text-[9px]">{{ $t('settings.plugins.statusStopped') }}</span>
                 </div>
@@ -2682,7 +2818,7 @@ onUnmounted(() => {
                     <Trash2 :size="13" />
                     <span>{{ $t('settings.account.resetAvatar') }}</span>
                   </button>
-                  <span class="text-[11px] opacity-40">支持 JPG, PNG, WebP, GIF, SVG，最大 5MB</span>
+                  <span class="text-[11px] opacity-40">支持 JPG, PNG, WebP, GIF, SVG，最大 5 MiB</span>
                 </div>
 
                 <div class="space-y-1.5">
@@ -2758,7 +2894,7 @@ onUnmounted(() => {
                 </h3>
                 <p class="text-xs opacity-50 mt-0.5">检测并获取 Ani-Go 官方 GitHub 最新发布版本与更新日志</p>
               </div>
-              <span class="badge badge-neutral text-xs font-mono font-bold">{{ currentVersion }}</span>
+              <span v-if="currentVersion" class="badge badge-neutral text-xs font-mono font-bold">{{ currentVersion }}</span>
             </div>
 
             <!-- 当前版本信息与快速检查 -->
@@ -2766,11 +2902,10 @@ onUnmounted(() => {
               <div class="space-y-1">
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-black">当前安装版本：</span>
-                  <span class="font-mono text-xs font-bold text-primary">{{ currentVersion }}</span>
+                  <span class="font-mono text-xs font-bold text-primary">{{ currentVersion || '—' }}</span>
                   <span v-if="hasNewVersion" class="badge badge-error badge-xs font-bold animate-pulse">发现新版本 {{ latestVersion }}</span>
                   <span v-else-if="manualCheckResult === 'latest'" class="badge badge-success badge-xs font-bold">已是最新</span>
                 </div>
-                <p v-if="environment === 'docker' && !canSelfUpdate" class="text-xs">在原部署目录执行 <code>docker compose pull ani-go &amp;&amp; docker compose up -d ani-go</code>，或通过原部署工具重建容器。</p>
                 <p class="text-[11px] opacity-60">
                   官方主仓：<a href="https://github.com/xiaoyueRX/Ani-Go/releases" target="_blank" rel="noopener noreferrer" class="hover:underline text-primary">github.com/xiaoyueRX/Ani-Go</a>
                 </p>
@@ -2803,6 +2938,7 @@ onUnmounted(() => {
               </div>
             </div>
 
+            <p v-if="hasNewVersion && !canSelfUpdate" class="text-sm">在 Compose 部署目录运行 <code>docker compose pull ani-go</code>，然后运行 <code>docker compose up -d ani-go</code> 重建服务。</p>
             <p v-if="manualCheckMsg" class="text-xs font-bold p-3 rounded-xl border" :class="manualCheckMsgType === 'success' ? 'bg-success/10 text-success border-success/20' : 'bg-error/10 text-error border-error/20'">
               {{ manualCheckMsg }}
             </p>
@@ -2830,16 +2966,16 @@ onUnmounted(() => {
 
     <!-- 导入 / 添加插件弹窗 Modal -->
     <div v-if="showPluginModal" class="modal modal-open z-50 animate-in fade-in duration-200">
-      <div class="modal-box max-w-2xl bg-base-100 rounded-3xl p-6 sm:p-7 border border-base-200/80 shadow-2xl space-y-5">
+      <fieldset :disabled="pluginSaving" class="modal-box max-w-2xl bg-base-100 rounded-3xl p-6 sm:p-7 border border-base-200/80 shadow-2xl space-y-5">
         <div class="flex items-center justify-between">
           <div class="space-y-0.5">
             <h3 class="text-lg font-black tracking-tight flex items-center gap-2">
               <Sparkles class="text-primary" :size="20" />
-              添加 / 导入插件扩展
+              {{ $t('settings.plugins.modalTitle') }}
             </h3>
-            <p class="text-xs opacity-50">支持快速创建 Webhook 推送或直接导入 JSON 规则包</p>
+            <p class="text-xs opacity-50">{{ $t('settings.plugins.modalDesc') }}</p>
           </div>
-          <button @click="showPluginModal = false" class="btn btn-ghost btn-sm btn-circle">✕</button>
+          <button @click="showPluginModal = false" :aria-label="$t('settings.plugins.cancel')" class="btn btn-ghost btn-sm btn-circle">✕</button>
         </div>
 
         <!-- 模式切换标签 -->
@@ -2884,7 +3020,7 @@ onUnmounted(() => {
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-base-200/50 p-3.5 rounded-2xl border border-base-300/40">
               <label v-for="ev in availablePluginEvents" :key="ev.id" class="flex items-center gap-2 cursor-pointer hover:opacity-100 opacity-80 py-0.5">
                 <input type="checkbox" :value="ev.id" v-model="pluginForm.events" class="checkbox checkbox-primary checkbox-xs rounded" />
-                <span class="text-xs select-none">{{ ev.label }}</span>
+                <span class="text-xs select-none">{{ $t('settings.plugins.events.' + ev.label) }} ({{ ev.id }})</span>
               </label>
             </div>
           </div>
@@ -2900,19 +3036,19 @@ onUnmounted(() => {
               <input type="file" accept=".json,application/json" class="hidden" @change="handlePluginFileImport" />
             </label>
           </div>
-          <textarea v-model="pluginJsonText" rows="9" class="textarea textarea-bordered w-full rounded-xl font-mono text-xs leading-relaxed" placeholder="在此粘贴 JSON 格式的插件定义"></textarea>
+          <textarea :disabled="pluginFileReading" v-model="pluginJsonText" rows="9" class="textarea textarea-bordered w-full rounded-xl font-mono text-xs leading-relaxed" :placeholder="$t('settings.plugins.jsonPlaceholder')"></textarea>
         </div>
 
         <p v-if="pluginJsonError" class="text-xs text-error font-bold bg-error/10 p-3 rounded-xl border border-error/20">{{ pluginJsonError }}</p>
 
         <div class="modal-action flex justify-end gap-2.5 pt-2">
           <button @click="showPluginModal = false" class="btn btn-ghost btn-sm rounded-xl px-5">{{ $t('settings.plugins.cancel') }}</button>
-          <button @click="submitPluginForm" :disabled="pluginSaving" class="btn btn-primary btn-sm rounded-xl px-7 shadow-md">
+          <button @click="submitPluginForm" :disabled="pluginSaving || pluginFileReading" class="btn btn-primary btn-sm rounded-xl px-7 shadow-md">
             <span v-if="pluginSaving" class="loading loading-spinner loading-xs"></span>
             <span v-else>{{ $t('settings.plugins.confirmImport') }}</span>
           </button>
         </div>
-      </div>
+      </fieldset>
     </div>
 
     <!-- 数据导入与迁移弹窗 Modal -->
@@ -2948,7 +3084,7 @@ onUnmounted(() => {
           <div class="border-2 border-dashed border-base-300 rounded-2xl p-6 text-center hover:border-primary/50 transition-colors bg-base-200/30 cursor-pointer relative">
             <input 
               type="file" 
-              accept=".db,.sqlite,.sqlite3" 
+              accept=".db,.sqlite,.sqlite3,.json,.zip"
               class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               @change="onMigrateFileSelect" 
             />
@@ -2999,6 +3135,7 @@ onUnmounted(() => {
               <div class="text-lg font-black text-accent">+{{ migrateResult.Downloads || 0 }}</div>
               <div class="text-[10px] opacity-60">{{ $t('settings.migrate.dlsCount') }}</div>
             </div>
+          <p v-if="migrateResult.Skipped" class="text-sm">{{ migrateResult.Skipped }} {{ $t('settings.migrate.skippedCount') }}</p>
           </div>
           <div v-if="migrateResult.Errors && migrateResult.Errors.length" class="pt-2 text-[11px] text-error/80">
             <div class="font-bold mb-1">{{ $t('settings.migrate.errorsTitle') }}:</div>

@@ -62,8 +62,6 @@ function toggleSelectAllBatch() {
   }
 }
 const undoBarVisible = ref(false)
-const undoDeletedCount = ref(0)
-const undoDeletedIds = ref<number[]>([])
 const remainingSeconds = ref(15)
 const UNDO_TIMEOUT_SECONDS = 15
 let undoInterval: ReturnType<typeof setInterval> | null = null
@@ -77,14 +75,10 @@ const batchDeleteModalOpen = ref(false)
 const batchDeleteFilesChecked = ref(true)
 
 // 延迟删除队列
-interface PendingDelete {
-  ids: number[]
-  deleteFiles: boolean
-  timer: ReturnType<typeof setTimeout>
-}
-const pendingDeletes = ref<PendingDelete[]>([])
-const undoDeleteFiles = ref(false)
-const undoCount = ref(0)
+const pendingDeletes = ref(new Map<number, boolean>())
+const undoDeleteFiles = computed(() => [...pendingDeletes.value.values()].some(Boolean))
+const undoCount = computed(() => pendingDeletes.value.size)
+let deleteTimer: ReturnType<typeof setTimeout> | undefined
 
 function enterBatchDeleteMode() {
   batchDeleteMode.value = true
@@ -120,61 +114,41 @@ function confirmBatchDeleteWithFiles() {
 
 // 调度延迟删除
 function scheduleDelete(ids: number[], deleteFiles: boolean) {
-  // 合并到现有倒计时
-  const existing = pendingDeletes.value.length > 0 ? pendingDeletes.value[0] : null
-  if (existing) {
-    for (const id of ids) {
-      if (!existing.ids.includes(id)) existing.ids.push(id)
-    }
-    existing.deleteFiles = existing.deleteFiles || deleteFiles
-    clearTimeout(existing.timer)
-    existing.timer = setTimeout(() => executePendingDeletes(), UNDO_TIMEOUT_SECONDS * 1000)
-    remainingSeconds.value = UNDO_TIMEOUT_SECONDS
-    undoCount.value = existing.ids.length
-    undoDeleteFiles.value = existing.deleteFiles
-    undoBarVisible.value = true
-    return
-  }
-
-  const timer = setTimeout(() => executePendingDeletes(), UNDO_TIMEOUT_SECONDS * 1000)
-  pendingDeletes.value = [{ ids, deleteFiles, timer }]
-  undoCount.value = ids.length
-  undoDeleteFiles.value = deleteFiles
+  for (const id of ids) pendingDeletes.value.set(id, deleteFiles)
+  clearTimeout(deleteTimer)
+  clearUndoTimer()
   undoBarVisible.value = true
-  remainingSeconds.value = UNDO_TIMEOUT_SECONDS
   startUndoCountdown()
+  deleteTimer = setTimeout(executePendingDeletes, UNDO_TIMEOUT_SECONDS * 1000)
 }
 
-// 执行真正删除
 async function executePendingDeletes() {
-  const batch = pendingDeletes.value.shift()
-  if (!batch) return
-  undoBarVisible.value = false
-  clearUndoTimer()
-  
-  try {
-    await request.post('/subscriptions/batch-delete', {
-      ids: batch.ids,
-      delete_files: batch.deleteFiles
-    })
-    subs.value = subs.value.filter(s => !batch.ids.includes(s.id))
-  } catch (e: any) {
-    error.value = '批量删除失败，请重试'
+  const pending = pendingDeletes.value
+  undoDelete()
+  for (const deleteFiles of [false, true]) {
+    const ids = [...pending].filter(([, files]) => files === deleteFiles).map(([id]) => id)
+    for (let start = 0; start < ids.length; start += 100) {
+      const batch = ids.slice(start, start + 100)
+      try {
+        await request.post('/subscriptions/batch-delete', { ids: batch, delete_files: deleteFiles })
+        subs.value = subs.value.filter(s => !batch.includes(s.id))
+      } catch (e: any) {
+        error.value = e.response?.data?.error || '批量删除失败，请检查订阅列表后重试'
+        window.showToast?.(error.value, 'error')
+      }
+    }
   }
 }
 
-// 撤回
 function undoDelete() {
-  const batch = pendingDeletes.value.shift()
-  if (!batch) return
-  clearTimeout(batch.timer)
-  undoBarVisible.value = false
+  clearTimeout(deleteTimer)
   clearUndoTimer()
+  pendingDeletes.value = new Map()
+  undoBarVisible.value = false
 }
 
-// 判断是否待删除
 function isPending(id: number): boolean {
-  return pendingDeletes.value.some(b => b.ids.includes(id))
+  return pendingDeletes.value.has(id)
 }
 
 function startUndoCountdown() {
@@ -183,7 +157,7 @@ function startUndoCountdown() {
     remainingSeconds.value--
     if (remainingSeconds.value <= 0) {
       clearUndoTimer()
-      hideUndoBar()
+      undoBarVisible.value = false
     }
   }, 1000)
 }
@@ -193,13 +167,6 @@ function clearUndoTimer() {
     clearInterval(undoInterval)
     undoInterval = null
   }
-}
-
-function hideUndoBar() {
-  undoBarVisible.value = false
-  undoDeletedIds.value = []
-  undoDeletedCount.value = 0
-  clearUndoTimer()
 }
 
 function proxyImage(url: string | undefined): string {
@@ -308,7 +275,7 @@ async function applyAiSubscribe() {
     }
     if (aiResult.value.subgroup_pref) {
       payload.subgroup_name = aiResult.value.subgroup_pref
-      payload.allowed_subgroups = JSON.stringify([aiResult.value.subgroup_pref])
+      payload.allowed_subgroups = [aiResult.value.subgroup_pref]
     }
     await request.post('/subscriptions', payload)
     window.showToast(t('subs.quickSubscribeSuccess'), 'success')
@@ -377,8 +344,8 @@ const mergingCollections = ref(false)
 async function triggerMergeCollections() {
   mergingCollections.value = true
   try {
-    const { data } = await request.post('/subscriptions/merge-collections')
-    const count = data?.applied_count ?? 0
+    const { data } = await request.post('/subscriptions/merge-collections', { apply: true })
+    const count = data?.data?.total_applied ?? 0
     if (count > 0) {
       window.showToast(t('subs.mergeCollectionsSuccess', { count }), 'success')
       await fetchSubscriptions()
@@ -434,8 +401,14 @@ function setupEventStream() {
       addLog(payload.title, "开始扫描补全...")
     } else if (ev.Type === "supplement.completed") {
       taskCenter.value.completed++
-      addLog(payload.title, "补全扫描完成 ✅")
-      fetchSubscriptions()
+      if (payload.error) {
+        addLog(payload.title, "补全扫描出错：" + payload.error)
+      } else if (!payload.new_count) {
+        addLog(payload.title, "补全扫描完成，没有新增下载")
+      } else {
+        addLog(payload.title, "补全扫描完成，新增 " + payload.new_count + " 个下载")
+      }
+      if (payload.new_count > 0) fetchSubscriptions()
       // 如果全部完成，10秒后自动关闭，但如果有新任务则继续显示
       setTimeout(() => {
         if (taskCenter.value.completed >= taskCenter.value.total) {
@@ -470,14 +443,7 @@ onUnmounted(() => {
   clearInterval(refreshTimer)
   if (eventSource) eventSource.close()
   clearUndoTimer()
-  while (pendingDeletes.value.length > 0) {
-    const batch = pendingDeletes.value.shift()!
-    clearTimeout(batch.timer)
-    request.post('/subscriptions/batch-delete', {
-      ids: batch.ids,
-      delete_files: batch.deleteFiles
-    }).catch(() => {})
-  }
+  if (pendingDeletes.value.size) void executePendingDeletes()
 })
 </script>
 

@@ -1,4 +1,8 @@
-# Ani-Go 工作日志
+# Ani-Go 早期开发工作日志（历史归档）
+
+本文记录 2026 年 5 月开发会话当时的改动和验证样本。下文的路由、路径、统计数字及界面可能已经变更；当前操作请查阅 [部署指南](05_DEPLOYMENT.md)、[API 文档](API.md) 和 [发行记录](../CHANGELOG.md)。
+
+This archive records observations from the May 2026 development sessions. For current instructions, see the [deployment guide](05_DEPLOYMENT_EN.md) and [release history](../CHANGELOG.md).
 
 > 开始时间: 2026-05-06 ~17:00 (UTC) / 当地时间 ~02:00
 > 结束时间: ~08:00
@@ -100,13 +104,6 @@
 - TypeScript: 0 errors ✅
 - Build: success ✅
 
-## 待处理（网络恢复后执行）
-```bash
-cd /root/x/Ani-Go
-git push origin main
-```
-4 pending commits: ddbf461, 0b2e86a, a290872, 6f1d8da
-
 ## Session 6: 剧集状态管理 + 登录页美化
 
 ### 6.1 剧集状态手动切换
@@ -151,7 +148,7 @@ git push origin main
 | 5 | 5 files | 代码审查+Mikan Groups修复+搜索超时 |
 | 6 | 4 files | 剧集状态切换+最终推送 |
 
-## Session 6: 前端图标库迁移与后端健壮性修复
+## 后续会话：前端图标库迁移与后端健壮性修复
 
 ### 6.1 前端图标库迁移至 Lucide
 - **重构**: 移除不再维护的 `IconSax`，全面迁移至 `lucide-vue-next`。

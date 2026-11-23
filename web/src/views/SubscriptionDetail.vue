@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
@@ -41,7 +41,7 @@ const route = useRoute()
 const router = useRouter()
 const id = Number(route.params.id)
 
-const { t } = useI18n({ useScope: 'global' })
+const { t, locale } = useI18n({ useScope: 'global' })
 
 function proxyImage(url: string | undefined): string {
   if (!url) return ''
@@ -55,6 +55,8 @@ const sub = ref<Subscription | null>(null)
 const episodes = ref<Episode[]>([])
 const loading = ref(true)
 const error = ref('')
+const actionError = ref('')
+let detailRead = 0
 const showEdit = ref(false)
 const editDialog = ref<HTMLDialogElement | null>(null)
 const updatingEps = ref<Set<number>>(new Set())
@@ -62,24 +64,20 @@ const selectedEpisodes = ref<Set<number>>(new Set())
 const showBulkActions = ref(false)
 const bulkActionLoading = ref(false)
 
-const statusCycle: Record<string, string> = {
-  pending: 'downloading',
-  downloading: 'completed',
-  completed: 'pending',
-  failed: 'pending',
-}
-
-async function cycleEpisodeStatus(ep: Episode) {
-  const nextStatus = statusCycle[ep.manual_status || ep.status] || 'pending'
+async function setEpisodeMark(ep: Episode, event: Event) {
+  const select = event.target as HTMLSelectElement
+  const mark = select.value
+  select.value = ep.manual_status || ''
+  if (updatingEps.value.has(ep.id) || bulkActionLoading.value || mark === select.value) return
   updatingEps.value.add(ep.id)
+  actionError.value = ''
   try {
-    await request.put(`/episodes/${ep.id}/status`, { status: nextStatus })
-    ep.manual_status = nextStatus
-    if (sub.value) {
-       const { data } = await request.get(`/subscriptions/${id}`)
-       sub.value = data.subscription
-    }
-  } catch { /* ignore */ } finally {
+    const { data } = await request.put(`/episodes/${ep.id}/status`, { status: mark })
+    ep.manual_status = data.manual_status
+    await fetchDetail()
+  } catch (e: any) {
+    actionError.value = e.response?.data?.error || t('detail.error.update')
+  } finally {
     updatingEps.value.delete(ep.id)
   }
 }
@@ -94,35 +92,53 @@ function closeEditDialog() {
 }
 
 async function fetchDetail() {
+  const sequence = ++detailRead
   loading.value = true
-  error.value = ''
   try {
     const { data } = await request.get(`/subscriptions/${id}`)
+    if (sequence !== detailRead) return
+    error.value = ''
     sub.value = data.subscription
     episodes.value = data.episodes || []
+    const visible = new Set(episodes.value.map(ep => ep.id))
+    selectedEpisodes.value = new Set([...selectedEpisodes.value].filter(id => visible.has(id)))
+    showBulkActions.value = selectedEpisodes.value.size > 0
   } catch (e: any) {
+    if (sequence !== detailRead) return
     error.value = e.response?.data?.error || t('detail.error.load')
+    if ([401, 403, 404].includes(e.response?.status)) {
+      sub.value = null
+      episodes.value = []
+      clearSelection()
+    }
   } finally {
-    loading.value = false
+    if (sequence === detailRead) loading.value = false
   }
 }
 
 async function handleSaveEdit(updated: Record<string, any>) {
   try {
     const { data } = await request.put(`/subscriptions/${id}`, updated)
+    ++detailRead
+    loading.value = false
     sub.value = data
     closeEditDialog()
+    return true
   } catch (e: any) {
     alert(e.response?.data?.error || t('detail.error.update'))
+    return false
   }
 }
 
 const statusCfg = computed<Record<string, { label: string; icon: any; cls: string }>>(() => ({
   pending: { label: t('detail.logs.status.pending'), icon: History, cls: 'bg-base-200 text-base-content/40 border-base-300' },
+  submitting: { label: t('detail.logs.status.submitting'), icon: Download, cls: 'bg-primary/10 text-primary border-primary/20' },
+  retrying: { label: t('detail.logs.status.retrying'), icon: RefreshCw, cls: 'bg-warning/10 text-warning border-warning/20' },
+  downloaded: { label: t('detail.logs.status.downloaded'), icon: Check, cls: 'bg-primary/10 text-primary border-primary/20' },
+  renaming: { label: t('detail.logs.status.organizing'), icon: FileText, cls: 'bg-primary/10 text-primary border-primary/20' },
   downloading: { label: t('detail.logs.status.active'), icon: Download, cls: 'bg-primary/10 text-primary border-primary/20' },
   completed: { label: t('detail.logs.status.finished'), icon: Check, cls: 'bg-success/10 text-success border-success/20' },
-  downloaded: { label: t('detail.downloaded'), icon: Download, cls: 'bg-primary/10 text-primary border-primary/20' },
-  organized: { label: t('detail.organized'), icon: Check, cls: 'bg-success/10 text-success border-success/20' },
+  organized: { label: t('detail.logs.status.organized'), icon: Check, cls: 'bg-success/10 text-success border-success/20' },
   failed: { label: t('detail.logs.status.failed'), icon: AlertTriangle, cls: 'bg-error/10 text-error border-error/20' },
 }))
 
@@ -151,12 +167,13 @@ const groupedEpisodes = computed(() => {
 })
 
 const progress = computed(() => {
-  if (!sub.value?.total_episodes) return 0
+  if (!sub.value || sub.value.total_episodes <= 0) return null
   return Math.min(100, (sub.value.current_episodes / sub.value.total_episodes) * 100)
 })
 
 // 多选相关函数
 function toggleEpisodeSelect(epId: number) {
+  if (bulkActionLoading.value) return
   if (selectedEpisodes.value.has(epId)) {
     selectedEpisodes.value.delete(epId)
   } else {
@@ -166,6 +183,7 @@ function toggleEpisodeSelect(epId: number) {
 }
 
 function toggleSelectAll(groupEps: Episode[]) {
+  if (bulkActionLoading.value) return
   const allSelected = groupEps.every(ep => selectedEpisodes.value.has(ep.id))
   if (allSelected) {
     groupEps.forEach(ep => selectedEpisodes.value.delete(ep.id))
@@ -181,25 +199,31 @@ function clearSelection() {
 }
 
 async function bulkUpdateStatus(newStatus: string) {
-  if (selectedEpisodes.value.size === 0) return
+  if (!selectedEpisodes.value.size || bulkActionLoading.value || updatingEps.value.size) return
+  const ids = [...selectedEpisodes.value]
   bulkActionLoading.value = true
+  actionError.value = ''
   try {
-    for (const epId of selectedEpisodes.value) {
-      await request.put(`/episodes/${epId}/status`, { status: newStatus })
+    const failures = new Set<number>()
+    for (const epId of ids) {
+      try {
+        await request.put(`/episodes/${epId}/status`, { status: newStatus })
+      } catch {
+        failures.add(epId)
+      }
     }
-    // 刷新数据
+    selectedEpisodes.value = failures
+    showBulkActions.value = failures.size > 0
+    if (failures.size) actionError.value = t('detail.error.partialUpdate', { count: failures.size, total: ids.length })
     await fetchDetail()
-    clearSelection()
-  } catch (e: any) {
-    alert(e.response?.data?.error || '批量更新失败')
   } finally {
     bulkActionLoading.value = false
   }
 }
 
 async function bulkDeleteEpisodes(deleteFiles: boolean) {
-  if (selectedEpisodes.value.size === 0) return
-  if (!confirm(`确定要删除选中的 ${selectedEpisodes.value.size} 个剧集记录${deleteFiles ? ' 及文件' : ''}吗？`)) return
+  if (!selectedEpisodes.value.size || bulkActionLoading.value || updatingEps.value.size) return
+  if (!confirm(t(deleteFiles ? 'detail.bulk.confirmFiles' : 'detail.bulk.confirmRecords', { count: selectedEpisodes.value.size }))) return
   
   bulkActionLoading.value = true
   try {
@@ -208,14 +232,15 @@ async function bulkDeleteEpisodes(deleteFiles: boolean) {
     await fetchDetail()
     clearSelection()
   } catch (e: any) {
-    alert(e.response?.data?.error || '批量删除失败')
+    await fetchDetail()
+    actionError.value = e.response?.data?.error || t('detail.error.update')
   } finally {
     bulkActionLoading.value = false
   }
 }
 
 async function addToBlacklist() {
-  if (selectedEpisodes.value.size === 0 || !sub.value) return
+  if (!selectedEpisodes.value.size || !sub.value || bulkActionLoading.value || updatingEps.value.size) return
   
   const selectedEps = episodes.value.filter(ep => selectedEpisodes.value.has(ep.id))
   const keywords = new Set<string>()
@@ -243,48 +268,70 @@ async function addToBlacklist() {
   const merged = Array.from(new Set([...currentExcluded, ...keywords]))
   
   try {
-    await handleSaveEdit({ excluded_keywords: JSON.stringify(merged) })
-    alert(`已添加 ${keywords.size} 个关键词到黑名单`)
+    bulkActionLoading.value = true
+    if (!await handleSaveEdit({ excluded_keywords: JSON.stringify(merged) })) return
+    window.showToast?.(t('detail.bulk.blocked', { count: merged.length - new Set(currentExcluded).size }), 'success')
     clearSelection()
   } catch (e: any) {
-    alert(e.response?.data?.error || '添加黑名单失败')
+    actionError.value = e.response?.data?.error || t('detail.error.update')
+  } finally {
+    bulkActionLoading.value = false
   }
 }
 
-onMounted(fetchDetail)
+function refreshVisibleDetail() {
+  if (!document.hidden && !loading.value && !showEdit.value && !bulkActionLoading.value && !updatingEps.value.size) {
+    void fetchDetail()
+  }
+}
+
+let refreshTimer: number
+onMounted(() => {
+  void fetchDetail()
+  refreshTimer = window.setInterval(refreshVisibleDetail, 30_000)
+  window.addEventListener('focus', refreshVisibleDetail)
+  document.addEventListener('visibilitychange', refreshVisibleDetail)
+})
+onUnmounted(() => {
+  ++detailRead
+  window.clearInterval(refreshTimer)
+  window.removeEventListener('focus', refreshVisibleDetail)
+  document.removeEventListener('visibilitychange', refreshVisibleDetail)
+})
 </script>
 
 <template>
   <div class="space-y-10 pb-20">
     <!-- Header -->
     <div class="flex items-center justify-between">
-      <button class="btn btn-ghost border-base-300 rounded-2xl px-6 hover:bg-base-200 transition-all active:scale-95 group" @click="router.push('/')">
+      <button class="btn btn-ghost border-base-300 rounded-2xl px-6 hover:bg-base-200 transition-all active:scale-95 group" @click="router.push('/subscriptions')">
         <ChevronLeft :size="20" class="group-hover:-translate-x-1 transition-transform" />
         <span class="text-xs font-black uppercase tracking-widest">{{ t('detail.back') }}</span>
       </button>
       
-      <div v-if="sub" class="flex gap-2">
-         <button class="btn btn-ghost btn-circle hover:bg-base-200" @click="fetchDetail" :disabled="loading">
+      <div class="flex gap-2">
+         <button class="btn btn-ghost btn-circle hover:bg-base-200" :aria-label="t('common.refresh')" @click="fetchDetail" :disabled="loading">
             <RefreshCw :size="20" class="opacity-40" />
          </button>
       </div>
     </div>
 
+    <div v-if="actionError" role="alert" class="alert alert-error break-words">{{ actionError }}</div>
     <div v-if="loading && !sub" class="flex justify-center py-32">
       <span class="loading loading-spinner loading-lg text-primary"></span>
     </div>
 
-    <div v-else-if="error" class="max-w-4xl mx-auto">
+    <div v-if="error" role="alert" class="max-w-4xl mx-auto">
        <div class="alert bg-error/10 border-error/20 text-error rounded-[2rem] p-6">
           <AlertTriangle :size="24" class="shrink-0" />
           <div class="flex-1">
-             <h3 class="font-black text-sm uppercase tracking-widest">{{ t('detail.error.accessDenied') }}</h3>
+             <h3 class="font-black text-sm uppercase tracking-widest">{{ t('detail.error.load') }}</h3>
              <p class="text-sm font-bold opacity-80 mt-1">{{ error }}</p>
           </div>
        </div>
     </div>
 
-    <template v-else-if="sub">
+    <template v-if="sub">
       <!-- Main Content Card -->
       <div class="group relative bg-base-100 rounded-[3rem] border border-base-200/60 shadow-xl overflow-hidden">
         <!-- Hero Background -->
@@ -345,7 +392,7 @@ onMounted(fetchDetail)
                    </div>
                    <div class="space-y-1">
                       <p class="text-[9px] font-black uppercase tracking-widest opacity-30">{{ t('detail.stats.metadata') }}</p>
-                      <p class="text-lg font-black uppercase">{{ sub.metadata_provider || 'yuc.wiki' }}</p>
+                      <p class="text-lg font-black">{{ sub.metadata_provider?.trim() || t('detail.stats.metadataNotRecorded') }}</p>
                    </div>
                 </div>
 
@@ -356,11 +403,11 @@ onMounted(fetchDetail)
                          <p class="text-[10px] font-black uppercase tracking-widest opacity-30 leading-none">{{ t('detail.progress.title') }}</p>
                          <p class="text-2xl font-black leading-none mt-2">{{ sub.current_episodes }} <span class="text-base-content/20 mx-1">/</span> {{ sub.total_episodes || '?' }}</p>
                       </div>
-                      <div class="text-right">
+                      <div v-if="progress !== null" class="text-right">
                          <p class="text-3xl font-black tracking-tighter text-primary">{{ Math.round(progress) }}%</p>
                       </div>
                    </div>
-                   <div class="h-4 w-full bg-base-300 rounded-full overflow-hidden p-1 border border-base-300 shadow-inner">
+                   <div v-if="progress !== null" class="h-4 w-full bg-base-300 rounded-full overflow-hidden p-1 border border-base-300 shadow-inner">
                       <div 
                         class="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-1000 ease-out shadow-[0_0_12px_rgba(var(--p),0.4)]"
                         :style="{ width: `${progress}%` }"
@@ -434,37 +481,40 @@ onMounted(fetchDetail)
       <div class="space-y-6">
          <!-- Bulk Actions Bar -->
          <Transition name="slide">
-           <div v-if="showBulkActions" class="fixed bottom-16 lg:bottom-6 left-3 right-3 sm:left-auto sm:right-6 z-50 bg-base-100/95 backdrop-blur-xl rounded-2xl sm:rounded-[2rem] border border-primary/30 shadow-2xl p-3 sm:p-4 flex flex-col sm:flex-row gap-2 sm:gap-3 animate-in slide-in-from-bottom-4 overflow-x-auto no-scrollbar max-w-2xl">
+           <fieldset v-if="showBulkActions" :disabled="bulkActionLoading || updatingEps.size > 0" class="fixed bottom-16 lg:bottom-6 left-3 right-3 sm:left-auto sm:right-6 z-50 bg-base-100/95 backdrop-blur-xl rounded-2xl sm:rounded-[2rem] border border-primary/30 shadow-2xl p-3 sm:p-4 flex flex-col sm:flex-row gap-2 sm:gap-3 animate-in slide-in-from-bottom-4 max-h-[55dvh] overflow-y-auto max-w-2xl">
              <span class="text-xs sm:text-sm font-black text-primary self-center px-2 whitespace-nowrap shrink-0">
-               已选 {{ selectedEpisodes.size }} 项
+               {{ t('detail.bulk.selected', { count: selectedEpisodes.size }) }}
              </span>
-             <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
+             <div class="flex flex-wrap items-center justify-center gap-1.5">
                <button class="btn btn-sm btn-ghost gap-2" @click="bulkUpdateStatus('pending')">
-                 <History :size="16" /> 待下载
+                 <History :size="16" /> {{ t('detail.logs.status.pending') }}
                </button>
                <button class="btn btn-sm btn-ghost gap-2" @click="bulkUpdateStatus('downloading')">
-                 <Download :size="16" /> 下载中
+                 <Download :size="16" /> {{ t('detail.logs.status.active') }}
                </button>
                <button class="btn btn-sm btn-ghost gap-2" @click="bulkUpdateStatus('completed')">
-                 <Check :size="16" /> 已完成
+                 <Check :size="16" /> {{ t('detail.logs.status.finished') }}
                </button>
                <button class="btn btn-sm btn-ghost gap-2 text-warning" @click="bulkUpdateStatus('failed')">
-                 <AlertTriangle :size="16" /> 失败
+                 <AlertTriangle :size="16" /> {{ t('detail.logs.status.failed') }}
+               </button>
+               <button class="btn btn-sm btn-ghost gap-2" @click="bulkUpdateStatus('')">
+                 <X :size="16" /> {{ t('detail.clearMarks') }}
                </button>
                <button class="btn btn-sm btn-ghost gap-2 text-error" @click="bulkDeleteEpisodes(false)">
-                 <Trash2 :size="16" /> 删记录
+                 <Trash2 :size="16" /> {{ t('detail.bulk.deleteRecords') }}
                </button>
                <button class="btn btn-sm btn-ghost gap-2 text-error" @click="bulkDeleteEpisodes(true)">
-                 <Trash2 :size="16" /> 删文件
+                 <Trash2 :size="16" /> {{ t('detail.bulk.deleteFiles') }}
                </button>
                <button class="btn btn-sm btn-ghost gap-2 text-warning" @click="addToBlacklist">
-                 <Shield :size="16" /> 加黑名单
+                 <Shield :size="16" /> {{ t('detail.bulk.blacklist') }}
                </button>
                <button class="btn btn-sm btn-ghost gap-2" @click="clearSelection">
-                 <X :size="16" /> 取消
+                 <X :size="16" /> {{ t('detail.bulk.cancel') }}
                </button>
              </div>
-           </div>
+           </fieldset>
          </Transition>
          
          <div class="flex items-center gap-4 px-4 group">
@@ -487,7 +537,7 @@ onMounted(fetchDetail)
               <input type="checkbox" :checked="gIdx === 0" />
               <div class="collapse-title text-lg font-black tracking-tight flex items-center gap-3">
                 <label class="cursor-pointer flex items-center gap-2">
-                  <input type="checkbox" class="checkbox checkbox-primary" :checked="groupEps.every(ep => selectedEpisodes.has(ep.id))" @change="toggleSelectAll(groupEps)" />
+                  <input type="checkbox" class="checkbox checkbox-primary" :disabled="bulkActionLoading" :checked="groupEps.every(ep => selectedEpisodes.has(ep.id))" @change="toggleSelectAll(groupEps)" />
                   <span>{{ groupName }}</span>
                 </label>
                 <span class="text-[10px] font-black uppercase tracking-widest opacity-30 bg-base-200 px-3 py-1 rounded-full">{{ groupEps.length }} {{ t('detail.logs.episodes') }}</span>
@@ -497,7 +547,7 @@ onMounted(fetchDetail)
                   <thead>
                     <tr class="border-b border-base-200 bg-base-200/30">
                       <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6 pl-10 w-12">
-                        <input type="checkbox" class="checkbox checkbox-primary" :checked="groupEps.every(ep => selectedEpisodes.has(ep.id))" @change="toggleSelectAll(groupEps)" />
+                        <input type="checkbox" class="checkbox checkbox-primary" :disabled="bulkActionLoading" :checked="groupEps.every(ep => selectedEpisodes.has(ep.id))" @change="toggleSelectAll(groupEps)" />
                       </th>
                       <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6">{{ t('detail.logs.table.id') }}</th>
                       <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6">{{ t('detail.logs.table.name') }}</th>
@@ -511,7 +561,7 @@ onMounted(fetchDetail)
                     <tr v-for="ep in groupEps" :key="ep.id" class="hover:bg-base-200/30 transition-colors group/row" :class="{ 'bg-primary/5': selectedEpisodes.has(ep.id) }">
                       <td class="pl-10">
                         <label class="cursor-pointer">
-                          <input type="checkbox" class="checkbox checkbox-primary" :checked="selectedEpisodes.has(ep.id)" @change="toggleEpisodeSelect(ep.id)" />
+                          <input type="checkbox" class="checkbox checkbox-primary" :disabled="bulkActionLoading" :checked="selectedEpisodes.has(ep.id)" @change="toggleEpisodeSelect(ep.id)" />
                         </label>
                       </td>
                       <td class="pl-10">
@@ -525,17 +575,20 @@ onMounted(fetchDetail)
                         </div>
                       </td>
                       <td>
-                        <button 
-                          class="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all active:scale-95 flex items-center gap-2 group/btn-s shadow-sm"
-                          :class="statusCfg[ep.manual_status || ep.status]?.cls || 'bg-base-200 text-base-content/40'"
-                          @click="cycleEpisodeStatus(ep)"
-                          :disabled="updatingEps.has(ep.id)"
-                        >
-                          <span v-if="updatingEps.has(ep.id)" class="loading loading-spinner loading-xs"></span>
-                          <component v-else :is="statusCfg[ep.manual_status || ep.status]?.icon || MoreVertical" :size="14" />
-                          {{ ep.manual_status ? t('detail.manualMark') + (statusCfg[ep.manual_status]?.label || ep.manual_status) : (statusCfg[ep.status]?.label || ep.status) }}
-                        </button>
-                        <small v-if="ep.manual_status">{{ statusCfg[ep.status]?.label || ep.status }}</small>
+                        <span class="inline-flex items-center gap-2 rounded-lg border px-2 py-1 text-xs" :class="statusCfg[ep.status]?.cls">
+                          <component :is="statusCfg[ep.status]?.icon || MoreVertical" :size="14" />
+                          {{ statusCfg[ep.status]?.label || ep.status }}
+                        </span>
+                        <label class="mt-1 flex items-center gap-1 text-xs">
+                          {{ t('detail.manualMark') }}
+                          <select class="select select-bordered select-xs" :value="ep.manual_status || ''"
+                            :disabled="updatingEps.has(ep.id) || bulkActionLoading" @change="setEpisodeMark(ep, $event)">
+                            <option value="">{{ t('detail.noMark') }}</option>
+                            <option v-for="mark in ['pending', 'downloading', 'completed', 'failed']" :key="mark" :value="mark">
+                              {{ statusCfg[mark]?.label }}
+                            </option>
+                          </select>
+                        </label>
                       </td>
                       <td>
                         <span v-if="ep.is_stalled" class="flex items-center gap-1.5 text-warning font-black uppercase text-[9px] tracking-widest bg-warning/5 px-3 py-1.5 rounded-full border border-warning/10">
@@ -547,7 +600,7 @@ onMounted(fetchDetail)
                         <span class="text-xs font-bold opacity-40">{{ formatSize(ep.file_size) }}</span>
                       </td>
                       <td class="pr-10">
-                        <span class="text-[10px] font-black opacity-30 uppercase tracking-tighter">{{ new Date(ep.created_at).toLocaleString('zh-CN', {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}) }}</span>
+                        <span class="text-[10px] font-black opacity-30 uppercase tracking-tighter">{{ new Date(ep.created_at).toLocaleString(locale, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}) }}</span>
                       </td>
                     </tr>
                   </tbody>
@@ -558,7 +611,7 @@ onMounted(fetchDetail)
       </div>
 
       <!-- Edit Dialog -->
-      <dialog ref="editDialog" class="modal bg-black/80 backdrop-blur-xl" @click.self="closeEditDialog">
+      <dialog ref="editDialog" class="modal bg-black/80 backdrop-blur-xl" @click.self="closeEditDialog" @close="showEdit = false">
         <div class="modal-box max-w-2xl bg-base-100 rounded-[3rem] p-10 border border-white/5 overflow-y-auto max-h-[85vh]">
          <div class="flex items-center justify-between mb-10">
             <div class="space-y-1">

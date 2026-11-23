@@ -42,7 +42,7 @@ func TestTVOrganizer_Preview(t *testing.T) {
 		t.Errorf("OriginalPath 期望 /downloads/frieren_08.mkv, 实际 %s", res.OriginalPath)
 	}
 
-	expectedRendered := "葬送的芙莉莲/Season 1/Sousou no Frieren S01E08"
+	expectedRendered := "葬送的芙莉莲/Season 1/Sousou no Frieren S01E08.mkv"
 	if res.RenderedPath != expectedRendered {
 		t.Errorf("RenderedPath 期望 %s, 实际 %s", expectedRendered, res.RenderedPath)
 	}

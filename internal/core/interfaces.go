@@ -106,20 +106,22 @@ type AIClassifier interface {
 // TorrentItem 统一种子条目
 // json 标签与前端 Search.vue TorrentItem 接口保持同步
 type TorrentItem struct {
-	Title       string    `json:"title"`
-	URL         string    `json:"url"`
-	MagnetURL   string    `json:"magnet"`
-	InfoHash    string    `json:"info_hash"`
-	Size        int64     `json:"size"`
-	PublishedAt time.Time `json:"pub_date"`
-	SourceName  string    `json:"source"`
-	BangumiID   string    `json:"bangumi_id"`
-	EpisodeURL  string    `json:"episode_url,omitempty"`
-	CoverURL    string    `json:"cover_url,omitempty"`
-	AiredTime   string    `json:"aired_time,omitempty"`
-	AiredDate   string    `json:"aired_date,omitempty"`
-	GroupName   string    `json:"group_name"`
-	Resolution  string    `json:"resolution,omitempty"`
+	TrackingTag     string    `json:"-"`
+	Title           string    `json:"title"`
+	URL             string    `json:"url"`
+	MagnetURL       string    `json:"magnet"`
+	AlternateMagnet string    `json:"alternate_magnet,omitempty"` // 同时提供种子文件时，供仅接收磁力的插件使用
+	InfoHash        string    `json:"info_hash"`
+	Size            int64     `json:"size"`
+	PublishedAt     time.Time `json:"pub_date"`
+	SourceName      string    `json:"source"`
+	BangumiID       string    `json:"bangumi_id"`
+	EpisodeURL      string    `json:"episode_url,omitempty"`
+	CoverURL        string    `json:"cover_url,omitempty"`
+	AiredTime       string    `json:"aired_time,omitempty"`
+	AiredDate       string    `json:"aired_date,omitempty"`
+	GroupName       string    `json:"group_name"`
+	Resolution      string    `json:"resolution,omitempty"`
 	// YucWiki 元数据增强
 	TotalEpisodes int  `json:"total_episodes,omitempty"`
 	IsFinished    bool `json:"is_finished,omitempty"`
@@ -164,7 +166,7 @@ type Subscription struct {
 }
 
 type Filter struct {
-	SearchTitle      string // 无专属作品编号的资源站使用的作品检索词
+	Titles           []string // 用于无站内作品 ID 的资源源，优先匹配订阅片名及别名
 	IncludeKeywords  []string
 	ExcludeKeywords  []string
 	PreferSubgroup   string
@@ -173,19 +175,23 @@ type Filter struct {
 }
 
 type DownloadTask struct {
-	Hash        string
-	Name        string
-	SavePath    string
-	ContentPath string
-	Status      string
-	Progress    float32
-	SpeedDown   int64
-	SpeedUp     int64
-	Size        int64
-	Done        int64
-	Uploaded    int64
-	Ratio       float64
-	SeedingTime int64
+	ClientID       string
+	FollowedBy     []string
+	TrackingTag    string
+	Hash           string
+	Name           string
+	SavePath       string
+	ContentPath    string
+	Status         string
+	Progress       float32
+	RemainingBytes *int64 `json:"-"` // 下载器确认的所选文件剩余字节，未知时为空
+	SpeedDown      int64
+	SpeedUp        int64
+	Size           int64
+	Done           int64
+	Uploaded       int64
+	Ratio          float64
+	SeedingTime    int64
 }
 
 type Event struct {
@@ -211,6 +217,11 @@ type Downloader interface {
 	Pause(ctx context.Context, hash string) error
 	Resume(ctx context.Context, hash string) error
 	IsAvailable(ctx context.Context) bool
+}
+
+// TrackedDownloader 返回服务端实际创建的任务标识。
+type TrackedDownloader interface {
+	AddWithID(context.Context, TorrentItem, string) (string, error)
 }
 
 type MetadataProvider interface {

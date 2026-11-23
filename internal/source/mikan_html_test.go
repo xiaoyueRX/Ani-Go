@@ -1,6 +1,10 @@
 package source
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
@@ -194,5 +198,25 @@ func TestParseSize(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("parseSize(%q) = %d, 期望 %d", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestMikanDetailUsesOfficialSubjectLink(t *testing.T) {
+	for _, tc := range []struct{ name, html, want string }{
+		{"真实页面结构", testDetailHTML, "12345"},
+		{"Bangumi 别名域名", `<p class="bangumi-info"><a href="//bangumi.tv/subject/987">Bangumi</a></p>`, "987"},
+		{"限制详情区域", `<footer><a href="https://bgm.tv/subject/900">推荐</a></footer>`, ""},
+		{"其他网站", `<p class="bangumi-info"><a href="https://other.example/subject/900">链接</a></p>`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, tc.html) }))
+			defer server.Close()
+			m := NewMikanSource(strings.TrimPrefix(server.URL, "https://"), "", nil)
+			m.httpClient = server.Client()
+			info, err := m.GetAnimeInfo(t.Context(), "12")
+			if err != nil || info.SubjectID != tc.want {
+				t.Fatalf("详情资料 %+v，错误 %v，期望 subject %q", info, err, tc.want)
+			}
+		})
 	}
 }

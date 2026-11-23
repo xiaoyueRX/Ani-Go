@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
@@ -23,13 +24,18 @@ type pluginContextImpl struct {
 	bus         core.EventBus
 	ctx         context.Context
 	cancel      context.CancelFunc
-	baseCoreCtx core.Context
+	baseCoreCtx core.ServiceRegistry
 
+	usesBus            atomic.Bool
+	busRevision        uint64
 	mu                 sync.Mutex
 	disposed           bool
+	cleaning           bool
+	finished           chan struct{}
 	disposables        []DisposableFunc
 	subscriptions      []subscriptionRef
-	registeredServices []core.ServiceType
+	registeredServices map[core.ServiceType]serviceRegistration
+	onServiceChange    func()
 	wg                 sync.WaitGroup
 }
 
@@ -56,13 +62,19 @@ func NewPluginContext(pluginID string, bus core.EventBus, baseCtx core.Context) 
 		cCtx.SetService(core.ServiceDB, database.DB)
 	}
 
+	var registry core.ServiceRegistry
+	if baseCtx != nil {
+		registry = core.TrackServices(baseCtx)
+	}
 	return &pluginContextImpl{
-		coreCtx:     cCtx,
-		pluginID:    pluginID,
-		bus:         bus,
-		ctx:         ctx,
-		cancel:      cancel,
-		baseCoreCtx: baseCtx,
+		coreCtx:            cCtx,
+		pluginID:           pluginID,
+		bus:                bus,
+		ctx:                ctx,
+		cancel:             cancel,
+		baseCoreCtx:        registry,
+		registeredServices: make(map[core.ServiceType]serviceRegistration),
+		finished:           make(chan struct{}),
 	}
 }
 
@@ -235,20 +247,64 @@ func (c *pluginContextImpl) GetSearch() interface{} {
 	return c.coreCtx.GetSearch()
 }
 
-// RegisterService 动态注册服务至核心上下文，在插件销毁/停用时自动解绑
+type serviceRegistration struct {
+	revision uint64
+	release  func()
+}
+
+// RegisterService 的登记和销毁共享同一把锁，旧注册只能注销自己的版本。
 func (c *pluginContextImpl) RegisterService(name core.ServiceType, svc interface{}) {
 	c.mu.Lock()
-	if c.disposed {
+	if c.disposed || c.ctx.Err() != nil {
 		c.mu.Unlock()
 		return
 	}
-	c.registeredServices = append(c.registeredServices, name)
-	c.mu.Unlock()
-
-	c.SetService(name, svc)
-	if c.baseCoreCtx != nil {
-		c.baseCoreCtx.SetService(name, svc)
+	if old, ok := c.registeredServices[name]; ok {
+		old.release()
+		delete(c.registeredServices, name)
 	}
+	if svc != nil {
+		local := core.TrackServices(c.coreCtx)
+		version, releaseLocal := local.BindService(name, svc)
+		release := releaseLocal
+		if c.baseCoreCtx != nil {
+			remoteVersion, releaseRemote := c.baseCoreCtx.BindService(name, svc)
+			version = remoteVersion
+			release = func() { releaseRemote(); releaseLocal() }
+		}
+		c.registeredServices[name] = serviceRegistration{version, release}
+	}
+	notify := c.onServiceChange
+	c.mu.Unlock()
+	if notify != nil {
+		notify()
+	}
+}
+
+func (c *pluginContextImpl) watchServices(notify func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onServiceChange = notify
+}
+
+// cancelForStop 让 Stop 可以等待受管工作退出，同时保留服务至 Dispose。
+func (c *pluginContextImpl) cancelForStop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onServiceChange = nil
+	c.cancel()
+}
+
+func (c *pluginContextImpl) ownedServices(registry core.ServiceRegistry) []core.ServiceType {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var result []core.ServiceType
+	for name, reg := range c.registeredServices {
+		if registry.ServiceRevision(name) == reg.revision {
+			result = append(result, name)
+		}
+	}
+	return result
 }
 
 // OnDispose 注册销毁清理函数，插件停用时倒序 (LIFO) 执行
@@ -257,26 +313,37 @@ func (c *pluginContextImpl) OnDispose(fn DisposableFunc) {
 		return
 	}
 	c.mu.Lock()
-	if c.disposed {
+	if !c.cleaning {
+		c.disposables = append(c.disposables, fn)
 		c.mu.Unlock()
-		// 如果上下文已销毁，异步隔离执行清理
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("⚠️ [插件 %s] OnDispose 异常崩溃: %v", c.pluginID, r)
-				}
-			}()
-			fn()
-		}()
 		return
 	}
-	c.disposables = append(c.disposables, fn)
 	c.mu.Unlock()
+	c.runCleanup(fn)
+}
+
+func (c *pluginContextImpl) runCleanup(fn DisposableFunc) {
+	defer func() {
+		if issue := recover(); issue != nil {
+			c.Errorf("清理回调异常: %v", issue)
+		}
+	}()
+	fn()
+}
+
+func (c *pluginContextImpl) beginWork() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.disposed || c.ctx.Err() != nil {
+		return false
+	}
+	c.wg.Add(1)
+	return true
 }
 
 // Subscribe 订阅事件总线并在插件销毁时自动注销，杜绝事件句柄泄漏
 func (c *pluginContextImpl) Subscribe(eventType string, handler core.EventHandler) core.SubscriptionID {
-	if c.bus == nil || handler == nil {
+	if handler == nil {
 		return 0
 	}
 	c.mu.Lock()
@@ -284,11 +351,21 @@ func (c *pluginContextImpl) Subscribe(eventType string, handler core.EventHandle
 		c.mu.Unlock()
 		return 0
 	}
+	first := !c.usesBus.Swap(true)
+	notify := c.onServiceChange
+	c.mu.Unlock()
+	if first && notify != nil {
+		notify()
+	}
+	if c.bus == nil {
+		return 0
+	}
 
 	subID := c.bus.Subscribe(eventType, func(ev core.Event) {
-		if c.ctx.Err() != nil {
+		if !c.beginWork() {
 			return
 		}
+		defer c.wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				c.Errorf("事件处理器捕获异常崩溃 [%s]: %v", eventType, r)
@@ -297,6 +374,12 @@ func (c *pluginContextImpl) Subscribe(eventType string, handler core.EventHandle
 		handler(ev)
 	})
 
+	c.mu.Lock()
+	if c.disposed || c.ctx.Err() != nil {
+		c.mu.Unlock()
+		c.bus.Unsubscribe(eventType, subID)
+		return 0
+	}
 	c.subscriptions = append(c.subscriptions, subscriptionRef{evType: eventType, subID: subID})
 	c.mu.Unlock()
 	return subID
@@ -307,13 +390,9 @@ func (c *pluginContextImpl) Go(task func(ctx context.Context)) {
 	if task == nil {
 		return
 	}
-	c.mu.Lock()
-	if c.disposed || c.ctx.Err() != nil {
-		c.mu.Unlock()
+	if !c.beginWork() {
 		return
 	}
-	c.wg.Add(1)
-	c.mu.Unlock()
 
 	go func() {
 		defer c.wg.Done()
@@ -355,21 +434,14 @@ func (c *pluginContextImpl) Dispose() {
 		c.cancel()
 	}
 
-	// 2. 导出清理列表以在锁外执行
-	disposables := make([]DisposableFunc, len(c.disposables))
-	copy(disposables, c.disposables)
-	c.disposables = nil
-
-	subs := make([]subscriptionRef, len(c.subscriptions))
-	copy(subs, c.subscriptions)
+	subs := c.subscriptions
 	c.subscriptions = nil
-
-	services := make([]core.ServiceType, len(c.registeredServices))
-	copy(services, c.registeredServices)
+	services := c.registeredServices
 	c.registeredServices = nil
+	notify := c.onServiceChange
+	c.onServiceChange = nil
 	c.mu.Unlock()
 
-	// 3. 自动注销绑定的事件订阅
 	if c.bus != nil {
 		for _, s := range subs {
 			if s.subID != 0 {
@@ -377,36 +449,30 @@ func (c *pluginContextImpl) Dispose() {
 			}
 		}
 	}
-
-	// 4. 注销动态注册的服务
-	for _, sName := range services {
-		c.coreCtx.SetService(sName, nil)
-		if c.baseCoreCtx != nil {
-			c.baseCoreCtx.SetService(sName, nil)
-		}
+	// 服务先从注册表撤销，旧调用持有的资源须等已进入的回调与工作者退出后才关闭。
+	for _, reg := range services {
+		reg.release()
 	}
-
-	// 5. 倒序 (LIFO) 执行资源清理回调函数
-	for i := len(disposables) - 1; i >= 0; i-- {
-		func(fn DisposableFunc) {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("⚠️ [插件 %s] OnDispose 清理函数异常崩溃: %v", c.pluginID, r)
-				}
-			}()
-			fn()
-		}(disposables[i])
+	if notify != nil && len(services) != 0 {
+		notify()
 	}
-
-	// 6. 等待后台受管协程退出（设置 3 秒超时守卫，防止恶意协程阻塞主程序）
-	done := make(chan struct{})
 	go func() {
+		defer close(c.finished)
 		c.wg.Wait()
-		close(done)
+		c.mu.Lock()
+		c.cleaning = true
+		disposables := c.disposables
+		c.disposables = nil
+		c.mu.Unlock()
+		for i := len(disposables) - 1; i >= 0; i-- {
+			c.runCleanup(disposables[i])
+		}
 	}()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
 	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		log.Printf("⚠️ [插件 %s] 后台协程在超时时间内未完全退出", c.pluginID)
+	case <-c.finished:
+	case <-timer.C:
+		c.Warnf("等待在途工作退出，清理将在其结束后继续")
 	}
 }

@@ -1,0 +1,2 @@
+# Some existing sources use CRLF. Check trailing spaces independently of line endings.
+* whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

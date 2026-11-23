@@ -262,19 +262,29 @@ func TestOrganizer_SameFileAndConflictHandling(t *testing.T) {
 	}
 }
 
-func TestFailedReplacementPreservesLibraryFile(t *testing.T) {
-	for _, hardlink := range []bool{true, false} {
+func TestFractionalEpisodeAndFailedReplacement(t *testing.T) {
+	for _, link := range []bool{true, false} {
 		dir := t.TempDir()
-		target := filepath.Join(dir, "episode.mkv")
-		if err := os.WriteFile(target, []byte("原有媒体"), 0600); err != nil {
+		org := New("Show/S{season:02}E{ep:02}{ext}", "", "", dir, "", link, nil)
+		ep := core.Episode{Season: 1, Number: 12.5}
+		anime := core.Anime{Type: "tv"}
+		dst := dir + "/Show/S01E12.5.mkv"
+		if err := os.MkdirAll(dir+"/Show", 0755); err != nil {
 			t.Fatal(err)
 		}
-		if err := installMediaFile(filepath.Join(dir, "missing.mkv"), target, hardlink); err == nil {
-			t.Fatal("缺失的文件不能替换目标")
+		if err := os.WriteFile(dst, []byte("原版本"), 0600); err != nil {
+			t.Fatal(err)
 		}
-		got, err := os.ReadFile(target)
-		if err != nil || string(got) != "原有媒体" {
-			t.Fatalf("替换失败后原目标发生变化: %q, %v", got, err)
+		preview, err := org.Preview(context.Background(), dir+"/source.mkv", anime, ep)
+		if err != nil || filepath.Clean(preview.FinalPath) != filepath.Clean(dst) {
+			t.Errorf("小数集预览路径 %q", preview.FinalPath)
+		}
+		if _, err := org.Organize(context.Background(), dir+"/missing.mkv", anime, ep); err == nil {
+			t.Error("没有报告缺失源文件")
+		}
+		b, err := os.ReadFile(dst)
+		if err != nil || string(b) != "原版本" {
+			t.Error("覆盖失败丢失旧文件")
 		}
 	}
 }

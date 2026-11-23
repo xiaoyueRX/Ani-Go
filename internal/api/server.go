@@ -5,9 +5,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"gorm.io/gorm"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +33,11 @@ import (
 
 // Server 持有 API 所需的依赖
 type Server struct {
+	deleteMu          sync.Mutex // 串行化 Web 删除请求的归属检查与执行
+	bgmFlows          bangumiFlows
+	settingsMu        sync.Mutex
+	appContext        context.Context
+	reloadIntervals   func()
 	downloader        core.Downloader
 	triggerSupplement func(ctx context.Context, subID uint) error
 	pluginManager     *plugin.Manager
@@ -43,14 +53,23 @@ type Server struct {
 	notifyMgr         *v2.NotifyManager
 	backupManager     *backup.BackupManager // 备份管理器
 	md                core.MetadataProvider
-	mcpServer         *mcp.Server           // MCP 服务端
+	mcpServer         *mcp.Server            // MCP 服务端
 	organizer         *organizer.TVOrganizer // 文件整理器（用于 Dry-Run 预览）
-	pluginReloadMu    sync.Mutex            // 保护插件并发重载与状态切换
+	pluginReloadMu    sync.Mutex             // 保护插件并发重载与状态切换
+}
+
+func (s *Server) jobContext() context.Context {
+	if s.appContext == nil {
+		return context.Background()
+	}
+	return s.appContext
 }
 
 // StartServer 启动 HTTP API 服务（支持优雅关闭）
 // staticHandler 为嵌入式前端静态文件服务，若为 nil 则仅提供 API 服务
 type ServerOptions struct {
+	Stopped            chan<- struct{}
+	ReloadIntervals    func()
 	SmartSearchEnabled bool
 	AIChat             ai.Classifier
 	BackupManager      *backup.BackupManager
@@ -76,26 +95,30 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 		}
 		return ""
 	})
-	mcpServer.RegisterAnimeOpsTools(mcp.AnimeOpsDeps{
-		Downloader:        dl,
-		MultiSource:       multi,
-		TriggerSupplement: triggerSupp,
-		TriggerRefresh: func() {
-			if triggerSupp == nil {
+	opsDeps := mcp.AnimeOpsDeps{Downloader: dl, MultiSource: multi, TriggerSupplement: triggerSupp}
+	if triggerSupp != nil {
+		opsDeps.TriggerRefresh = func() {
+			var ids []uint
+			if err := database.DB.WithContext(ctx).Model(&database.Subscription{}).Where("enabled = ?", true).Pluck("id", &ids).Error; err != nil {
+				if ctx.Err() == nil {
+					log.Printf("[MCP] 查询历史补全订阅失败: %v", err)
+				}
 				return
 			}
-			go func() {
-				var subs []database.Subscription
-				if err := database.DB.Where("enabled = ?", true).Find(&subs).Error; err == nil {
-					for _, sub := range subs {
-						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-						_ = triggerSupp(ctx, sub.ID)
-						cancel()
-					}
+			for _, id := range ids {
+				if ctx.Err() != nil {
+					return
 				}
-			}()
-		},
-	})
+				jobCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+				err := triggerSupp(jobCtx, id)
+				cancel()
+				if err != nil && ctx.Err() == nil {
+					log.Printf("[MCP] 订阅 %d 历史补全失败: %v", id, err)
+				}
+			}
+		}
+	}
+	mcpServer.RegisterAnimeOpsTools(opsDeps)
 	mcpServer.RegisterGovernanceTools(mcp.GovernanceDeps{
 		PluginManager: pluginMgr,
 		Downloader:    dl,
@@ -103,6 +126,7 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 	})
 
 	s := &Server{
+		appContext: ctx, reloadIntervals: opts.ReloadIntervals,
 		downloader:        dl,
 		triggerSupplement: triggerSupp,
 		pluginManager:     pluginMgr,
@@ -148,8 +172,9 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 		finalHandler = apiHandler
 	}
 
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	srv := &http.Server{
+		BaseContext:  func(net.Listener) context.Context { return ctx },
 		Addr:         addr,
 		Handler:      finalHandler,
 		ReadTimeout:  30 * time.Second,
@@ -165,22 +190,37 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 		}
 	}()
 
+	mirrorDone := make(chan struct{})
 	go func() {
 		<-ctx.Done()
 		log.Println("🛑 HTTP 服务正在关闭...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			_ = srv.Close()
+		}
+		<-mirrorDone
+		if opts.Stopped != nil {
+			close(opts.Stopped)
+		}
 	}()
 
 	// 启动时自动测速，选择最快的 Mikan 镜像
 	go func() {
+		defer close(mirrorDone)
 		if s.mikanSrc == nil {
 			return
 		}
-		time.Sleep(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
 		log.Println("📡 正在测速 Mikan 镜像...")
-		results := s.mikanSrc.TestLatency(context.Background())
+		results := s.mikanSrc.TestLatency(ctx)
+		if ctx.Err() != nil {
+			return
+		}
 		best := source.BestDomain(results, s.mikanSrc.GetDomain())
 		for _, r := range results {
 			status := "✅"
@@ -214,7 +254,7 @@ func (s *Server) SetBackupManager(bm *backup.BackupManager) {
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 认证接口（AuthMiddleware 放行）
 	mux.HandleFunc("/api/login", handleLogin)
-	mux.HandleFunc("/api/health", handleHealth)
+	mux.HandleFunc("/api/health", s.handleHealth)
 
 	// 用户信息与头像
 	mux.HandleFunc("GET /api/me", handleMe)
@@ -236,8 +276,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/subscriptions/supplement-all", s.handleSupplementAll)
 
 	// 剧集管理
-	mux.HandleFunc("POST /api/subscriptions/{id}/episodes/batch-delete", s.handleBatchDeleteEpisodes)
 	mux.HandleFunc("PUT /api/episodes/{id}/status", s.handleUpdateEpisodeStatus)
+	mux.HandleFunc("POST /api/subscriptions/{id}/episodes/batch-delete", s.handleBatchDeleteEpisodes)
 
 	// 下载队列
 	mux.HandleFunc("GET /api/downloads", s.handleListDownloads)
@@ -295,6 +335,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 搜索番剧
 	mux.HandleFunc("GET /api/search", s.handleSearchAnime)
 	mux.HandleFunc("POST /api/search/smart", s.handleSmartSearch)
+	mux.HandleFunc("GET /api/search/capabilities", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]bool{"smart_search": s.smartExpander.Enabled()})
+	})
 
 	// Mikan 字幕组查询（根据 BangumiID 获取字幕组 RSS URL）
 	mux.HandleFunc("GET /api/mikan/groups", s.handleMikanGroups)
@@ -308,6 +351,15 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/plugins/custom", s.handleGetCustomPlugins)
 	mux.HandleFunc("POST /api/plugins/custom", s.handleSavePlugin)
 	mux.HandleFunc("POST /api/plugins/reload", s.handleReloadPlugins)
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		mux.HandleFunc(method+" /api/plugins/cloud-115/config", s.withCloud115(s.handleCloud115Config))
+		mux.HandleFunc(method+" /api/plugins/{id}/panel/credential", s.handlePanelCredential)
+	}
+	for _, method := range []string{"GET", "POST"} {
+		mux.HandleFunc(method+" /api/plugins/cloud-115/tasks", s.withCloud115(s.handleCloud115Tasks))
+	}
+
+	mux.HandleFunc("POST /api/plugins/{id}/panel/actions/{action}", s.handlePanelAction)
 
 	// 新番时间表（使用 yuc.wiki 数据源）
 	mux.HandleFunc("GET /api/schedule", s.handleSchedule)
@@ -384,7 +436,11 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user database.User
-	if err := database.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
+	if err := database.DB.WithContext(r.Context()).Where("username = ?", req.Username).First(&user).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "账户数据暂时不可用"})
+			return
+		}
 		log.Printf("⚠️  登录失败: 用户 %s 不存在", req.Username)
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "用户名或密码错误"})
 		return
@@ -420,12 +476,12 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user database.User
-	if err := database.DB.Where("username = ?", claims.Username).First(&user).Error; err != nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"username":            claims.Username,
-			"avatar_url":          "",
-			"is_default_password": false,
-		})
+	if err := database.DB.WithContext(r.Context()).Where("username = ? AND token_version = ?", claims.Username, claims.TokenVersion).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "登录已过期，请重新登录"})
+		} else {
+			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "账户数据暂时不可用"})
+		}
 		return
 	}
 
@@ -438,10 +494,11 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
-		"status": "ok",
-		"time":   time.Now().Format(time.RFC3339),
+		"status":  "ok",
+		"version": s.version,
+		"time":    time.Now().Format(time.RFC3339),
 	})
 }
 
@@ -535,8 +592,27 @@ func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
-	if err := s.backupManager.RestoreBackup(ctx, req.Name); err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+	restore := func() error { return s.backupManager.RestoreBackup(ctx, req.Name) }
+	var err error
+	if s.pluginManager == nil {
+		err = restore()
+	} else {
+		err = s.pluginManager.RestoreConfiguration(restore)
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "备份文件不存在"})
+		return
+	}
+	if errors.Is(err, backup.ErrInvalidArchive) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "备份格式或完整性校验失败，数据未恢复"})
+		return
+	}
+	if errors.Is(err, plugin.ErrReloadAfterRestore) {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "备份已写入数据库，插件重新加载失败，请检查配置后重载插件"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "恢复备份失败，请检查备份文件和数据库状态"})
 		return
 	}
 
@@ -558,6 +634,10 @@ func (s *Server) handleDeleteBackup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.backupManager.DeleteBackup(name); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "备份文件不存在"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
 	}

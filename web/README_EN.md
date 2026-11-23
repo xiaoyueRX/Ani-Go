@@ -1,68 +1,38 @@
-# Ani-Go Web Frontend
+# Ani-Go web frontend
 
-Management dashboard frontend for Ani-Go, built with Vue3 + Vite + TypeScript.
+[简体中文](README.md) · [Installation](../README_EN.md)
 
-## Tech Stack
+The dashboard uses Vue 3, Vue Router, TypeScript and Vite. The plugins section in Settings handles manifest import, enablement and provenance filters. `PluginPanel.vue` renders credentials, actions and task lists from an Ani-Go panel declaration. [Author guide](../docs/02_PLUGIN_SPEC_EN.md) · [Import example](../examples/plugins/cloud-tasks.json)
 
-- **Framework**: Vue 3.5+ (Composition API + `<script setup>`)
-- **Build Tool**: Vite 8
-- **Language**: TypeScript 6
-- **CSS**: TailwindCSS v4 + DaisyUI v5 (dark theme)
-- **Router**: Vue Router 4 (History mode + JWT route guard)
-- **HTTP**: Axios (interceptor auto-injects Bearer Token, 401 redirect)
+## Local development
 
-## Development
+Run these commands in the repository's `web` directory with Node 24.
 
-```bash
-cd web
-
-# Install dependencies (first time)
-npm install
-
-# Start dev server (HMR)
+```sh
+npm ci
 npm run dev
+```
 
-# Production build (output to dist/)
+The lockfile uses the public npm registry. To install from an organization mirror, pass `--registry` to `npm ci` or set `registry` in your local npm configuration.
+
+Vite serves the UI at `http://localhost:5173` by default and proxies `/api` to `http://localhost:20001`. Use the running Go server's administrator account to sign in. The client in `src/utils/request.ts` attaches the JWT and handles expired sessions.
+
+Browser tabs on the same origin share the login session. Signing out in one tab takes other management pages back to sign-in. Signing in again restores each tab’s previous internal page. The backend creates the administrator account on first startup.
+
+When subscribing from a release in search results, review the original release title and the suggested series title, season, group and resolution. You can supply a series RSS feed. Selecting multiple episodes of one series and season produces one subscription. Conflicting group or resolution choices are left open, and failed submissions remain in the dialog for review. Mikan series entries offer the release-group picker directly.
+
+Episode rows show the actual download or organization status alongside an optional manual mark. Use the selector to set or clear a mark, or select multiple episodes to apply changes together.
+
+Subscription details refresh every 30 seconds while visible and when you return to the tab. Background refresh pauses while editing or changing episodes. Refreshing Bangumi authorization in Settings preserves local unsaved changes.
+
+In Downloads, Enter submits the new-download form. Escape dismisses an idle dialog and returns focus to its opening control. When auto-refresh is on, only visible tabs poll the download queue, and each poll waits for any active read to finish.
+
+## Tests and production build
+
+```sh
+npm test
+npm run typecheck
 npm run build
-
-# Type check
-vue-tsc -b
 ```
 
-Dev server runs at `http://localhost:5173`. API requests should be proxied to the Go backend (configure proxy in `vite.config.ts`).
-
-## Project Structure
-
-```
-web/
-├── src/
-│   ├── App.vue              # Root component
-│   ├── main.ts              # Entry point (mount App + Router)
-│   ├── style.css            # Global styles (Tailwind + DaisyUI)
-│   ├── router/index.ts      # Route definitions (login / subscriptions / downloads / settings)
-│   ├── utils/request.ts     # Axios wrapper (token injection + 401 interception)
-│   ├── components/          # Reusable components
-│   │   └── SubscriptionEditForm.vue  # Subscription edit form
-│   └── views/               # Page components
-│       ├── Login.vue        # Login page
-│       ├── Layout.vue       # Layout shell (sidebar nav + top bar)
-│       ├── Subscriptions.vue      # Subscription list
-│       ├── SubscriptionDetail.vue # Subscription detail + episodes
-│       ├── SubscriptionForm.vue   # New subscription form
-│       ├── Downloads.vue    # Download queue
-│       └── SettingsPage.vue # Settings management
-├── index.html               # HTML entry point
-├── vite.config.ts           # Vite configuration
-├── tsconfig.json            # TypeScript configuration
-└── package.json             # Dependencies and scripts
-```
-
-## Production Deployment
-
-The frontend build output (`dist/`) is embedded into the Go binary via `//go:embed`. No separate deployment is needed. See the project root README.md for details.
-
-## Notes
-
-- Under DaisyUI v5 + Node 24, `@plugin "daisyui"` in CSS fails. Use `@import "daisyui/daisyui.css"` in `style.css` instead.
-- `index.html` sets `data-theme="dark"` for DaisyUI dark mode.
-- Vue Router uses History mode. The Go backend's static file handler falls back to `index.html` for all non-`/api/*` paths.
+`npm run build` checks types and writes `web/dist`. Building the Go binary from the repository root embeds those assets. The UI reads the running server version from `/api/health`. [Build configuration](vite.config.ts) · [Routes](src/router/index.ts) · [HTTP reference](../docs/API.md)

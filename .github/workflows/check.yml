@@ -1,0 +1,74 @@
+name: Verify source
+
+on:
+  workflow_call:
+    inputs:
+      revision:
+        type: string
+        required: true
+      upload-web:
+        type: boolean
+        default: false
+      historical-rebuild:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test & Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Test and build the embedded UI
+        working-directory: web
+        env:
+          HISTORICAL_REBUILD: ${{ inputs.historical-rebuild }}
+        run: |
+          npm ci
+          if [[ "$HISTORICAL_REBUILD" == true ]]; then
+            npm run test --if-present
+          else
+            npm test
+          fi
+          npm run build
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Check Go code and build the production binary
+        run: |
+          go vet ./...
+          go test -race -count=1 -timeout=5m ./...
+          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$RUNNER_TEMP/anigo" .
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: ${{ !inputs.historical-rebuild }}
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements-docs.txt
+      - name: Check API and documentation contracts
+        if: ${{ !inputs.historical-rebuild }}
+        run: |
+          python -m pip install -r scripts/requirements-docs.txt
+          python scripts/check_docs.py
+      - name: Test the release installer
+        if: ${{ !inputs.historical-rebuild }}
+        run: python scripts/test_install.py
+      - name: Save verified UI for release packaging
+        if: inputs.upload-web
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-dist
+          path: web/dist/
+          if-no-files-found: error
+          retention-days: 1

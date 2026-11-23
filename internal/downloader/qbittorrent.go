@@ -44,10 +44,10 @@ func NewQBittorrent(host, username, password, category string) *QBittorrent {
 	client.Jar = jar
 	return &QBittorrent{
 		httpClient: client,
-		host:     strings.TrimRight(host, "/"),
-		username: username,
-		password: password,
-		category: category,
+		host:       strings.TrimRight(host, "/"),
+		username:   username,
+		password:   password,
+		category:   category,
 	}
 }
 
@@ -119,10 +119,16 @@ func (q *QBittorrent) addWithRetry(ctx context.Context, item core.TorrentItem, s
 	} else {
 		data.Set("urls", item.URL)
 	}
-	data.Set("savepath", savePath)
+	if savePath != "" {
+		data.Set("savepath", savePath)
+		data.Set("autoTMM", "false")
+	}
 	data.Set("category", q.category)
 	// 构建标签: ani-go + 字幕组 + 分辨率
 	tags := []string{"ani-go"}
+	if item.TrackingTag != "" {
+		tags = append(tags, item.TrackingTag)
+	}
 	if item.GroupName != "" {
 		tags = append(tags, item.GroupName)
 	}
@@ -131,7 +137,6 @@ func (q *QBittorrent) addWithRetry(ctx context.Context, item core.TorrentItem, s
 	}
 	// qBittorrent API 使用逗号分隔标签（分号在 v4.3.4 之后也支持，但 v5.x 建议用逗号或数组）
 	data.Set("tags", strings.Join(tags, ","))
-	data.Set("autoTMM", "false")
 	data.Set("paused", "false")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -530,16 +535,18 @@ func (q *QBittorrent) ensureLogin(ctx context.Context) error {
 
 // qbTorrentInfo qBittorrent API 返回的单个种子信息
 type qbTorrentInfo struct {
+	Tags        string  `json:"tags"`
 	Hash        string  `json:"hash"`
 	Name        string  `json:"name"`
 	SavePath    string  `json:"save_path"`
 	ContentPath string  `json:"content_path"`
 	State       string  `json:"state"`
-	Progress    float32 `json:"progress"`
+	Progress    float64 `json:"progress"`
+	AmountLeft  *int64  `json:"amount_left"`
 	DlSpeed     int64   `json:"dlspeed"`
 	UpSpeed     int64   `json:"upspeed"`
 	Size        int64   `json:"size"`
-	Completed   int64   `json:"completed"`
+	Completed   *int64  `json:"completed"`
 	Uploaded    int64   `json:"uploaded"`
 	Ratio       float64 `json:"ratio"`
 	SeedingTime int64   `json:"seeding_time"`
@@ -556,20 +563,42 @@ func parseQBittorrentList(r io.Reader) ([]core.DownloadTask, error) {
 
 	tasks := make([]core.DownloadTask, 0, len(infos))
 	for _, info := range infos {
+		trackingTag := ""
+		for _, tag := range strings.Split(info.Tags, ",") {
+			tag = strings.TrimSpace(tag)
+			if strings.HasPrefix(tag, "anigo-id-") {
+				trackingTag = tag
+				break
+			}
+		}
+		remaining := info.AmountLeft
+		var done int64
+		if info.Completed != nil {
+			done = *info.Completed
+			if remaining == nil && info.Size > 0 && done >= 0 && done <= info.Size {
+				left := info.Size - done
+				remaining = &left
+			}
+		}
+		if remaining != nil && (info.Size <= 0 || *remaining < 0) {
+			remaining = nil
+		}
 		tasks = append(tasks, core.DownloadTask{
-			Hash:         info.Hash,
-			Name:         info.Name,
-			SavePath:     info.SavePath,
-			ContentPath:  info.ContentPath,
-			Status:       info.State,
-			Progress:     info.Progress,
-			SpeedDown:    info.DlSpeed,
-			SpeedUp:      info.UpSpeed,
-			Size:         info.Size,
-			Done:         info.Completed,
-			Uploaded:     info.Uploaded,
-			Ratio:        info.Ratio,
-			SeedingTime:  info.SeedingTime,
+			Hash:           info.Hash,
+			TrackingTag:    trackingTag,
+			Name:           info.Name,
+			SavePath:       info.SavePath,
+			ContentPath:    info.ContentPath,
+			Status:         info.State,
+			Progress:       downloadProgress(info.Progress, remaining),
+			RemainingBytes: remaining,
+			SpeedDown:      info.DlSpeed,
+			SpeedUp:        info.UpSpeed,
+			Size:           info.Size,
+			Done:           done,
+			Uploaded:       info.Uploaded,
+			Ratio:          info.Ratio,
+			SeedingTime:    info.SeedingTime,
 		})
 	}
 	return tasks, nil

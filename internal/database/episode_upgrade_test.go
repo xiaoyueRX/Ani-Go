@@ -7,6 +7,8 @@ import (
 
 // 旧格式的同一标记可能对应下载中的任务，也可能对应已经入库的剧集。
 func TestUpgradeManualCompletion(t *testing.T) {
+	previous := DB
+	t.Cleanup(func() { DB = previous })
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	if err := Init(path); err != nil {
 		t.Fatal(err)
