@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -25,27 +26,69 @@ func archiveDigest(body any) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func verifyArchive(raw []byte) error {
-	var header struct {
-		Format int    `json:"format_version"`
-		SHA256 string `json:"sha256"`
-	}
-	if err := json.Unmarshal(raw, &header); err != nil {
-		return ErrInvalidArchive
-	}
-	if header.Format == 0 && header.SHA256 == "" {
-		return nil
-	}
-	if header.Format != archiveFormat || len(header.SHA256) != sha256.Size*2 {
-		return ErrInvalidArchive
-	}
-	var original archiveBody[json.RawMessage, json.RawMessage, json.RawMessage]
+type rawArchive struct {
+	archiveBody[json.RawMessage, json.RawMessage, json.RawMessage]
+	Format int    `json:"format_version"`
+	SHA256 string `json:"sha256"`
+}
+
+func parseArchive(raw []byte) (rawArchive, error) {
+	var original rawArchive
 	if err := json.Unmarshal(raw, &original); err != nil {
-		return ErrInvalidArchive
+		return original, ErrInvalidArchive
 	}
-	digest, err := archiveDigest(original)
-	if err != nil || digest != header.SHA256 {
-		return ErrInvalidArchive
+	if original.Format == 0 && original.SHA256 == "" {
+		return original, nil
 	}
-	return nil
+	if original.Format != archiveFormat || len(original.SHA256) != sha256.Size*2 {
+		return original, ErrInvalidArchive
+	}
+	digest, err := original.digest()
+	if err != nil || digest != original.SHA256 {
+		return original, ErrInvalidArchive
+	}
+	return original, nil
+}
+
+// v1 对原始 JSON 字段（包括未知属性和数字原文）计算摘要。剧集数组可能很大，
+// 分段编码与一次 Encode 相同的字节，再补上 Encode 的最后一个换行。
+func (original rawArchive) digest() (string, error) {
+	body := original.archiveBody
+	episodes := body.Episodes
+	if len(episodes) == 0 || episodes[0] != '[' {
+		return archiveDigest(body)
+	}
+	body.Episodes = nil
+	prefix, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.New()
+	sum.Write(prefix[:len(prefix)-1]) // 数组接在原对象的右括号之前。
+	sum.Write([]byte(`,"episodes":[`))
+	dec := json.NewDecoder(bytes.NewReader(episodes))
+	if _, err := dec.Token(); err != nil {
+		return "", err
+	}
+	var row json.RawMessage
+	for first := true; dec.More(); first = false {
+		if err := dec.Decode(&row); err != nil {
+			return "", err
+		}
+		encoded, err := json.Marshal(row)
+		if err != nil {
+			return "", err
+		}
+		if !first {
+			sum.Write([]byte(","))
+		}
+		sum.Write(encoded)
+	}
+	sum.Write([]byte("]}\n"))
+	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
+func verifyArchive(raw []byte) error {
+	_, err := parseArchive(raw)
+	return err
 }

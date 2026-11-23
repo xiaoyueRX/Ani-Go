@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -370,19 +371,33 @@ func (m *BackupManager) RestoreBackup(ctx context.Context, fileName string) erro
 	if err != nil {
 		return err
 	}
-	if err := verifyArchive(data); err != nil {
+	original, err := parseArchive(data)
+	if err != nil {
 		return err
 	}
-	var backup BackupData
-	if err := json.Unmarshal(data, &backup); err != nil {
+	backup := BackupData{FormatVersion: original.Format, Timestamp: original.Timestamp}
+	if err := json.Unmarshal(original.Settings, &backup.Settings); err != nil {
 		return ErrInvalidArchive
+	}
+	if len(original.Subscriptions) != 0 {
+		if err := json.Unmarshal(original.Subscriptions, &backup.Subscriptions); err != nil {
+			return ErrInvalidArchive
+		}
 	}
 	if _, err := time.Parse(time.RFC3339, backup.Timestamp); err != nil || backup.Settings == nil {
 		return ErrInvalidArchive
 	}
+	// 旧归档允许省略 episodes 或写 null。对数组只保留游标，事务中逐条恢复。
+	var episodes *json.Decoder
+	if len(original.Episodes) != 0 && !bytes.Equal(original.Episodes, []byte("null")) {
+		episodes = json.NewDecoder(bytes.NewReader(original.Episodes))
+		if opener, err := episodes.Token(); err != nil || opener != json.Delim('[') {
+			return ErrInvalidArchive
+		}
+	}
 	// SQL 参数可能包含私有 RSS 地址与凭据；恢复失败时仅对外返回不带数据值的诊断。
 	db := database.DB.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard})
-	err = db.Transaction(func(tx *gorm.DB) error {
+	restore := func(tx *gorm.DB) error {
 		if err := m.restoreBackupSettings(tx, backup.Settings); err != nil {
 			return err
 		}
@@ -419,9 +434,13 @@ func (m *BackupManager) RestoreBackup(ctx context.Context, fileName string) erro
 		}
 		legacyProgress := make(map[uint]bool)
 		legacyMovies := make(map[uint][]database.Episode)
-		claimedEpisodes := make(map[uint]bool, len(backup.Episodes))
-		episodeIDs := make(map[uint]bool, len(backup.Episodes))
-		for _, ep := range backup.Episodes {
+		claimedEpisodes := make(map[uint]bool)
+		episodeIDs := make(map[uint]bool)
+		for episodes != nil && episodes.More() {
+			var ep database.Episode
+			if err := episodes.Decode(&ep); err != nil {
+				return ErrInvalidArchive
+			}
 			if ep.ID == 0 || episodeIDs[ep.ID] {
 				return fmt.Errorf("%w：剧集编号无效（%d）", ErrInvalidArchive, ep.ID)
 			}
@@ -475,7 +494,9 @@ func (m *BackupManager) RestoreBackup(ctx context.Context, fileName string) erro
 			}
 		}
 		return nil
-	})
+	}
+	// 在同一连接上开启普通事务，避免预编译缓存为每一行绑定的语句积压到提交时才释放。
+	err = db.Connection(func(conn *gorm.DB) error { return conn.Transaction(restore) })
 	if err == nil || errors.Is(err, ErrInvalidArchive) {
 		return err
 	}
