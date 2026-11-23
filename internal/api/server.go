@@ -280,6 +280,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/episodes/{id}/retry-organize", s.handleRetryOrganization)
 	mux.HandleFunc("POST /api/subscriptions/{id}/episodes/batch-delete", s.handleBatchDeleteEpisodes)
 	mux.HandleFunc("POST /api/subscriptions/{id}/verify-files", s.handleVerifyFiles)
+	mux.HandleFunc("POST /api/subscriptions/{id}/episodes/{episodeID}/restore-file", s.handleRestoreFile)
 
 	// 下载队列
 	mux.HandleFunc("GET /api/downloads", s.handleListDownloads)
