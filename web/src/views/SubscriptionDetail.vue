@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
@@ -9,7 +9,7 @@ import {
   History, Download, Check, 
   MoreVertical, FileText, X,
   Trash2,
-  Shield
+  Shield, FileCheck2
 } from 'lucide-vue-next'
 import SubscriptionEditForm from '../components/SubscriptionEditForm.vue'
 
@@ -47,6 +47,16 @@ interface RecheckResult {
   reason?: string
 }
 
+type FileStatus = 'size_matches' | 'present' | 'empty' | 'size_mismatch' | 'missing' | 'unverified' | 'not_applicable'
+interface FileVerification {
+  id: number
+  status: FileStatus
+  reason?: 'path' | 'library_unavailable' | 'volume_unavailable' | 'file_type' | 'access'
+  expected_size?: number
+  actual_size?: number
+}
+type FileReportRow = Omit<FileVerification, 'status'> & { name: string; status: FileStatus | 'request_failed' }
+
 const route = useRoute()
 const router = useRouter()
 const id = Number(route.params.id)
@@ -73,6 +83,21 @@ const updatingEps = ref<Set<number>>(new Set())
 const selectedEpisodes = ref<Set<number>>(new Set())
 const showBulkActions = ref(false)
 const bulkActionLoading = ref(false)
+const fileReport = ref<{ rows: FileReportRow[]; checkedAt: number; volumeGuarded: boolean | null } | null>(null)
+const verifyingFiles = ref(false)
+const hasOrganizedFiles = computed(() => episodes.value.some(ep => ep.status === 'organized'))
+const fileScope = computed(() => [route.params.id, ...selectedEpisodes.value].join(','))
+let verificationRequest: AbortController | undefined
+let verifiedScope = ''
+function clearFileReport() {
+  verificationRequest?.abort()
+  verificationRequest = undefined
+  verifyingFiles.value = false
+  fileReport.value = null
+}
+watch(fileScope, scope => {
+  if (scope !== verifiedScope) clearFileReport()
+})
 const recheckResults = ref<RecheckResult[]>([])
 const recheckCounts = computed(() => {
   const counts = { queued: 0, failed: 0, skipped: 0 }
@@ -280,6 +305,48 @@ function clearSelection() {
   showBulkActions.value = false
 }
 
+async function verifyFiles(mode: 'organized' | 'selected') {
+  if (verifyingFiles.value || bulkActionLoading.value || updatingEps.value.size) return
+  const items = episodes.value.filter(ep => mode === 'organized' ? ep.status === 'organized' : selectedEpisodes.value.has(ep.id))
+  if (!items.length) return
+  const controller = new AbortController()
+  verificationRequest = controller
+  verifiedScope = fileScope.value
+  verifyingFiles.value = true
+  fileReport.value = null
+  const rows: FileReportRow[] = []
+  let volumeGuarded: boolean | null = null
+  try {
+    for (let start = 0; start < items.length; start += 100) {
+      if (controller.signal.aborted || fileScope.value !== verifiedScope) return
+      const batch = items.slice(start, start + 100)
+      let results: FileVerification[] = []
+      try {
+        const { data } = await request.post<{ results: FileVerification[]; volume_guarded: boolean }>(
+          `/subscriptions/${id}/verify-files`, { ids: batch.map(ep => ep.id) }, { signal: controller.signal },
+        )
+        results = data.results ?? []
+        if (typeof data.volume_guarded === 'boolean') volumeGuarded = volumeGuarded !== false && data.volume_guarded
+      } catch {
+        if (controller.signal.aborted) return
+      }
+      for (const [index, ep] of batch.entries()) {
+        const name = (ep.final_path || ep.source_file || ep.original_name || ep.title || '').split(/[\\/]/).pop() || episodeLabel(ep)
+        const result = results[index]
+        rows.push(result?.id === ep.id ? { ...result, name } : { id: ep.id, name, status: 'request_failed' })
+      }
+    }
+    if (!controller.signal.aborted && fileScope.value === verifiedScope) {
+      fileReport.value = { rows, checkedAt: Date.now(), volumeGuarded }
+    }
+  } finally {
+    if (verificationRequest === controller) {
+      verificationRequest = undefined
+      verifyingFiles.value = false
+    }
+  }
+}
+
 function recheckSkipReason(ep: Episode) {
   if (ep.status !== 'needs_review') return t('detail.bulk.notInReview')
   if (ep.review_kind === 'episode_identity') return t('detail.bulk.needsAssignment')
@@ -412,6 +479,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', refreshVisibleDetail)
 })
 onUnmounted(() => {
+  clearFileReport()
   ++detailRead
   window.clearInterval(refreshTimer)
   window.removeEventListener('focus', refreshVisibleDetail)
@@ -605,6 +673,9 @@ onUnmounted(() => {
                {{ t('detail.bulk.selected', { count: selectedEpisodes.size }) }}
              </span>
              <div class="flex flex-wrap items-center justify-center gap-1.5">
+               <button type="button" class="btn btn-sm btn-outline gap-2" :disabled="verifyingFiles" @click="verifyFiles('selected')">
+                 <FileCheck2 :size="16" /> {{ t('detail.files.selected') }}
+               </button>
                <button type="button" class="btn btn-sm btn-outline btn-warning gap-2" @click="bulkRecheck">
                  <RefreshCw :size="16" /> {{ t('detail.bulk.recheck') }}
                </button>
@@ -644,6 +715,23 @@ onUnmounted(() => {
             <h2 class="text-2xl font-black tracking-tight italic uppercase">{{ t('detail.logs.title') }}</h2>
             <span class="text-[10px] font-black uppercase tracking-widest text-base-content/20 mt-1">{{ t('detail.logs.count', { count: episodes.length }) }}</span>
          </div>
+         <div v-if="hasOrganizedFiles" class="px-4">
+           <button type="button" class="btn btn-sm btn-ghost" :disabled="verifyingFiles || bulkActionLoading || updatingEps.size > 0" @click="verifyFiles('organized')">
+             <FileCheck2 :size="16" /> {{ t('detail.files.all') }}
+           </button>
+         </div>
+         <p v-if="verifyingFiles" role="status" class="px-4 text-sm">{{ t('detail.files.checking') }}</p>
+         <details v-if="fileReport" open class="rounded-2xl border border-base-300 bg-base-100 p-4 text-sm">
+           <summary class="cursor-pointer font-semibold" aria-live="polite">{{ t('detail.files.result', { count: fileReport.rows.length, time: new Date(fileReport.checkedAt).toLocaleTimeString(locale) }) }}</summary>
+           <p v-if="fileReport.volumeGuarded === false" class="mt-2">{{ t('detail.files.currentPath') }}</p>
+           <ul class="mt-2 max-h-60 space-y-1 overflow-y-auto break-words">
+             <li v-for="row in fileReport.rows" :key="row.id">
+               <span class="font-medium">{{ row.name }}</span> · {{ t(`detail.files.${row.status}`) }}
+               <template v-if="row.status === 'size_mismatch'"> · {{ t('detail.files.sizes', { expected: row.expected_size?.toLocaleString(locale), actual: row.actual_size?.toLocaleString(locale) }) }}</template>
+               <template v-if="row.reason"> · {{ t(`detail.files.reason.${row.reason}`) }}</template>
+             </li>
+           </ul>
+         </details>
          <details v-if="recheckResults.length" open class="rounded-2xl border border-base-300 bg-base-100 p-4 text-sm">
            <summary class="cursor-pointer font-semibold"><span aria-live="polite">{{ t('detail.bulk.recheckResults', recheckCounts) }}</span></summary>
            <ul class="mt-2 max-h-60 space-y-1 overflow-y-auto break-words">

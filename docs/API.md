@@ -58,6 +58,7 @@ curl -fsS -H "Authorization: Bearer $jwt" "$base/api/plugins"
 | `POST` | `/api/subscriptions/supplement-all` | JWT | 异步触发全部订阅补全（预过滤后立即返回） |
 | `POST` | `/api/subscriptions/merge-collections` | JWT | 按合集归并订阅元数据 |
 | `POST` | `/api/subscriptions/{id}/resolve-collection` | JWT | 解析单个订阅所属的合集 |
+| `POST` | `/api/subscriptions/{id}/verify-files` | JWT | 手动只读核对该订阅所选版本的库文件 |
 | `POST` | `/api/subscriptions/{id}/episodes/batch-delete` | JWT | 删除当前订阅下选中的剧集 |
 | `PUT` | `/api/episodes/{id}/status` | JWT | 设置或清除剧集的手动标记 |
 | `POST` | `/api/episodes/{id}/retry-organize` | JWT | 将待复核文件重新排入整理队列，可附上核实的季集 |
@@ -208,6 +209,14 @@ curl -fsS -H "Authorization: Bearer $jwt" -H 'Content-Type: application/json' \
 - 批量创建发送 `{"items":[…]}`，每批 1–20 项，各项可传 `season`，和单条创建采用相同的判重条件。按项读取 `success` 和 `failed`。单条或全量补全异步执行，202 表示已受理。全量补全最多同时处理三个订阅，同一订阅已有扫描时共享该次结果。
 - 批量删除与恢复订阅发送 `{"ids":[1,2]}`。删除剧集向所属订阅的 `episodes/batch-delete` 发送 `{"ids":[1],"delete_files":false}`，单次 1–1000 个剧集 ID。跨订阅选择返回 404。删除共享下载的文件时会返回 409；下载器执行失败返回 502。[删除与文件归属](../internal/api/episodes.go)
 - 写入手动标记时发送 `{"status":"completed"}`，可用值还有 `pending`、`downloading`、`failed`。发送 `{"status":""}` 可清除。成功响应中的 `status` 和 `manual_status` 均回显本次标记。读取订阅详情时，剧集的 `status` 是实际下载或整理状态，`manual_status` 是用户标记。整理进度和完结统计按实际状态计算。
+
+通过 `POST /api/subscriptions/{id}/verify-files` 发送 `{"ids":[12,18]}`，一次选择 1–100 条当前订阅记录。重复 ID 按首次出现次序返回一条结果。未知、已删除或其它订阅的 ID 使整批返回 404。请求只接受 ID；服务器根据当前媒体库设置和已保存的最终路径核对文件，不读取媒体内容。响应示例：
+
+```json
+{"volume_guarded":false,"results":[{"id":12,"status":"size_matches"},{"id":18,"status":"missing"}]}
+```
+
+`size_matches` 表示普通文件存在且大小与逐文件证据相符；`size_mismatch` 包含 `expected_size`、`actual_size`。没有可靠历史大小时返回 `present`；这时若文件为零字节则返回 `empty`。当前库中未找到为 `missing`。库离线、配置卷标错误、没有权限或历史路径不能安全定位时返回 `unverified`，用固定的 `reason` 说明。未整理的记录为 `not_applicable`。`volume_guarded` 说明该媒体类型是否配置本机卷标。核对结果只适用于查询当时，人工标记、任务、记录和进度保持原值。[卷标配置与操作](05_DEPLOYMENT.md)
 
 待复核条目的实际状态为 `needs_review`。详情给出 `review_reason` 和可执行操作。以下三种请求均使用 `POST /api/episodes/{id}/retry-organize`。成功返回 `{"status":"downloaded"}` 并由调度器重新核验。文件证据过期或记录状态已改变时，按 409 响应中的原因刷新条目。
 

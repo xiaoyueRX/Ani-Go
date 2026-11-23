@@ -40,6 +40,8 @@ Use plain UTF-8 without a BOM, with up to 256 bytes for the identifier and an op
 
 The built-in Bangumi NFO scraper uses the volume verified for each organized media file. If the marker is missing or incorrect when the plugin receives the event or finishes downloading a poster, it skips that sidecar write. Other plugins manage their own file writes.
 
+After remounting a library or restoring a backup, open the subscription details to check all organized files or selected editions. Ani-Go checks the library directory visible to the running instance. With a configured volume ID, a missing or mismatched marker makes the check inconclusive. Without one, a missing result refers to the currently mounted path. Check the mount before taking recovery action. A size match confirms the byte count. The check leaves media files and collection progress intact.
+
 ## Backups and restore
 
 Point `BACKUP_PATH` at a writable directory on a persistent volume. Manual and scheduled backups share `BACKUP_KEEP_COUNT`, which defaults to the latest seven archives. The default schedule is midnight. `BACKUP_CRON` accepts five fields, such as `0 3 * * *`, or six fields including seconds. Saving either setting applies it to the running backup scheduler. Deployment environment variables take precedence.

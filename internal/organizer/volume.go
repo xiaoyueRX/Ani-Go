@@ -38,6 +38,18 @@ func (v LibraryVolume) hold(dst string) (*heldVolume, error) {
 	if v.ID == "" {
 		return nil, nil
 	}
+	h, err := v.openRoot()
+	if err != nil {
+		return nil, err
+	}
+	if err := h.check(dst); err != nil {
+		h.close()
+		return nil, err
+	}
+	return h, nil
+}
+
+func (v LibraryVolume) openRoot() (*heldVolume, error) {
 	if v.Root == "" {
 		return nil, fmt.Errorf("缺少受保护的媒体库根目录")
 	}
@@ -53,12 +65,7 @@ func (v LibraryVolume) hold(dst string) (*heldVolume, error) {
 	if err != nil {
 		return nil, fmt.Errorf("媒体卷不可用 %s: %w", base, err)
 	}
-	h := &heldVolume{volume: v, root: root}
-	if err := h.check(dst); err != nil {
-		root.Close()
-		return nil, err
-	}
-	return h, nil
+	return &heldVolume{volume: v, root: root}, nil
 }
 
 func (h *heldVolume) close() {
@@ -77,7 +84,7 @@ func (h *heldVolume) check(dst string) error {
 	return nil
 }
 
-func (h *heldVolume) checkRoot(dst string) error {
+func (h *heldVolume) checkIdentity() error {
 	actual, err := os.Stat(h.volume.Root)
 	if err != nil {
 		return err
@@ -88,6 +95,9 @@ func (h *heldVolume) checkRoot(dst string) error {
 	}
 	if !os.SameFile(actual, pinned) {
 		return fmt.Errorf("媒体库根目录已更换")
+	}
+	if h.volume.ID == "" {
+		return nil
 	}
 	marker, err := h.root.Lstat(volumeMarker)
 	if err != nil {
@@ -118,6 +128,13 @@ func (h *heldVolume) checkRoot(dst string) error {
 	}
 	if id != h.volume.ID {
 		return fmt.Errorf("%s 与配置的卷标识不符", volumeMarker)
+	}
+	return nil
+}
+
+func (h *heldVolume) checkRoot(dst string) error {
+	if err := h.checkIdentity(); err != nil {
+		return err
 	}
 	abs, err := filepath.Abs(dst)
 	if err != nil {

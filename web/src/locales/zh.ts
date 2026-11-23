@@ -700,6 +700,14 @@ export default {
     supplement: '补全',
   },
   detail: {
+    files: {
+      selected: '核对所选库文件', all: '核对全部已整理文件', checking: '正在核对库文件…',
+      result: '库文件核对 · {count} 项 · {time}', currentPath: '未设置卷标识，本次仅核对当前媒体库路径。',
+      size_matches: '文件存在，大小与记录一致', present: '文件存在，缺少可比的大小记录', empty: '文件为 0 字节，缺少可比的大小记录', size_mismatch: '文件大小不符',
+      sizes: '记录 {expected} 字节，实际 {actual} 字节', missing: '当前路径未找到文件', unverified: '无法核对',
+      not_applicable: '尚未整理', request_failed: '核对请求失败，请刷新后重试',
+      reason: { path: '记录的路径无效', library_unavailable: '媒体库不可用', volume_unavailable: '无法确认媒体卷', file_type: '不是普通文件', access: '无法读取文件信息' },
+    },
     manualMark: '手动标记', noMark: '无', clearMarks: '清除标记',
     review: {
       noReason: '未记录复核原因。', retry: '重新整理', failed: '重新整理请求失败。',

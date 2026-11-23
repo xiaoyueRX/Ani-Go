@@ -699,6 +699,14 @@ export default {
     supplement: 'Supplement',
   },
   detail: {
+    files: {
+      selected: 'Check selected library files', all: 'Check all organized files', checking: 'Checking library files…',
+      result: 'Library file check · {count} items · {time}', currentPath: 'No volume ID is configured. This check covers the current library path.',
+      size_matches: 'File present, recorded size matches', present: 'File present, no recorded size to compare', empty: 'Empty file, no recorded size to compare', size_mismatch: 'File size differs',
+      sizes: 'Expected {expected} bytes, found {actual} bytes', missing: 'File missing at current path', unverified: 'Could not verify',
+      not_applicable: 'Not organized', request_failed: 'Request failed. Refresh and try again.',
+      reason: { path: 'Invalid recorded path', library_unavailable: 'Library unavailable', volume_unavailable: 'Could not confirm media volume', file_type: 'Not a regular file', access: 'Could not read file information' },
+    },
     review: {
       noReason: 'No review reason was recorded.', retry: 'Retry organization', failed: 'Could not retry organization.',
       assign: 'Assign season and episode', assignAndRetry: 'Retry with these numbers', source: 'Source file',

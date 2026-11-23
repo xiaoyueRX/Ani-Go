@@ -1359,6 +1359,58 @@ paths:
         '500': {description: 补全调度器未配置}
         '401': {$ref: '#/components/responses/LoginRequired'}
 
+  /subscriptions/{id}/verify-files:
+    post:
+      tags: [Episodes]
+      summary: 只读核对一个订阅的库文件 / Check selected library files
+      operationId: verifySubscriptionFiles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              additionalProperties: false
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Results in request order, with repeated IDs returned once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, volume_guarded]
+                properties:
+                  volume_guarded: {type: boolean, description: Whether the current library type has a configured volume marker}
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, status]
+                      properties:
+                        id: {type: integer}
+                        status: {type: string, enum: [size_matches, size_mismatch, present, empty, missing, unverified, not_applicable]}
+                        reason: {type: string, enum: [path, library_unavailable, volume_unavailable, file_type, access]}
+                        expected_size: {type: integer, format: int64, description: Recorded bytes when size differs}
+                        actual_size: {type: integer, format: int64, description: Observed bytes when size differs}
+        '400': {description: Invalid selection or request}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+        '404': {description: Subscription or selected records are unavailable}
+        '408': {description: Check cancelled}
+        '500': {description: Database read failed}
+        '503': {description: Organizer unavailable}
+
   /subscriptions/{id}/episodes/batch-delete:
     post:
       tags: [Episodes]

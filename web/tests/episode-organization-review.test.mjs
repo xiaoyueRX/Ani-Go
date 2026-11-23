@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { createSSRApp } from 'vue'
+import { createSSRApp, nextTick, reactive } from 'vue'
 import { parse } from 'vue/compiler-sfc'
 import { renderToString } from 'vue/server-renderer'
 import { createI18n } from 'vue-i18n'
@@ -22,11 +22,11 @@ function review(overrides = {}) {
   return { id: 41, status: 'needs_review', review_kind: '', can_retry_organize: true, review_reason: 'The destination was unavailable', season: 1, number: 0,
     group_name: 'Harbor', manual_status: 'pending', ...overrides }
 }
-function setup(rows, request = {}, locale = 'en') {
+function setup(rows, request = {}, locale = 'en', params = { id: 2 }) {
   const { t } = createI18n({ legacy: false, locale, messages: { en, zh } }).global
   const { component } = view('views/SubscriptionDetail', {
     get: async () => ({ data: { subscription: { id: 2 }, episodes: rows } }), ...request,
-  }, { route: { params: { id: 2 } }, translate: (key, values) => values ? t(key, { ...values }) : t(key) })
+  }, { route: { params }, translate: (key, values) => values ? t(key, { ...values }) : t(key) })
   component.episodes.value = rows
   return component
 }
@@ -271,4 +271,73 @@ test('刷新后已删除的文件仍有可追溯的请求失败原因，并显�
   const html = await renderToString(createSSRApp({ template: resultTemplate, setup: () => ({ ...c }) }))
   assert.ok(html.includes('Recheck results: 0 queued, 1 failed, 0 skipped'), html)
   for (const label of ['Removed edition.mkv', 'Request failed', 'Episode no longer exists']) assert.ok(html.includes(label), label)
+})
+
+
+const checkTemplate = findTemplate(tree, node => node.tag === 'details' && node.props.some(prop => prop.exp?.content === 'fileReport'))
+
+test('主动核对所选条目只读展示每个文件的结果，零字节和未设卷标均有说明', async () => {
+  const rows = [review({ id: 31, status: 'organized', final_path: '/private/nas/Show/E01.mkv' }), review({ id: 32, status: 'organized', final_path: 'D:\\private\\E02.mkv' }), review({ id: 33, status: 'needs_review', original_name: 'E03.mkv' })]
+  const requests = []
+  const c = setup(rows, { post: async (url, body) => {
+    requests.push([url, Array.from(body.ids)])
+    return { data: { volume_guarded: false, results: [{ id: 31, status: 'size_matches' }, { id: 32, status: 'size_mismatch', expected_size: 351, actual_size: 0 }, { id: 33, status: 'not_applicable' }] } }
+  } }, 'zh')
+  c.toggleSelectAll(rows)
+  assert.deepEqual(requests, [])
+  const before = JSON.stringify(c.episodes.value)
+  await c.verifyFiles('selected')
+  assert.deepEqual(requests, [['/subscriptions/2/verify-files', [31, 32, 33]]])
+  assert.equal(JSON.stringify(c.episodes.value), before)
+  assert.deepEqual([...c.selectedEpisodes.value], [31, 32, 33])
+  const html = await renderToString(createSSRApp({ template: checkTemplate, setup: () => ({ ...c }) }))
+  for (const word of ['E01.mkv', 'E02.mkv', 'E03.mkv', '大小与记录一致', '351', '0 字节', '尚未整理', '当前媒体库路径']) assert.ok(html.includes(word), word)
+  assert.ok(!html.includes('private'), html)
+  c.toggleEpisodeSelect(31)
+  await nextTick()
+  assert.equal(c.fileReport.value, null)
+})
+
+test('全订阅核对仅提交已整理文件，连续分批，报错后仍保留其他批次结果', async () => {
+  const rows = Array.from({length: 103}, (_,i) => review({ id: i+1, status: i===102?'needs_review':'organized', final_path: '/library/ep-'+i+'.mkv' }))
+  const calls = []
+  const c = setup(rows, { post: async (url,body) => {
+    calls.push(Array.from(body.ids))
+    if (calls.length===2) throw { response: { status: 404, data: { error: '/private/error' } } }
+    return {data: { volume_guarded: true, results: body.ids.map(id=>({id,status:'present'})) }}
+  } })
+  await c.verifyFiles('organized')
+  assert.deepEqual(calls.map(batch=>batch.length), [100, 2])
+  assert.deepEqual(calls[1], [101, 102])
+  const html = await renderToString(createSSRApp({ template: checkTemplate, setup: () => ({ ...c }) }))
+  assert.ok(html.includes('ep-100.mkv') && html.includes('ep-101.mkv') && html.includes('Request failed'))
+  assert.ok(!html.includes('ep-102.mkv') && !html.includes('/private/error'))
+})
+
+test('切换订阅或勾选时晚到的核对结果不会出现在当前页面', async () => {
+  const rows = [review({id:21, status:'organized'}), review({id:22, status:'organized'})]
+  for (const changeRoute of [false, true]) {
+    const params = reactive({id:2}), pending = Promise.withResolvers()
+    const c = setup(rows, { post: ()=>pending.promise }, 'en', params)
+    c.toggleEpisodeSelect(21)
+    const first = c.verifyFiles('selected')
+    if (changeRoute) params.id=9
+    else c.toggleEpisodeSelect(22)
+    await nextTick()
+    pending.resolve({data:{volume_guarded:true,results:[{id:21,status:'size_matches'}]}})
+    await first
+    assert.equal(c.fileReport.value,null)
+  }
+})
+
+
+test('文件缺失、空文件和卷身份未核实各自显示对应原因', async () => {
+  const rows = [11, 12, 13].map(id => review({ id, status: 'organized', title: `Episode ${id}` }))
+  const c = setup(rows, { post: async () => ({ data: { volume_guarded: true, results: [
+    { id: 11, status: 'missing' }, { id: 12, status: 'empty' }, { id: 13, status: 'unverified', reason: 'volume_unavailable' },
+  ] } }) })
+  await c.verifyFiles('organized')
+  const html = await renderToString(createSSRApp({ template: checkTemplate, setup: () => ({ ...c }) }))
+  for (const word of ['File missing at current path', 'Empty file', 'Could not confirm media volume']) assert.ok(html.includes(word), word)
+  assert.ok(!html.includes('No volume ID is configured'))
 })
