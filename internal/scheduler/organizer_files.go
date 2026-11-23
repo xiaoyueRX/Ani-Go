@@ -16,7 +16,8 @@ var errOrganizationReview = errors.New("整理需要复核")
 
 type verifiedSelection struct {
 	downloader.FileSelection
-	issues map[string]string
+	issues      map[string]string
+	singleVideo bool
 }
 
 func availableVideos(root string, selected downloader.FileSelection, legacyMoved bool) (verifiedSelection, error) {
@@ -26,7 +27,7 @@ func availableVideos(root string, selected downloader.FileSelection, legacyMoved
 		return videos, err
 	}
 	for _, f := range selected.Files {
-		if !mediaFile(f.Path) {
+		if !core.IsVideoFile(f.Path) {
 			continue
 		}
 		rel, err := filepath.Rel(root, f.Path)
@@ -82,7 +83,7 @@ func verifiedBatchSource(ep database.Episode, dl core.Downloader) bool {
 	}
 	path := filepath.Join(ep.DownloadRoot, ep.SourceFile)
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() != ep.FileSize || !mediaFile(path) {
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() != ep.FileSize || !core.IsVideoFile(path) {
 		return false
 	}
 	base, err := filepath.EvalSymlinks(ep.DownloadRoot)

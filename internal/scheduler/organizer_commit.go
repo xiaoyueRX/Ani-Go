@@ -38,8 +38,8 @@ func durableMoveCommit(ctx context.Context, ep database.Episode, dst string, mov
 	}
 	now := time.Now()
 	result, err := conn.ExecContext(ctx,
-		"UPDATE episodes SET status = ?, final_path = ?, organized_at = ?, updated_at = ?, move_source_path = ?, move_source_mod_time = ? WHERE id = ? AND status = ? AND (updated_at = ? OR (updated_at IS NULL AND ?)) AND deleted_at IS NULL",
-		"organized", dst, now, now, move.Path, move.ModTime, ep.ID, ep.Status, ep.UpdatedAt, ep.UpdatedAt.IsZero())
+		"UPDATE episodes SET status = ?, final_path = ?, organized_at = ?, updated_at = ?, move_source_path = ?, move_source_mod_time = ?, movie_feature = ? WHERE id = ? AND status = ? AND (updated_at = ? OR (updated_at IS NULL AND ?)) AND deleted_at IS NULL",
+		"organized", dst, now, now, move.Path, move.ModTime, ep.MovieFeature, ep.ID, ep.Status, ep.UpdatedAt, ep.UpdatedAt.IsZero())
 	if err != nil {
 		return err
 	}
@@ -59,11 +59,16 @@ func (s *Scheduler) commitOrganization(ctx context.Context, ep database.Episode,
 	if matches != 1 {
 		return "", fmt.Errorf("剧集 %d 的整理快照已失效", ep.ID)
 	}
+	// 已下载电影只有通过整份清单或人工确认的来源才能走到此处；与最终路径一起提交正片身份。
+	if ep.Status == "downloaded" && core.TMDBMediaType(anime.Type) == "movie" && ep.HasBoundReviewFile() {
+		feature := true
+		ep.MovieFeature = &feature
+	}
 	commit := func(path string, move *organizer.MoveSource) error {
 		if move != nil {
 			return durableMoveCommit(ctx, ep, path, *move)
 		}
-		result := ep.OrganizationSnapshot(db).Updates(map[string]any{"status": "organized", "final_path": path, "organized_at": time.Now()})
+		result := ep.OrganizationSnapshot(db).Updates(map[string]any{"status": "organized", "final_path": path, "organized_at": time.Now(), "movie_feature": ep.MovieFeature})
 		if result.Error != nil {
 			return result.Error
 		}

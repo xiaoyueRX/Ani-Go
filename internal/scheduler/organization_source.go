@@ -25,6 +25,15 @@ func (s *Scheduler) reportOrganizationError(ctx context.Context, ep database.Epi
 	}
 }
 
+func movieExtraSource(sub database.Subscription, source string, ep database.Episode) bool {
+	titles := []string{sub.TitleCN, sub.TitleJP, sub.TitleEN}
+	release := ep.OriginalName
+	if release == "" {
+		release = ep.Title
+	}
+	return core.MovieExtra(source, titles...) || core.MovieExtra(release, titles...)
+}
+
 // 只要原先确认的源指纹或身份发生变化，就要求重新确认。
 func boundIdentityProblem(ep database.Episode, sub database.Subscription, size, modTime int64) (string, string) {
 	movie := movieSubscription(sub)
@@ -63,7 +72,7 @@ func boundIdentityProblem(ep database.Episode, sub database.Subscription, size, 
 func holdBoundMember(ctx context.Context, ep database.Episode, kind, reason string, file downloader.CompletedFile) error {
 	updates := map[string]any{
 		"status": database.EpisodeNeedsReview, "review_kind": kind, "review_reason": reason,
-		"file_size": file.Size, "source_mod_time": file.ModTime, "confirmed_identity": "",
+		"file_size": file.Size, "source_mod_time": file.ModTime, "confirmed_identity": "", "movie_feature": false,
 	}
 	return ep.OrganizationSnapshot(database.DB.WithContext(ctx)).Updates(updates).Error
 }
@@ -90,7 +99,8 @@ func (s *Scheduler) organizationSource(ctx context.Context, ep database.Episode,
 			}
 		}
 	}
-	if verified {
+	// 旧文件行未记录任务有几个视频。自动认定正片前重查完整清单，明确的人工确认可沿用源指纹。
+	if verified && (!movie || ep.ConfirmedIdentity != "" || ep.ReviewKind != "") {
 		if kind, reason := boundIdentityProblem(ep, sub, ep.FileSize, ep.SourceModTime); reason != "" {
 			return "", nil, holdBoundMember(ctx, ep, kind, reason, downloader.CompletedFile{Size: ep.FileSize, ModTime: ep.SourceModTime})
 		}
@@ -116,11 +126,13 @@ func (s *Scheduler) organizationSource(ctx context.Context, ep database.Episode,
 		if err != nil {
 			return "", nil, err
 		}
+		singleVideo := movie && files.IsSingleVideo() // 绑定成员会缩减下面的清单，必须先查整份任务。
 		if ep.SourceFile != "" {
 			if !filepath.IsLocal(ep.SourceFile) {
 				return "", nil, fmt.Errorf("%w: 已绑定成员不是本地相对路径", errOrganizationReview)
 			}
-			matching := downloader.FileSelection{Partial: files.Partial}
+			matching := files
+			matching.Files = nil
 			for _, f := range files.Files {
 				if f.Path == filepath.Join(task.SavePath, ep.SourceFile) || f.Path == filepath.Join(content, ep.SourceFile) {
 					matching.Files = append(matching.Files, f)
@@ -135,6 +147,7 @@ func (s *Scheduler) organizationSource(ctx context.Context, ep database.Episode,
 		if err != nil {
 			return "", nil, err
 		}
+		selected.singleVideo = singleVideo
 		if ep.SourceFile != "" {
 			file := selected.Files[0]
 			// 旧记录的成员名可能相对内容目录。只复用下载器实际选中的路径。
@@ -152,6 +165,9 @@ func (s *Scheduler) organizationSource(ctx context.Context, ep database.Episode,
 			if why != "" {
 				return "", nil, holdBoundMember(ctx, ep, kind, why, file)
 			}
+			if movie && ep.ConfirmedIdentity == "" && (!singleVideo || movieExtraSource(sub, ep.SourceFile, ep)) {
+				return "", nil, holdBoundMember(ctx, ep, database.ReviewMovieSelection, "请核对下载任务并确认该文件为电影正片", file)
+			}
 			return file.Path, nil, nil
 		}
 		members, err := s.expandBatch(ctx, ep, sub, task.SavePath, &selected)
@@ -165,7 +181,14 @@ func (s *Scheduler) organizationSource(ctx context.Context, ep database.Episode,
 		if !filepath.IsLocal(ep.SourceFile) {
 			return "", nil, fmt.Errorf("%w: 已绑定成员不是本地相对路径", errOrganizationReview)
 		}
-		content = filepath.Join(content, ep.SourceFile)
+		if movie && ep.ConfirmedIdentity == "" {
+			// 无清单的下载器只有明确以该文件为整个任务内容时，才能证明它是唯一视频。
+			if filepath.Clean(content) != filepath.Join(ep.DownloadRoot, ep.SourceFile) || movieExtraSource(sub, ep.SourceFile, ep) {
+				return "", nil, holdBoundMember(ctx, ep, database.ReviewMovieSelection, "请确认任务选择的电影正片", downloader.CompletedFile{Size: ep.FileSize, ModTime: ep.SourceModTime})
+			}
+		} else {
+			content = filepath.Join(content, ep.SourceFile)
+		}
 	}
 	info, err := os.Lstat(content)
 	if err != nil {
@@ -188,7 +211,7 @@ func (s *Scheduler) organizationSource(ctx context.Context, ep database.Episode,
 		}
 		return content, nil, nil
 	}
-	one := verifiedSelection{FileSelection: downloader.FileSelection{Files: []downloader.CompletedFile{{Path: content, Size: info.Size(), ModTime: info.ModTime().UnixNano()}}}}
+	one := verifiedSelection{singleVideo: true, FileSelection: downloader.FileSelection{Files: []downloader.CompletedFile{{Path: content, Size: info.Size(), ModTime: info.ModTime().UnixNano()}}}}
 	members, err := s.expandBatch(ctx, ep, sub, filepath.Dir(content), &one)
 	return "", members, err
 }

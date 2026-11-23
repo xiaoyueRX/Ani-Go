@@ -154,7 +154,9 @@ func UpdateSubscription(db *gorm.DB, id uint, changes map[string]interface{}) (S
 		}
 		season, setSeason := changes["season"].(int)
 		total, setTotal := changes["total_episodes"].(int)
-		if (setSeason && max(1, season) != max(1, prior.Season)) || (setTotal && total != prior.TotalEpisodes) {
+		kind, setKind := changes["anime_type"].(string)
+		changedMovie := setKind && prior.TotalEpisodes == 1 && movieType(kind) != movieType(prior.AnimeType)
+		if changedMovie || (setSeason && max(1, season) != max(1, prior.Season)) || (setTotal && total != prior.TotalEpisodes) {
 			_, explicitCompletion := changes["completed"]
 			if _, err := SyncEpisodeProgress(tx, id, !explicitCompletion); err != nil {
 				return err

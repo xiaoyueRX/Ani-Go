@@ -19,13 +19,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func mediaFile(name string) bool {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".mkv", ".mp4", ".avi", ".rmvb", ".m4v", ".webm", ".ts", ".m2ts", ".mov":
-		return true
-	}
-	return false
-}
+func mediaFile(name string) bool { return core.IsVideoFile(name) }
 
 // 同一任务的每个源文件有独立记录；一项需要复核时，其余成员仍可整理。
 func (s *Scheduler) expandBatch(ctx context.Context, parent database.Episode, sub database.Subscription, dir string, selection *verifiedSelection) ([]database.Episode, error) {
@@ -51,9 +45,11 @@ func (s *Scheduler) expandBatch(ctx context.Context, parent database.Episode, su
 		member.ReviewKind = ""
 		member.ReviewReason = ""
 		member.ConfirmedIdentity = ""
+		feature := false
+		member.MovieFeature = &feature
 		single := selection != nil && len(selection.Files) == 1
 		if movieSubscription(sub) {
-			if !single || batchEpisodeReviewReason(rel, sub, 0, 0) != "" {
+			if selection == nil || !selection.singleVideo || movieExtraSource(sub, rel, parent) {
 				member.ReviewKind = database.ReviewMovieSelection
 				member.Number = 0
 				issue = "请确认要整理的电影正片，任务中有多个视频或文件带附加内容标记"
@@ -138,11 +134,7 @@ func (s *Scheduler) expandBatch(ctx context.Context, parent database.Episode, su
 }
 
 func movieSubscription(sub database.Subscription) bool {
-	switch strings.ToLower(strings.TrimSpace(sub.AnimeType)) {
-	case "movie", "film", "劇場版", "剧场版":
-		return true
-	}
-	return false
+	return core.TMDBMediaType(sub.AnimeType) == "movie"
 }
 
 // 首个成员沿用占位记录的主键，保留历史引用。按具体来源去重使同集不同版本各自可追踪。

@@ -45,7 +45,9 @@ func Init(dbPath string) error {
 	}
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		legacyEpisodeStatus := tx.Migrator().HasTable(&Episode{}) && !tx.Migrator().HasColumn(&Episode{}, "ManualStatus")
+		existingEpisodes := tx.Migrator().HasTable(&Episode{})
+		legacyEpisodeStatus := existingEpisodes && !tx.Migrator().HasColumn(&Episode{}, "ManualStatus")
+		legacyMovieFeature := existingEpisodes && !tx.Migrator().HasColumn(&Episode{}, "MovieFeature")
 		if tx.Migrator().HasIndex(&Episode{}, "idx_episodes_torrent_hash") {
 			if err := tx.Migrator().DropIndex(&Episode{}, "idx_episodes_torrent_hash"); err != nil {
 				return err
@@ -62,7 +64,13 @@ func Init(dbPath string) error {
 		); err != nil {
 			return err
 		}
-		return migrateEpisodeLabels(tx, legacyEpisodeStatus)
+		if err := migrateEpisodeLabels(tx, legacyEpisodeStatus); err != nil {
+			return err
+		}
+		if legacyMovieFeature {
+			return migrateMovieFeatures(tx)
+		}
+		return nil
 	})
 	if err != nil {
 		return err

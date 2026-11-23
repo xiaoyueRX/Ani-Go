@@ -464,6 +464,7 @@ func (m *BackupManager) RestoreBackup(ctx context.Context, fileName string) erro
 			claimedSubs[sub.ID] = true
 		}
 		legacyProgress := make(map[uint]bool)
+		legacyMovies := make(map[uint][]database.Episode)
 		claimedEpisodes := make(map[uint]bool, len(backup.Episodes))
 		episodeIDs := make(map[uint]bool, len(backup.Episodes))
 		for _, ep := range backup.Episodes {
@@ -508,11 +509,25 @@ func (m *BackupManager) RestoreBackup(ctx context.Context, fileName string) erro
 					return err
 				}
 			}
+			legacyMovie := ep.MovieFeature == nil && ep.Status == "organized" && ep.Number == 0 && ep.OrganizedAt != nil
 			err = saveArchiveRow(tx, &ep, &ep.Model, id, backup.FormatVersion == archiveFormat)
 			if err != nil {
 				return err
 			}
 			claimedEpisodes[ep.ID] = true
+			if legacyMovie {
+				legacyMovies[parent] = append(legacyMovies[parent], ep)
+			}
+		}
+		// 先恢复全部任务成员，避免把多文件备份中的第一条误当独立正片。
+		for id, rows := range legacyMovies {
+			var sub database.Subscription
+			if err := tx.Unscoped().First(&sub, id).Error; err != nil {
+				return err
+			}
+			if _, err := database.RecoverLegacyMovieFeatures(tx, sub, rows, true); err != nil {
+				return err
+			}
 		}
 		for _, id := range ids {
 			if _, err := database.SyncEpisodeProgress(tx.Unscoped(), id, legacyProgress[id]); err != nil {
@@ -550,6 +565,9 @@ func preserveLocalFileEvidence(tx *gorm.DB, id uint, ep *database.Episode) error
 	if ep.Status == "organized" && local.Status == "organized" && ep.FinalPath != "" && ep.FinalPath == local.FinalPath {
 		ep.MoveSourcePath = local.MoveSourcePath
 		ep.MoveSourceModTime = local.MoveSourceModTime
+		if ep.MovieFeature == nil && local.MovieFeature != nil {
+			ep.MovieFeature = local.MovieFeature
+		}
 	}
 	return nil
 }

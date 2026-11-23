@@ -294,11 +294,11 @@ func TestMoviePackRequiresConfirmedOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(movie.FinalPath)
-	if movie.Status != "organized" || err != nil || string(data) != "Feature.mkv" {
+	if movie.Status != "organized" || err != nil || string(data) != "Feature.mkv" || movie.MovieFeature == nil || !*movie.MovieFeature {
 		t.Fatalf("确认正片未入库: %+v %v", movie, err)
 	}
 	var trailer database.Episode
-	if err := db.Where("source_file = ?", "Trailer.mkv").First(&trailer).Error; err != nil || trailer.Status != database.EpisodeNeedsReview || trailer.FinalPath != "" {
+	if err := db.Where("source_file = ?", "Trailer.mkv").First(&trailer).Error; err != nil || trailer.Status != database.EpisodeNeedsReview || trailer.FinalPath != "" || trailer.MovieFeature != nil && *trailer.MovieFeature {
 		t.Fatalf("其他电影文件被错误放行: %+v %v", trailer, err)
 	}
 }

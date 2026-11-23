@@ -16,7 +16,41 @@ import (
 type FileSelection struct {
 	Files   []CompletedFile
 	Partial bool
+	// 仅当下载器列出被跳过的文件，且它们都是已知附件时为真。
+	onlySidecarsSkipped bool
 }
+
+// IsSingleVideo 仅对清单中唯一的视频自动确认。未知的未选文件也可能是另一版本。
+func (s FileSelection) IsSingleVideo() bool {
+	if s.Partial && !s.onlySidecarsSkipped {
+		return false
+	}
+	count := 0
+	for _, f := range s.Files {
+		if core.IsVideoFile(f.Path) {
+			count++
+		} else if !isSidecar(f.Path) {
+			return false
+		}
+	}
+	return count == 1
+}
+
+func (s *FileSelection) skip(name string) {
+	// 之后遇到字幕时，仍须记住前面跳过的视频或未知文件。
+	s.onlySidecarsSkipped = (!s.Partial || s.onlySidecarsSkipped) && isSidecar(name)
+	s.Partial = true
+}
+
+func isSidecar(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".sup", ".smi",
+		".nfo", ".txt", ".jpg", ".jpeg", ".png", ".webp", ".ttf", ".otf", ".sfv", ".md5", ".sha256":
+		return true
+	}
+	return false
+}
+
 type CompletedFile struct {
 	ModTime int64 // 调度器在核对下载目录时记录的文件修改时间。
 	Path    string
@@ -66,7 +100,7 @@ func (q *QBittorrent) CompletedFiles(ctx context.Context, task core.DownloadTask
 			return result, fmt.Errorf("qBittorrent 文件清单缺少选择状态或大小")
 		}
 		if *f.Priority == 0 {
-			result.Partial = true
+			result.skip(f.Name)
 			continue
 		}
 		if err := result.add(task.SavePath, f.Name, *f.Size, *f.Priority > 0 && f.Progress != nil && *f.Progress == 1); err != nil {
@@ -109,7 +143,7 @@ func (t *Transmission) CompletedFiles(ctx context.Context, task core.DownloadTas
 			return result, fmt.Errorf("Transmission 文件选择状态或大小未知")
 		}
 		if !*wanted {
-			result.Partial = true
+			result.skip(f.Name)
 			continue
 		}
 		if err := result.add(task.SavePath, f.Name, *f.Length, f.BytesCompleted != nil && *f.Length == *f.BytesCompleted); err != nil {
@@ -142,7 +176,7 @@ func (a *Aria2) CompletedFiles(ctx context.Context, task core.DownloadTask) (Fil
 			return result, fmt.Errorf("Aria2 文件选择状态或大小未知")
 		}
 		if !*f.Selected {
-			result.Partial = true
+			result.skip(f.Path)
 			continue
 		}
 		name, err := filepath.Rel(task.SavePath, f.Path)

@@ -5,6 +5,15 @@ import (
 	"strings"
 )
 
+// IsVideoFile 判断下载成员是否使用整理器支持的视频扩展名。
+func IsVideoFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".mkv", ".mp4", ".avi", ".rmvb", ".m4v", ".webm", ".ts", ".m2ts", ".mov":
+		return true
+	}
+	return false
+}
+
 var mediaServerReplacer = strings.NewReplacer(
 	":", " - ",
 	"?", "？",

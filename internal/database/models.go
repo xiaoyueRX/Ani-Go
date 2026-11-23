@@ -59,6 +59,7 @@ type Episode struct {
 	ReviewReason       string  `json:"ReviewReason,omitempty"`
 	ReviewKind         string  `json:"ReviewKind,omitempty"`
 	ConfirmedIdentity  string  `json:"ConfirmedIdentity,omitempty"`
+	MovieFeature       *bool   `gorm:"default:false"` // 旧备份缺少正片验证字段时为 nil。
 	TorrentHash        string  `gorm:"index:idx_episode_client_hash"`
 	OriginKey          string  `gorm:"index"`
 	ReservationKey     *string `gorm:"uniqueIndex:idx_episode_claim,where:deleted_at IS NULL"`

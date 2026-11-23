@@ -137,7 +137,7 @@ components:
         description: {type: string}
         anime_type: {type: string}
         total_episodes: {type: integer}
-        current_episodes: {type: integer, description: 该订阅季已整理的正片集号数，同集多份只计一次}
+        current_episodes: {type: integer, description: 该订阅季已整理的正片集号数。同集多份只计一次，总数为 1 的电影订阅中，已入库的正片多个版本也只计一部。}
         enabled: {type: boolean}
         completed: {type: boolean}
         filter_json: {type: string}

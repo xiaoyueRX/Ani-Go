@@ -589,3 +589,51 @@ func TestRestoreDistinguishesOpaqueTaskIDsThatDifferByCase(t *testing.T) {
 		t.Fatalf("不透明任务标识被误合并：%+v %v", rows, err)
 	}
 }
+
+func TestRestoreMovieProgressWithoutLocalFileTimes(t *testing.T) {
+	for _, tc := range []struct {
+		name, status string
+		feature      any
+		want         int
+		completed    bool
+	}{
+		{"旧归档保留显式完结状态", "organized", nil, 1, false},
+		{"旧归档先恢复工作流状态", "completed", nil, 1, true},
+		{"新归档明确未验证", "organized", false, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newArchiveFixture(t, 1)
+			sub := database.Subscription{TitleCN: "独立电影", AnimeType: "movie", TotalEpisodes: 1, Season: 1}
+			sub.ID = 24
+			file := "[Group] 独立电影 [Movie].mkv"
+			hash := strings.Repeat("ab", 20)
+			key := database.EpisodeFileReservationKey(sub.ID, hash, file)
+			// 旧版 JSON 不导出源文件修改时间。归属仍由归档中的成员键和任务名交叉验证。
+			ep := map[string]any{"ID": 48, "SubscriptionID": sub.ID, "Number": 0, "Season": 1, "Status": tc.status,
+				"OrganizedAt": time.Now(), "FinalPath": "/movies/movie.mkv", "SourceFile": file, "DownloadRoot": "/downloads",
+				"OriginalName": strings.TrimSuffix(file, ".mkv"), "GroupName": "Group", "FileSize": 5000, "TorrentHash": hash, "ReservationKey": key}
+			if tc.feature != nil {
+				ep["MovieFeature"] = tc.feature
+			}
+			raw, err := json.Marshal(map[string]any{"timestamp": time.Now().Format(time.RFC3339), "settings": map[string]string{}, "subscriptions": []database.Subscription{sub}, "episodes": []any{ep}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			const name = "anigo_backup_20260101_120000_full.json"
+			if err := os.WriteFile(filepath.Join(m.cfg.Scheduler.BackupPath, name), raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.RestoreBackup(t.Context(), name); err != nil {
+				t.Fatal(err)
+			}
+			var saved database.Subscription
+			if err := database.DB.First(&saved).Error; err != nil {
+				t.Fatal(err)
+			}
+			counts, err := database.FinishedEpisodeCounts(database.DB, []uint{saved.ID})
+			if err != nil || counts[saved.ID] != tc.want || saved.CurrentEpisodes != tc.want || saved.Completed != tc.completed {
+				t.Fatalf("restored list %v, stored %d/%d completed %t: %v", counts, saved.CurrentEpisodes, saved.TotalEpisodes, saved.Completed, err)
+			}
+		})
+	}
+}
