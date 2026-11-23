@@ -8,6 +8,11 @@ const { Image } = createRequire(import.meta.url)('lucide-vue-next')
 const first = '/api/proxy/image?url=first'
 const second = '/api/proxy/image?url=second'
 
+function imageEvent(src, isConnected = true) {
+  const target = { src, isConnected }
+  return { target, currentTarget: target }
+}
+
 function find(node, matches) {
   if (matches(node)) return node
   if (Array.isArray(node.children)) {
@@ -46,7 +51,7 @@ test('没有封面的卡片仅显示图标，添加或移除封面时随之切�
   assert.equal(c.cover().skeleton, true)
   assert.equal(c.cover().icon, false)
   assert.equal(c.cover().image.src, first)
-  c.cover().image.onLoad()
+  c.cover().image.onLoad(imageEvent(first))
   assert.equal(c.cover().skeleton, false)
   await c.changeCover('')
   assert.deepEqual(c.cover(), emptyCover)
@@ -58,18 +63,18 @@ for (const failed of [false, true]) {
     const initial = c.cover()
     assert.equal(initial.skeleton, true)
     if (failed) {
-      const target = { src: first }
-      initial.image.onError({ target })
-      assert.match(target.src, /^data:image\/svg\+xml,/)
+      const event = imageEvent(first)
+      initial.image.onError(event)
+      assert.match(event.target.src, /^data:image\/svg\+xml,/)
       assert.equal(c.cover().skeleton, true)
     }
-    initial.image.onLoad()
+    initial.image.onLoad(imageEvent(first))
     assert.equal(c.cover().skeleton, false)
     await c.changeCover(second)
     const replacement = c.cover()
     assert.equal(replacement.image.src, second)
     assert.equal(replacement.skeleton, true)
-    replacement.image.onLoad()
+    replacement.image.onLoad(imageEvent(second))
     assert.equal(c.cover().skeleton, false)
   })
 }
@@ -93,7 +98,7 @@ test('只跳过离屏的装饰动画，保留图片、替代文本和卡片标�
 test('同一张已加载的封面改为等价 HTTPS 地址时保持可见', async () => {
   const c = card('//covers.example/series.jpg')
   const initial = c.cover().image
-  initial.onLoad()
+  initial.onLoad(imageEvent(initial.src))
   assert.equal(c.cover().skeleton, false)
 
   await c.changeCover('https://covers.example/series.jpg')
@@ -102,3 +107,23 @@ test('同一张已加载的封面改为等价 HTTPS 地址时保持可见', asyn
   assert.equal(updated.skeleton, false)
   assert.ok(updated.image.class.split(' ').includes('opacity-100'))
 })
+
+for (const type of ['load', 'error']) {
+  test(`忽略已移除的封面图片迟到的 ${type} 事件`, async () => {
+    const c = card(first)
+    const old = c.cover().image
+    await c.changeCover('')
+    assert.equal(c.cover().icon, true)
+    await c.changeCover(second)
+    const latest = c.cover().image
+    const stale = imageEvent(first, false)
+    if (type === 'load') old.onLoad(stale)
+    else old.onError(stale)
+
+    assert.equal(stale.target.src, first)
+    assert.equal(c.cover().skeleton, true)
+    assert.ok(c.cover().image.class.split(' ').includes('opacity-0'))
+    latest.onLoad(imageEvent(second))
+    assert.equal(c.cover().skeleton, false)
+  })
+}
