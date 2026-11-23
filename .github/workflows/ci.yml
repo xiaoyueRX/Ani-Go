@@ -173,7 +173,12 @@ jobs:
             mkdir "$volume"
             hdiutil attach -readonly -nobrowse -mountpoint "$volume" "$dmg"
             trap 'hdiutil detach "$volume"' EXIT
-            qb=$(find "$volume" -path '*/Contents/MacOS/qbittorrent' -type f -print -quit)
+            app="$RUNNER_TEMP/qbittorrent.app"
+            ditto "$volume/qbittorrent.app" "$app"
+            hdiutil detach "$volume" || hdiutil detach -force "$volume"
+            trap - EXIT
+            qb="$app/Contents/MacOS/qbittorrent"
+            test ! -e "$volume/qbittorrent.app"
             lipo -archs "$qb"
           else
             if ! command -v qbittorrent-nox >/dev/null; then
