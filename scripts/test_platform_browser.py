@@ -177,9 +177,10 @@ def check_subscription_grid(browser, service, saved):
         raise RuntimeError("A subscription without a cover should show a static image icon without a loading skeleton")
 
     filter_by_title()
-    match = wait.until(EC.element_to_be_clickable(heading))
-    browser.execute_script("arguments[0].scrollIntoView({block: 'center'})", match)
-    match.click()
+    title_link = wait.until(EC.element_to_be_clickable(
+        (By.XPATH, f"//h3/a[@href='/subscriptions/{saved['id']}' and normalize-space(.)='{title}']")),
+        "The filtered title must be a keyboard-accessible link to the saved subscription")
+    title_link.send_keys(Keys.ENTER)
     wait.until(EC.visibility_of_element_located((By.XPATH, f"//h1[normalize-space(.)='{title}']")))
     if urlsplit(browser.current_url).path != f"/subscriptions/{saved['id']}":
         raise RuntimeError("Opening the filtered card did not navigate to its subscription")
@@ -191,6 +192,7 @@ def check_subscription_grid(browser, service, saved):
     wait.until(lambda b: field.get_attribute("value") == "" and {title, TITLE}.issubset(card_titles(b)),
                "Clearing title search did not restore both cards")
     print("Verified coverless card, title filter, detail navigation and clearing the filter.", flush=True)
+    print("Verified keyboard activation of the title link and return to the filtered list.", flush=True)
 
 
 def check_filtered_batch_selection(browser, service, saved):
