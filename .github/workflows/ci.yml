@@ -153,42 +153,32 @@ jobs:
           fi
           file "$daemon"
           "$py" scripts/test_transmission_runtime.py "./anigo$(go env GOEXE)" --daemon "$daemon"
-      - name: Transfer selected episodes between real qBittorrent peers
+      - name: Install qBittorrent
+        id: qb
         if: ${{ !cancelled() && steps.application.outcome == 'success' }}
+        run: bash scripts/install_ci_qbittorrent.sh
+      - name: Transfer selected episodes between real qBittorrent peers
+        if: ${{ !cancelled() && steps.qb.outcome == 'success' }}
+        env:
+          QB: ${{ steps.qb.outputs.executable }}
         run: |
-          py=python3
-          if [[ "$RUNNER_OS" == Windows ]]; then
-            py=python
-            installer=qbittorrent_5.3.0_x64_setup.exe
-            curl --fail --silent --show-error --location --output "$installer" "https://github.com/qbittorrent/qBittorrent/releases/download/release-5.3.0/$installer"
-            echo "aff5b3bdc00d6e5773d6099ba30f9696dd3dfd1669ab0f64ce5c4e7168486436  $installer" | sha256sum --check
-            pwsh -NoProfile -Command '$p = Start-Process .\qbittorrent_5.3.0_x64_setup.exe -ArgumentList /S -Wait -PassThru; exit $p.ExitCode'
-            qb=$(pwsh -NoProfile -Command 'Join-Path $env:ProgramFiles qBittorrent/qbittorrent.exe' | tr -d '\r')
-            qb=$(cygpath -u "$qb")
-          elif [[ "$RUNNER_OS" == macOS ]]; then
-            dmg=qbittorrent-5.2.3.dmg
-            curl --fail --silent --show-error --location --output "$dmg" "https://github.com/qbittorrent/qBittorrent/releases/download/release-5.2.3/$dmg"
-            echo "9e37f6c7ff848c7bdd3c10167614c0cb78c00e2ddcc323f1ad3ac6c008a0481f  $dmg" | shasum -a 256 --check
-            volume="$RUNNER_TEMP/qb-volume"
-            mkdir "$volume"
-            hdiutil attach -readonly -nobrowse -mountpoint "$volume" "$dmg"
-            trap 'hdiutil detach "$volume"' EXIT
-            app="$RUNNER_TEMP/qbittorrent.app"
-            ditto "$volume/qbittorrent.app" "$app"
-            hdiutil detach "$volume" || hdiutil detach -force "$volume"
-            trap - EXIT
-            qb="$app/Contents/MacOS/qbittorrent"
-            test ! -e "$volume/qbittorrent.app"
-            lipo -archs "$qb"
-          else
-            if ! command -v qbittorrent-nox >/dev/null; then
-              sudo apt-get update -qq
-              sudo apt-get install -y --no-install-recommends qbittorrent-nox
-            fi
-            qb=$(command -v qbittorrent-nox)
-          fi
-          file "$qb"
-          "$py" scripts/test_qb_runtime.py "./anigo$(go env GOEXE)" --qbittorrent "$qb"
+          if [[ "$RUNNER_OS" == Windows ]]; then py=python; else py=python3; fi
+          file "$QB"
+          "$py" scripts/test_qb_runtime.py "./anigo$(go env GOEXE)" --qbittorrent "$QB"
+      - name: Export a complete Windows backup after organizing a real download
+        id: portable
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && matrix.runner == 'windows-2025' && steps.qb.outcome == 'success' }}
+        env:
+          QB: ${{ steps.qb.outputs.executable }}
+        run: python scripts/test_portable_backup.py export ./anigo.exe "$RUNNER_TEMP/portable-backup" --qbittorrent "$QB"
+      - name: Share the Windows backup with the target operating systems
+        if: ${{ !cancelled() && steps.portable.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-portable-backup
+          path: ${{ runner.temp }}/portable-backup/*.json
+          if-no-files-found: error
+          retention-days: 1
       - name: Test direct ARMv7 execution and downloaders on the ARM64 host
         if: ${{ !cancelled() && steps.application.outcome == 'success' && matrix.os == 'linux' && matrix.arch == 'arm64' }}
         run: |
@@ -206,6 +196,49 @@ jobs:
           qemu-arm --version
           GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o anigo .
           python3 scripts/test_platform_runtime.py --runner qemu-arm ./anigo
+
+  restore-windows-backup:
+    name: Restore Windows backup on ${{ matrix.runner }}
+    needs: platform
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, target: linux/amd64 }
+          - { runner: macos-15, target: darwin/arm64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: web/dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-portable-backup
+          path: ${{ runner.temp }}/portable-backup
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Build the native destination application
+        env:
+          TARGET: ${{ matrix.target }}
+          CGO_ENABLED: '0'
+        run: |
+          go version
+          test "$(go env GOHOSTOS)/$(go env GOHOSTARCH)" = "$TARGET"
+          go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o anigo .
+      - name: Install qBittorrent
+        id: qb
+        run: bash scripts/install_ci_qbittorrent.sh
+      - name: Restore the Windows archive and organize a new local download
+        env:
+          QB: ${{ steps.qb.outputs.executable }}
+        run: python3 scripts/test_portable_backup.py import ./anigo "$RUNNER_TEMP/portable-backup" --require-windows-source --qbittorrent "$QB"
 
   check-container:
     needs: verify

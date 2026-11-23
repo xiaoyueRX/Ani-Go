@@ -82,10 +82,11 @@ class SeedHandler(BaseHTTPRequestHandler):
 
 
 @contextmanager
-def web_seed(media_ready=None, *, http_seed=True, payloads=PAYLOADS):
+def web_seed(media_ready=None, *, http_seed=True, payloads=PAYLOADS, member_directory=None):
     piece = PIECE_SIZE
     content = b"".join(payloads)
-    files = [{b"length": len(data), b"path": [name.encode()]} for name, data in zip(NAMES, payloads)]
+    paths = [[member_directory, name] if member_directory else [name] for name in NAMES]
+    files = [{b"length": len(data), b"path": [part.encode() for part in path]} for path, data in zip(paths, payloads)]
     info = {b"name": TITLE.encode(), b"files": files, b"piece length": piece, b"private": 1,
             b"pieces": b"".join(hashlib.sha1(content[i:i+piece]).digest() for i in range(0, len(content), piece))}
     infohash = hashlib.sha1(bencode(info)).hexdigest()
@@ -96,7 +97,7 @@ def web_seed(media_ready=None, *, http_seed=True, payloads=PAYLOADS):
             torrent[b"url-list"] = [(url + "/media/").encode()]
         server.torrent = bencode(torrent)
         server.media_ready = media_ready
-        server.media = {f"/media/{TITLE}/{name}": data for name, data in zip(NAMES, payloads)} if http_seed else {}
+        server.media = {f"/media/{TITLE}/" + "/".join(path): data for path, data in zip(paths, payloads)} if http_seed else {}
         server.rss = f"""<rss version="2.0"><channel><title>{TITLE}</title><item>
         <title>[Fixture] {TITLE} [01-03] [1080p]</title><link>{url}/Home/Episode/{infohash}</link>
         <enclosure url="{url}/pack.torrent" length="{len(server.torrent)}" type="application/x-bittorrent"/>
