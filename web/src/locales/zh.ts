@@ -703,6 +703,10 @@ export default {
     files: {
       selected: '核对所选库文件', all: '核对全部已整理文件', checking: '正在核对库文件…',
       result: '库文件核对 · {count} 项 · {time}', currentPath: '未设置卷标识，本次仅核对当前媒体库路径。',
+      restore: '从下载原件补回', restoring: '正在补回…',
+      restoreHelp: '下载原件和媒体库须在同一文件系统，原目标父目录须仍存在。补回会建立硬链接，保留下载原件。',
+      confirmVolume: '未设置媒体卷标识。你已确认当前挂载的是正确的媒体库，并要补回“{name}”吗？',
+      restoreFailed: '补回失败，请重新核对文件后重试。', restoredCheckFailed: '文件已补回，但重新核对失败。',
       size_matches: '文件存在，大小与记录一致', present: '文件存在，缺少可比的大小记录', empty: '文件为 0 字节，缺少可比的大小记录', size_mismatch: '文件大小不符',
       sizes: '记录 {expected} 字节，实际 {actual} 字节', missing: '当前路径未找到文件', unverified: '无法核对',
       not_applicable: '尚未整理', request_failed: '核对请求失败，请刷新后重试',

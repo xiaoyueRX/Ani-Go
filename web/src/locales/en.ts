@@ -702,6 +702,10 @@ export default {
     files: {
       selected: 'Check selected library files', all: 'Check all organized files', checking: 'Checking library files…',
       result: 'Library file check · {count} items · {time}', currentPath: 'No volume ID is configured. This check covers the current library path.',
+      restore: 'Restore from download', restoring: 'Restoring…',
+      restoreHelp: 'The download and library must be on the same filesystem, and the original destination folder must still exist. Restoring creates a hard link and keeps the download.',
+      confirmVolume: 'No volume ID is configured. Have you confirmed the correct library volume is mounted and want to restore “{name}”?',
+      restoreFailed: 'Could not restore the file. Check the library file and try again.', restoredCheckFailed: 'File restored, but the follow-up check failed.',
       size_matches: 'File present, recorded size matches', present: 'File present, no recorded size to compare', empty: 'Empty file, no recorded size to compare', size_mismatch: 'File size differs',
       sizes: 'Expected {expected} bytes, found {actual} bytes', missing: 'File missing at current path', unverified: 'Could not verify',
       not_applicable: 'Not organized', request_failed: 'Request failed. Refresh and try again.',

@@ -22,11 +22,11 @@ function review(overrides = {}) {
   return { id: 41, status: 'needs_review', review_kind: '', can_retry_organize: true, review_reason: 'The destination was unavailable', season: 1, number: 0,
     group_name: 'Harbor', manual_status: 'pending', ...overrides }
 }
-function setup(rows, request = {}, locale = 'en', params = { id: 2 }) {
+function setup(rows, request = {}, locale = 'en', params = { id: 2 }, globals = {}) {
   const { t } = createI18n({ legacy: false, locale, messages: { en, zh } }).global
   const { component } = view('views/SubscriptionDetail', {
     get: async () => ({ data: { subscription: { id: 2 }, episodes: rows } }), ...request,
-  }, { route: { params }, translate: (key, values) => values ? t(key, { ...values }) : t(key) })
+  }, { route: { params }, globals, translate: (key, values) => values ? t(key, { ...values }) : t(key) })
   component.episodes.value = rows
   return component
 }
@@ -340,4 +340,98 @@ test('文件缺失、空文件和卷身份未核实各自显示对应原因', as
   const html = await renderToString(createSSRApp({ template: checkTemplate, setup: () => ({ ...c }) }))
   for (const word of ['File missing at current path', 'Empty file', 'Could not confirm media volume']) assert.ok(html.includes(word), word)
   assert.ok(!html.includes('No volume ID is configured'))
+})
+
+function renderFileReport(c) {
+  return renderToString(createSSRApp({ template: checkTemplate, setup: () => ({ ...c }) }))
+}
+
+test('只有缺失版本可补回，未标记媒体卷须先确认，单次成功只复验这一个版本', async () => {
+  const calls = [], prompts = []
+  const pending = Promise.withResolvers()
+  let approved = false
+  const rows = [11, 12, 13, 14, 15].map(id => review({ id, status: 'organized', final_path: '/library/edition-' + id + '.mkv' }))
+  const states = ['missing', 'size_matches', 'size_mismatch', 'empty', 'unverified']
+  const c = setup(rows, { post: async (url, body) => {
+    calls.push([url, JSON.parse(JSON.stringify(body))])
+    if (url.endsWith('/restore-file')) return pending.promise
+    return { data: { volume_guarded: false, results: body.ids.map(id => ({ id, status: body.ids.length === 1 ? 'size_matches' : states[id - 11] })) } }
+  } }, 'zh', { id: 2 }, { confirm: msg => { prompts.push(msg); return approved } })
+  await c.verifyFiles('organized')
+  const report = c.fileReport.value
+  const html = await renderFileReport(c)
+  assert.equal((html.match(/从下载原件补回/g) || []).length, 1)
+  for (const word of ['硬链接', '同一', '原件', '父目录']) assert.ok(html.includes(word), word)
+  for (const sibling of report.rows.slice(1)) await c.restoreFile(sibling)
+  await c.restoreFile(report.rows[0])
+  assert.equal(prompts.length, 1)
+  assert.match(prompts[0], /正确的媒体库/)
+  assert.equal(calls.length, 1)
+  approved = true
+  const first = c.restoreFile(report.rows[0])
+  await c.restoreFile(report.rows[0])
+  assert.equal(prompts.length, 2)
+  assert.equal(calls.length, 2)
+  pending.resolve({ data: { restored: true } })
+  await first
+  assert.deepEqual(calls.slice(1), [
+    ['/subscriptions/2/episodes/11/restore-file', { confirm_unmarked_volume: true }],
+    ['/subscriptions/2/verify-files', { ids: [11] }],
+  ])
+  assert.deepEqual(Array.from(report.rows, row => row.status), ['size_matches', ...states.slice(1)])
+  assert.ok(!(await renderFileReport(c)).includes('从下载原件补回'))
+})
+
+test('已标记卷的补回失败在对应行显示服务端原因，保留其它版本和再次补回入口', async () => {
+  const calls = []
+  const c = setup([41, 42].map(id => review({ id, status: 'organized', original_name: id + '.mkv' })), { post: async (url, body) => {
+    if (url.endsWith('/verify-files')) return { data: { volume_guarded: true, results: body.ids.map(id => ({ id, status: 'missing' })) } }
+    calls.push([url, body.confirm_unmarked_volume])
+    throw { response: { data: { error: '下载原件已变化' } } }
+  } }, 'en', { id: 2 }, { confirm: () => assert.fail('Marked media volume requested unmarked confirmation') })
+  await c.verifyFiles('organized')
+  await c.restoreFile(c.fileReport.value.rows[0])
+  const html = await renderFileReport(c)
+  const [failed, sibling] = html.split('<li>').slice(1)
+  assert.ok(failed.includes('下载原件已变化') && failed.includes('Restore from download'))
+  assert.ok(sibling.includes('42.mkv') && sibling.includes('Restore from download') && !sibling.includes('下载原件已变化'))
+  assert.deepEqual(calls, [['/subscriptions/2/episodes/41/restore-file', false]])
+})
+
+test('离开核对范围时晚到的补回成功不会复写其他报告', async () => {
+  const pending = Promise.withResolvers(), calls = []
+  const ep = review({ status: 'organized' })
+  const c = setup([ep], { post: async url => {
+    calls.push(url)
+    if (url.endsWith('/restore-file')) return pending.promise
+    return { data: { volume_guarded: true, results: [{ id: ep.id, status: 'missing' }] } }
+  } })
+  await c.verifyFiles('organized')
+  const first = c.restoreFile(c.fileReport.value.rows[0])
+  c.toggleEpisodeSelect(ep.id)
+  await nextTick()
+  assert.equal(c.fileReport.value, null)
+  pending.resolve({ data: { restored: true } })
+  await first
+  assert.equal(c.fileReport.value, null)
+  assert.equal(calls.length, 2)
+})
+
+test('已补回后重新核对失败会区分两步结果，用户不能再次提交同一次补回', async () => {
+  const calls = []
+  const ep = review({ status: 'organized' })
+  const c = setup([ep], { post: async url => {
+    calls.push(url)
+    if (calls.length === 1) return { data: { volume_guarded: true, results: [{ id: ep.id, status: 'missing' }] } }
+    if (url.endsWith('/restore-file')) return { data: { restored: true } }
+    throw new Error('Connection closed')
+  } })
+  await c.verifyFiles('organized')
+  const row = c.fileReport.value.rows[0]
+  await c.restoreFile(row)
+  const html = await renderFileReport(c)
+  assert.ok(html.includes('File restored, but the follow-up check failed.'))
+  assert.ok(!html.includes('Restore from download'))
+  await c.restoreFile(row)
+  assert.equal(calls.length, 3)
 })

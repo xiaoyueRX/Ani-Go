@@ -55,7 +55,9 @@ interface FileVerification {
   expected_size?: number
   actual_size?: number
 }
-type FileReportRow = Omit<FileVerification, 'status'> & { name: string; status: FileStatus | 'request_failed' }
+type FileReportRow = Omit<FileVerification, 'status'> & {
+  name: string; status: FileStatus | 'request_failed'; restoring?: boolean; restoreError?: string
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -305,6 +307,12 @@ function clearSelection() {
   showBulkActions.value = false
 }
 
+function checkFileIds(ids: number[], signal?: AbortSignal) {
+  return request.post<{ results: FileVerification[]; volume_guarded: boolean }>(
+    `/subscriptions/${id}/verify-files`, { ids }, { signal },
+  )
+}
+
 async function verifyFiles(mode: 'organized' | 'selected') {
   if (verifyingFiles.value || bulkActionLoading.value || updatingEps.value.size) return
   const items = episodes.value.filter(ep => mode === 'organized' ? ep.status === 'organized' : selectedEpisodes.value.has(ep.id))
@@ -322,9 +330,7 @@ async function verifyFiles(mode: 'organized' | 'selected') {
       const batch = items.slice(start, start + 100)
       let results: FileVerification[] = []
       try {
-        const { data } = await request.post<{ results: FileVerification[]; volume_guarded: boolean }>(
-          `/subscriptions/${id}/verify-files`, { ids: batch.map(ep => ep.id) }, { signal: controller.signal },
-        )
+        const { data } = await checkFileIds(batch.map(ep => ep.id), controller.signal)
         results = data.results ?? []
         if (typeof data.volume_guarded === 'boolean') volumeGuarded = volumeGuarded !== false && data.volume_guarded
       } catch {
@@ -344,6 +350,41 @@ async function verifyFiles(mode: 'organized' | 'selected') {
       verificationRequest = undefined
       verifyingFiles.value = false
     }
+  }
+}
+
+async function restoreFile(row: FileReportRow) {
+  const report = fileReport.value
+  if (!report?.rows.includes(row) || fileScope.value !== verifiedScope || row.status !== 'missing' ||
+      updatingEps.value.has(row.id) || verifyingFiles.value || bulkActionLoading.value) return
+  const unmarked = report.volumeGuarded !== true
+  if (unmarked && !confirm(t('detail.files.confirmVolume', { name: row.name }))) return
+
+  updatingEps.value.add(row.id)
+  row.restoring = true
+  delete row.restoreError
+  let restored = false
+  try {
+    const { data } = await request.post<{ restored: boolean }>(`/subscriptions/${id}/episodes/${row.id}/restore-file`,
+      { confirm_unmarked_volume: unmarked })
+    if (data?.restored !== true) throw new Error()
+    restored = true
+    if (fileReport.value !== report || fileScope.value !== verifiedScope) return
+    const { data: checked } = await checkFileIds([row.id])
+    const result = checked.results?.[0]
+    if (result?.id !== row.id) throw new Error()
+    Object.assign(row, result)
+    if (checked.volume_guarded === false) report.volumeGuarded = false
+  } catch (e: any) {
+    if (restored) {
+      row.status = 'request_failed'
+      row.restoreError = t('detail.files.restoredCheckFailed')
+    } else {
+      row.restoreError = e.response?.data?.error || t('detail.files.restoreFailed')
+    }
+  } finally {
+    row.restoring = false
+    updatingEps.value.delete(row.id)
   }
 }
 
@@ -724,11 +765,17 @@ onUnmounted(() => {
          <details v-if="fileReport" open class="rounded-2xl border border-base-300 bg-base-100 p-4 text-sm">
            <summary class="cursor-pointer font-semibold" aria-live="polite">{{ t('detail.files.result', { count: fileReport.rows.length, time: new Date(fileReport.checkedAt).toLocaleTimeString(locale) }) }}</summary>
            <p v-if="fileReport.volumeGuarded === false" class="mt-2">{{ t('detail.files.currentPath') }}</p>
+           <p v-if="fileReport.rows.some(row => row.status === 'missing')" class="mt-2">{{ t('detail.files.restoreHelp') }}</p>
            <ul class="mt-2 max-h-60 space-y-1 overflow-y-auto break-words">
              <li v-for="row in fileReport.rows" :key="row.id">
                <span class="font-medium">{{ row.name }}</span> · {{ t(`detail.files.${row.status}`) }}
                <template v-if="row.status === 'size_mismatch'"> · {{ t('detail.files.sizes', { expected: row.expected_size?.toLocaleString(locale), actual: row.actual_size?.toLocaleString(locale) }) }}</template>
                <template v-if="row.reason"> · {{ t(`detail.files.reason.${row.reason}`) }}</template>
+               <button v-if="row.status === 'missing'" type="button" class="btn btn-outline btn-xs ms-2"
+                 :disabled="verifyingFiles || bulkActionLoading || updatingEps.has(row.id)" @click="restoreFile(row)">
+                 {{ t(row.restoring ? 'detail.files.restoring' : 'detail.files.restore') }}
+               </button>
+               <span v-if="row.restoreError" role="alert" class="block text-error">{{ row.restoreError }}</span>
              </li>
            </ul>
          </details>
