@@ -15,6 +15,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
+	"gorm.io/gorm/clause"
 )
 
 func subscriptionTitles(sub database.Subscription) []string {
@@ -157,10 +158,23 @@ func matchesHistoryRelease(item core.TorrentItem, sub database.Subscription, fil
 }
 
 // 只有提供者范围内的 ID 可用于其详情接口，旧记录按标题重新核实。
-func (s *Scheduler) resolveSubscriptionIDs(ctx context.Context, sub *database.Subscription) {
+func (s *Scheduler) resolveSubscriptionIDs(ctx context.Context, sub *database.Subscription) (bool, error) {
+	md, mikan := s.metadataProvider, source.MikanFrom(s.source)
+	searchMetadata := md != nil && sub.MetadataID == "" &&
+		(!strings.EqualFold(md.Name(), "TMDB") || sub.TMDBID == "" && !movieSubscription(*sub))
+	searchMikan := mikan != nil && sub.MikanID == ""
+	if !searchMetadata && !searchMikan {
+		return true, nil
+	}
+	// 标题查询及蜜柑搜索可能耗时。仅当搜索所依据的作品、季和来源标识都未变时才采用结果。
+	current := database.DB.WithContext(ctx).Model(sub).Where("id = ?", sub.ID).
+		Where("title_cn = ? AND COALESCE(title_jp, '') = ? AND COALESCE(title_en, '') = ?", sub.TitleCN, sub.TitleJP, sub.TitleEN).
+		Where("COALESCE(year, 0) = ? AND COALESCE(NULLIF(season, 0), 1) = ? AND COALESCE(anime_type, '') = ?", sub.Year, max(1, sub.Season), sub.AnimeType).
+		Where("COALESCE(metadata_id, '') = ? AND COALESCE(metadata_provider, '') = ? AND COALESCE(tmdb_id, '') = ?", sub.MetadataID, sub.MetadataProvider, sub.TMDBID).
+		Where("COALESCE(mikan_id, '') = ? AND COALESCE(bangumi_id, '') = ?", sub.MikanID, sub.BangumiID)
 	updates := map[string]any{}
-	if md := s.metadataProvider; md != nil && sub.MetadataID == "" &&
-		(!strings.EqualFold(md.Name(), "TMDB") || sub.TMDBID == "" && !movieSubscription(*sub)) {
+	mikanLookup := *sub
+	if searchMetadata {
 		lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		results, err := md.SearchAnime(lookupCtx, sub.TitleCN)
 		cancel()
@@ -178,30 +192,29 @@ func (s *Scheduler) resolveSubscriptionIDs(ctx context.Context, sub *database.Su
 				match = anime
 			}
 			if match != nil {
-				sub.MetadataID, sub.MetadataProvider = match.ID, md.Name()
-				updates["metadata_id"], updates["metadata_provider"] = sub.MetadataID, sub.MetadataProvider
+				mikanLookup.MetadataID, mikanLookup.MetadataProvider = match.ID, md.Name()
+				updates["metadata_id"], updates["metadata_provider"] = match.ID, md.Name()
 				if match.TMDBID != "" {
-					sub.TMDBID = match.TMDBID
 					updates["tmdb_id"] = match.TMDBID
 				}
 			}
 		}
 	}
-	if sub.MikanID == "" {
-		if m := source.MikanFrom(s.source); m != nil {
-			if id := lookupMikanID(ctx, m, *sub); id != "" {
-				sub.MikanID = id
-				updates["mikan_id"] = id
-				if sub.BangumiID == "" {
-					sub.BangumiID = id
-					updates["bangumi_id"] = id
-				}
+	if searchMikan {
+		if id := lookupMikanID(ctx, mikan, mikanLookup); id != "" {
+			updates["mikan_id"] = id
+			if sub.BangumiID == "" {
+				updates["bangumi_id"] = id
 			}
 		}
 	}
-	if len(updates) > 0 && sub.ID != 0 {
-		database.DB.Model(sub).Updates(updates)
+	if len(updates) > 0 {
+		current = current.Clauses(clause.Returning{}).Updates(updates)
+	} else {
+		// 即使搜索未命中，后续历史资源抓取也不能沿用用户刚更换的标识。
+		current = current.Find(sub)
 	}
+	return current.RowsAffected == 1, current.Error
 }
 
 type mikanCatalog interface {

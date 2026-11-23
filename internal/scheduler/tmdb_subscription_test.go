@@ -148,3 +148,55 @@ func TestTMDBAutoSubscribeRetainsMovieIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestSupplementKeepsSourceIDsEditedDuringTitleSearch(t *testing.T) {
+	for _, tc := range []struct {
+		name, result string
+		editMetadata bool
+	}{
+		{"标题命中时改元数据和蜜柑", `{"results":[{"id":101,"name":"海港回声"}]}`, true},
+		{"标题未命中时改元数据和蜜柑", `{"results":[]}`, true},
+		{"仅改蜜柑", `{"results":[]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := pipelineDB(t)
+			sub := database.Subscription{TitleCN: "海港回声", Season: 2, MikanID: "351", BangumiID: "351"}
+			savePipelineRow(t, db, &sub)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/search/tv" {
+					t.Errorf("手工选定其他提供者后仍请求过时的元数据 %s", r.URL.Path)
+					w.Write([]byte(`{}`))
+					return
+				}
+				// 查询结果返回前，经用户编辑入口提交到同一数据库。
+				changes := map[string]any{"mikan_id": "352", "bangumi_id": "352"}
+				if tc.editMetadata {
+					changes["metadata_provider"], changes["metadata_id"] = "BGM.tv", "207"
+				}
+				_, err := database.UpdateSubscription(db, sub.ID, changes)
+				if err != nil {
+					t.Error(err)
+				}
+				w.Write([]byte(tc.result))
+			}))
+			defer server.Close()
+			feed := &subscriptionFeedFixture{}
+			s := Scheduler{source: feed, metadataProvider: metadata.NewTMDBProvider("fixture", "zh-CN", []string{server.URL})}
+			if err := s.TriggerSupplement(t.Context(), sub.ID); err != nil {
+				t.Fatal(err)
+			}
+			var saved database.Subscription
+			if err := db.First(&saved, sub.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if tc.editMetadata && (saved.MetadataProvider != "BGM.tv" || saved.MetadataID != "207" || saved.TMDBID != "") ||
+				saved.MikanID != "352" || saved.BangumiID != "352" {
+				t.Errorf("手工标识被覆盖：元数据 %s/%s，TMDB %s，蜜柑 %s/%s", saved.MetadataProvider, saved.MetadataID,
+					saved.TMDBID, saved.MikanID, saved.BangumiID)
+			}
+			if feed.historyID != "" && feed.historyID != "352" {
+				t.Errorf("本次补全使用了过时的蜜柑 ID %q", feed.historyID)
+			}
+		})
+	}
+}

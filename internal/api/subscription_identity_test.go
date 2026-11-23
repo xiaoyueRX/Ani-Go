@@ -185,3 +185,57 @@ func TestTMDBIdentityChecksEditedMediaType(t *testing.T) {
 		t.Fatalf("冲突编辑后类型为 %q，错误 %v", saved.AnimeType, err)
 	}
 }
+
+func TestTMDBSubscriptionMetadataEditsReconcileStoredIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, id, aux, body, canonical, lookup string
+	}{
+		{"更换已补全的作品", "TMDB", "tv/123", "tv/123", `{"metadata_id":"tv/456"}`, "tv/456", "tv/456"},
+		{"重新提交错误记录的主标识", "TMDB", "tv/456", "tv/123", `{"metadata_id":"tv/456"}`, "tv/456", "tv/456"},
+		{"清除主标识也清除旧回退值", "TMDB", "tv/123", "tv/123", `{"metadata_id":""}`, "", ""},
+		{"未改标识保留历史电影类型", "TMDB", "123", "movie/123", `{"description":"新简介"}`, "movie/123", "movie/123"},
+		{"重提交裸号保留电影类型", "TMDB", "123", "movie/123", `{"metadata_id":"123","metadata_provider":"tmdb"}`, "movie/123", "movie/123"},
+		{"同一来源重提不删独立跨库映射", "BGM.tv", "5", "movie/123", `{"metadata_id":"5","metadata_provider":"bgm.TV"}`, "", ""},
+		{"清空来源防止旧号变成历史回退值", "TMDB", "tv/123", "tv/123", `{"metadata_id":"","metadata_provider":""}`, "", ""},
+		{"从其他来源转为 TMDB", "BGM.tv", "5", "movie/123", `{"metadata_id":"tv/456","metadata_provider":"TMDB"}`, "tv/456", "tv/456"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupTestDB(t)
+			sub := database.Subscription{TitleCN: "来源标识测试", Season: 1, MetadataProvider: tc.provider, MetadataID: tc.id, TMDBID: tc.aux}
+			if err := database.DB.Create(&sub).Error; err != nil {
+				t.Fatal(err)
+			}
+			mux := http.NewServeMux()
+			(&Server{}).registerRoutes(mux)
+			panelCall(t, mux, "PUT", "/api/subscriptions/1", tc.body, 200)
+			var saved database.Subscription
+			if err := database.DB.First(&saved, sub.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if strings.EqualFold(saved.MetadataProvider, "BGM.tv") && saved.TMDBID != tc.aux {
+				t.Fatalf("BGM 的独立映射从 %q 变成了 %q", tc.aux, saved.TMDBID)
+			}
+			if canonical, lookup := saved.TMDBIdentity(); canonical != tc.canonical || lookup != tc.lookup {
+				t.Fatalf("编辑后 metadata_id=%q tmdb_id=%q，查重标识和查询标识为 (%q, %q)，预期 (%q, %q)", saved.MetadataID, saved.TMDBID, canonical, lookup, tc.canonical, tc.lookup)
+			}
+		})
+	}
+}
+
+func TestTMDBSubscriptionEditRejectsDuplicateAfterEnrichment(t *testing.T) {
+	setupTestDB(t)
+	mux := http.NewServeMux()
+	(&Server{}).registerRoutes(mux)
+	subs := []database.Subscription{
+		{TitleCN: "待改作品", Season: 1, MetadataProvider: "TMDB", MetadataID: "tv/123", TMDBID: "tv/123"},
+		{TitleCN: "另一部作品", Season: 1, MetadataProvider: "TMDB", MetadataID: "tv/456"},
+	}
+	if err := database.DB.Create(&subs).Error; err != nil {
+		t.Fatal(err)
+	}
+	panelCall(t, mux, "PUT", "/api/subscriptions/1", `{"metadata_id":"tv/456","description":"冲突编辑"}`, 409)
+	var saved database.Subscription
+	if err := database.DB.First(&saved, subs[0].ID).Error; err != nil || saved.MetadataID != "tv/123" || saved.TMDBID != "tv/123" || saved.Description != "" {
+		t.Fatalf("冲突未回滚：metadata_id=%q tmdb_id=%q description=%q 错误=%v", saved.MetadataID, saved.TMDBID, saved.Description, err)
+	}
+}

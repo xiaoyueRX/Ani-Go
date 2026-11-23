@@ -845,7 +845,10 @@ func (s *Scheduler) scanSubscription(ctx context.Context, sub database.Subscript
 	}
 	multipleSeasons := matches.RowsAffected != 0
 	if !multipleSeasons {
-		s.resolveSubscriptionIDs(ctx, &sub)
+		current, err := s.resolveSubscriptionIDs(ctx, &sub)
+		if err != nil || !current {
+			return err
+		}
 	}
 	if id := s.subscriptionMetadataID(sub); id != "" {
 		getCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

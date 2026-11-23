@@ -126,6 +126,32 @@ func checkSubscriptionIdentity(tx *gorm.DB, created Subscription) error {
 	return nil
 }
 
+// clearObsoleteTMDBID 在显式修改元数据来源时清除失效的补全值。
+func clearObsoleteTMDBID(sub Subscription, changes map[string]interface{}) {
+	provider, setProvider := changes["metadata_provider"].(string)
+	if !setProvider {
+		provider = sub.MetadataProvider
+	}
+	id, setID := changes["metadata_id"].(string)
+	if sub.TMDBID == "" || (!setID && strings.EqualFold(provider, sub.MetadataProvider)) {
+		return
+	}
+	if !setID {
+		id = sub.MetadataID
+	}
+	if strings.EqualFold(provider, "TMDB") {
+		// 只核对来源标识。保留与裸号相符的电影类型，显式清空则禁用旧号回退。
+		source := Subscription{MetadataProvider: provider, MetadataID: id, TMDBID: sub.TMDBID}
+		_, lookup := source.TMDBIdentity()
+		if lookup != "" && !(setID && strings.TrimSpace(id) == "") {
+			return
+		}
+	} else if !strings.EqualFold(sub.MetadataProvider, "TMDB") && (provider != "" || id != "") {
+		return // 其他来源也可能有独立的 TMDB 跨库映射。
+	}
+	changes["tmdb_id"] = ""
+}
+
 // UpdateSubscription 同时更新订阅标识和由此派生的 RSS 字段。
 // 只要标识不变，仍可编辑历史重复记录。
 func UpdateSubscription(db *gorm.DB, id uint, changes map[string]interface{}) (Subscription, error) {
@@ -149,6 +175,7 @@ func UpdateSubscription(db *gorm.DB, id uint, changes map[string]interface{}) (S
 		if mikan, ok := changes["mikan_id"].(string); ok && mikan != prior.MikanID {
 			changes["rss_url"] = ""
 		}
+		clearObsoleteTMDBID(prior, changes)
 		if err := tx.Model(&Subscription{}).Where("id = ?", id).Updates(changes).Error; err != nil {
 			return err
 		}
