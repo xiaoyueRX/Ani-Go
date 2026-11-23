@@ -163,13 +163,13 @@ func (o *TVOrganizer) organizeAndCommit(ctx context.Context, filePath string, an
 	if err := commit(dst, move); err != nil {
 		return "", err
 	}
-	o.publishOrganizedEvent(filePath, dst, anime, episode)
+	o.publishOrganizedEvent(filePath, dst, anime, episode, volume)
 	return dst, nil
 }
 
-func (o *TVOrganizer) publishOrganizedEvent(filePath, fullPath string, anime core.Anime, episode core.Episode) {
+func (o *TVOrganizer) publishOrganizedEvent(filePath, fullPath string, anime core.Anime, episode core.Episode, volume *heldVolume) {
 	if o.eventBus != nil {
-		o.eventBus.Publish(core.Event{
+		ev := core.Event{
 			Type: core.EventFileOrganized,
 			Payload: map[string]any{
 				"anime":      anime,
@@ -179,7 +179,11 @@ func (o *TVOrganizer) publishOrganizedEvent(filePath, fullPath string, anime cor
 				"anime_type": anime.Type,
 			},
 			Time: time.Now(),
-		})
+		}
+		if volume != nil {
+			ev.OpenLibraryDir = volume.volume.openSidecarDir
+		}
+		o.eventBus.Publish(ev)
 	}
 }
 

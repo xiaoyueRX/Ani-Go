@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -195,6 +196,14 @@ func (p *NFOScraperPlugin) handleFileOrganized(ev core.Event, pctx PluginContext
 		return
 	}
 
+	if ev.OpenLibraryDir != nil {
+		dir, err := ev.OpenLibraryDir(newPath)
+		if err != nil {
+			pctx.Logf("媒体卷不可用，跳过 NFO 与海报 [%s]: %v", newPath, err)
+			return
+		}
+		dir.Close()
+	}
 	anime := extractAnimeFromPayload(payload)
 	// 有来源信息时，只有 Bangumi.tv 的条目标识能写入 Bangumi 节点。
 	if anime.Provider != "" && !strings.EqualFold(anime.Provider, "BGM.tv") {
@@ -205,23 +214,23 @@ func (p *NFOScraperPlugin) handleFileOrganized(ev core.Event, pctx PluginContext
 
 	if isMovieAnime(anime, payload) {
 		movieDir := filepath.Dir(newPath)
-		p.generateMovieNFO(runCtx, movieDir, anime)
+		p.generateMovieNFO(runCtx, movieDir, anime, ev.OpenLibraryDir)
 		if anime.CoverURL != "" {
-			p.downloadPoster(runCtx, movieDir, anime.CoverURL)
+			p.downloadPoster(runCtx, movieDir, anime.CoverURL, ev.OpenLibraryDir)
 		}
 		return
 	}
 
 	// 1. 生成剧集对应的 <episode>.nfo
-	p.generateEpisodeNFO(runCtx, newPath, anime, episode)
+	p.generateEpisodeNFO(runCtx, newPath, anime, episode, ev.OpenLibraryDir)
 
 	// 2. 解析番剧根目录并生成 tvshow.nfo
 	showDir := resolveShowRootDir(newPath)
-	p.generateTVShowNFO(runCtx, showDir, anime)
+	p.generateTVShowNFO(runCtx, showDir, anime, ev.OpenLibraryDir)
 
 	// 3. 若存在封面 URL 且尚无 poster.jpg，安全下载海报
 	if anime.CoverURL != "" {
-		p.downloadPoster(runCtx, showDir, anime.CoverURL)
+		p.downloadPoster(runCtx, showDir, anime.CoverURL, ev.OpenLibraryDir)
 	}
 }
 
@@ -318,7 +327,7 @@ func buildUniqueIDs(bangumiID, tmdbID, imdbID string) []UniqueID {
 	return ids
 }
 
-func (p *NFOScraperPlugin) generateEpisodeNFO(ctx context.Context, mediaPath string, anime core.Anime, ep core.Episode) {
+func (p *NFOScraperPlugin) generateEpisodeNFO(ctx context.Context, mediaPath string, anime core.Anime, ep core.Episode, openDir openLibraryDirectory) {
 	if !p.isActive(ctx) {
 		return
 	}
@@ -359,14 +368,14 @@ func (p *NFOScraperPlugin) generateEpisodeNFO(ctx context.Context, mediaPath str
 	if _, err := os.Stat(nfoPath); err == nil {
 		return
 	}
-	if err := atomicWriteFile(nfoPath, content, 0644); err != nil {
+	if err := writeSidecar(nfoPath, content, openDir); err != nil {
 		log.Printf("⚠️ [NFO刮削] 写入分集元数据失败 [%s]: %v", nfoPath, err)
 		return
 	}
 	log.Printf("📄 [NFO刮削] 生成分集元数据: %s", filepath.Base(nfoPath))
 }
 
-func (p *NFOScraperPlugin) generateTVShowNFO(ctx context.Context, tvshowDir string, anime core.Anime) {
+func (p *NFOScraperPlugin) generateTVShowNFO(ctx context.Context, tvshowDir string, anime core.Anime, openDir openLibraryDirectory) {
 	if !p.isActive(ctx) {
 		return
 	}
@@ -404,14 +413,14 @@ func (p *NFOScraperPlugin) generateTVShowNFO(ctx context.Context, tvshowDir stri
 	if _, err := os.Stat(nfoPath); err == nil {
 		return
 	}
-	if err := atomicWriteFile(nfoPath, content, 0644); err != nil {
+	if err := writeSidecar(nfoPath, content, openDir); err != nil {
 		log.Printf("⚠️ [NFO刮削] 写入番剧元数据失败 [%s]: %v", nfoPath, err)
 		return
 	}
 	log.Printf("📄 [NFO刮削] 生成番剧元数据: %s", nfoPath)
 }
 
-func (p *NFOScraperPlugin) generateMovieNFO(ctx context.Context, movieDir string, anime core.Anime) {
+func (p *NFOScraperPlugin) generateMovieNFO(ctx context.Context, movieDir string, anime core.Anime, openDir openLibraryDirectory) {
 	if !p.isActive(ctx) {
 		return
 	}
@@ -447,14 +456,14 @@ func (p *NFOScraperPlugin) generateMovieNFO(ctx context.Context, movieDir string
 	if _, err := os.Stat(nfoPath); err == nil {
 		return
 	}
-	if err := atomicWriteFile(nfoPath, content, 0644); err != nil {
+	if err := writeSidecar(nfoPath, content, openDir); err != nil {
 		log.Printf("⚠️ [NFO刮削] 写入剧场版元数据失败 [%s]: %v", nfoPath, err)
 		return
 	}
 	log.Printf("📄 [NFO刮削] 生成剧场版元数据: %s", nfoPath)
 }
 
-func (p *NFOScraperPlugin) downloadPoster(ctx context.Context, targetDir, coverURL string) {
+func (p *NFOScraperPlugin) downloadPoster(ctx context.Context, targetDir, coverURL string, openDir openLibraryDirectory) {
 	if !p.isActive(ctx) {
 		return
 	}
@@ -546,49 +555,72 @@ func (p *NFOScraperPlugin) downloadPoster(ctx context.Context, targetDir, coverU
 	if _, err := os.Stat(posterPath); err == nil {
 		return
 	}
-	if err := atomicWriteFile(posterPath, data, 0644); err != nil {
+	if err := writeSidecar(posterPath, data, openDir); err != nil {
 		log.Printf("⚠️ [NFO刮削] 保存海报失败 [%s]: %v", posterPath, err)
 		return
 	}
 	log.Printf("🖼️ [NFO刮削] 已保存海报: %s", posterPath)
 }
 
-// atomicWriteFile 通过同目录临时文件写入后原子重命名，防止并发或中断产生半残文件
-func atomicWriteFile(targetPath string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
+// openLibraryDirectory 随单次整理事件传入。启用卷保护时父目录应已由媒体整理创建。
+type openLibraryDirectory func(target string) (*os.Root, error)
+
+func writeSidecar(target string, data []byte, openDir openLibraryDirectory) (err error) {
+	var dir *os.Root
+	if openDir != nil {
+		dir, err = openDir(target)
+	} else {
+		parent := filepath.Dir(target)
+		if err = os.MkdirAll(parent, 0755); err == nil {
+			dir, err = os.OpenRoot(parent)
+		}
 	}
-	tmpFile, err := os.CreateTemp(dir, ".anigo-nfo-*")
 	if err != nil {
 		return err
 	}
-	tmpName := tmpFile.Name()
-	cleanup := true
+	defer dir.Close()
+
+	// 文件句柄、重命名和失败后的清理均使用同一个父目录。掉盘不会把操作转向底层同名目录。
+	name := ".anigo-nfo-" + rand.Text()
+	stage, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
 	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
+		if err != nil {
+			stage.Close()
+			dir.Remove(name)
 		}
 	}()
-
-	if _, err := tmpFile.Write(data); err != nil {
-		_ = tmpFile.Close()
+	if _, err = stage.Write(data); err != nil {
 		return err
 	}
-	if err := tmpFile.Chmod(perm); err != nil {
-		_ = tmpFile.Close()
+	if err = stage.Chmod(0644); err != nil {
 		return err
 	}
-	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
+	if err = stage.Sync(); err != nil {
 		return err
 	}
-	if err := tmpFile.Close(); err != nil {
+	if err = stage.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, targetPath); err != nil {
-		return err
+	if openDir != nil {
+		visible, err := openDir(target)
+		if err != nil {
+			return err
+		}
+		defer visible.Close()
+		before, err := dir.Stat(".")
+		if err != nil {
+			return err
+		}
+		after, err := visible.Stat(".")
+		if err != nil {
+			return err
+		}
+		if !os.SameFile(before, after) {
+			return fmt.Errorf("发布副文件前媒体目录已更换: %s", target)
+		}
 	}
-	cleanup = false
-	return nil
+	return dir.Rename(name, filepath.Base(target))
 }

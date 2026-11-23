@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 )
@@ -198,6 +199,9 @@ type Event struct {
 	Type    string
 	Payload map[string]interface{}
 	Time    time.Time
+
+	// OpenLibraryDir 供本机写入整理副文件时核验并固定目标父目录，调用方负责关闭。
+	OpenLibraryDir func(target string) (*os.Root, error) `json:"-"`
 }
 
 type Source interface {

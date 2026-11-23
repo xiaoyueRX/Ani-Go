@@ -143,6 +143,24 @@ func (h *heldVolume) checkRoot(dst string) error {
 	return nil
 }
 
+// openSidecarDir 从本次整理使用的卷根打开副文件父目录。延迟事件可在整理句柄关闭后重新核验。
+func (v LibraryVolume) openSidecarDir(target string) (*os.Root, error) {
+	held, err := v.hold(target)
+	if err != nil {
+		return nil, err
+	}
+	defer held.close()
+	absolute, err := filepath.Abs(target)
+	if err != nil {
+		return nil, err
+	}
+	parent, err := filepath.Rel(held.volume.Root, filepath.Dir(absolute))
+	if err != nil {
+		return nil, err
+	}
+	return held.root.OpenRoot(parent)
+}
+
 // PendingMoveVolume 按历史订阅的实际类别核对库根；同名的其他分类目录不能替它证明归属。
 func (o *TVOrganizer) PendingMoveVolume(ctx context.Context, ep database.Episode) (LibraryVolume, error) {
 	if volumeID("tv") == "" && volumeID("movie") == "" && volumeID("ova") == "" {
