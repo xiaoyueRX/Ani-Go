@@ -12,7 +12,7 @@ function subscriptionList(t) {
     disconnect() { this.onerror?.() }
   }
   const { mounted, unmounted } = view('views/Subscriptions', { get: async () => ({ data: [] }) }, {
-    globals: { EventSource, setTimeout, clearTimeout },
+    globals: { document: new EventTarget(), EventSource, setTimeout, clearTimeout },
   })
   mounted.forEach(fn => fn())
   return { sources, leave: () => unmounted.forEach(fn => fn()) }

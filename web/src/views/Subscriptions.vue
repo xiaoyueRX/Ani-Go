@@ -249,7 +249,32 @@ function toggleSelectAllBatch() {
   }
 }
 
-async function fetchSubscriptions() {
+let listClosed = false
+
+// 多个轮询或补全事件同时到达时，等当前请求结束后再获取一次最新状态。
+function coalesceRefresh(load: () => Promise<void>) {
+  let pending: Promise<void> | undefined
+  let requested = false
+  return () => {
+    if (pending) {
+      requested = true
+      return pending
+    }
+    pending = (async () => {
+      try {
+        do {
+          requested = false
+          await load()
+        } while (requested && !listClosed && !document.hidden)
+      } finally {
+        pending = undefined
+      }
+    })()
+    return pending
+  }
+}
+
+const fetchSubscriptions = coalesceRefresh(async () => {
   error.value = ''
   try {
     const { data } = await request.get('/subscriptions')
@@ -259,9 +284,9 @@ async function fetchSubscriptions() {
   } finally {
     loading.value = false
   }
-}
+})
 
-async function fetchDeletedSubscriptions() {
+const fetchDeletedSubscriptions = coalesceRefresh(async () => {
   deletedLoading.value = true
   try {
     const { data } = await request.get('/subscriptions?deleted=true')
@@ -271,7 +296,7 @@ async function fetchDeletedSubscriptions() {
   } finally {
     deletedLoading.value = false
   }
-}
+})
 
 async function restoreSubscription(ids: number[]) {
   if (ids.length === 0) return
@@ -457,7 +482,7 @@ function setupEventStream() {
       } else {
         addLog(payload.title, "补全扫描完成，新增 " + payload.new_count + " 个下载")
       }
-      if (payload.new_count > 0) fetchSubscriptions()
+      if (payload.new_count > 0 && !document.hidden) void fetchSubscriptions()
       // 如果全部完成，10秒后自动关闭，但如果有新任务则继续显示
       setTimeout(() => {
         if (taskCenter.value.completed >= taskCenter.value.total) {
@@ -471,11 +496,19 @@ function setupEventStream() {
       if (payload.message && (payload.message.includes("已添加下载") || payload.message.includes("获取到")) ) {
         addLog(payload.title, payload.message)
       }
-      if (payload.message && payload.message.includes("已添加下载")) fetchSubscriptions()
+      if (payload.message && payload.message.includes("已添加下载") && !document.hidden) void fetchSubscriptions()
     }
   }
 }
 
+
+function refreshVisible(includeDeleted = false) {
+  if (document.hidden) return
+  void fetchSubscriptions()
+  if (includeDeleted || filterType.value === 'recycle') void fetchDeletedSubscriptions()
+}
+
+const onVisibilityChange = () => refreshVisible(true)
 
 onMounted(() => {
   const active = fetchSubscriptions()
@@ -486,14 +519,12 @@ onMounted(() => {
     window.scrollTo?.({ top: 0, behavior: 'instant' })
   }
   setupEventStream()
-  refreshTimer = setInterval(() => {
-    fetchSubscriptions()
-    if (filterType.value === 'recycle') {
-      fetchDeletedSubscriptions()
-    }
-  }, 30000)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  refreshTimer = setInterval(refreshVisible, 30000)
 })
 onUnmounted(() => {
+  listClosed = true
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   clearInterval(refreshTimer)
   closeEventStream()
   clearUndoTimer()
