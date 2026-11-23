@@ -317,6 +317,49 @@ def check_library_files(browser, service, home):
         raise RuntimeError("The file check changed the stored progress, episode history or media files")
 
 
+def check_mobile_header(browser, service):
+    # Safari 有最小窗口宽度；同源框架可让两个原生浏览器使用相同的 360 CSS 像素布局。
+    frame = browser.execute_script("""
+        const frame = document.createElement('iframe');
+        frame.style.cssText = 'position:fixed;inset:0 auto auto 0;width:360px;height:640px;border:0;z-index:2147483647';
+        frame.src = '/subscriptions';
+        return document.body.appendChild(frame);
+    """)
+    try:
+        browser.switch_to.frame(frame)
+        wait = WebDriverWait(browser, 20)
+        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "main h3[title]")))
+        version = service.api("health")["version"]
+        footer = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "footer span.font-mono")))
+        if not version or footer.text != version:
+            raise RuntimeError("The mobile footer must show the full running version")
+        menu = browser.find_element(By.CSS_SELECTOR, "header button")
+        account = browser.find_element(By.CSS_SELECTOR, "header .avatar")
+        dimensions = browser.execute_script("""
+            const [menu, account, version] = arguments, root = document.documentElement;
+            const text = document.createRange();
+            text.selectNodeContents(version);
+            const rects = [menu.getBoundingClientRect(), account.getBoundingClientRect(), ...text.getClientRects()];
+            return [innerWidth, root.clientWidth, root.scrollWidth,
+                    rects.every(r => r.width > 0 && r.left >= -1 && r.right <= root.clientWidth + 1)];
+        """, menu, account, footer)
+        viewport, layout, content, fits = dimensions
+        if viewport != 360 or content > layout + 1 or not fits:
+            raise RuntimeError(f"Mobile header or version extends outside the 360px page: "
+                               f"viewport={viewport}, layout={layout}, content={content}, controls and version fit={fits}")
+
+        account.click()
+        wait.until(EC.visibility_of_element_located((By.XPATH, "//header//li[normalize-space(.)='admin']")))
+        menu.click()
+        settings = (By.CSS_SELECTOR, "body > div.fixed a[href='/settings']")
+        wait.until(EC.element_to_be_clickable(settings)).click()
+        wait.until(lambda b: b.execute_script("return location.pathname") == "/settings")
+        print(f"Verified 360px mobile menus and full version {version}; layout/content={layout}/{content}.", flush=True)
+    finally:
+        browser.switch_to.default_content()
+        browser.execute_script("arguments[0].remove()", frame)
+
+
 def check_filter_layout(browser, command, root, offline):
     # 用同一浏览器和独立空库，保留先前登录、备份恢复和媒体核对的数据。
     with socket.socket() as available:
@@ -369,6 +412,7 @@ def check_filter_layout(browser, command, root, offline):
         # 允许固定的浏览器开销；多移除的卡片不应每两张就引入一次额外的整页几何读取。
         if 2 * (many_reads - few_reads) >= many - few:
             raise RuntimeError("Document layout reads scaled with the number of filtered-out cards")
+        check_mobile_header(browser, service)
 
 
 def main():
