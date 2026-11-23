@@ -209,11 +209,16 @@ jobs:
 
   check-container:
     needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
     if: github.event_name == 'pull_request'
     uses: ./.github/workflows/docker-build.yml
     with:
       revision: ${{ github.sha }}
       publish: false
+      check_arch: ${{ matrix.arch }}
 
   publish-container:
     needs: verify

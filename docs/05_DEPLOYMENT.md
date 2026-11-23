@@ -16,6 +16,8 @@
 | `/data/media` | Compose 将番剧、电影、特别篇分别整理到该目录下。 |
 | `/data/downloads` | 可选的下载目录。下载器完成任务时报告的路径必须可由 Ani-Go 读取。 |
 
+在 NAS 管理界面或用 `docker run` 手工创建新容器时，要沿用表中的布局，请同时挂载 `/data`、把工作目录设为 `/`，并采用 Compose 中的 `DB_PATH`、`BACKUP_PATH` 和三个媒体库路径。单独挂载 `/data` 时，官方 v0.7.0 镜像使用默认工作目录，数据库会写到容器内的 `/app/ani-go.db`。[Compose 配置](../docker-compose.yml)
+
 订阅的**下载目录**留空时，Transmission、aria2 和 qBittorrent 使用自身的默认保存设置。需要指定目录时，请填写下载器能识别的实际路径，例如 `/data/downloads/series`。清空该字段会恢复默认值，后续新增任务才会使用新设置。整理完成的媒体另存到配置的媒体库目录。
 
 空下载目录的订阅仍在投递前按 `DISK_MIN_FREE_GB` 检查 Ani-Go 所在机器的 `TV_BASE_PATH` 卷。显式下载目录按 Ani-Go 本机所见的路径或其已有父目录检查。远程下载器默认卷的剩余空间由下载器所在机器监控。
@@ -45,6 +47,8 @@ curl -fsS http://localhost:20001/api/health
 ```
 
 ### 试用候选版和回滚
+
+从手工创建的旧容器迁入持久卷时，先确认数据库实际位置。如果数据库在容器可写层，停止并保留旧容器，把数据库和同目录中存在的 `-wal`、`-shm` 文件一起复制到私有临时目录。从这份副本用 SQLite 的 `.backup` 创建独立快照，核对 `PRAGMA quick_check` 返回 `ok` 后，再将快照放入新空卷的 `db/ani-go.db`，授予容器账户读写权限。用原账号登录并核对订阅，再处理旧容器。
 
 升级前记录当前镜像的仓库摘要或保留可启动的旧二进制、Compose 和环境配置。在宿主机上用 SQLite 的 `.backup` 为实际的 `DB_PATH` 创建独立快照，用 `PRAGMA quick_check` 检查快照应返回 `ok`。SQLite 的备份接口会包含已提交到 WAL 的事务。容器使用 `latest` 时，试用前将 `image` 固定为要验证的候选标签或摘要。
 

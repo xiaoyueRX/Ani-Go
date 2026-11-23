@@ -16,6 +16,8 @@
 | `/data/media` | Compose places series, films and specials in separate directories beneath this path. |
 | `/data/downloads` | One possible download directory. The completed path reported by the downloader must be readable by Ani-Go. |
 
+For a new container created in a NAS interface or with `docker run`, mount `/data`, set the working directory to `/`, and use the database, backup and three media paths from the Compose configuration to reproduce this layout. With only the `/data` mount and its default working directory, the official v0.7.0 image writes the database to `/app/ani-go.db` inside the container. [Compose configuration](../docker-compose.yml)
+
 Leave a subscription’s **Download directory** blank to use the default save settings of Transmission, aria2 or qBittorrent. To override it, enter a literal path understood by the downloader, such as `/data/downloads/series`. Clearing the field restores the default for subsequent downloads. The organizer places completed media in the configured library.
 
 When the download directory is blank, the scheduler still checks the Ani-Go host’s `TV_BASE_PATH` volume against `DISK_MIN_FREE_GB` before submission. An explicit download directory is checked using the existing path or its nearest existing parent on the Ani-Go host. Monitor free space on a remote downloader’s default volume on that machine.
@@ -45,6 +47,8 @@ curl -fsS http://localhost:20001/api/health
 ```
 
 ### Trying a release candidate and rolling back
+
+When moving a manually created container to a persistent volume, locate its actual database first. If the file is in the container's writable layer, stop and retain that container. Copy the database and any adjacent `-wal` and `-shm` files together to a private temporary directory. Use SQLite's `.backup` on this copy to create a snapshot and check that `PRAGMA quick_check` returns `ok`. Place the snapshot at `db/ani-go.db` on a new, empty volume, give the container user read and write access, and verify the original login and subscriptions before retiring the old container.
 
 Record the running image digest or keep the working executable, Compose file and environment settings. On the host, use SQLite’s `.backup` command on the active `DB_PATH` to create a separate snapshot. Run `PRAGMA quick_check` on the snapshot and verify it returns `ok`. The SQLite backup interface includes committed WAL transactions. If Compose uses `latest`, pin `image` to the candidate tag or digest before the trial.
 
