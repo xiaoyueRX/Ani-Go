@@ -415,6 +415,16 @@ const addLog = (title: string, message: string) => {
   if (taskCenter.value.logs.length > 50) taskCenter.value.logs.pop()
 }
 let eventSource: EventSource | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+
+function closeEventStream() {
+  clearTimeout(reconnectTimer)
+  if (eventSource) {
+    eventSource.onerror = null
+    eventSource.close()
+    eventSource = null
+  }
+}
 
 function setupEventStream() {
   const token = localStorage.getItem('token')
@@ -425,11 +435,10 @@ function setupEventStream() {
     console.log('✅ SSE 已连接')
   }
 
-  eventSource.onerror = (e) => {
-    console.error('❌ SSE 错误:', e)
-    eventSource?.close()
-    // 5秒后尝试重连
-    setTimeout(setupEventStream, 5000)
+  eventSource.onerror = () => {
+    console.error('❌ SSE 错误')
+    closeEventStream()
+    reconnectTimer = setTimeout(setupEventStream, 5000)
   }
   eventSource.onmessage = (event) => {
     const ev = JSON.parse(event.data)
@@ -486,7 +495,7 @@ onMounted(() => {
 })
 onUnmounted(() => {
   clearInterval(refreshTimer)
-  if (eventSource) eventSource.close()
+  closeEventStream()
   clearUndoTimer()
   if (pendingDeletes.value.size) void executePendingDeletes()
 })

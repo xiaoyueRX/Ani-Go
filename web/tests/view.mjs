@@ -15,11 +15,11 @@ export function view(path, request, { route = {}, storage = new Map(), props = {
   const { outputText } = ts.transpileModule(script, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true,
   } })
-  const mounted = []
+  const mounted = [], unmounted = []
   const notices = []
   const window = { showToast: (message, type) => notices.push({ message, type }), location: {} }
   const modules = {
-    vue: { ...vue, onMounted: fn => mounted.push(fn), onUnmounted() {} },
+    vue: { ...vue, onMounted: fn => mounted.push(fn), onUnmounted: fn => unmounted.push(fn) },
     'vue-router': { onBeforeRouteLeave() {}, useRouter: () => router, useRoute: () => ({ params: {}, query: {}, ...route }) },
     'vue-i18n': { useI18n: () => ({ t: translate, te: translationExists, locale: vue.ref('en') }) },
     '../utils/request': request,
@@ -32,12 +32,13 @@ export function view(path, request, { route = {}, storage = new Map(), props = {
   }
   const exports = {}
   runInNewContext(outputText, {
-    ...globals, exports, console, window, AbortController, URL, crypto: globalThis.crypto,
+    exports, console, window, AbortController, URL, crypto: globalThis.crypto,
     require: name => modules[name] ?? (name.endsWith('.vue') ? {} : require(name)),
     confirm: globals.confirm ?? (() => true), alert() {}, setTimeout() {}, clearTimeout() {}, setInterval() {}, clearInterval() {},
+    ...globals,
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
   })
   const emitted = []
   const component = exports.default.setup(props, { expose() {}, emit: (...args) => emitted.push(args) })
-  return { component, notices, mounted, emitted }
+  return { component, notices, mounted, unmounted, emitted }
 }
