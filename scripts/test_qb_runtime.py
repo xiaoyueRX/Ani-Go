@@ -67,7 +67,7 @@ class QB:
                  lambda rows: [row["priority"] > 0 for row in rows] == [True, False, True])
 
     def add(self, feed_url):
-        if self.request("torrents/add", {"urls": feed_url + "/pack.torrent", "savepath": str(self.downloads)}).strip() != b"Ok.":
+        if self.request("torrents/add", {"urls": feed_url + "/pack.torrent", "savepath": str(self.downloads)}).strip() == b"Fails.":
             raise RuntimeError("qBittorrent rejected the local torrent")
 
     @contextmanager
@@ -80,7 +80,8 @@ class QB:
                 if proc.poll() is not None:
                     raise RuntimeError(f"qBittorrent exited during startup with code {proc.returncode}")
                 try:
-                    return self.request("auth/login", {"username": "admin", "password": self.password}) == b"Ok."
+                    self.request("auth/login", {"username": "admin", "password": self.password})
+                    return bool(self.request("app/version").strip())
                 except URLError:
                     return False
             wait_for("private qBittorrent Web UI", login, bool, timeout=45)

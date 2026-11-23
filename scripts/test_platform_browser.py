@@ -70,6 +70,24 @@ def login_diagnostic(browser, base, target, log, offset):
             f"WebDriver URL matches DOM={browser.current_url == href}, login API={outcome}, visible error={error}")
 
 
+def fill_login_field(browser, field, value):
+    field.clear()
+    field.send_keys(value)
+    if browser.execute_script("return arguments[0].value === arguments[1]", field, value):
+        return "keyboard"
+    if browser.name.lower() != "safari":
+        return "keyboard mismatch"
+    # SafariDriver 偶尔会改变输入字符。只对受影响的字段走原生 DOM 赋值，并通知 Vue。
+    browser.execute_script("""
+        const [field, value] = arguments;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(field, value);
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+        field.dispatchEvent(new Event('change', {bubbles: true}));
+    """, field, value)
+    return "DOM input after SafariDriver mismatch"
+
+
 def check_form(browser, service, password, log):
     base = f"http://{HOST}:{service.port}"
     target = "/subscriptions/new?source=ci#form"
@@ -81,12 +99,15 @@ def check_form(browser, service, password, log):
     if login.path != "/login" or parse_qs(login.query).get("redirect") != [target]:
         raise RuntimeError("The login redirect did not preserve the protected URL")
     secret = browser.find_element(By.CSS_SELECTOR, 'form input[autocomplete="current-password"]')
-    for field, value in ((username, "admin"), (secret, password)):
-        field.clear()
-        field.send_keys(value)
+    username_method = fill_login_field(browser, username, "admin")
+    password_method = fill_login_field(browser, secret, password)
+    print(f"Browser login input: username={username_method}, password={password_method}.", flush=True)
     offset = log.stat().st_size
-    if not browser.execute_script("return arguments[0].value === 'admin' && arguments[1].value === arguments[2]", username, secret, password):
-        raise RuntimeError("Browser login fields differ from the supplied credentials; " + login_diagnostic(browser, base, target, log, offset))
+    matches = browser.execute_script("return [arguments[0].value === 'admin', arguments[1].value === arguments[2]]",
+                                     username, secret, password)
+    if not all(matches):
+        raise RuntimeError(f"Browser login input mismatch (username matches={matches[0]}, password matches={matches[1]}); "
+                           + login_diagnostic(browser, base, target, log, offset))
     wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'form button[type="submit"]'))).click()
     try:
         wait.until(lambda b: b.execute_script("return window.location.href") == base + target
