@@ -578,135 +578,135 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-10 pb-20">
-    <!-- Header -->
+  <div class="space-y-6 pb-20">
+    <!-- 顶部返回与刷新 -->
     <div class="flex items-center justify-between">
-      <button class="btn btn-ghost border-base-300 rounded-2xl px-6 hover:bg-base-200 transition-all active:scale-95 group" @click="returnToList">
-        <ChevronLeft :size="20" class="group-hover:-translate-x-1 transition-transform" />
-        <span class="text-xs font-black uppercase tracking-widest">{{ t('detail.back') }}</span>
+      <button type="button" class="btn btn-ghost btn-sm border border-base-content/12 rounded-lg gap-1.5" @click="returnToList">
+        <ChevronLeft :size="16" />
+        <span>{{ t('detail.back') }}</span>
       </button>
-      
+
       <div class="flex gap-2">
-         <button class="btn btn-ghost btn-circle hover:bg-base-200" :aria-label="t('common.refresh')" @click="fetchDetail" :disabled="loading">
-            <RefreshCw :size="20" class="opacity-40" />
-         </button>
+        <button type="button" class="btn btn-ghost btn-square btn-sm rounded-lg border border-base-content/12" :aria-label="t('common.refresh')" @click="fetchDetail" :disabled="loading">
+          <RefreshCw :size="16" :class="{ 'animate-spin': loading }" />
+        </button>
       </div>
     </div>
 
-    <div v-if="actionError" role="alert" class="alert alert-error break-words">{{ actionError }}</div>
-    <div v-if="loading && !sub" class="flex justify-center py-32">
+    <div v-if="actionError" role="alert" class="alert alert-error rounded-xl break-words text-sm">{{ actionError }}</div>
+    <div v-if="loading && !sub" class="flex justify-center py-28">
       <span class="loading loading-spinner loading-lg text-primary"></span>
     </div>
 
-    <div v-if="error" role="alert" class="max-w-4xl mx-auto">
-       <div class="alert bg-error/10 border-error/20 text-error rounded-[2rem] p-6">
-          <AlertTriangle :size="24" class="shrink-0" />
-          <div class="flex-1">
-             <h3 class="font-black text-sm uppercase tracking-widest">{{ t('detail.error.load') }}</h3>
-             <p class="text-sm font-bold opacity-80 mt-1">{{ error }}</p>
-          </div>
-       </div>
+    <div v-if="error" role="alert" class="max-w-3xl mx-auto">
+      <div class="alert bg-error/10 border border-error/25 text-error rounded-xl p-4">
+        <AlertTriangle :size="20" class="shrink-0" />
+        <div class="flex-1">
+          <h3 class="font-semibold text-sm">{{ t('detail.error.load') }}</h3>
+          <p class="text-xs opacity-85 mt-0.5">{{ error }}</p>
+        </div>
+      </div>
     </div>
 
     <template v-if="sub">
-      <!-- Main Content Card -->
-      <div class="group relative bg-base-100 rounded-[3rem] border border-base-200/60 shadow-xl overflow-hidden">
-        <!-- Hero Background -->
-        <div class="absolute inset-x-0 top-0 h-64 z-0 overflow-hidden">
-           <img v-if="sub.cover_url" :src="proxyImage(sub.cover_url)" class="w-full h-full object-cover blur-3xl opacity-20 scale-125" />
-           <div class="absolute inset-0 bg-gradient-to-b from-transparent to-base-100"></div>
+      <!-- 订阅详情主卡片 -->
+      <div class="relative app-surface rounded-2xl overflow-hidden">
+        <!-- 顶部模糊背景 -->
+        <div class="absolute inset-x-0 top-0 h-48 z-0 overflow-hidden pointer-events-none">
+          <img v-if="sub.cover_url" :src="proxyImage(sub.cover_url)" class="w-full h-full object-cover blur-3xl opacity-15 scale-125" />
+          <div class="absolute inset-0 bg-gradient-to-b from-transparent to-base-100"></div>
         </div>
 
-        <div class="p-4 sm:p-8 lg:p-12 relative z-10">
-          <div class="flex flex-col lg:flex-row gap-6 lg:gap-12">
-             <!-- Left: Poster -->
-             <div class="w-full lg:w-1/3 xl:w-1/4 shrink-0 flex justify-center lg:justify-start">
-                <div class="w-full max-w-[240px] sm:max-w-sm lg:max-w-none aspect-[3/3.8] rounded-2xl sm:rounded-[2.5rem] bg-base-200 overflow-hidden shadow-2xl border border-white/5 relative group/poster">
-                   <img v-if="sub.cover_url" :src="proxyImage(sub.cover_url)" class="w-full h-full object-contain bg-black transition-transform duration-1000 group-hover/poster:scale-110" />
-                   <div v-else class="w-full h-full flex items-center justify-center text-base-content/10">
-                      <Image :size="80" />
-                   </div>
-                   <!-- Overlay badge -->
-                   <div class="absolute top-4 left-4">
-                      <span class="bg-primary/90 backdrop-blur-md text-primary-content text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full shadow-lg border border-white/10">
-                        #{{ sub.id }}
-                      </span>
-                   </div>
+        <div class="p-5 sm:p-7 lg:p-8 relative z-10">
+          <div class="flex flex-col lg:flex-row gap-6 lg:gap-8">
+            <!-- 左侧海报 -->
+            <div class="w-full lg:w-56 xl:w-64 shrink-0 flex justify-center lg:justify-start">
+              <div class="w-full max-w-[220px] lg:max-w-none aspect-[2/3] rounded-xl bg-base-200 overflow-hidden shadow-md border border-base-content/10 relative">
+                <img v-if="sub.cover_url" :src="proxyImage(sub.cover_url)" class="w-full h-full object-cover" />
+                <div v-else class="w-full h-full flex items-center justify-center text-base-content/20">
+                  <Image :size="48" />
                 </div>
-             </div>
+                <div class="absolute top-2.5 left-2.5">
+                  <span class="bg-base-100/90 backdrop-blur-sm text-base-content text-xs font-mono font-semibold px-2.5 py-0.5 rounded-md border border-base-content/15">
+                    #{{ sub.id }}
+                  </span>
+                </div>
+              </div>
+            </div>
 
-             <!-- Right: Information -->
-            <div class="flex-1 space-y-6 sm:space-y-8">
-               <div class="space-y-3 sm:space-y-4">
-              <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-                  <span v-if="sub.anime_type && sub.anime_type !== t('detail.type.unknown')" class="text-[10px] font-black uppercase tracking-[0.3em] text-primary bg-primary/10 px-3 py-1 sm:px-4 sm:py-1.5 rounded-full border border-primary/20">
+            <!-- 右侧详情与控制 -->
+            <div class="flex-1 min-w-0 space-y-5">
+              <div class="space-y-2.5">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span v-if="sub.anime_type && sub.anime_type !== t('detail.type.unknown')" class="text-xs font-medium text-primary bg-primary/12 px-2.5 py-0.5 rounded-md border border-primary/20">
                     {{ sub.anime_type }}
                   </span>
-                  <span v-if="sub.completed" class="text-[10px] font-black uppercase tracking-[0.3em] text-success bg-success/10 px-3 py-1 sm:px-4 sm:py-1.5 rounded-full border border-success/20">
+                  <span v-if="sub.completed" class="text-xs font-medium text-success bg-success/12 px-2.5 py-0.5 rounded-md border border-success/20">
                     {{ t('detail.status.finished') }}
                   </span>
-                  <span v-if="!sub.enabled" class="text-[10px] font-black uppercase tracking-[0.3em] text-warning bg-warning/10 px-3 py-1 sm:px-4 sm:py-1.5 rounded-full border border-warning/20">
+                  <span v-if="!sub.enabled" class="text-xs font-medium text-warning bg-warning/15 px-2.5 py-0.5 rounded-md border border-warning/25">
                     {{ t('detail.status.paused') }}
                   </span>
-               </div>
-                   
-                   <div class="space-y-2">
-                      <h1 class="text-2xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">{{ sub.title_cn }}</h1>
-                      <p v-if="sub.title_jp" class="text-sm sm:text-lg font-bold opacity-30 tracking-tight">{{ sub.title_jp }}</p>
-                      <p v-if="sub.title_en" class="text-xs sm:text-sm font-bold opacity-20 tracking-widest uppercase">{{ sub.title_en }}</p>
-                   </div>
                 </div>
 
-                <!-- Stats Grid -->
-                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-6 p-4 sm:p-8 bg-base-200/50 rounded-2xl sm:rounded-[2rem] border border-base-300/30">
-                   <div class="space-y-1">
-                      <p class="text-[9px] font-black uppercase tracking-widest opacity-30">{{ t('detail.stats.releaseYear') }}</p>
-                      <p class="text-lg font-black">{{ sub.year || 'N/A' }}</p>
-                   </div>
-                   <div class="space-y-1">
-                      <p class="text-[9px] font-black uppercase tracking-widest opacity-30">{{ t('detail.stats.season') }}</p>
-                      <p class="text-lg font-black">{{ sub.season || '1' }}</p>
-                   </div>
-                   <div class="space-y-1">
-                      <p class="text-[9px] font-black uppercase tracking-widest opacity-30">{{ t('detail.stats.metadata') }}</p>
-                      <p class="text-lg font-black">{{ sub.metadata_provider?.trim() || t('detail.stats.metadataNotRecorded') }}</p>
-                   </div>
+                <div class="space-y-1">
+                  <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-base-content leading-snug">{{ sub.title_cn }}</h1>
+                  <p v-if="sub.title_jp" class="text-sm text-base-content/60">{{ sub.title_jp }}</p>
+                  <p v-if="sub.title_en" class="text-xs text-base-content/45">{{ sub.title_en }}</p>
                 </div>
+              </div>
 
-                <!-- Progress Section -->
-                <div class="space-y-4">
-                   <div class="flex items-end justify-between px-2">
-                      <div class="space-y-1">
-                         <p class="text-[10px] font-black uppercase tracking-widest opacity-30 leading-none">{{ t('detail.progress.title') }}</p>
-                         <p class="text-2xl font-black leading-none mt-2">{{ sub.current_episodes }} <span class="text-base-content/20 mx-1">/</span> {{ sub.total_episodes || '?' }}</p>
-                      </div>
-                      <div v-if="progress !== null" class="text-right">
-                         <p class="text-3xl font-black tracking-tighter text-primary">{{ Math.round(progress) }}%</p>
-                      </div>
-                   </div>
-                   <div v-if="progress !== null" class="h-4 w-full bg-base-300 rounded-full overflow-hidden p-1 border border-base-300 shadow-inner">
-                      <div 
-                        class="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-1000 ease-out shadow-[0_0_12px_rgba(var(--p),0.4)]"
-                        :style="{ width: `${progress}%` }"
-                      ></div>
-                   </div>
+              <!-- 元数据摘要网格 -->
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 app-surface-muted rounded-xl">
+                <div>
+                  <p class="text-xs text-base-content/55">{{ t('detail.stats.releaseYear') }}</p>
+                  <p class="text-base font-semibold font-mono tabular-nums mt-0.5">{{ sub.year || 'N/A' }}</p>
                 </div>
+                <div>
+                  <p class="text-xs text-base-content/55">{{ t('detail.stats.season') }}</p>
+                  <p class="text-base font-semibold font-mono tabular-nums mt-0.5">{{ sub.season || '1' }}</p>
+                </div>
+                <div class="col-span-2 sm:col-span-1">
+                  <p class="text-xs text-base-content/55">{{ t('detail.stats.metadata') }}</p>
+                  <p class="text-base font-semibold mt-0.5 truncate">{{ sub.metadata_provider?.trim() || t('detail.stats.metadataNotRecorded') }}</p>
+                </div>
+              </div>
 
-                <!-- Actions -->
-                <div class="flex flex-wrap gap-4 pt-4">
-                   <button class="btn btn-primary h-14 rounded-2xl px-10 shadow-xl shadow-lg gap-3 group/btn transition-all active:scale-95" @click="openEditDialog">
-                      <Edit3 :size="20" />
-                      <span class="text-xs font-black uppercase tracking-widest">{{ t('detail.actions.modify') }}</span>
-                   </button>
-                   <button 
-                     class="btn h-14 rounded-2xl px-10 gap-3 transition-all active:scale-95"
-                     :class="sub.enabled ? 'btn-ghost bg-warning/10 text-warning border-warning/20 hover:bg-warning hover:text-warning-content' : 'btn-ghost bg-success/10 text-success border-success/20 hover:bg-success hover:text-success-content'"
-                     @click="handleSaveEdit({ enabled: !sub.enabled })"
-                   >
-                      <component :is="sub.enabled ? Pause : Play" :size="20" />
-                      <span class="text-xs font-black uppercase tracking-widest">{{ sub.enabled ? t('detail.actions.suspend') : t('detail.actions.resume') }}</span>
-                   </button>
+              <!-- 进度条 -->
+              <div class="space-y-2">
+                <div class="flex items-end justify-between">
+                  <div>
+                    <p class="text-xs text-base-content/60">{{ t('detail.progress.title') }}</p>
+                    <p class="text-xl font-bold font-mono tabular-nums mt-0.5">{{ sub.current_episodes }} <span class="text-base-content/30 mx-0.5">/</span> {{ sub.total_episodes || '?' }}</p>
+                  </div>
+                  <div v-if="progress !== null" class="text-right">
+                    <p class="text-lg font-bold font-mono tabular-nums text-primary">{{ Math.round(progress) }}%</p>
+                  </div>
                 </div>
+                <div v-if="progress !== null" class="h-2 w-full bg-base-200 rounded-full overflow-hidden">
+                  <div
+                    class="h-full rounded-full bg-primary transition-all duration-500"
+                    :style="{ width: `${progress}%` }"
+                  ></div>
+                </div>
+              </div>
+
+              <!-- 操作按钮 -->
+              <div class="flex flex-wrap gap-2.5 pt-1">
+                <button type="button" class="btn btn-primary h-10 min-h-0 rounded-lg px-5 gap-2 text-sm font-semibold" @click="openEditDialog">
+                  <Edit3 :size="16" />
+                  <span>{{ t('detail.actions.modify') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn h-10 min-h-0 rounded-lg px-5 gap-2 text-sm font-semibold border"
+                  :class="sub.enabled ? 'btn-ghost bg-warning/10 text-warning border-warning/25 hover:bg-warning hover:text-warning-content' : 'btn-ghost bg-success/10 text-success border-success/25 hover:bg-success hover:text-success-content'"
+                  @click="handleSaveEdit({ enabled: !sub.enabled })"
+                >
+                  <component :is="sub.enabled ? Pause : Play" :size="16" />
+                  <span>{{ sub.enabled ? t('detail.actions.suspend') : t('detail.actions.resume') }}</span>
+                </button>
+              </div>
 
                 <!-- Description -->
                 <div v-if="sub.description" class="mt-12 space-y-4">

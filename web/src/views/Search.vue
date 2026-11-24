@@ -580,68 +580,69 @@ function sourceBadge(source: string): string {
 </script>
 
 <template>
-  <div class="space-y-8 pb-20 max-w-7xl mx-auto animate-in fade-in duration-300">
-    <!-- Header Section -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-base-100 p-6 sm:p-7 rounded-3xl border border-base-200/80 shadow-sm">
-      <div class="space-y-1">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-inner">
-            <Search :size="20" />
-          </div>
-          <h1 class="text-2xl sm:text-3xl font-black tracking-tight italic">{{ $t('search.title') }}</h1>
-          <span v-if="results.length > 0" class="badge badge-neutral text-xs font-mono font-bold">{{ t('search.resultsCount', { count: results.length }) }}</span>
+  <div class="space-y-6 pb-20 max-w-6xl mx-auto">
+    <!-- 顶部页头（首个子元素保留原生节点与仅含 ChevronLeft/Plus/Search，以兼容 search-navigation.test.mjs 的 SSR 片段断言） -->
+    <header class="app-page-header">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <h1 class="app-page-title">{{ $t('search.title') }}</h1>
+          <span v-if="results.length > 0" class="badge badge-neutral badge-sm font-mono font-semibold tabular-nums">
+            {{ t('search.resultsCount', { count: results.length }) }}
+          </span>
         </div>
-        <p class="text-xs text-base-content/60 font-medium">{{ $t('search.subtitle') }}</p>
+        <p class="app-page-subtitle">{{ $t('search.subtitle') }}</p>
       </div>
-      
-      <div class="flex flex-wrap items-center gap-2">
-        <router-link to="/subscriptions/new" class="btn btn-outline btn-sm rounded-xl gap-2">
-          <Plus :size="16" aria-hidden="true" />
-          {{ $t('search.addManually') }}
+
+      <div class="flex flex-wrap items-center gap-2 shrink-0">
+        <router-link to="/subscriptions/new" class="btn btn-outline btn-sm rounded-lg gap-1.5 border-base-content/15">
+          <Plus :size="15" aria-hidden="true" />
+          <span>{{ $t('search.addManually') }}</span>
         </router-link>
-        <button class="btn btn-ghost btn-sm border border-base-200/80 rounded-xl gap-2 px-4 hover:bg-base-200 transition-all"
-          @click="router.push('/schedule')">
-          <ChevronLeft :size="16" />
-          <span class="text-xs font-bold">{{ $t('search.back') }}</span>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm border border-base-content/12 rounded-lg gap-1.5"
+          @click="router.push('/schedule')"
+        >
+          <ChevronLeft :size="15" />
+          <span>{{ $t('search.back') }}</span>
         </button>
       </div>
-    </div>
+    </header>
 
-    <!-- Modern Search Interface -->
-    <div class="space-y-4 max-w-4xl mx-auto w-full">
-      <div class="relative group w-full">
-        <div class="absolute -inset-1 bg-gradient-to-r from-primary via-secondary to-accent rounded-[2.5rem] blur opacity-15 group-focus-within:opacity-35 transition-opacity duration-500"></div>
-        <div class="relative bg-base-100 rounded-2xl sm:rounded-[2.2rem] border border-base-200/80 shadow-2xl flex items-center p-1.5 sm:p-2 overflow-hidden">
-          <div class="pl-3 sm:pl-5 text-base-content/30 group-focus-within:text-primary transition-colors shrink-0">
-            <Search :size="22" class="sm:w-6 sm:h-6" />
-          </div>
-          <input 
-            ref="searchInputRef"
-            v-model="query" 
-            type="text"
-            class="flex-1 min-w-0 bg-transparent border-none outline-none px-3 sm:px-5 py-2.5 sm:py-3.5 font-bold text-sm sm:text-base placeholder:text-base-content/30 placeholder:font-bold"
-            :placeholder="$t('search.placeholder')"
-            @keyup.enter="handleSearch"
-          />
-          <button 
-            v-if="query" 
-            @click="clearQuery"
-            class="btn btn-ghost btn-circle btn-xs mr-2 text-base-content/40 hover:text-base-content"
-          >
-            <X :size="14" />
-          </button>
-          <button 
-            class="btn btn-primary h-11 sm:h-12 min-h-0 px-5 sm:px-8 rounded-xl sm:rounded-[1.6rem] shadow-md gap-2 shrink-0 group/btn transition-all active:scale-95"
-            :disabled="loading || !query.trim()" 
-            @click="handleSearch"
-          >
-            <span v-if="loading" class="loading loading-spinner loading-xs sm:loading-sm"></span>
-            <template v-else>
-              <span class="hidden sm:inline text-xs font-black uppercase tracking-wider">{{ $t('search.execute') }}</span>
-              <Search :size="16" class="group-hover/btn:scale-110 transition-transform" />
-            </template>
-          </button>
+    <!-- 检索输入框 -->
+    <div class="space-y-3 max-w-3xl mx-auto w-full">
+      <div class="app-surface rounded-xl flex items-center p-1.5 shadow-sm focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/15 transition-all">
+        <div class="pl-3 text-base-content/40 shrink-0">
+          <Search :size="18" />
         </div>
+        <input
+          ref="searchInputRef"
+          v-model="query"
+          type="text"
+          class="flex-1 min-w-0 bg-transparent border-none outline-none px-3 py-2 text-sm sm:text-base font-medium placeholder:text-base-content/35"
+          :placeholder="$t('search.placeholder')"
+          @keyup.enter="handleSearch"
+        />
+        <button
+          v-if="query"
+          type="button"
+          @click="clearQuery"
+          class="btn btn-ghost btn-circle btn-xs mr-1.5 text-base-content/45 hover:text-base-content"
+        >
+          <X :size="14" />
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary h-9 min-h-0 px-4 sm:px-5 rounded-lg gap-1.5 shrink-0 font-semibold text-xs sm:text-sm"
+          :disabled="loading || !query.trim()"
+          @click="handleSearch"
+        >
+          <span v-if="loading" class="loading loading-spinner loading-xs"></span>
+          <template v-else>
+            <Search :size="15" />
+            <span>{{ $t('search.execute') }}</span>
+          </template>
+        </button>
       </div>
 
       <!-- Search Options Bar -->
@@ -651,7 +652,7 @@ function sourceBadge(source: string): string {
           <span>{{ $t('search.smart') }}</span>
           <input v-model="smartSearch" type="checkbox" class="toggle toggle-primary toggle-sm rounded-full" :disabled="!aiConfigured" />
           <span v-if="!aiConfigured" class="text-[10px] font-bold text-warning ml-1">
-            ({{ $t('settings.ai.error.aiNotConfigured') }})
+            ({{ $t('settings.ai.notConfiguredTip') }})
           </span>
         </label>
 
@@ -939,59 +940,59 @@ function sourceBadge(source: string): string {
     </div>
 
     <!-- Empty Search / Welcome Dashboard -->
-    <div v-else-if="!loading && results.length === 0" class="max-w-4xl mx-auto space-y-8">
-      <!-- Welcome Hero Card -->
-      <div class="flex flex-col items-center justify-center py-16 text-center bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6">
-        <div class="w-20 h-20 bg-primary/10 text-primary rounded-3xl flex items-center justify-center mb-5 shadow-inner">
-          <Search :size="36" />
+    <div v-else-if="!loading && results.length === 0" class="max-w-3xl mx-auto space-y-5">
+      <div class="app-empty-state">
+        <div class="w-11 h-11 rounded-xl bg-primary/12 text-primary flex items-center justify-center mb-3">
+          <Search :size="20" />
         </div>
-        <h3 class="text-xl sm:text-2xl font-black tracking-tight mb-2">
+        <h3 class="text-base font-semibold text-base-content">
           {{ query ? $t('search.empty.noResults') : $t('search.empty.welcome') }}
         </h3>
-        <p class="text-xs sm:text-sm text-base-content/50 max-w-md mx-auto leading-relaxed">
+        <p class="text-sm text-base-content/60 mt-1 max-w-md leading-relaxed">
           {{ query ? $t('search.empty.noResultsDesc') : $t('search.empty.welcomeDesc') }}
         </p>
       </div>
 
-      <!-- Recent Searches (搜索历史) -->
-      <div v-if="searchHistory.length > 0" class="bg-base-100 p-5 sm:p-6 rounded-3xl border border-base-200/80 shadow-sm space-y-3">
+      <!-- 最近搜索 -->
+      <div v-if="searchHistory.length > 0" class="app-surface p-4 sm:p-5 rounded-xl space-y-3">
         <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-base-content/60">
+          <div class="flex items-center gap-2 text-xs font-semibold text-base-content/70">
             <History :size="14" class="text-primary" />
             <span>{{ $t('search.historyTitle') }}</span>
           </div>
-          <button @click="clearAllHistory" class="text-[11px] font-bold text-base-content/40 hover:text-error transition-colors flex items-center gap-1">
+          <button type="button" @click="clearAllHistory" class="text-xs text-base-content/50 hover:text-error transition-colors flex items-center gap-1">
             <Trash2 :size="12" />
             <span>{{ $t('search.historyClear') }}</span>
           </button>
         </div>
         <div class="flex flex-wrap gap-2">
-          <div 
-            v-for="hist in searchHistory" 
-            :key="hist" 
-            class="group/chip flex items-center gap-1.5 bg-base-200/70 hover:bg-primary/10 hover:text-primary px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border border-base-200"
+          <div
+            v-for="hist in searchHistory"
+            :key="hist"
+            class="flex items-center gap-1.5 bg-base-200/70 hover:bg-primary/12 hover:text-primary px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer border border-base-content/8"
             @click="quickSearch(hist)"
           >
             <span>{{ hist }}</span>
-            <button @click.stop="removeHistoryItem(hist)" class="opacity-40 hover:opacity-100 hover:text-error p-0.5 rounded-full">
+            <button type="button" @click.stop="removeHistoryItem(hist)" class="opacity-50 hover:opacity-100 hover:text-error p-0.5 rounded-full">
               <X :size="12" />
             </button>
           </div>
         </div>
       </div>
 
-      <!-- Hot Discoveries (热门推荐) -->
-      <div class="bg-base-100 p-5 sm:p-6 rounded-3xl border border-base-200/80 shadow-sm space-y-3">
-        <div class="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-base-content/60">
+      <!-- 热门发现 -->
+      <div class="app-surface p-4 sm:p-5 rounded-xl space-y-3">
+        <div class="flex items-center gap-2 text-xs font-semibold text-base-content/70">
           <Sparkles :size="14" class="text-secondary" />
           <span>{{ $t('search.recommendTitle') }}</span>
         </div>
         <div class="flex flex-wrap gap-2">
-          <button 
-            v-for="tag in popularTags" 
-            :key="tag" 
+          <button
+            v-for="tag in popularTags"
+            :key="tag"
+            type="button"
             @click="quickSearch(tag)"
-            class="bg-base-200/50 hover:bg-secondary/10 hover:text-secondary hover:border-secondary/30 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border border-base-200"
+            class="bg-base-200/70 hover:bg-primary/12 hover:text-primary px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border border-base-content/8"
           >
             {{ tag }}
           </button>

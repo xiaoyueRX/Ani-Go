@@ -5,10 +5,11 @@ import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
 import { downloaderForms, downloaderProbe, type DownloaderType } from '../utils/setupDownloader'
 import PluginPanel from '../components/PluginPanel.vue'
+import { PageHeader } from '../components/ui'
 import { 
   Check, Antenna, Download, 
   Folder, Bell, Cpu, 
-  Settings, Timer, Lock, 
+  Timer, Lock,
   FileText, Eye, EyeOff,
   RefreshCw, User, Database, 
   RotateCcw, Upload, Trash2, 
@@ -1494,109 +1495,99 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6 pb-24 max-w-7xl mx-auto animate-in fade-in duration-300">
-    
-    <!-- 顶部标题与保存操作栏 -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-base-100 p-6 sm:p-7 rounded-3xl border border-base-200/80 shadow-sm">
-      <div class="space-y-1">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-inner">
-            <Settings :size="20" />
-          </div>
-          <h1 class="text-2xl sm:text-3xl font-black tracking-tight italic">{{ $t('settings.title') }}</h1>
-          <span v-if="currentVersion" class="badge badge-neutral text-xs font-mono font-bold">{{ currentVersion }}</span>
-        </div>
-        <p class="text-xs text-base-content/60 font-medium">{{ $t('settings.subtitle') }}</p>
-      </div>
-
-      <div class="flex items-center gap-3">
-        <button 
-          @click="saveAll" 
-          class="btn btn-primary rounded-xl px-7 gap-2 shadow-lg shadow-primary/25 hover:scale-[1.02] active:scale-95 transition-all"
+  <div class="space-y-6 pb-24 max-w-7xl mx-auto">
+    <!-- 顶部页头与保存栏 -->
+    <PageHeader :title="$t('settings.title')" :subtitle="$t('settings.subtitle')" :badge="currentVersion">
+      <template #actions>
+        <button
+          type="button"
+          @click="saveAll"
+          class="btn btn-primary btn-sm rounded-lg px-4 gap-2 font-semibold"
           :disabled="loading || !settingsReady || savingSettings || customRegexLoading"
         >
-          <Check :size="18" />
-          <span class="text-xs font-black uppercase tracking-wider">{{ $t('settings.saveAll') }}</span>
-          <kbd class="hidden md:inline-block kbd kbd-xs bg-primary-content/20 text-primary-content font-mono border-0 ml-1">{{ $t('settings.ctrlS') }}</kbd>
+          <Check :size="16" />
+          <span>{{ $t('settings.saveAll') }}</span>
+          <kbd class="hidden md:inline-block kbd kbd-xs bg-primary-content/20 text-primary-content font-mono border-0">{{ $t('settings.ctrlS') }}</kbd>
         </button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 顶部状态提示条 -->
     <Transition name="fade">
-      <div v-if="saved" class="alert bg-success/15 border border-success/30 text-success rounded-2xl p-4 shadow-sm flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <Check :size="18" class="shrink-0" />
+      <div v-if="saved" class="alert bg-success/12 border border-success/25 text-success rounded-xl p-3.5 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <Check :size="17" class="shrink-0" />
           <div>
-            <h4 class="font-black text-xs">{{ $t('settings.updateSuccess') }}</h4>
-            <p class="text-[11px] opacity-80">{{ $t('settings.updateSuccessDesc') }}</p>
+            <h4 class="font-semibold text-xs">{{ $t('settings.updateSuccess') }}</h4>
+            <p class="text-xs opacity-80">{{ $t('settings.updateSuccessDesc') }}</p>
           </div>
         </div>
-        <button @click="saved = false" class="btn btn-ghost btn-xs btn-circle">✕</button>
+        <button type="button" @click="saved = false" class="btn btn-ghost btn-xs btn-circle">✕</button>
       </div>
     </Transition>
     <Transition name="fade">
-      <div v-if="error" class="alert bg-error/15 border border-error/30 text-error rounded-2xl p-4 shadow-sm flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <Shield :size="18" class="shrink-0" />
+      <div v-if="error" class="alert bg-error/12 border border-error/25 text-error rounded-xl p-3.5 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <Shield :size="17" class="shrink-0" />
           <div>
-            <h4 class="font-black text-xs">{{ $t('settings.errorTitle') }}</h4>
-            <p class="text-[11px] opacity-80">{{ error }}</p>
+            <h4 class="font-semibold text-xs">{{ $t('settings.errorTitle') }}</h4>
+            <p class="text-xs opacity-80">{{ error }}</p>
           </div>
         </div>
-        <button @click="error = ''" class="btn btn-ghost btn-xs btn-circle">✕</button>
+        <button type="button" @click="error = ''" class="btn btn-ghost btn-xs btn-circle">✕</button>
       </div>
     </Transition>
 
-    <!-- 主布局：左侧导航 + 右侧内容面板 -->
-    <div v-if="loading" class="flex justify-center py-32">
+    <!-- 主布局：左侧分类导航 + 右侧配置面板 -->
+    <div v-if="loading" class="flex justify-center py-28">
       <span class="loading loading-spinner loading-lg text-primary"></span>
     </div>
 
     <div v-else class="flex flex-col lg:flex-row gap-6 items-start w-full">
-      
-      <!-- 移动端与平板端专属：横向滑动切换标签栏 (Mobile & Tablet Horizontal Tab Strip) -->
-      <div class="lg:hidden w-full overflow-x-auto no-scrollbar py-1 flex items-center gap-2 bg-base-100/90 backdrop-blur-md p-2 rounded-2xl border border-base-200/80 sticky top-16 z-20 shadow-sm">
+      <!-- 移动端/平板横向切换标签栏 -->
+      <div class="lg:hidden w-full overflow-x-auto no-scrollbar flex items-center gap-1.5 app-surface p-1.5 rounded-xl sticky top-14 z-20 shadow-sm">
         <button
           v-for="tab in allFlatTabs"
           :key="tab.key"
+          type="button"
           @click="activeTab = tab.key"
-          class="px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0"
-          :class="activeTab === tab.key 
-            ? 'bg-primary text-primary-content shadow-sm font-black' 
-            : 'bg-base-200/60 text-base-content/60 hover:text-base-content hover:bg-base-200'"
+          class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 shrink-0"
+          :class="activeTab === tab.key
+            ? 'bg-primary/15 text-primary font-semibold'
+            : 'text-base-content/65 hover:text-base-content hover:bg-base-200/80'"
         >
           <component :is="tab.icon" :size="14" />
           <span>{{ tab.label }}</span>
         </button>
       </div>
 
-      <!-- 左侧分类侧边栏 Navigation Sidebar (桌面端常驻) -->
-      <aside class="hidden lg:block w-64 shrink-0 lg:sticky lg:top-24 space-y-4 bg-base-100 p-4 rounded-3xl border border-base-200/80 shadow-sm">
-        <div v-for="group in tabGroups" :key="group.name" class="space-y-1">
-          <div class="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-base-content/40">
+      <!-- 桌面端左侧分类侧栏 -->
+      <aside class="hidden lg:block w-56 shrink-0 lg:sticky lg:top-6 space-y-4 app-surface p-3 rounded-xl">
+        <div v-for="group in tabGroups" :key="group.name" class="space-y-0.5">
+          <div class="px-2.5 py-1 text-[11px] font-semibold text-base-content/45">
             {{ group.name }}
           </div>
           <button
             v-for="tab in group.tabs"
             :key="tab.key"
+            type="button"
             @click="activeTab = tab.key"
-            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all group"
-            :class="activeTab === tab.key 
-              ? 'bg-primary text-primary-content shadow-md shadow-primary/20 font-black' 
-              : 'text-base-content/70 hover:text-base-content hover:bg-base-200/60'"
+            class="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-[13px] transition-colors relative"
+            :class="activeTab === tab.key
+              ? 'bg-primary/12 text-primary font-semibold'
+              : 'text-base-content/70 hover:text-base-content hover:bg-base-200/80 font-medium'"
           >
-            <div class="flex items-center gap-2.5">
-              <component :is="tab.icon" :size="16" class="group-hover:scale-110 transition-transform" />
-              <span>{{ tab.label }}</span>
+            <div class="flex items-center gap-2 min-w-0">
+              <component :is="tab.icon" :size="15" class="shrink-0" />
+              <span class="truncate">{{ tab.label }}</span>
             </div>
-            <span v-if="activeTab === tab.key" class="w-1.5 h-1.5 rounded-full bg-primary-content"></span>
+            <span v-if="activeTab === tab.key" class="w-1.5 h-1.5 rounded-full bg-primary shrink-0"></span>
           </button>
         </div>
       </aside>
 
       <!-- 右侧配置主面板 Right Content Area -->
-      <main class="flex-1 min-w-0 w-full space-y-6">
+      <div class="flex-1 min-w-0 w-full space-y-6">
 
         <!-- 1. Mikan 镜像测速卡片 (在 Mikan 或 Bangumi Tab 顶部展示) -->
         <div v-if="activeTab === 'mikan' || activeTab === 'bangumi'" class="w-full bg-base-100 rounded-3xl border border-base-200/80 shadow-sm p-6 sm:p-7 space-y-5 block">
@@ -2949,7 +2940,7 @@ onUnmounted(() => {
 
         </div>
 
-      </main>
+      </div>
     </div>
 
     <!-- 导入 / 添加插件弹窗 Modal -->

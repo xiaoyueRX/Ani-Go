@@ -12,6 +12,7 @@ import {
 import { ListChecks, CheckCircle, XCircle } from 'lucide-vue-next'
 import OnboardingModal from '../components/OnboardingModal.vue'
 import ChangelogModal from '../components/ChangelogModal.vue'
+import { PageHeader, EmptyState } from '../components/ui'
 import { useVersion } from '../composables/useVersion'
 import { useAuth } from '../composables/useAuth'
 
@@ -570,179 +571,185 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="space-y-10 pb-20">
-    <!-- Header Section -->
-    <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
-      <div class="space-y-1">
-        <h1 class="text-4xl font-black tracking-tighter italic">{{ $t('schedule.title') }}</h1>
-        <p class="text-xs font-bold tracking-[0.3em] uppercase opacity-30">{{ $t('schedule.subtitle') }}</p>
-      </div>
-      
-      <div class="flex items-center gap-3 overflow-x-auto pb-2 no-scrollbar max-w-full">
-        <!-- Offline Mode Indicator -->
-        <div v-if="isOfflineMode" class="flex-none flex items-center gap-2 px-3 py-1.5 bg-warning/10 border border-warning/20 text-warning rounded-2xl text-[9px] font-black uppercase tracking-widest animate-pulse">
+  <div class="space-y-6 pb-20">
+    <!-- 顶部页头 -->
+    <PageHeader :title="$t('schedule.title')" :subtitle="$t('schedule.subtitle')">
+      <template #meta>
+        <span
+          v-if="isOfflineMode"
+          class="inline-flex items-center gap-1.5 px-2 py-0.5 bg-warning/15 border border-warning/25 text-warning rounded-md text-xs font-medium"
+        >
           <WifiOff :size="12" />
           <span>{{ $t('schedule.offlineMode') }}</span>
-        </div>
-        
-        <!-- Season Selector -->
-        <div v-if="activeTab === 'schedule'" class="flex-none flex items-center gap-1.5 p-1 bg-base-200/50 rounded-2xl border border-base-300/30">
-          <select v-model="selectedYear" @change="fetchSchedule" class="select select-ghost select-xs focus:bg-transparent font-black text-[10px] w-20 h-8 min-h-0">
+        </span>
+      </template>
+
+      <template #actions>
+        <div v-if="activeTab === 'schedule'" class="flex items-center gap-1 p-1 app-surface rounded-lg h-9">
+          <select v-model="selectedYear" @change="fetchSchedule" class="select select-ghost select-xs focus:bg-transparent font-semibold text-xs w-20 h-7 min-h-0">
             <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
           </select>
-          <div class="w-px h-3 bg-base-content/10"></div>
-          <select v-model="selectedSeason" @change="fetchSchedule" class="select select-ghost select-xs focus:bg-transparent font-black text-[10px] w-20 h-8 min-h-0">
+          <div class="w-px h-3.5 bg-base-content/12"></div>
+          <select v-model="selectedSeason" @change="fetchSchedule" class="select select-ghost select-xs focus:bg-transparent font-semibold text-xs w-20 h-7 min-h-0">
             <option v-for="s in seasons" :key="s.value" :value="s.value">{{ s.label }}</option>
           </select>
         </div>
 
-          <div class="flex-none p-1 bg-base-200/50 rounded-2xl flex gap-1 border border-base-300/30 overflow-x-auto no-scrollbar scroll-smooth">
-            <button 
-              v-for="t in [ {id: 'schedule', label: $t('schedule.tabs.all'), icon: Antenna}, {id: 'mysub', label: $t('schedule.tabs.mine'), icon: LayoutGrid} ]" 
-              :key="t.id"
-              class="px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap"
-              :class="activeTab === t.id ? 'bg-primary text-primary-content shadow-lg' : 'text-base-content/40 hover:text-base-content hover:bg-base-200'"
-              @click="activeTab = t.id as any"
-            >
-            <component :is="t.icon" :size="14" />
-            {{ t.label }}
-            <span v-if="t.id === 'mysub' && subscribedCount > 0" class="badge badge-xs bg-white/20 text-white border-none ml-1">{{ subscribedCount }}</span>
+        <div class="app-segmented">
+          <button
+            v-for="tab in [ {id: 'schedule', label: $t('schedule.tabs.all'), icon: Antenna}, {id: 'mysub', label: $t('schedule.tabs.mine'), icon: LayoutGrid} ]"
+            :key="tab.id"
+            type="button"
+            class="app-segmented-btn"
+            :data-active="activeTab === tab.id ? 'true' : 'false'"
+            @click="activeTab = tab.id as any"
+          >
+            <component :is="tab.icon" :size="14" />
+            <span>{{ tab.label }}</span>
+            <span v-if="tab.id === 'mysub' && subscribedCount > 0" class="badge badge-primary badge-xs font-mono tabular-nums">{{ subscribedCount }}</span>
           </button>
         </div>
-        <button v-if="!batchMode" class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl hover:bg-base-200 text-[10px] font-black uppercase tracking-widest gap-2 whitespace-nowrap" @click="enterBatchMode">
-          <ListChecks :size="16" />
-          {{ $t('schedule.batchSubscribe') }}
-        </button>
-        <button 
-          class="flex-none btn btn-ghost btn-circle hover:bg-base-200" 
-          @click="fetchSchedule" 
-          :disabled="loading"
+
+        <button
+          v-if="!batchMode"
+          type="button"
+          class="btn btn-ghost btn-sm border border-base-content/12 rounded-lg gap-1.5 text-xs font-medium whitespace-nowrap"
+          @click="enterBatchMode"
         >
-          <RefreshCw :size="20" class="opacity-50" />
+          <ListChecks :size="15" />
+          <span>{{ $t('schedule.batchSubscribe') }}</span>
         </button>
-      </div>
-    </div>
 
-    <!-- Error State -->
+        <button
+          type="button"
+          class="btn btn-ghost btn-square btn-sm border border-base-content/12 rounded-lg"
+          @click="fetchSchedule"
+          :disabled="loading"
+          :aria-label="$t('common.refresh')"
+        >
+          <RefreshCw :size="15" :class="{ 'animate-spin': loading }" />
+        </button>
+      </template>
+    </PageHeader>
+
+    <!-- 错误提示 -->
     <div v-if="error" class="max-w-4xl mx-auto">
-      <div class="alert bg-error/10 border-error/20 text-error rounded-[2rem] p-6">
-        <AlertTriangle :size="24" class="shrink-0" />
-        <div class="flex-1">
-          <h3 class="font-black text-sm uppercase tracking-widest">{{ $t('schedule.error.sync') }}</h3>
-          <p class="text-sm font-bold opacity-80 mt-1">{{ error }}</p>
+      <div class="alert bg-error/10 border border-error/25 text-error rounded-xl p-4">
+        <AlertTriangle :size="20" class="shrink-0" />
+        <div class="flex-1 min-w-0">
+          <h3 class="font-semibold text-sm">{{ $t('schedule.error.sync') }}</h3>
+          <p class="text-xs opacity-85 mt-0.5">{{ error }}</p>
         </div>
-        <button class="btn btn-ghost btn-circle btn-sm" @click="error = ''">
-          <X :size="16" />
+        <button type="button" class="btn btn-ghost btn-circle btn-xs" @click="error = ''">
+          <X :size="14" />
         </button>
       </div>
     </div>
 
-    <!-- Loading State -->
-    <div v-if="loading" class="grid gap-10">
-      <div v-for="i in 3" :key="i" class="space-y-4">
-         <div class="h-6 w-32 bg-base-200 rounded-full animate-pulse"></div>
-         <div class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
-            <div v-for="j in 6" :key="j" class="aspect-[3/4.5] bg-base-200 rounded-3xl animate-pulse border border-base-300/30"></div>
-         </div>
+    <!-- 加载骨架 -->
+    <div v-if="loading" class="grid gap-8">
+      <div v-for="i in 3" :key="i" class="space-y-3">
+        <div class="h-5 w-28 bg-base-200 rounded-md animate-pulse"></div>
+        <div class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
+          <div v-for="j in 6" :key="j" class="aspect-[2/3] bg-base-200 rounded-xl animate-pulse border border-base-content/8"></div>
+        </div>
       </div>
     </div>
 
     <!-- 筛选过滤与源切换工具栏 -->
-    <div v-if="!loading" class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-base-100 p-4 rounded-3xl border border-base-200/80 shadow-sm">
+    <div v-if="!loading" class="app-toolbar">
       <div class="flex items-center gap-2 flex-wrap">
-        <!-- 数据源切换 -->
-        <div class="flex p-1 bg-base-200/60 rounded-2xl border border-base-300/40 text-xs">
-          <!-- 蜜柑计划 (默认) -->
-          <button 
-            @click="setScheduleSource('mikan')" 
-            class="px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5"
-            :class="scheduleSource === 'mikan' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
+        <div class="app-segmented text-xs">
+          <button
+            type="button"
+            @click="setScheduleSource('mikan')"
+            class="app-segmented-btn"
+            :data-active="scheduleSource === 'mikan' ? 'true' : 'false'"
           >
             <Sparkles :size="13" />
             <span>{{ $t('schedule.sourceMikan') }}</span>
           </button>
-          <!-- Bangumi 每日放送 -->
-          <button 
-            @click="setScheduleSource('bangumi')" 
-            class="px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5"
-            :class="scheduleSource === 'bangumi' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
+          <button
+            type="button"
+            @click="setScheduleSource('bangumi')"
+            class="app-segmented-btn"
+            :data-active="scheduleSource === 'bangumi' ? 'true' : 'false'"
           >
             <Calendar :size="13" />
             <span>{{ $t('schedule.sourceBangumi') }}</span>
           </button>
-          <!-- 長門番堂 (yuc.wiki) 仅在开启插件后显示 -->
-          <button 
+          <button
             v-if="isYucPluginEnabled"
-            @click="setScheduleSource('yuc')" 
-            class="px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5"
-            :class="scheduleSource === 'yuc' ? 'bg-primary text-primary-content shadow-sm' : 'opacity-60 hover:opacity-100'"
+            type="button"
+            @click="setScheduleSource('yuc')"
+            class="app-segmented-btn"
+            :data-active="scheduleSource === 'yuc' ? 'true' : 'false'"
           >
             <Antenna :size="13" />
             <span>{{ $t('schedule.sourceYuc') }}</span>
           </button>
         </div>
 
-        <!-- 只看今日开关 -->
-        <button 
-          @click="onlyToday = !onlyToday" 
-          class="btn btn-sm rounded-xl font-bold gap-1.5 transition-all"
-          :class="onlyToday ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70 hover:opacity-100'"
+        <button
+          type="button"
+          @click="onlyToday = !onlyToday"
+          class="btn btn-sm rounded-lg font-medium gap-1.5"
+          :class="onlyToday ? 'btn-primary' : 'btn-ghost border border-base-content/12 text-base-content/75'"
         >
           <Clock :size="14" />
           <span>{{ $t('schedule.todayOnly') }}</span>
-          <span class="badge badge-xs" :class="onlyToday ? 'bg-white/20 text-white' : 'badge-neutral'">
+          <span class="badge badge-xs" :class="onlyToday ? 'bg-white/20 text-white border-none' : 'badge-neutral'">
             {{ dayNames[todayWeekday] }}
           </span>
         </button>
       </div>
 
-      <!-- 搜索框 -->
       <div class="relative w-full sm:w-64">
-        <input 
-          v-model="scheduleSearch" 
-          type="text" 
-          :placeholder="$t('schedule.filterPlaceholder')" 
-          class="input input-bordered input-sm w-full rounded-xl pl-8 text-xs font-medium"
+        <input
+          v-model="scheduleSearch"
+          type="text"
+          :placeholder="$t('schedule.filterPlaceholder')"
+          class="input input-sm w-full bg-base-200/70 border border-base-content/12 rounded-lg pl-8 text-xs font-medium"
         />
-        <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
+        <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-base-content/40" />
       </div>
     </div>
 
     <!-- 季度自动回退提示 -->
-    <div v-if="seasonNotice && !loading" class="max-w-5xl mx-auto mb-6 alert bg-info/10 border border-info/25 text-info rounded-2xl px-4 py-3 flex items-start gap-3">
-      <Info :size="18" class="shrink-0 mt-0.5" />
+    <div v-if="seasonNotice && !loading" class="max-w-5xl mx-auto alert bg-info/10 border border-info/25 text-info rounded-xl px-4 py-3 flex items-start gap-3">
+      <Info :size="17" class="shrink-0 mt-0.5" />
       <div class="flex-1 min-w-0 space-y-0.5">
-        <p class="text-xs font-black tracking-tight">{{ seasonNotice }}</p>
-        <p class="text-[11px] font-bold opacity-80 leading-relaxed">{{ seasonNoticeDetail }}</p>
+        <p class="text-xs font-semibold">{{ seasonNotice }}</p>
+        <p class="text-xs opacity-80 leading-relaxed">{{ seasonNoticeDetail }}</p>
       </div>
-      <button class="btn btn-ghost btn-xs btn-circle opacity-60 hover:opacity-100" @click="seasonNotice = ''">
+      <button type="button" class="btn btn-ghost btn-xs btn-circle opacity-60 hover:opacity-100" @click="seasonNotice = ''">
         <X :size="14" />
       </button>
     </div>
 
-    <!-- Empty State -->
-    <div v-if="!loading && (activeTab === 'schedule' ? filteredDays.length === 0 : Object.keys(subscribedSchedule).length === 0)" class="flex flex-col items-center justify-center py-32 text-center bg-base-100/30 rounded-[3rem] border-2 border-dashed border-base-200 max-w-4xl mx-auto">
-      <div class="w-32 h-32 bg-base-200/50 rounded-full flex items-center justify-center mb-8 rotate-12">
-        <Calendar :size="64" class="opacity-10" />
-      </div>
-      <h3 class="text-2xl font-black tracking-tight mb-2">
-        {{ scheduleSearch || onlyToday ? $t('schedule.empty.noMatch') : $t('schedule.empty.title') }}
-      </h3>
-      <p class="text-sm font-bold text-base-content/40 max-w-md mx-auto leading-relaxed">
-        {{ scheduleSearch || onlyToday ? $t('schedule.empty.noMatchDesc') : $t('schedule.empty.desc') }}
-      </p>
-      <p v-if="!scheduleSearch && !onlyToday" class="text-xs font-bold text-base-content/30 max-w-md mx-auto mt-3 leading-relaxed">
-        {{ $t('schedule.empty.sourceHint') }}
-      </p>
-      <button
-        v-if="!scheduleSearch && !onlyToday"
-        class="btn btn-outline btn-sm rounded-xl mt-8 gap-2 font-bold"
-        @click="gotoPreviousSeason"
-      >
-        <History :size="14" />
-        <span>{{ $t('schedule.empty.viewPrevious') }}</span>
-      </button>
-    </div>
+    <!-- 空状态 -->
+    <EmptyState
+      v-if="!loading && (activeTab === 'schedule' ? filteredDays.length === 0 : Object.keys(subscribedSchedule).length === 0)"
+      :title="scheduleSearch || onlyToday ? $t('schedule.empty.noMatch') : $t('schedule.empty.title')"
+      :description="scheduleSearch || onlyToday ? $t('schedule.empty.noMatchDesc') : $t('schedule.empty.desc')"
+      :hint="!scheduleSearch && !onlyToday ? $t('schedule.empty.sourceHint') : undefined"
+      class="max-w-3xl mx-auto"
+    >
+      <template #icon>
+        <Calendar :size="22" />
+      </template>
+      <template #actions>
+        <button
+          v-if="!scheduleSearch && !onlyToday"
+          type="button"
+          class="btn btn-outline btn-sm rounded-lg gap-1.5 border-base-content/15"
+          @click="gotoPreviousSeason"
+        >
+          <History :size="14" />
+          <span>{{ $t('schedule.empty.viewPrevious') }}</span>
+        </button>
+      </template>
+    </EmptyState>
 
     <!-- ====== Main Timeline ====== -->
     <div v-else-if="!loading" class="space-y-12">

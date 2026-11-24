@@ -11,6 +11,7 @@ export default {
     close: '关闭',
     refresh: '刷新',
     actions: '操作',
+    back: '返回',
   },
   login: {
     title: 'Ani-Go',
@@ -21,7 +22,7 @@ export default {
     passwordPlaceholder: '请输入密码',
     remember: '记住用户名',
     forgot: '忘记密码？',
-    submit: '进入终端',
+    submit: '进入控制台',
     securing: '已建立加密连接',
     errorEmpty: '请输入用户名和密码',
     errorFailed: '登录失败',
@@ -36,6 +37,8 @@ export default {
     navigation: '导航',
     activeNow: '在线',
     terminate: '结束会话',
+    themeLight: '浅色模式',
+    themeDark: '深色模式',
   },
   settings: {
     title: '系统设置',

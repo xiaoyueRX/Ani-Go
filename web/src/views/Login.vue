@@ -4,13 +4,15 @@ import { useRouter, useRoute } from 'vue-router'
 import { loginDestination } from '../utils/loginRedirect'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
-import { 
-  AlertTriangle, User, Lock, LogIn, Languages
+import { useTheme } from '../composables/useTheme'
+import {
+  AlertTriangle, User, Lock, LogIn, Languages, Sun, Moon
 } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
 const { t, locale } = useI18n()
+const { isDark, toggleTheme } = useTheme()
 const username = ref(localStorage.getItem('remembered_username') || '')
 const password = ref('')
 const remember = ref(!!username.value)
@@ -51,129 +53,139 @@ async function handleLogin() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-[#0a0c10] overflow-hidden relative font-sans">
-    <!-- Animated Background Blobs -->
-    <div class="absolute top-0 left-0 w-full h-full overflow-hidden z-0">
-      <div class="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[120px] animate-pulse"></div>
-      <div class="absolute top-[60%] -right-[5%] w-[35%] h-[35%] bg-secondary/10 rounded-full blur-[100px] animate-pulse" style="animation-delay: 2s"></div>
-      <div class="absolute -bottom-[5%] left-[20%] w-[30%] h-[30%] bg-accent/10 rounded-full blur-[80px] animate-pulse" style="animation-delay: 4s"></div>
-    </div>
+  <div class="min-h-screen flex items-center justify-center bg-base-300 text-base-content relative overflow-hidden px-4 py-10">
+    <!-- 细腻网格与顶部微光背景 -->
+    <div
+      class="pointer-events-none absolute inset-0 opacity-45"
+      style="background-image: radial-gradient(circle at 50% 0%, color-mix(in oklch, var(--color-primary) 16%, transparent), transparent 60%);"
+      aria-hidden="true"
+    />
 
-    <!-- Language Switcher -->
-    <div class="absolute top-8 right-8 z-20">
-      <button @click="toggleLanguage" class="btn btn-ghost btn-circle hover:bg-white/10">
-        <Languages :size="20" class="text-white/60" />
+    <!-- 右上角主题与语言开关 -->
+    <div class="absolute top-5 right-5 z-20 flex items-center gap-1.5">
+      <button
+        type="button"
+        class="btn btn-ghost btn-sm btn-square rounded-lg border border-base-content/10 bg-base-100/80"
+        :title="isDark ? $t('nav.themeLight') : $t('nav.themeDark')"
+        :aria-label="isDark ? $t('nav.themeLight') : $t('nav.themeDark')"
+        @click="toggleTheme"
+      >
+        <Sun v-if="isDark" :size="16" />
+        <Moon v-else :size="16" />
+      </button>
+      <button
+        type="button"
+        class="btn btn-ghost btn-sm rounded-lg border border-base-content/10 bg-base-100/80 gap-1.5 text-xs font-medium"
+        @click="toggleLanguage"
+      >
+        <Languages :size="15" class="text-primary" />
+        <span>{{ locale === 'zh' ? 'EN' : '中文' }}</span>
       </button>
     </div>
 
-    <!-- Login Card -->
-    <div class="relative z-10 w-full max-w-md p-4">
-      <div class="card bg-base-100/40 backdrop-blur-2xl border border-white/5 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] rounded-[3rem] overflow-hidden">
-        <div class="card-body p-8 sm:p-12">
-          <!-- Logo & Title -->
-          <div class="flex flex-col items-center text-center mb-10">
-            <div class="relative mb-6 group">
-               <div class="absolute inset-0 bg-primary blur-3xl opacity-30 group-hover:opacity-60 transition-opacity"></div>
-               <img src="/logo.png" alt="Ani-Go Logo" class="w-24 h-24 rounded-3xl shadow-2xl rotate-3 group-hover:rotate-0 transition-all duration-500 relative z-10 object-cover" />
+    <!-- 登录卡片 -->
+    <div class="relative z-10 w-full max-w-[390px]">
+      <div class="app-surface rounded-2xl shadow-xl p-6 sm:p-8">
+        <!-- 品牌标题区 -->
+        <div class="flex flex-col items-center text-center mb-7">
+          <img
+            src="/logo.png"
+            alt="Ani-Go Logo"
+            class="w-12 h-12 rounded-xl object-cover border border-base-content/10 shadow-sm mb-4"
+          />
+          <h1 class="text-xl font-bold tracking-tight text-base-content">{{ $t('login.title') }}</h1>
+          <p class="text-xs text-base-content/60 mt-1">{{ $t('login.subtitle') }}</p>
+        </div>
+
+        <!-- 错误提示 -->
+        <Transition name="fade">
+          <div
+            v-if="error"
+            role="alert"
+            class="bg-error/10 border border-error/25 text-error rounded-lg px-3.5 py-2.5 mb-5 flex items-center gap-2.5 text-xs font-medium"
+          >
+            <AlertTriangle :size="16" class="shrink-0" />
+            <span>{{ error }}</span>
+          </div>
+        </Transition>
+
+        <!-- 登录表单 -->
+        <form @submit.prevent="handleLogin" class="space-y-4">
+          <div>
+            <label for="login-username" class="app-field-label">{{ $t('login.username') }}</label>
+            <div class="relative group">
+              <div class="pointer-events-none absolute inset-y-0 left-3.5 flex items-center text-base-content/35 group-focus-within:text-primary transition-colors">
+                <User :size="16" />
+              </div>
+              <input
+                id="login-username"
+                v-model="username"
+                type="text"
+                :placeholder="$t('login.usernamePlaceholder')"
+                class="input w-full h-10 bg-base-200/70 border border-base-content/12 rounded-lg pl-10 pr-3.5 text-sm font-medium placeholder:text-base-content/35"
+                autocomplete="username"
+              />
             </div>
-            <h1 class="text-4xl font-black tracking-tighter italic bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent mb-2">{{ $t('login.title') }}</h1>
-            <p class="text-[10px] font-black tracking-[0.4em] uppercase opacity-30">{{ $t('login.subtitle') }}</p>
           </div>
 
-          <!-- Error Message -->
-          <Transition name="fade">
-            <div v-if="error" role="alert" class="bg-error/10 border border-error/20 text-error rounded-2xl p-4 mb-6 flex items-center gap-3 text-sm font-bold">
-              <AlertTriangle :size="18" class="shrink-0" />
-              <span>{{ error }}</span>
+          <div>
+            <label for="login-password" class="app-field-label">{{ $t('login.password') }}</label>
+            <div class="relative group">
+              <div class="pointer-events-none absolute inset-y-0 left-3.5 flex items-center text-base-content/35 group-focus-within:text-primary transition-colors">
+                <Lock :size="16" />
+              </div>
+              <input
+                id="login-password"
+                v-model="password"
+                type="password"
+                :placeholder="$t('login.passwordPlaceholder')"
+                class="input w-full h-10 bg-base-200/70 border border-base-content/12 rounded-lg pl-10 pr-3.5 text-sm font-medium placeholder:text-base-content/35"
+                autocomplete="current-password"
+              />
             </div>
-          </Transition>
-
-          <!-- Form -->
-          <form @submit.prevent="handleLogin" class="space-y-5">
-            <div class="space-y-1.5">
-               <label for="login-username" class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ $t('login.username') }}</label>
-               <div class="relative group">
-                  <div class="absolute inset-y-0 left-5 flex items-center text-base-content/20 group-focus-within:text-primary transition-colors">
-                     <User :size="20" />
-                  </div>
-                  <input 
-                    id="login-username" v-model="username"
-                    type="text" 
-                    :placeholder="$t('login.usernamePlaceholder')" 
-                    class="w-full bg-white/5 border border-white/5 focus:border-primary/30 focus:bg-white/10 focus:ring-4 focus:ring-primary/10 rounded-[1.5rem] pl-14 pr-6 py-4 transition-all outline-none font-bold placeholder:text-base-content/20"
-                    autocomplete="username" 
-                  />
-               </div>
-            </div>
-
-            <div class="space-y-1.5">
-               <label for="login-password" class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ $t('login.password') }}</label>
-               <div class="relative group">
-                  <div class="absolute inset-y-0 left-5 flex items-center text-base-content/20 group-focus-within:text-primary transition-colors">
-                     <Lock :size="20" />
-                  </div>
-                  <input 
-                    id="login-password" v-model="password"
-                    type="password" 
-                    :placeholder="$t('login.passwordPlaceholder')" 
-                    class="w-full bg-white/5 border border-white/5 focus:border-primary/30 focus:bg-white/10 focus:ring-4 focus:ring-primary/10 rounded-[1.5rem] pl-14 pr-6 py-4 transition-all outline-none font-bold placeholder:text-base-content/20"
-                    autocomplete="current-password" 
-                  />
-               </div>
-            </div>
-
-            <div class="flex items-center justify-between px-2 pt-2">
-               <label class="flex items-center gap-3 cursor-pointer group">
-                  <input v-model="remember" type="checkbox" class="checkbox checkbox-primary rounded-lg border-white/10" />
-                  <span class="text-xs font-bold text-base-content/40 group-hover:text-base-content transition-colors">{{ $t('login.remember') }}</span>
-               </label>
-            </div>
-
-            <button 
-              type="submit" 
-              class="w-full btn btn-primary h-16 rounded-[1.5rem] shadow-xl shadow-lg text-xs font-black uppercase tracking-[0.2em] gap-3 mt-4 group" 
-              :disabled="loading"
-            >
-              <span v-if="loading" class="loading loading-spinner"></span>
-              <template v-else>
-                 {{ $t('login.submit') }}
-                 <LogIn :size="20" class="group-hover:translate-x-1 transition-transform" />
-              </template>
-            </button>
-          </form>
-
-          <!-- Footer -->
-          <div class="mt-12 text-center">
-             <p class="text-[9px] font-bold text-base-content/20 uppercase tracking-[0.3em]">{{ $t('login.securing') }}</p>
           </div>
+
+          <div class="flex items-center justify-between pt-0.5">
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input v-model="remember" type="checkbox" class="checkbox checkbox-primary checkbox-sm rounded" />
+              <span class="text-xs text-base-content/65">{{ $t('login.remember') }}</span>
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            class="btn btn-primary w-full h-10 rounded-lg font-semibold text-sm gap-2 mt-2"
+            :disabled="loading"
+          >
+            <span v-if="loading" class="loading loading-spinner loading-sm"></span>
+            <template v-else>
+              <span>{{ $t('login.submit') }}</span>
+              <LogIn :size="16" />
+            </template>
+          </button>
+        </form>
+
+        <div class="mt-6 pt-4 border-t border-base-content/8 text-center">
+          <p class="text-[11px] text-base-content/45">{{ $t('login.securing') }}</p>
         </div>
       </div>
-      
-      <!-- Bottom Links -->
-      <div class="mt-8 flex justify-center gap-6 opacity-30">
-         <a href="https://github.com/xiaoyueRX/Ani-Go" target="_blank" rel="noopener noreferrer" class="text-[10px] font-black uppercase tracking-widest hover:opacity-100 transition-opacity">GitHub</a>
-         <a :href="locale === 'zh' ? 'https://github.com/xiaoyueRX/Ani-Go/blob/HEAD/docs/05_DEPLOYMENT.md' : 'https://github.com/xiaoyueRX/Ani-Go/blob/HEAD/docs/05_DEPLOYMENT_EN.md'" target="_blank" rel="noopener noreferrer" class="text-[10px] font-black uppercase tracking-widest hover:opacity-100 transition-opacity">Documentation</a>
-         <a href="https://github.com/xiaoyueRX/Ani-Go/issues" target="_blank" rel="noopener noreferrer" class="text-[10px] font-black uppercase tracking-widest hover:opacity-100 transition-opacity">Support</a>
+
+      <!-- 底部链接 -->
+      <div class="mt-5 flex justify-center gap-5 text-xs text-base-content/50">
+        <a href="https://github.com/xiaoyueRX/Ani-Go" target="_blank" rel="noopener noreferrer" class="hover:text-base-content transition-colors">GitHub</a>
+        <a :href="locale === 'zh' ? 'https://github.com/xiaoyueRX/Ani-Go/blob/HEAD/docs/05_DEPLOYMENT.md' : 'https://github.com/xiaoyueRX/Ani-Go/blob/HEAD/docs/05_DEPLOYMENT_EN.md'" target="_blank" rel="noopener noreferrer" class="hover:text-base-content transition-colors">Documentation</a>
+        <a href="https://github.com/xiaoyueRX/Ani-Go/issues" target="_blank" rel="noopener noreferrer" class="hover:text-base-content transition-colors">Support</a>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus {
-  -webkit-text-fill-color: white;
-  -webkit-box-shadow: 0 0 0px 1000px rgba(255, 255, 255, 0.05) inset;
+  -webkit-text-fill-color: var(--color-base-content);
+  -webkit-box-shadow: 0 0 0 1000px var(--color-base-200) inset;
   transition: background-color 5000s ease-in-out 0s;
 }
 </style>

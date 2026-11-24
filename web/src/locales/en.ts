@@ -11,6 +11,7 @@ export default {
     close: 'Close',
     refresh: 'Refresh',
     actions: 'Actions',
+    back: 'Back',
   },
   login: {
     title: 'Ani-Go',
@@ -21,7 +22,7 @@ export default {
     passwordPlaceholder: 'Enter your password',
     remember: 'Remember username',
     forgot: 'Forgot Password?',
-    submit: 'Enter System',
+    submit: 'Sign In',
     securing: 'Encrypted Connection Secured',
     errorEmpty: 'Please enter username and password',
     errorFailed: 'Login failed',
@@ -36,6 +37,8 @@ export default {
     navigation: 'Navigation',
     activeNow: 'Online',
     terminate: 'End Session',
+    themeLight: 'Light mode',
+    themeDark: 'Dark mode',
   },
   settings: {
     title: 'Settings',
@@ -303,6 +306,7 @@ export default {
       goToPlugins: 'Go to Plugin Manager',
     },
     ai: {
+      notConfiguredTip: 'LLM not configured, cannot enable',
       fetchModels: 'Fetch Models',
       loadingModels: 'Fetching...',
       fetchTooltip: 'Retrieve available models from the endpoint',

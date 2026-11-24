@@ -9,6 +9,7 @@ import {
   RotateCcw, Trash2, Play, Check, Sparkles, Layers
 } from 'lucide-vue-next'
 import SubscriptionCard from '../components/SubscriptionCard.vue'
+import { PageHeader, StatCard, EmptyState } from '../components/ui'
 
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
@@ -533,99 +534,106 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-10">
-    <!-- Header Section -->
-    <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
-      <div class="space-y-1">
-        <h1 class="text-4xl font-black tracking-tighter italic">{{ $t('subs.title') }}</h1>
-        <p class="text-xs font-bold tracking-[0.3em] uppercase opacity-30">{{ $t('subs.subtitle') }}</p>
-      </div>
-      
-      <div class="flex items-center gap-2 overflow-x-auto no-scrollbar max-w-full pb-1">
+  <div class="space-y-6 pb-20">
+    <!-- 顶部页头与常用动作 -->
+    <PageHeader :title="$t('subs.title')" :subtitle="$t('subs.subtitle')" :badge="subs.length">
+      <template #actions>
         <template v-if="batchDeleteMode && filterType !== 'recycle'">
-          <div class="flex items-center gap-2.5 flex-none">
-            <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-3 text-xs font-bold" :disabled="selectableVisibleSubs.length === 0" @click="toggleSelectAllBatch">
+          <div class="flex items-center gap-2 flex-wrap">
+            <button type="button" class="btn btn-ghost btn-sm rounded-lg font-medium" :disabled="selectableVisibleSubs.length === 0" @click="toggleSelectAllBatch">
               {{ allVisibleSelected ? $t('subs.unselectAll') : $t('subs.selectAll') }}
             </button>
-            <span class="text-xs font-bold opacity-60 whitespace-nowrap">{{ $t('subs.selectedCount', { count: batchDeleteSelected.size }) }}</span>
-            <button class="btn btn-ghost btn-xs rounded-xl h-10 min-h-0 px-3" @click="exitBatchDeleteMode">
+            <span class="text-xs font-medium text-base-content/65 whitespace-nowrap">{{ $t('subs.selectedCount', { count: batchDeleteSelected.size }) }}</span>
+            <button type="button" class="btn btn-ghost btn-sm rounded-lg" @click="exitBatchDeleteMode">
               {{ $t('common.cancel') }}
             </button>
-            <button class="btn btn-error btn-xs rounded-xl h-10 min-h-0 px-4 gap-1.5 whitespace-nowrap font-bold" :disabled="batchDeleteSelected.size === 0" @click="openBatchDeleteModal">
+            <button type="button" class="btn btn-error btn-sm rounded-lg gap-1.5 font-medium" :disabled="batchDeleteSelected.size === 0" @click="openBatchDeleteModal">
               <Trash2 :size="14" />
-              {{ $t('common.delete') }} ({{ batchDeleteSelected.size }})
+              <span>{{ $t('common.delete') }} ({{ batchDeleteSelected.size }})</span>
             </button>
           </div>
         </template>
-        <button v-if="!batchDeleteMode && filterType !== 'recycle'"
-          class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap"
-          @click="enterBatchDeleteMode">
-          <Trash2 :size="16" class="opacity-50" />
-          <span class="text-[10px] font-black uppercase tracking-widest">{{ $t('subs.batchDelete') }}</span>
-        </button>
-        <button 
-          class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap" 
-          @click="triggerSupplementAll"
-          :disabled="loading"
-        >
-          <RotateCcw :size="16" class="opacity-50" />
-          <span class="text-[10px] font-black uppercase tracking-widest">{{ $t('subs.supplementAll') }}</span>
-        </button>
-        <button 
-          class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap" 
-          @click="triggerMergeCollections"
-          :disabled="loading || mergingCollections"
-          :title="$t('subs.mergeCollectionsDesc')"
-        >
-          <Layers :size="16" class="opacity-50" :class="{ 'animate-spin': mergingCollections }" />
-          <span class="text-[10px] font-black uppercase tracking-widest">{{ $t('subs.mergeCollections') }}</span>
-        </button>
-        <button 
-          class="flex-none btn btn-ghost border border-base-300/50 rounded-2xl gap-2 px-4 h-11 min-h-0 hover:bg-base-200 transition-all active:scale-95 whitespace-nowrap" 
-          @click="router.push('/search')"
-        >
-          <Search :size="16" class="opacity-50" />
-          <span class="text-[10px] font-black uppercase tracking-widest">{{ $t('subs.find') }}</span>
-        </button>
-        <button 
-          class="flex-none btn btn-primary rounded-2xl gap-2 px-5 h-11 min-h-0 shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all whitespace-nowrap" 
-          @click="router.push('/search')"
-        >
-          <Plus :size="16" />
-          <span class="text-[10px] font-black uppercase tracking-widest">{{ $t('subs.new') }}</span>
-        </button>
-      </div>
-    </div>
 
-    <!-- AI 一句话智能追番栏 -->
-    <div class="bg-gradient-to-r from-primary/10 via-base-100 to-primary/5 p-4 sm:p-5 rounded-3xl border border-primary/20 shadow-sm space-y-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2 text-primary font-black text-xs uppercase tracking-wider">
-          <Sparkles :size="16" class="animate-pulse" />
+        <template v-else>
+          <button
+            v-if="filterType !== 'recycle'"
+            type="button"
+            class="btn btn-ghost btn-sm border border-base-content/12 rounded-lg gap-1.5 text-xs font-medium whitespace-nowrap"
+            @click="enterBatchDeleteMode"
+          >
+            <Trash2 :size="14" class="text-base-content/60" />
+            <span>{{ $t('subs.batchDelete') }}</span>
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm border border-base-content/12 rounded-lg gap-1.5 text-xs font-medium whitespace-nowrap"
+            @click="triggerSupplementAll"
+            :disabled="loading"
+          >
+            <RotateCcw :size="14" class="text-base-content/60" />
+            <span>{{ $t('subs.supplementAll') }}</span>
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm border border-base-content/12 rounded-lg gap-1.5 text-xs font-medium whitespace-nowrap"
+            @click="triggerMergeCollections"
+            :disabled="loading || mergingCollections"
+            :title="$t('subs.mergeCollectionsDesc')"
+          >
+            <Layers :size="14" class="text-base-content/60" :class="{ 'animate-spin': mergingCollections }" />
+            <span>{{ $t('subs.mergeCollections') }}</span>
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm border border-base-content/12 rounded-lg gap-1.5 text-xs font-medium whitespace-nowrap"
+            @click="router.push('/search')"
+          >
+            <Search :size="14" class="text-base-content/60" />
+            <span>{{ $t('subs.find') }}</span>
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary btn-sm rounded-lg gap-1.5 px-3.5 text-xs font-semibold whitespace-nowrap"
+            @click="router.push('/search')"
+          >
+            <Plus :size="15" />
+            <span>{{ $t('subs.new') }}</span>
+          </button>
+        </template>
+      </template>
+    </PageHeader>
+
+    <!-- AI 一句话快速追番栏 -->
+    <div class="app-surface border-primary/20 p-4 rounded-xl space-y-3">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 text-primary font-semibold text-xs">
+          <Sparkles :size="15" />
           <span>{{ $t('subs.quickSubscribe') }}</span>
         </div>
-        <span class="text-[11px] opacity-60 hidden sm:inline">{{ $t('subs.quickSubscribeDesc') }}</span>
+        <span class="text-xs text-base-content/50 hidden sm:inline">{{ $t('subs.quickSubscribeDesc') }}</span>
       </div>
 
       <div class="flex flex-col sm:flex-row gap-2">
         <div class="relative flex-1">
-          <input 
-            v-model="aiInput" 
-            type="text" 
+          <input
+            v-model="aiInput"
+            type="text"
             :placeholder="$t('subs.quickSubscribePlaceholder')"
-            class="input w-full bg-base-100 border-primary/30 focus:border-primary focus:ring-0 rounded-2xl text-xs font-semibold h-11"
+            class="input w-full h-9 bg-base-200/70 border border-base-content/12 rounded-lg text-xs sm:text-sm pr-8"
             @keyup.enter="parseAiTask"
           />
-          <button 
-            v-if="aiInput" 
-            class="btn btn-ghost btn-circle btn-xs absolute right-3 top-1/2 -translate-y-1/2 opacity-40 hover:opacity-100"
+          <button
+            v-if="aiInput"
+            type="button"
+            class="btn btn-ghost btn-circle btn-xs absolute right-2 top-1/2 -translate-y-1/2 text-base-content/45 hover:text-base-content"
             @click="aiInput = ''; aiResult = null"
           >
-            <X :size="14" />
+            <X :size="13" />
           </button>
         </div>
-        <button 
-          class="btn btn-primary rounded-2xl gap-2 h-11 min-h-0 px-6 font-black text-xs shadow-md shrink-0"
+        <button
+          type="button"
+          class="btn btn-primary h-9 min-h-0 rounded-lg gap-1.5 px-4 font-semibold text-xs shrink-0"
           :disabled="aiParsing || !aiInput.trim()"
           @click="parseAiTask"
         >
@@ -635,41 +643,43 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- AI 解析结果展示卡片 -->
       <Transition name="fade">
-        <div v-if="aiResult" class="bg-base-100/90 backdrop-blur p-3.5 rounded-2xl border border-primary/20 space-y-3">
+        <div v-if="aiResult" class="app-surface-muted p-3 rounded-lg space-y-2.5">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="badge badge-primary font-black text-xs">
+              <span class="badge badge-primary badge-sm font-semibold">
                 {{ aiResult.action === 'subscribe' ? '追番' : aiResult.action }}
               </span>
-              <span class="font-bold text-sm text-base-content">{{ aiResult.title }}</span>
-              <span class="badge badge-outline text-xs font-mono">S{{ aiResult.season || 1 }}</span>
-              <span v-if="aiResult.resolution" class="badge badge-ghost text-xs font-mono">{{ aiResult.resolution }}</span>
-              <span v-if="aiResult.subgroup_pref" class="badge badge-secondary badge-outline text-xs">{{ aiResult.subgroup_pref }}</span>
-              <span v-if="aiResult.confidence" class="text-[10px] opacity-60">置信度: {{ Math.round(aiResult.confidence * 100) }}%</span>
+              <span class="font-semibold text-sm text-base-content">{{ aiResult.title }}</span>
+              <span class="badge badge-outline badge-sm font-mono">S{{ aiResult.season || 1 }}</span>
+              <span v-if="aiResult.resolution" class="badge badge-ghost badge-sm font-mono">{{ aiResult.resolution }}</span>
+              <span v-if="aiResult.subgroup_pref" class="badge badge-secondary badge-outline badge-sm">{{ aiResult.subgroup_pref }}</span>
+              <span v-if="aiResult.confidence" class="text-xs text-base-content/55">置信度 {{ Math.round(aiResult.confidence * 100) }}%</span>
             </div>
-            <div class="flex items-center gap-2">
-              <button 
-                class="btn btn-primary btn-xs rounded-xl gap-1.5 h-8 px-3 font-bold"
+            <div class="flex items-center gap-1.5">
+              <button
+                type="button"
+                class="btn btn-primary btn-xs rounded-md gap-1 h-7 px-2.5 font-semibold"
                 :disabled="aiSubscribing"
                 @click="applyAiSubscribe"
               >
                 <Check :size="12" />
                 <span>{{ $t('subs.oneClickSubscribe') }}</span>
               </button>
-              <button 
-                class="btn btn-ghost btn-xs rounded-xl h-8 px-3 font-bold opacity-75 hover:opacity-100"
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs rounded-md h-7 px-2.5"
                 @click="router.push(`/search?q=${encodeURIComponent(aiResult.title)}`)"
               >
                 <Search :size="12" />
                 <span>{{ $t('subs.goToSearch') }}</span>
               </button>
-              <button 
-                class="btn btn-ghost btn-circle btn-xs opacity-50 hover:opacity-100"
+              <button
+                type="button"
+                class="btn btn-ghost btn-circle btn-xs"
                 @click="aiResult = null"
               >
-                <X :size="14" />
+                <X :size="13" />
               </button>
             </div>
           </div>
@@ -677,184 +687,169 @@ onUnmounted(() => {
       </Transition>
     </div>
 
-    <!-- 订阅统计概览仪表盘 -->
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-      <div 
-        @click="filterType = 'all'" 
-        class="bg-base-100 p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer hover:border-primary/50 shadow-sm flex items-center justify-between"
-        :class="filterType === 'all' ? 'border-primary shadow-md shadow-primary/10' : 'border-base-200/80'"
+    <!-- 统计概览筛选卡片 -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <StatCard
+        clickable
+        :active="filterType === 'all'"
+        :label="$t('subs.stats.all')"
+        :value="subs.length"
+        @click="filterType = 'all'"
       >
-        <div class="space-y-0.5">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">{{ $t('subs.stats.all') }}</span>
-          <p class="text-xl font-black font-mono text-base-content">{{ subs.length }}</p>
-        </div>
-        <div class="w-10 h-10 rounded-xl bg-base-200 text-base-content/60 flex items-center justify-center">
-          <LayoutGrid :size="20" />
-        </div>
-      </div>
+        <template #icon><LayoutGrid :size="18" /></template>
+      </StatCard>
 
-      <div 
-        @click="filterType = 'active'" 
-        class="bg-base-100 p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer hover:border-primary/50 shadow-sm flex items-center justify-between"
-        :class="filterType === 'active' ? 'border-primary shadow-md shadow-primary/10' : 'border-base-200/80'"
+      <StatCard
+        clickable
+        tone="primary"
+        :active="filterType === 'active'"
+        :label="$t('subs.stats.active')"
+        :value="activeSubsCount"
+        @click="filterType = 'active'"
       >
-        <div class="space-y-0.5">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">{{ $t('subs.stats.active') }}</span>
-          <p class="text-xl font-black font-mono text-primary">{{ activeSubsCount }}</p>
-        </div>
-        <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-          <Play :size="20" class="fill-current" />
-        </div>
-      </div>
+        <template #icon><Play :size="18" /></template>
+      </StatCard>
 
-      <div 
-        @click="filterType = 'completed'" 
-        class="bg-base-100 p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer hover:border-success/50 shadow-sm flex items-center justify-between"
-        :class="filterType === 'completed' ? 'border-success shadow-md shadow-success/10' : 'border-base-200/80'"
+      <StatCard
+        clickable
+        tone="success"
+        :active="filterType === 'completed'"
+        :label="$t('subs.stats.completed')"
+        :value="completedSubsCount"
+        @click="filterType = 'completed'"
       >
-        <div class="space-y-0.5">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">{{ $t('subs.stats.completed') }}</span>
-          <p class="text-xl font-black font-mono text-success">{{ completedSubsCount }}</p>
-        </div>
-        <div class="w-10 h-10 rounded-xl bg-success/10 text-success flex items-center justify-center">
-          <Check :size="20" />
-        </div>
-      </div>
+        <template #icon><Check :size="18" /></template>
+      </StatCard>
 
-      <div 
-        @click="filterType = 'stalled'" 
-        class="bg-base-100 p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer hover:border-warning/50 shadow-sm flex items-center justify-between"
-        :class="filterType === 'stalled' ? 'border-warning shadow-md shadow-warning/10' : 'border-base-200/80'"
+      <StatCard
+        clickable
+        tone="warning"
+        :active="filterType === 'stalled'"
+        :label="$t('subs.stats.stalled')"
+        :value="stalledSubsCount"
+        @click="filterType = 'stalled'"
       >
-        <div class="space-y-0.5">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">{{ $t('subs.stats.stalled') }}</span>
-          <p class="text-xl font-black font-mono text-warning">{{ stalledSubsCount }}</p>
-        </div>
-        <div class="w-10 h-10 rounded-xl bg-warning/10 text-warning flex items-center justify-center">
-          <AlertTriangle :size="20" />
-        </div>
-      </div>
+        <template #icon><AlertTriangle :size="18" /></template>
+      </StatCard>
 
-      <div 
-        @click="filterType = 'recycle'" 
-        class="bg-base-100 p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer hover:border-error/50 shadow-sm flex items-center justify-between"
-        :class="filterType === 'recycle' ? 'border-error shadow-md shadow-error/10' : 'border-base-200/80'"
+      <StatCard
+        clickable
+        :tone="deletedSubsCount > 0 ? 'error' : 'default'"
+        :active="filterType === 'recycle'"
+        :label="$t('subs.filter.recycle')"
+        :value="deletedSubsCount"
+        class="col-span-2 sm:col-span-1"
+        @click="filterType = 'recycle'"
       >
-        <div class="space-y-0.5">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider">{{ $t('subs.filter.recycle') }}</span>
-          <p class="text-xl font-black font-mono" :class="deletedSubsCount > 0 ? 'text-error' : 'text-base-content/40'">{{ deletedSubsCount }}</p>
-        </div>
-        <div class="w-10 h-10 rounded-xl bg-error/10 text-error flex items-center justify-center">
-          <Trash2 :size="20" />
-        </div>
-      </div>
+        <template #icon><Trash2 :size="18" /></template>
+      </StatCard>
     </div>
 
-    <!-- 搜索与排序工具栏 -->
-    <div class="flex flex-wrap items-center gap-4 bg-base-100 p-3 rounded-[2rem] border border-base-200/50 shadow-sm">
-      <div class="relative w-full sm:w-80 group">
-        <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-base-content/20 group-focus-within:text-primary transition-colors">
-          <Search :size="20" />
-        </div>
-        <input 
-          v-model="filterText" 
-          type="text" 
-          :placeholder="$t('subs.searchPlaceholder')" 
-          class="input w-full bg-base-200/50 border-transparent focus:border-primary/30 focus:bg-base-100 focus:ring-0 rounded-2xl pl-12 transition-all font-bold text-sm h-12"
+    <!-- 搜索、筛选与排序工具栏 -->
+    <div class="app-toolbar">
+      <div class="relative w-full sm:w-72">
+        <Search :size="15" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40" />
+        <input
+          v-model="filterText"
+          type="text"
+          :placeholder="$t('subs.searchPlaceholder')"
+          class="input input-sm w-full h-9 bg-base-200/70 border border-base-content/12 rounded-lg pl-9 text-xs sm:text-sm"
         />
       </div>
 
-      <div class="flex p-1.5 bg-base-200/50 rounded-2xl gap-1 w-fit overflow-x-auto no-scrollbar">
-        <button 
-          v-for="t in [
-            { key: 'all', label: $t('subs.filter.all') || '全部' },
-            { key: 'active', label: $t('subs.filter.active') || '连载中' },
-            { key: 'completed', label: $t('subs.filter.completed') || '已完结' },
-            { key: 'stalled', label: $t('subs.filter.stalled') || '超时异常' },
-            { key: 'recycle', label: $t('subs.filter.recycle') || '回收站' }
-          ]" 
-          :key="t.key"
-          class="px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap"
-          :class="filterType === t.key ? 'bg-base-100 text-primary shadow-sm ring-1 ring-base-300 font-bold' : 'text-base-content/40 hover:text-base-content'"
-          @click="filterType = t.key as any"
+      <div class="flex items-center gap-2 flex-wrap">
+        <div class="app-segmented overflow-x-auto no-scrollbar max-w-full">
+          <button
+            v-for="tab in [
+              { key: 'all', label: $t('subs.filter.all') || '全部' },
+              { key: 'active', label: $t('subs.filter.active') || '连载中' },
+              { key: 'completed', label: $t('subs.filter.completed') || '已完结' },
+              { key: 'stalled', label: $t('subs.filter.stalled') || '超时异常' },
+              { key: 'recycle', label: $t('subs.filter.recycle') || '回收站' }
+            ]"
+            :key="tab.key"
+            type="button"
+            class="app-segmented-btn"
+            :data-active="filterType === tab.key ? 'true' : 'false'"
+            @click="filterType = tab.key as any"
+          >
+            <span>{{ tab.label }}</span>
+            <span v-if="tab.key === 'recycle' && deletedSubsCount > 0" class="badge badge-error badge-xs font-mono tabular-nums">
+              {{ deletedSubsCount }}
+            </span>
+          </button>
+        </div>
+
+        <select v-model="sortBy" class="select select-sm h-9 min-h-0 bg-base-200/70 border border-base-content/12 rounded-lg text-xs font-medium">
+          <option value="created_at">{{ $t('subs.sort.createdAt') }}</option>
+          <option value="title">{{ $t('subs.sort.title') }}</option>
+          <option value="progress">{{ $t('subs.sort.progress') }}</option>
+          <option value="year">{{ $t('subs.sort.year') }}</option>
+        </select>
+
+        <span class="hidden xl:inline text-xs text-base-content/45 font-mono tabular-nums px-1">
+          {{ $t('subs.itemsTracked', { count: subs.length }) }}
+        </span>
+      </div>
+    </div>
+
+    <!-- 错误提示 -->
+    <div v-if="error" class="alert bg-error/10 border border-error/25 text-error rounded-xl p-4 flex items-start gap-3">
+      <AlertTriangle :size="20" class="shrink-0 mt-0.5" />
+      <div class="flex-1 min-w-0">
+        <h3 class="font-semibold text-sm">{{ $t('subs.error.op') }}</h3>
+        <p class="text-xs opacity-85 mt-0.5">{{ error }}</p>
+      </div>
+      <button type="button" class="btn btn-ghost btn-circle btn-xs" @click="error = ''">
+        <X :size="15" />
+      </button>
+    </div>
+
+    <!-- 加载骨架 -->
+    <div v-if="loading" class="grid gap-4 sm:gap-5 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 animate-pulse">
+      <div v-for="i in 12" :key="i" class="aspect-[2/3] bg-base-200 rounded-xl"></div>
+    </div>
+
+    <!-- 空状态 -->
+    <EmptyState
+      v-else-if="filteredSubs.length === 0"
+      :title="filterType === 'recycle' ? $t('subs.recycle.emptyTitle') : (subs.length > 0 ? $t('subs.empty.noResults') : $t('subs.empty.noSubs'))"
+      :description="filterType === 'recycle' ? $t('subs.recycle.emptyDesc') : (subs.length > 0 ? $t('subs.empty.noResultsDesc') : $t('subs.empty.noSubsDesc'))"
+    >
+      <template #icon>
+        <Trash2 v-if="filterType === 'recycle'" :size="22" />
+        <LayoutGrid v-else :size="22" />
+      </template>
+      <template #actions>
+        <button
+          v-if="filterType === 'recycle'"
+          type="button"
+          class="btn btn-outline btn-sm rounded-lg gap-1.5 border-base-content/15"
+          @click="filterType = 'all'"
         >
-          {{ t.label }}
-          <span v-if="t.key === 'recycle' && deletedSubsCount > 0" class="badge badge-error badge-xs ml-1 font-mono text-[9px] text-white">
-            {{ deletedSubsCount }}
-          </span>
+          <RotateCcw :size="14" />
+          <span>返回活跃订阅</span>
         </button>
-      </div>
-
-        <div class="flex items-center gap-2 px-3 h-11 bg-base-200/50 rounded-2xl border border-transparent focus-within:border-primary/30 transition-all">
-          <LayoutGrid :size="16" class="opacity-30" />
-          <select v-model="sortBy" class="select select-ghost select-sm rounded-xl text-[10px] font-black uppercase tracking-widest bg-transparent border-none h-8 px-1 focus:ring-0">
-            <option value="created_at">{{ $t('subs.sort.createdAt') }}</option>
-            <option value="title">{{ $t('subs.sort.title') }}</option>
-            <option value="progress">{{ $t('subs.sort.progress') }}</option>
-            <option value="year">{{ $t('subs.sort.year') }}</option>
-          </select>
-        </div>
-
-        <div class="hidden sm:flex ml-auto px-4 items-center gap-2">
-           <span class="text-[10px] font-black text-base-content/20 uppercase tracking-widest ml-2">{{ $t('subs.itemsTracked', { count: subs.length }) }}</span>
-        </div>
-      </div>
-
-    <!-- Status Alerts -->
-    <div v-if="error" class="alert bg-error/10 border-error/20 text-error rounded-3xl p-6 flex items-start gap-4">
-      <div class="p-3 bg-error/20 rounded-2xl">
-        <AlertTriangle :size="24" />
-      </div>
-      <div class="flex-1">
-        <h3 class="font-black text-sm uppercase tracking-widest">{{ $t('subs.error.op') }}</h3>
-        <p class="text-sm font-bold opacity-80 mt-1">{{ error }}</p>
-      </div>
-      <button class="btn btn-ghost btn-circle btn-sm" @click="error = ''">
-        <X :size="16" />
-      </button>
-    </div>
-
-    <!-- Main Content Section -->
-    <div v-if="loading" class="grid gap-6 sm:gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 animate-pulse">
-      <div v-for="i in 16" :key="i" class="aspect-[3/5] bg-base-200 rounded-[2.5rem]"></div>
-    </div>
-
-    <div v-else-if="filteredSubs.length === 0" class="flex flex-col items-center justify-center py-32 text-center bg-base-100/30 rounded-[3rem] border-2 border-dashed border-base-200">
-      <div class="w-32 h-32 bg-base-200/50 rounded-full flex items-center justify-center mb-8 rotate-12">
-        <Trash2 v-if="filterType === 'recycle'" :size="64" class="opacity-10" />
-        <LayoutGrid v-else :size="64" class="opacity-10" />
-      </div>
-      <h3 class="text-2xl font-black tracking-tight mb-2">
-        {{ filterType === 'recycle' ? $t('subs.recycle.emptyTitle') : (subs.length > 0 ? $t('subs.empty.noResults') : $t('subs.empty.noSubs')) }}
-      </h3>
-      <p class="text-sm font-bold text-base-content/40 max-w-xs mx-auto mb-10 leading-relaxed">
-        {{ filterType === 'recycle' ? $t('subs.recycle.emptyDesc') : (subs.length > 0 ? $t('subs.empty.noResultsDesc') : $t('subs.empty.noSubsDesc')) }}
-      </p>
-      <button 
-        v-if="filterType === 'recycle'"
-        class="btn btn-ghost btn-md rounded-2xl px-10 gap-3 border-base-300 font-black text-xs uppercase tracking-wider"
-        @click="filterType = 'all'"
-      >
-        <RotateCcw :size="18" />
-        <span>返回活跃订阅</span>
-      </button>
-      <button 
-        v-else-if="subs.length === 0" 
-        class="btn btn-primary btn-lg rounded-3xl px-12 shadow-2xl shadow-lg gap-4" 
-        @click="router.push('/search')"
-      >
-        <Search :size="24" />
-        <span class="font-black uppercase tracking-widest">{{ $t('subs.empty.discover') }}</span>
-      </button>
-      <button 
-        v-else 
-        class="btn btn-ghost btn-md rounded-2xl px-10 gap-4 border-base-300" 
-        @click="filterText = ''; filterType = 'all'"
-      >
-        <RefreshCw :size="20" />
-        <span class="font-black uppercase tracking-widest text-xs">{{ $t('subs.empty.clear') }}</span>
-      </button>
-    </div>
+        <button
+          v-else-if="subs.length === 0"
+          type="button"
+          class="btn btn-primary btn-sm rounded-lg gap-1.5 px-4"
+          @click="router.push('/search')"
+        >
+          <Search :size="14" />
+          <span>{{ $t('subs.empty.discover') }}</span>
+        </button>
+        <button
+          v-else
+          type="button"
+          class="btn btn-outline btn-sm rounded-lg gap-1.5 border-base-content/15"
+          @click="filterText = ''; filterType = 'all'"
+        >
+          <RefreshCw :size="14" />
+          <span>{{ $t('subs.empty.clear') }}</span>
+        </button>
+      </template>
+    </EmptyState>
 
     <!-- 回收站专用列表 -->
     <div v-else-if="filterType === 'recycle'" class="space-y-4">

@@ -29,6 +29,16 @@ export function view(path, request, { route = {}, storage = new Map(), props = {
     '../utils/loginRedirect': require('../src/utils/loginRedirect.ts'),
     './utils/loginRedirect': require('../src/utils/loginRedirect.ts'),
     '../composables/useVersion': { currentVersion: vue.ref(''), useVersion: () => ({}) },
+    '../composables/useTheme': {
+      useTheme: () => ({
+        theme: vue.ref('anigo-dark'),
+        isDark: vue.computed(() => true),
+        setTheme() {},
+        syncTheme() {},
+        toggleTheme() {},
+      }),
+    },
+    '../components/ui': {},
   }
   const exports = {}
   runInNewContext(outputText, {

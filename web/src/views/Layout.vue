@@ -3,9 +3,9 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
-import { 
+import {
   Menu, LogOut, Antenna, Languages, ExternalLink,
-  Calendar, LayoutGrid, Search, Download, Settings, Sparkles, X, TriangleAlert
+  Calendar, LayoutGrid, Search, Download, Settings, Sparkles, X, TriangleAlert, Sun, Moon
 } from 'lucide-vue-next'
 import { loadCurrentVersion, useVersion } from '../composables/useVersion'
 
@@ -17,6 +17,32 @@ const userAvatar = ref('')
 const isDrawerOpen = ref(false)
 const isDefaultPassword = ref(false)
 const dismissDefaultPasswordAlert = ref(false)
+
+// version.test.mjs 在仅注入有限模块的 VM 中运行 Layout，主题读写在此内联以避免额外相对导入
+type ThemeName = 'anigo-dark' | 'anigo-light'
+const currentTheme = ref<ThemeName>(
+  typeof localStorage !== 'undefined' && localStorage.getItem('ani-go-theme') === 'anigo-light'
+    ? 'anigo-light'
+    : 'anigo-dark'
+)
+
+function applyTheme(next: ThemeName) {
+  currentTheme.value = next
+  if (typeof document !== 'undefined') {
+    document.documentElement?.setAttribute('data-theme', next)
+    const meta = document.querySelector?.('meta[name="theme-color"]')
+    if (meta) {
+      meta.setAttribute('content', next === 'anigo-light' ? '#f6f7f9' : '#0b0d12')
+    }
+  }
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('ani-go-theme', next)
+  }
+}
+
+function toggleTheme() {
+  applyTheme(currentTheme.value === 'anigo-dark' ? 'anigo-light' : 'anigo-dark')
+}
 
 const { currentVersion, latestVersion, hasNewVersion, checkGitHubUpdate, updating, updateProgress, triggerUpdate, canSelfUpdate } = useVersion()
 
@@ -33,11 +59,11 @@ function showToast(message: string, type: 'success' | 'error' | 'info' = 'succes
   const id = ++toastId
   toasts.value.push({ id, message, type })
   setTimeout(() => {
-    toasts.value = toasts.value.filter(t => t.id !== id)
+    toasts.value = toasts.value.filter(item => item.id !== id)
   }, 3000)
 }
 
-// 暴露出全局 Toast 给子组件使用
+// 暴露全局 Toast 供子组件调用
 window.showToast = showToast
 
 function proxyImage(url: string | undefined): string {
@@ -61,6 +87,14 @@ function updateAvatar(event: Event) {
 onUnmounted(() => window.removeEventListener('avatar-updated', updateAvatar))
 onMounted(async () => {
   window.addEventListener('avatar-updated', updateAvatar)
+  if (typeof document !== 'undefined') {
+    const domTheme = document.documentElement?.getAttribute('data-theme')
+    if (domTheme === 'anigo-light' || domTheme === 'anigo-dark') {
+      currentTheme.value = domTheme
+    } else {
+      document.documentElement?.setAttribute('data-theme', currentTheme.value)
+    }
+  }
   void loadCurrentVersion()
   try {
     const { data } = await request.get('/me')
@@ -69,7 +103,7 @@ onMounted(async () => {
     isDefaultPassword.value = !!data.is_default_password
   } catch { /* 401 handled by interceptor */ }
 
-  // Check for updates if enabled in backend settings
+  // 若后台配置开启了自动检查更新，则在启动后静默探测
   try {
     const { data: settings } = await request.get('/settings')
     if (settings.AUTO_CHECK_UPDATE === 'true') {
@@ -93,122 +127,151 @@ const nav = computed(() => [
   { path: '/settings', label: t('nav.settings'), icon: Settings },
 ])
 
+const themeLabel = computed(() => (
+  currentTheme.value === 'anigo-dark' ? t('nav.themeLight') : t('nav.themeDark')
+))
+
 function closeDrawer() {
   isDrawerOpen.value = false
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-base-300/30 flex text-base-content antialiased">
-    <!-- Desktop Sticky Sidebar (100% 视口固定，时间表再长也绝对不随页面滚动) -->
-    <aside class="hidden lg:flex w-64 h-screen sticky top-0 flex-col bg-base-100 border-r border-base-200/80 shrink-0 z-30 select-none">
-      <!-- Logo Brand Section -->
-      <div class="px-6 py-6 border-b border-base-200/60">
-        <div class="flex items-center gap-3 group cursor-pointer" @click="router.push('/schedule')">
-          <div class="relative shrink-0">
-            <img src="/logo.png" alt="Ani-Go" class="w-10 h-10 rounded-xl object-cover shadow-md shadow-primary/20 group-hover:scale-105 transition-transform" />
-            <div class="absolute -inset-0.5 rounded-xl bg-primary/20 blur-sm -z-10 group-hover:opacity-100 opacity-50 transition-opacity"></div>
-          </div>
-          <div class="flex min-w-0 flex-col">
-            <div class="flex items-center gap-1.5">
-              <span class="shrink-0 text-xl font-black text-primary italic tracking-tight">Ani-Go</span>
-              <span v-if="currentVersion" :title="currentVersion" class="min-w-0">
-                <span class="badge badge-primary badge-xs max-w-full font-mono font-bold">
-                  <span class="truncate">{{ currentVersion }}</span>
-                </span>
-              </span>
-            </div>
-            <span class="text-[9px] font-bold text-base-content/40 uppercase tracking-[0.2em]">Anime Sync Engine</span>
-          </div>
+  <div class="min-h-screen bg-base-300 flex text-base-content antialiased">
+    <!-- 桌面端固定侧边栏 -->
+    <aside class="hidden lg:flex w-60 h-screen sticky top-0 flex-col bg-base-100 border-r border-base-content/8 shrink-0 z-30 select-none">
+      <!-- 品牌标识区 -->
+      <div class="h-14 px-4 border-b border-base-content/8 flex items-center justify-between gap-2 shrink-0">
+        <div class="flex items-center gap-2.5 min-w-0 cursor-pointer" @click="router.push('/schedule')">
+          <img src="/logo.png" alt="Ani-Go" class="w-7 h-7 rounded-lg object-cover shrink-0 border border-base-content/10" />
+          <span class="text-base font-bold tracking-tight text-base-content truncate">Ani-Go</span>
         </div>
+        <span v-if="currentVersion" :title="currentVersion" class="min-w-0 max-w-[96px]">
+          <span class="badge badge-neutral badge-xs max-w-full font-mono text-[11px]">
+            <span class="truncate">{{ currentVersion }}</span>
+          </span>
+        </span>
       </div>
 
-      <!-- Navigation Links (自适应高度内部滚动，保证小屏笔记本也全功能可用) -->
-      <div class="flex-1 px-3 py-4 overflow-y-auto space-y-1">
-        <div class="px-3 py-1.5 text-[10px] font-black tracking-widest text-base-content/30 uppercase">
+      <!-- 主导航菜单 -->
+      <div class="flex-1 px-2.5 py-3 overflow-y-auto space-y-0.5">
+        <div class="px-3 pb-1.5 text-[11px] font-semibold text-base-content/45">
           {{ $t('nav.navigation') }}
         </div>
         <router-link
           v-for="item in nav"
           :key="item.path"
           :to="item.path"
-          class="flex items-center gap-3.5 px-3.5 py-3 rounded-xl transition-all duration-200 group font-bold text-sm relative"
-          :class="route.path.startsWith(item.path) 
-            ? 'bg-primary text-primary-content font-black shadow-md shadow-primary/25' 
-            : 'text-base-content/70 hover:text-base-content hover:bg-base-200/70 hover:translate-x-0.5'"
+          class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-[13.5px] relative"
+          :class="route.path.startsWith(item.path)
+            ? 'bg-primary/12 text-primary font-semibold'
+            : 'text-base-content/70 hover:text-base-content hover:bg-base-200/80 font-medium'"
         >
-          <component :is="item.icon" :size="19" class="shrink-0 transition-transform group-hover:scale-110" />
-          <span class="tracking-tight">{{ item.label }}</span>
-          <div v-if="route.path.startsWith(item.path)" class="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-white/70 rounded-l-full"></div>
+          <span
+            v-if="route.path.startsWith(item.path)"
+            class="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-primary rounded-r"
+            aria-hidden="true"
+          />
+          <component :is="item.icon" :size="17" class="shrink-0" />
+          <span class="truncate">{{ item.label }}</span>
         </router-link>
       </div>
 
-      <!-- User Profile Card (永远固定锁定在侧边栏底部) -->
-      <div class="p-3.5 m-3 rounded-2xl bg-base-200/60 border border-base-200/80 shadow-sm">
-        <div class="flex items-center gap-3 mb-3">
+      <!-- 侧边栏底部账户与快捷控制 -->
+      <div class="p-2.5 m-2.5 rounded-xl bg-base-200/70 border border-base-content/8 space-y-2.5">
+        <div class="flex items-center gap-2.5 min-w-0">
           <div class="avatar online shrink-0">
-            <div v-if="userAvatar" class="w-10 h-10 rounded-xl bg-cover bg-center ring-1 ring-base-content/10 shadow-sm" :style="{ backgroundImage: `url(${proxyImage(userAvatar)})` }"></div>
-            <div v-else class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-black ring-1 ring-base-content/10 shadow-sm">
+            <div v-if="userAvatar" class="w-8 h-8 rounded-lg bg-cover bg-center border border-base-content/10" :style="{ backgroundImage: `url(${proxyImage(userAvatar)})` }"></div>
+            <div v-else class="w-8 h-8 rounded-lg bg-primary/15 text-primary flex items-center justify-center font-bold text-xs border border-primary/20">
               {{ username?.slice(0, 1).toUpperCase() || 'A' }}
             </div>
           </div>
-          <div class="overflow-hidden min-w-0 flex-1">
-            <div class="text-sm font-black truncate">{{ username }}</div>
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-semibold truncate text-base-content">{{ username || 'admin' }}</div>
             <div class="flex items-center gap-1.5 mt-0.5">
-              <span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span>
-              <span class="text-[9px] font-bold text-base-content/40 uppercase tracking-wider">{{ $t('nav.activeNow') }}</span>
+              <span class="w-1.5 h-1.5 rounded-full bg-success shrink-0"></span>
+              <span class="text-[11px] text-base-content/55 truncate">{{ $t('nav.activeNow') }}</span>
             </div>
           </div>
         </div>
-        
-        <div class="grid grid-cols-2 gap-1.5 pt-2 border-t border-base-200/80">
-          <button @click="toggleLanguage" class="btn btn-ghost btn-xs rounded-lg font-bold gap-1.5 justify-center hover:bg-base-100">
-            <Languages :size="13" class="text-primary" />
-            <span class="text-[10px]">{{ locale === 'zh' ? 'English' : '中文' }}</span>
+
+        <div class="grid grid-cols-3 gap-1 pt-2 border-t border-base-content/8">
+          <button
+            type="button"
+            class="btn btn-ghost btn-xs h-7 min-h-0 rounded-md justify-center text-base-content/70 hover:text-base-content hover:bg-base-100"
+            :title="themeLabel"
+            :aria-label="themeLabel"
+            @click="toggleTheme"
+          >
+            <Sun v-if="currentTheme === 'anigo-dark'" :size="14" />
+            <Moon v-else :size="14" />
           </button>
-          <button @click="logout" class="btn btn-ghost btn-xs rounded-lg font-bold gap-1.5 justify-center hover:bg-error/15 hover:text-error">
-            <LogOut :size="13" />
-            <span class="text-[10px]">{{ $t('nav.logout') }}</span>
+          <button
+            type="button"
+            class="btn btn-ghost btn-xs h-7 min-h-0 rounded-md font-medium gap-1 justify-center text-base-content/70 hover:text-base-content hover:bg-base-100"
+            :title="locale === 'zh' ? 'English' : '中文'"
+            @click="toggleLanguage"
+          >
+            <Languages :size="13" class="text-primary" />
+            <span class="text-[11px]">{{ locale === 'zh' ? 'EN' : '中' }}</span>
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-xs h-7 min-h-0 rounded-md justify-center text-base-content/70 hover:bg-error/12 hover:text-error"
+            :title="$t('nav.logout')"
+            :aria-label="$t('nav.logout')"
+            @click="logout"
+          >
+            <LogOut :size="14" />
           </button>
         </div>
       </div>
     </aside>
 
-    <!-- Main Content Container (Right Side) -->
+    <!-- 右侧主内容区域 -->
     <div class="flex-1 flex flex-col min-w-0 min-h-screen">
-      <!-- Mobile / Tablet Top Header -->
-      <header class="sticky top-0 z-30 flex h-16 w-full items-center justify-between px-4 bg-base-100/90 backdrop-blur-xl border-b border-base-200/80 lg:hidden shadow-sm">
-        <button class="btn btn-square btn-ghost btn-sm rounded-xl" @click="isDrawerOpen = true">
-          <Menu :size="20" />
+      <!-- 移动端顶栏：第一个按钮必须触发侧滑抽屉，右侧 .avatar 触发账户菜单 -->
+      <header class="sticky top-0 z-30 flex h-14 w-full items-center justify-between px-3 bg-base-100/95 backdrop-blur-md border-b border-base-content/8 lg:hidden">
+        <button type="button" class="btn btn-square btn-ghost btn-sm rounded-lg" @click="isDrawerOpen = true" aria-label="Menu">
+          <Menu :size="19" />
         </button>
-        <div class="flex min-w-0 items-center gap-2 cursor-pointer" @click="router.push('/schedule')">
-          <img src="/logo.png" alt="Ani-Go" class="w-7 h-7 shrink-0 rounded-lg object-cover shadow-sm" />
-          <span class="shrink-0 text-lg font-black text-primary italic">Ani-Go</span>
-          <span v-if="currentVersion" :title="currentVersion" class="min-w-0">
-            <span class="badge badge-neutral badge-xs max-w-full font-mono font-bold opacity-60">
+
+        <div class="flex min-w-0 items-center gap-2 cursor-pointer px-2" @click="router.push('/schedule')">
+          <img src="/logo.png" alt="Ani-Go" class="w-6 h-6 shrink-0 rounded-md object-cover border border-base-content/10" />
+          <span class="shrink-0 text-sm font-bold tracking-tight text-base-content">Ani-Go</span>
+          <span v-if="currentVersion" :title="currentVersion" class="min-w-0 max-w-[120px]">
+            <span class="badge badge-neutral badge-xs max-w-full font-mono text-[10px]">
               <span class="truncate">{{ currentVersion }}</span>
             </span>
           </span>
         </div>
-        <div class="dropdown dropdown-end">
+
+        <div class="dropdown dropdown-end shrink-0">
           <label tabindex="0" class="btn btn-ghost btn-circle btn-sm avatar online">
-            <div v-if="userAvatar" class="w-8 h-8 rounded-lg bg-cover bg-center" :style="{ backgroundImage: `url(${proxyImage(userAvatar)})` }"></div>
-            <div v-else class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-black text-xs">
+            <div v-if="userAvatar" class="w-7 h-7 rounded-lg bg-cover bg-center" :style="{ backgroundImage: `url(${proxyImage(userAvatar)})` }"></div>
+            <div v-else class="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center font-bold text-xs">
               {{ username?.slice(0, 1).toUpperCase() || 'A' }}
             </div>
           </label>
-          <ul tabindex="0" class="mt-3 z-50 p-2 shadow-2xl menu menu-sm dropdown-content bg-base-100 rounded-2xl w-48 border border-base-200">
-            <li class="menu-title text-xs font-black uppercase tracking-wider text-base-content/40 px-3 py-1.5">{{ username }}</li>
+          <ul tabindex="0" class="mt-2 z-50 p-1.5 shadow-xl menu menu-sm dropdown-content bg-base-100 rounded-xl w-48 border border-base-content/10">
+            <li class="menu-title text-xs font-semibold text-base-content/60 px-3 py-1.5">{{ username }}</li>
             <li>
-              <a @click="toggleLanguage" class="flex items-center gap-2 font-bold py-2">
-                <Languages :size="15" class="text-primary" />
+              <a @click="toggleTheme" class="flex items-center gap-2 font-medium py-2">
+                <Sun v-if="currentTheme === 'anigo-dark'" :size="14" class="text-primary" />
+                <Moon v-else :size="14" class="text-primary" />
+                <span>{{ themeLabel }}</span>
+              </a>
+            </li>
+            <li>
+              <a @click="toggleLanguage" class="flex items-center gap-2 font-medium py-2">
+                <Languages :size="14" class="text-primary" />
                 <span>{{ locale === 'zh' ? 'English' : '中文' }}</span>
               </a>
             </li>
-            <div class="divider my-1 opacity-20"></div>
+            <div class="divider my-1 opacity-15"></div>
             <li>
-              <a @click="logout" class="text-error flex items-center gap-2 font-bold py-2 hover:bg-error/10">
-                <LogOut :size="15" />
+              <a @click="logout" class="text-error flex items-center gap-2 font-medium py-2 hover:bg-error/10">
+                <LogOut :size="14" />
                 <span>{{ $t('nav.logout') }}</span>
               </a>
             </li>
@@ -216,20 +279,20 @@ function closeDrawer() {
         </div>
       </header>
 
-      <!-- Default Password Security Alert Banner -->
-      <div v-if="isDefaultPassword && !dismissDefaultPasswordAlert" class="bg-warning/15 border-b border-warning/30 px-4 py-2.5 flex items-center justify-between text-warning text-xs sm:text-sm font-medium">
+      <!-- 默认密码安全横幅 -->
+      <div v-if="isDefaultPassword && !dismissDefaultPasswordAlert" class="bg-warning/12 border-b border-warning/25 px-4 py-2 flex items-center justify-between text-warning text-xs sm:text-sm font-medium">
         <div class="flex items-center gap-2 max-w-[85%]">
-          <TriangleAlert :size="18" class="shrink-0 text-warning" />
-          <span>{{ locale === 'zh' ? '安全提醒：当前管理员仍在使用默认密码 (admin)，极易遭遇扫描入侵，请立即修改！' : 'Security Warning: You are using the default password (admin). Please change it immediately!' }}</span>
+          <TriangleAlert :size="16" class="shrink-0 text-warning" />
+          <span>{{ locale === 'zh' ? '安全提醒：当前管理员仍在使用默认密码 (admin)，请立即前往设置修改。' : 'Security Warning: You are using the default password (admin). Please change it immediately.' }}</span>
         </div>
-        <div class="flex items-center gap-3 shrink-0">
-          <router-link to="/settings" class="btn btn-warning btn-xs rounded-lg font-bold">{{ locale === 'zh' ? '前往修改' : 'Change' }}</router-link>
-          <button @click="dismissDefaultPasswordAlert = true" class="btn btn-ghost btn-xs btn-circle opacity-60 hover:opacity-100"><X :size="14" /></button>
+        <div class="flex items-center gap-2 shrink-0">
+          <router-link to="/settings" class="btn btn-warning btn-xs rounded-md font-semibold">{{ locale === 'zh' ? '前往修改' : 'Change' }}</router-link>
+          <button type="button" @click="dismissDefaultPasswordAlert = true" class="btn btn-ghost btn-xs btn-circle opacity-70 hover:opacity-100"><X :size="14" /></button>
         </div>
       </div>
 
-      <!-- Main Page Router View -->
-      <main class="flex-1 p-3 sm:p-5 md:p-8 max-w-[2000px] mx-auto w-full pb-24 lg:pb-8 overflow-x-hidden">
+      <!-- 主路由视口 -->
+      <main class="flex-1 p-3 sm:p-5 lg:p-6 max-w-[1600px] mx-auto w-full pb-24 lg:pb-8 overflow-x-hidden">
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in">
             <component :is="Component" :key="route.name === 'subscription-detail' ? route.params.id as string : undefined" />
@@ -237,181 +300,179 @@ function closeDrawer() {
         </router-view>
       </main>
 
-      <!-- Footer -->
-      <footer class="py-6 px-4 text-center text-xs space-y-1.5 mt-auto border-t border-base-content/5 opacity-60 hover:opacity-100 transition-opacity pb-24 lg:pb-6">
-        <div class="font-semibold text-base-content/80 flex items-center justify-center gap-1.5 flex-wrap">
-          <span>Ani-Go &copy; 2026 • 倾心打造</span>
+      <!-- 页脚（保留完整单行版本号 span.font-mono 供移动端校验） -->
+      <footer class="py-5 px-4 text-center text-xs text-base-content/55 mt-auto border-t border-base-content/8 pb-24 lg:pb-6">
+        <div class="flex items-center justify-center gap-2 flex-wrap">
+          <span>Ani-Go &copy; 2026</span>
           <span class="opacity-40">•</span>
-          <span>by <a href="https://github.com/xiaoyueRX" target="_blank" rel="noopener noreferrer" class="text-primary font-bold hover:underline">xiaoyue</a></span>
-        </div>
-        <div class="text-[11px] opacity-70 flex items-center justify-center gap-2 flex-wrap">
-          <a href="https://github.com/xiaoyueRX/Ani-Go" target="_blank" rel="noopener noreferrer" 
-             class="inline-flex items-center gap-1.5 hover:text-primary transition-colors font-mono font-medium">
-            <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-            <span>GitHub: xiaoyueRX/Ani-Go</span>
-          </a>
+          <a href="https://github.com/xiaoyueRX/Ani-Go" target="_blank" rel="noopener noreferrer" class="hover:text-primary transition-colors">GitHub</a>
           <template v-if="currentVersion">
-            <span class="opacity-30">•</span>
-            <span class="max-w-full break-all font-mono">{{ currentVersion }}</span>
+            <span class="opacity-40">•</span>
+            <span class="max-w-full break-all font-mono text-base-content/75">{{ currentVersion }}</span>
           </template>
         </div>
       </footer>
 
-      <!-- Mobile Edge-to-Edge Bottom Navigation Bar (标准贴底，绝不与页面浮动栏碰撞) -->
-      <nav class="fixed bottom-0 left-0 right-0 z-40 bg-base-100/95 backdrop-blur-xl border-t border-base-200/80 px-2 py-1 flex items-center justify-around lg:hidden shadow-lg pb-[env(safe-area-inset-bottom,6px)]">
+      <!-- 移动端底部固定导航栏 -->
+      <nav class="fixed bottom-0 left-0 right-0 z-40 bg-base-100/95 backdrop-blur-md border-t border-base-content/8 px-1.5 py-1 flex items-center justify-around lg:hidden pb-[env(safe-area-inset-bottom,6px)]">
         <router-link
           v-for="item in nav"
           :key="item.path"
           :to="item.path"
-          class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-colors min-w-[56px]"
-          :class="route.path.startsWith(item.path) ? 'text-primary font-black' : 'text-base-content/50 hover:text-base-content font-medium'"
+          class="flex flex-col items-center justify-center py-1 px-2 rounded-lg transition-colors min-w-[52px]"
+          :class="route.path.startsWith(item.path) ? 'text-primary font-semibold' : 'text-base-content/55 hover:text-base-content font-medium'"
         >
-          <component :is="item.icon" :size="20" class="transition-transform" :class="{ 'scale-110 text-primary': route.path.startsWith(item.path) }" />
-          <span class="text-[10px] tracking-tight mt-0.5 whitespace-nowrap">{{ item.label }}</span>
+          <component :is="item.icon" :size="18" />
+          <span class="text-[11px] mt-0.5 whitespace-nowrap">{{ item.label }}</span>
         </router-link>
       </nav>
 
-      <!-- Global Toasts -->
+      <!-- 全局 Toast 提示 -->
       <div class="toast toast-end toast-bottom p-4 z-[100] mb-16 lg:mb-2">
         <transition-group name="page">
-          <div 
-            v-for="t in toasts" :key="t.id"
-            class="alert shadow-2xl border-0 mb-2 rounded-2xl min-w-[280px] animate-in slide-in-from-right duration-300 backdrop-blur-xl"
+          <div
+            v-for="item in toasts"
+            :key="item.id"
+            class="alert shadow-lg border mb-2 rounded-xl min-w-[260px] max-w-sm py-3 px-4"
             :class="{
-              'bg-primary text-primary-content shadow-primary/20': t.type === 'success',
-              'bg-error text-error-content shadow-error/20': t.type === 'error',
-              'bg-info text-info-content shadow-info/20': t.type === 'info'
+              'bg-base-100 text-base-content border-primary/30': item.type === 'success',
+              'bg-base-100 text-error border-error/30': item.type === 'error',
+              'bg-base-100 text-info border-info/30': item.type === 'info'
             }"
           >
-            <div class="flex items-center gap-3">
-              <Sparkles v-if="t.type === 'success'" :size="18" />
-              <TriangleAlert v-else-if="t.type === 'error'" :size="18" />
-              <Antenna v-else :size="18" />
-              <span class="text-xs font-black uppercase tracking-widest">{{ t.message }}</span>
+            <div class="flex items-center gap-2.5">
+              <Sparkles v-if="item.type === 'success'" :size="16" class="text-primary shrink-0" />
+              <TriangleAlert v-else-if="item.type === 'error'" :size="16" class="text-error shrink-0" />
+              <Antenna v-else :size="16" class="text-info shrink-0" />
+              <span class="text-xs font-semibold">{{ item.message }}</span>
             </div>
           </div>
         </transition-group>
       </div>
     </div>
 
-    <!-- Mobile Slide-over Drawer Backdrop & Panel -->
+    <!-- 移动端侧滑导航抽屉 -->
     <Teleport to="body">
-      <Transition name="fade">
-        <div v-if="isDrawerOpen" class="fixed inset-0 z-[110] lg:hidden flex">
-          <!-- Backdrop -->
-          <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" @click="closeDrawer"></div>
-          
-          <!-- Drawer Content -->
-          <div class="relative w-72 max-w-[80vw] h-full bg-base-100 shadow-2xl flex flex-col z-10 animate-in slide-in-from-left duration-200">
-            <div class="px-6 py-6 border-b border-base-200/60 flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <img src="/logo.png" alt="Ani-Go" class="w-9 h-9 rounded-xl object-cover shadow-sm" />
-                <span class="text-xl font-black text-primary italic">Ani-Go</span>
+      <div v-if="isDrawerOpen" class="fixed inset-0 z-[110] lg:hidden flex">
+        <div class="fixed inset-0 bg-black/55 backdrop-blur-xs" @click="closeDrawer"></div>
+
+        <div class="relative w-72 max-w-[82vw] h-full bg-base-100 border-r border-base-content/10 shadow-2xl flex flex-col z-10">
+          <div class="h-14 px-4 border-b border-base-content/8 flex items-center justify-between shrink-0">
+            <div class="flex items-center gap-2.5">
+              <img src="/logo.png" alt="Ani-Go" class="w-7 h-7 rounded-lg object-cover border border-base-content/10" />
+              <span class="text-base font-bold tracking-tight text-base-content">Ani-Go</span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-square btn-sm rounded-lg" @click="closeDrawer" aria-label="Close">
+              <X :size="17" />
+            </button>
+          </div>
+
+          <div class="flex-1 px-2.5 py-3 overflow-y-auto space-y-0.5">
+            <router-link
+              v-for="item in nav"
+              :key="item.path"
+              :to="item.path"
+              class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm relative"
+              :class="route.path.startsWith(item.path) ? 'bg-primary/12 text-primary font-semibold' : 'text-base-content/75 hover:bg-base-200/80 font-medium'"
+              @click="closeDrawer"
+            >
+              <span
+                v-if="route.path.startsWith(item.path)"
+                class="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-primary rounded-r"
+                aria-hidden="true"
+              />
+              <component :is="item.icon" :size="18" />
+              <span>{{ item.label }}</span>
+            </router-link>
+          </div>
+
+          <div class="p-3 m-2.5 rounded-xl bg-base-200/70 border border-base-content/8 space-y-2.5">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="avatar online shrink-0">
+                <div v-if="userAvatar" class="w-8 h-8 rounded-lg bg-cover bg-center" :style="{ backgroundImage: `url(${proxyImage(userAvatar)})` }"></div>
+                <div v-else class="w-8 h-8 rounded-lg bg-primary/15 text-primary flex items-center justify-center font-bold text-xs">
+                  {{ username?.slice(0, 1).toUpperCase() || 'A' }}
+                </div>
               </div>
-              <button class="btn btn-ghost btn-circle btn-sm" @click="closeDrawer">
-                <X :size="18" />
+              <div class="min-w-0 flex-1">
+                <div class="text-xs font-semibold truncate">{{ username }}</div>
+                <div class="text-[11px] text-success">{{ $t('nav.activeNow') }}</div>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-1 pt-2 border-t border-base-content/8">
+              <button type="button" @click="toggleTheme" class="btn btn-ghost btn-xs h-7 min-h-0 rounded-md justify-center" :aria-label="themeLabel">
+                <Sun v-if="currentTheme === 'anigo-dark'" :size="14" />
+                <Moon v-else :size="14" />
               </button>
-            </div>
-
-            <div class="flex-1 px-3 py-4 overflow-y-auto space-y-1">
-              <router-link
-                v-for="item in nav"
-                :key="item.path"
-                :to="item.path"
-                class="flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all font-bold text-sm"
-                :class="route.path.startsWith(item.path) ? 'bg-primary text-primary-content font-black shadow-md' : 'text-base-content/70 hover:bg-base-200'"
-                @click="closeDrawer"
-              >
-                <component :is="item.icon" :size="20" />
-                <span>{{ item.label }}</span>
-              </router-link>
-            </div>
-
-            <!-- Drawer Bottom User Profile -->
-            <div class="p-4 m-3 rounded-2xl bg-base-200/60 border border-base-200/80">
-              <div class="flex items-center gap-3 mb-3">
-                <div class="avatar online">
-                  <div v-if="userAvatar" class="w-9 h-9 rounded-lg bg-cover bg-center" :style="{ backgroundImage: `url(${proxyImage(userAvatar)})` }"></div>
-                  <div v-else class="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-black text-xs">
-                    {{ username?.slice(0, 1).toUpperCase() || 'A' }}
-                  </div>
-                </div>
-                <div class="overflow-hidden min-w-0">
-                  <div class="text-sm font-black truncate">{{ username }}</div>
-                  <div class="text-[9px] font-bold text-success">{{ $t('nav.activeNow') }}</div>
-                </div>
-              </div>
-              <div class="flex items-center gap-2 pt-2 border-t border-base-200/80">
-                <button @click="toggleLanguage" class="btn btn-ghost btn-xs rounded-lg font-bold flex-1 justify-center">
-                  <Languages :size="14" class="text-primary" />
-                  <span class="text-[10px]">{{ locale === 'zh' ? 'English' : '中文' }}</span>
-                </button>
-                <button @click="logout" class="btn btn-ghost btn-xs rounded-lg font-bold flex-1 justify-center text-error hover:bg-error/10">
-                  <LogOut :size="14" />
-                  <span class="text-[10px]">{{ $t('nav.logout') }}</span>
-                </button>
-              </div>
+              <button type="button" @click="toggleLanguage" class="btn btn-ghost btn-xs h-7 min-h-0 rounded-md font-medium justify-center gap-1">
+                <Languages :size="13" class="text-primary" />
+                <span class="text-[11px]">{{ locale === 'zh' ? 'EN' : '中' }}</span>
+              </button>
+              <button type="button" @click="logout" class="btn btn-ghost btn-xs h-7 min-h-0 rounded-md justify-center text-error hover:bg-error/10" :aria-label="$t('nav.logout')">
+                <LogOut :size="14" />
+              </button>
             </div>
           </div>
         </div>
-      </Transition>
+      </div>
     </Teleport>
 
-    <!-- Update Notification Toast & Modal -->
-    <div v-if="hasNewVersion" class="fixed bottom-6 right-6 z-[100] animate-in fade-in slide-in-from-bottom-10 duration-500">
-      <div class="bg-base-100/95 backdrop-blur-xl border border-primary/30 shadow-2xl rounded-3xl p-5 flex flex-col gap-3.5 max-w-md ring-1 ring-primary/20">
+    <!-- 新版本提示浮窗 -->
+    <div v-if="hasNewVersion" class="fixed bottom-20 lg:bottom-5 right-5 z-[100]">
+      <div class="bg-base-100 border border-primary/30 shadow-xl rounded-xl p-4 flex flex-col gap-3 max-w-sm">
         <div class="flex items-start justify-between gap-3">
-          <div class="flex items-center gap-3">
-            <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center text-primary-content shadow-md shadow-primary/30 shrink-0">
-              <Sparkles :size="22" />
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-9 h-9 rounded-lg bg-primary/12 text-primary flex items-center justify-center shrink-0">
+              <Sparkles :size="18" />
             </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="text-[10px] font-black uppercase tracking-widest text-primary bg-primary/10 px-2 py-0.5 rounded-md">发现云端更新</span>
-                <span class="badge badge-primary badge-xs font-mono font-bold">{{ latestVersion }}</span>
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[11px] font-semibold text-primary">发现新版本</span>
+                <span class="badge badge-primary badge-xs font-mono">{{ latestVersion }}</span>
               </div>
-              <h4 class="text-sm font-black mt-0.5 text-base-content">Ani-Go 新版本已就绪</h4>
+              <h4 class="text-sm font-semibold mt-0.5 text-base-content">Ani-Go 更新就绪</h4>
             </div>
           </div>
-          <button @click="hasNewVersion = false" class="btn btn-ghost btn-xs btn-circle text-base-content/40 hover:text-base-content">
-            <X :size="16" />
+          <button type="button" @click="hasNewVersion = false" class="btn btn-ghost btn-xs btn-circle text-base-content/50 hover:text-base-content">
+            <X :size="15" />
           </button>
         </div>
 
-        <!-- 更新状态提示条 -->
-        <div v-if="updating" class="bg-base-200/80 p-3 rounded-2xl space-y-2 border border-base-300/60">
-          <div class="flex items-center justify-between text-xs font-bold">
+        <div v-if="updating" class="bg-base-200 p-2.5 rounded-lg space-y-1.5 border border-base-content/8">
+          <div class="flex items-center justify-between text-xs font-medium">
             <span class="text-primary flex items-center gap-1.5">
               <span class="loading loading-spinner loading-xs"></span>
               {{ updateProgress.message }}
             </span>
-            <span class="font-mono text-primary">{{ updateProgress.progress }}%</span>
+            <span class="font-mono text-primary tabular-nums">{{ updateProgress.progress }}%</span>
           </div>
-          <progress class="progress progress-primary w-full h-2 rounded-full" :value="updateProgress.progress" max="100"></progress>
+          <progress class="progress progress-primary w-full h-1.5" :value="updateProgress.progress" max="100"></progress>
         </div>
 
-        <div v-else class="text-xs text-base-content/70 leading-relaxed font-medium">
-          <span v-if="canSelfUpdate">发现新版本。更新后将检查服务版本与运行状态。</span>
-          <span v-else>在 Compose 部署目录运行 <code>docker compose pull ani-go</code>，然后运行 <code>docker compose up -d ani-go</code> 重建服务。</span>
+        <div v-else class="text-xs text-base-content/65 leading-relaxed">
+          <span v-if="canSelfUpdate">发现新版本，升级完成后将校验运行版本号。</span>
+          <span v-else>在 Compose 目录运行 <code>docker compose pull ani-go</code> 与 <code>docker compose up -d ani-go</code> 完成升级。</span>
         </div>
 
-        <div class="flex items-center gap-2 pt-1">
-          <button 
+        <div class="flex items-center gap-2">
+          <button
             v-if="canSelfUpdate"
-            @click="triggerUpdate" 
+            type="button"
+            @click="triggerUpdate"
             :disabled="updating"
-            class="btn btn-primary btn-sm flex-1 rounded-xl font-bold gap-2 shadow-lg shadow-primary/25 hover:scale-[1.02] active:scale-95 transition-all"
+            class="btn btn-primary btn-sm flex-1 rounded-lg font-medium gap-1.5"
           >
-            <Download :size="15" />
-            <span>{{ updating ? "正在平滑升级..." : "立即一键升级" }}</span>
+            <Download :size="14" />
+            <span>{{ updating ? "正在升级..." : "立即升级" }}</span>
           </button>
-          <a 
-            href="https://github.com/xiaoyueRX/Ani-Go/releases" 
-            target="_blank" 
-            class="btn btn-ghost btn-sm rounded-xl font-bold gap-1.5 text-xs text-base-content/70"
+          <a
+            href="https://github.com/xiaoyueRX/Ani-Go/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-ghost btn-sm rounded-lg font-medium gap-1 text-xs text-base-content/70"
           >
             <span>发行日志</span>
-            <ExternalLink :size="13" />
+            <ExternalLink :size="12" />
           </a>
         </div>
       </div>
@@ -422,38 +483,26 @@ function closeDrawer() {
 <style scoped>
 .page-enter-active,
 .page-leave-active {
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.16s ease, transform 0.16s ease;
 }
 
 .page-enter-from {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(4px);
 }
 
 .page-leave-to {
   opacity: 0;
-  transform: translateY(-6px);
+  transform: translateY(-4px);
 }
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity 0.18s ease;
 }
 
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
-}
-
-/* Custom scrollbar for sidebar */
-aside > div::-webkit-scrollbar {
-  width: 4px;
-}
-aside > div::-webkit-scrollbar-track {
-  background: transparent;
-}
-aside > div::-webkit-scrollbar-thumb {
-  background: hsl(var(--bc) / 0.1);
-  border-radius: 10px;
 }
 </style>

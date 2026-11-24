@@ -9,6 +9,7 @@ import {
   Play, Trash2, ArrowUp, ArrowDown, Clock, Plus
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
+import { PageHeader, StatCard, EmptyState } from '../components/ui'
 
 const { t } = useI18n()
 
@@ -314,197 +315,169 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-8 pb-20 max-w-7xl mx-auto animate-in fade-in duration-300">
-    <!-- Header Section -->
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-base-100 p-6 sm:p-7 rounded-3xl border border-base-200/80 shadow-sm">
-      <div class="space-y-1">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-inner">
-            <Download :size="20" />
-          </div>
-          <h1 class="text-2xl sm:text-3xl font-black tracking-tight italic">{{ $t('downloads.title') }}</h1>
-          <span class="badge badge-neutral text-xs font-mono font-bold">{{ tasks.length }} {{ $t('downloads.countUnit') }}</span>
-        </div>
-        <p class="text-xs text-base-content/60 font-medium">{{ $t('downloads.subtitle') }}</p>
-      </div>
-      
-      <div class="flex items-center gap-2.5 flex-wrap">
-        <button 
-          class="btn btn-outline btn-sm rounded-xl gap-1.5 px-3 border-base-300 hover:bg-base-200"
+  <div class="space-y-6 pb-20 max-w-7xl mx-auto">
+    <!-- 顶部页头 -->
+    <PageHeader
+      :title="$t('downloads.title')"
+      :subtitle="$t('downloads.subtitle')"
+      :badge="`${tasks.length} ${$t('downloads.countUnit')}`"
+    >
+      <template #actions>
+        <button
+          type="button"
+          class="btn btn-outline btn-sm rounded-lg gap-1.5 border-base-content/15"
           @click="pauseAllTasks"
           :disabled="batchActionLoading || changingTasks.size > 0 || !tasks.some(task => task.can_pause)"
           :title="$t('downloads.action.pauseAll')"
         >
           <Pause :size="14" />
-          <span class="text-xs font-bold">{{ $t('downloads.action.pauseAll') }}</span>
+          <span>{{ $t('downloads.action.pauseAll') }}</span>
         </button>
 
-        <button 
-          class="btn btn-outline btn-sm rounded-xl gap-1.5 px-3 border-base-300 hover:bg-base-200"
+        <button
+          type="button"
+          class="btn btn-outline btn-sm rounded-lg gap-1.5 border-base-content/15"
           @click="resumeAllTasks"
           :disabled="batchActionLoading || changingTasks.size > 0 || !tasks.some(task => task.can_resume)"
           :title="$t('downloads.action.resumeAll')"
         >
           <Play :size="14" />
-          <span class="text-xs font-bold">{{ $t('downloads.action.resumeAll') }}</span>
+          <span>{{ $t('downloads.action.resumeAll') }}</span>
         </button>
 
-        <button 
-          class="btn btn-primary btn-sm rounded-xl gap-2 px-4 shadow-sm"
+        <button
+          type="button"
+          class="btn btn-primary btn-sm rounded-lg gap-1.5 px-3.5"
           @click="showAddModal = true"
         >
           <Plus :size="15" />
-          <span class="text-xs font-bold">{{ $t('downloads.action.newDownload') }}</span>
+          <span>{{ $t('downloads.action.newDownload') }}</span>
         </button>
 
-        <label class="flex items-center gap-1.5 cursor-pointer text-xs font-bold border border-base-300/60 px-3 py-2 rounded-xl hover:bg-base-200/40 transition-colors">
+        <label class="flex items-center gap-1.5 cursor-pointer text-xs font-medium border border-base-content/12 px-2.5 h-8 rounded-lg hover:bg-base-200/50 transition-colors">
           <input type="checkbox" v-model="autoRefresh" class="checkbox checkbox-primary checkbox-xs rounded" />
           <span>{{ $t('downloads.action.autoRefresh') }} (4s)</span>
         </label>
-        <button 
-          class="btn btn-ghost btn-sm rounded-xl gap-2 px-3 border border-base-300/60 shadow-sm" 
+
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm rounded-lg gap-1.5 border border-base-content/12"
           @click="fetchDownloads"
           :disabled="activeReads > 0"
         >
           <RefreshCw :size="14" :class="{ 'animate-spin': activeReads > 0 }" />
-          <span class="text-xs font-bold">{{ $t('downloads.refresh') }}</span>
+          <span>{{ $t('downloads.refresh') }}</span>
         </button>
-      </div>
+      </template>
+    </PageHeader>
+
+    <!-- 概览统计卡片 -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <StatCard tone="primary" :label="$t('downloads.stats.speedDown')" :value="formatSpeed(totalSpeedDown)">
+        <template #icon><Zap :size="18" /></template>
+      </StatCard>
+
+      <StatCard tone="success" :label="$t('downloads.stats.speedUp')" :value="formatSpeed(totalSpeedUp)">
+        <template #icon><ArrowUp :size="18" /></template>
+      </StatCard>
+
+      <StatCard tone="primary" :label="$t('downloads.stats.downloading')" :value="downloadingCount">
+        <template #icon><Download :size="18" /></template>
+      </StatCard>
+
+      <StatCard tone="success" :label="$t('downloads.stats.seeding')" :value="seedingCount">
+        <template #icon><Upload :size="18" /></template>
+      </StatCard>
+
+      <StatCard :label="$t('downloads.stats.completed')" :value="completedCount" class="col-span-2 sm:col-span-1">
+        <template #icon><Check :size="18" /></template>
+      </StatCard>
     </div>
 
-    <!-- 概览状态卡片群 -->
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-      <div class="bg-base-100 p-4 sm:p-5 rounded-2xl border border-base-200/80 shadow-sm flex items-center justify-between">
-        <div class="space-y-0.5 min-w-0">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider block truncate">{{ $t('downloads.stats.speedDown') }}</span>
-          <p class="text-base sm:text-xl font-black font-mono text-primary truncate">{{ formatSpeed(totalSpeedDown) }}</p>
-        </div>
-        <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-          <Zap :size="20" />
-        </div>
-      </div>
-
-      <div class="bg-base-100 p-4 sm:p-5 rounded-2xl border border-base-200/80 shadow-sm flex items-center justify-between">
-        <div class="space-y-0.5 min-w-0">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider block truncate">{{ $t('downloads.stats.speedUp') }}</span>
-          <p class="text-base sm:text-xl font-black font-mono text-success truncate">{{ formatSpeed(totalSpeedUp) }}</p>
-        </div>
-        <div class="w-10 h-10 rounded-xl bg-success/10 text-success flex items-center justify-center shrink-0">
-          <ArrowUp :size="20" />
-        </div>
-      </div>
-
-      <div class="bg-base-100 p-4 sm:p-5 rounded-2xl border border-base-200/80 shadow-sm flex items-center justify-between">
-        <div class="space-y-0.5 min-w-0">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider block truncate">{{ $t('downloads.stats.downloading') }}</span>
-          <p class="text-base sm:text-xl font-black font-mono text-primary truncate">{{ downloadingCount }}</p>
-        </div>
-        <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-          <Download :size="20" />
-        </div>
-      </div>
-
-      <div class="bg-base-100 p-4 sm:p-5 rounded-2xl border border-base-200/80 shadow-sm flex items-center justify-between">
-        <div class="space-y-0.5 min-w-0">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider block truncate">{{ $t('downloads.stats.seeding') }}</span>
-          <p class="text-base sm:text-xl font-black font-mono text-success truncate">{{ seedingCount }}</p>
-        </div>
-        <div class="w-10 h-10 rounded-xl bg-success/10 text-success flex items-center justify-center shrink-0">
-          <Upload :size="20" />
-        </div>
-      </div>
-
-      <div class="bg-base-100 p-4 sm:p-5 rounded-2xl border border-base-200/80 shadow-sm flex items-center justify-between col-span-2 sm:col-span-1">
-        <div class="space-y-0.5 min-w-0">
-          <span class="text-[11px] font-bold text-base-content/50 uppercase tracking-wider block truncate">{{ $t('downloads.stats.completed') }}</span>
-          <p class="text-base sm:text-xl font-black font-mono text-base-content/70 truncate">{{ completedCount }}</p>
-        </div>
-        <div class="w-10 h-10 rounded-xl bg-base-200 text-base-content/50 flex items-center justify-center shrink-0">
-          <Check :size="20" />
-        </div>
-      </div>
-    </div>
-
-    <!-- 筛选过滤与搜索工具栏 -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-base-100 p-4 rounded-2xl border border-base-200/80 shadow-sm">
-      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs">
-        <button 
-          @click="currentFilter = 'all'" 
-          class="btn btn-xs sm:btn-sm rounded-xl font-bold"
-          :class="currentFilter === 'all' ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
+    <!-- 状态过滤与搜索栏 -->
+    <div class="app-toolbar">
+      <div class="app-segmented overflow-x-auto no-scrollbar max-w-full">
+        <button
+          type="button"
+          @click="currentFilter = 'all'"
+          class="app-segmented-btn"
+          :data-active="currentFilter === 'all' ? 'true' : 'false'"
         >
           {{ $t('downloads.action.all') }} ({{ tasks.length }})
         </button>
-        <button 
-          @click="currentFilter = 'downloading'" 
-          class="btn btn-xs sm:btn-sm rounded-xl font-bold"
-          :class="currentFilter === 'downloading' ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
+        <button
+          type="button"
+          @click="currentFilter = 'downloading'"
+          class="app-segmented-btn"
+          :data-active="currentFilter === 'downloading' ? 'true' : 'false'"
         >
           {{ $t('downloads.status.downloading') }} ({{ downloadingCount }})
         </button>
-        <button 
-          @click="currentFilter = 'seeding'" 
-          class="btn btn-xs sm:btn-sm rounded-xl font-bold"
-          :class="currentFilter === 'seeding' ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
+        <button
+          type="button"
+          @click="currentFilter = 'seeding'"
+          class="app-segmented-btn"
+          :data-active="currentFilter === 'seeding' ? 'true' : 'false'"
         >
           {{ $t('downloads.status.seeding') }} ({{ seedingCount }})
         </button>
-        <button 
-          @click="currentFilter = 'completed'" 
-          class="btn btn-xs sm:btn-sm rounded-xl font-bold"
-          :class="currentFilter === 'completed' ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
+        <button
+          type="button"
+          @click="currentFilter = 'completed'"
+          class="app-segmented-btn"
+          :data-active="currentFilter === 'completed' ? 'true' : 'false'"
         >
           {{ $t('downloads.status.completed') }} ({{ completedCount }})
         </button>
-        <button 
-          @click="currentFilter = 'paused'" 
-          class="btn btn-xs sm:btn-sm rounded-xl font-bold"
-          :class="currentFilter === 'paused' ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
+        <button
+          type="button"
+          @click="currentFilter = 'paused'"
+          class="app-segmented-btn"
+          :data-active="currentFilter === 'paused' ? 'true' : 'false'"
         >
           {{ $t('downloads.status.paused') }} ({{ tasks.filter(t => t.display_status === 'paused').length }})
         </button>
       </div>
 
       <div class="relative w-full sm:w-64">
-        <input 
-          v-model="searchQuery" 
-          type="text" 
-          :placeholder="$t('downloads.action.search')" :aria-label="$t('downloads.action.search')"
-          class="input input-bordered input-sm w-full rounded-xl pl-8 text-xs font-medium"
+        <input
+          v-model="searchQuery"
+          type="text"
+          :placeholder="$t('downloads.action.search')"
+          :aria-label="$t('downloads.action.search')"
+          class="input input-sm w-full h-9 bg-base-200/70 border border-base-content/12 rounded-lg pl-8 text-xs font-medium"
         />
-        <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
+        <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-base-content/40" />
       </div>
     </div>
 
-    <!-- Error Alert -->
-    <div v-if="error" class="alert bg-error/10 border-error/20 text-error rounded-2xl p-4 shadow-sm flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <AlertTriangle :size="20" class="shrink-0" />
-        <div>
-          <h4 class="font-black text-xs uppercase tracking-wider">{{ $t('downloads.error.title') }}</h4>
-          <p class="text-xs opacity-80 mt-0.5">{{ error }}</p>
+    <!-- 错误提示 -->
+    <div v-if="error" class="alert bg-error/10 border border-error/25 text-error rounded-xl p-4 flex items-center justify-between">
+      <div class="flex items-center gap-3 min-w-0">
+        <AlertTriangle :size="18" class="shrink-0" />
+        <div class="min-w-0">
+          <h4 class="font-semibold text-xs">{{ $t('downloads.error.title') }}</h4>
+          <p class="text-xs opacity-85 mt-0.5">{{ error }}</p>
         </div>
       </div>
-      <button class="btn btn-ghost btn-circle btn-xs" @click="error = ''">
+      <button type="button" class="btn btn-ghost btn-circle btn-xs" @click="error = ''">
         <X :size="14" />
       </button>
     </div>
 
-    <!-- Loading State -->
-    <div v-if="loading && tasks.length === 0" class="space-y-4">
-      <div v-for="i in 4" :key="i" class="h-28 bg-base-100 rounded-3xl border border-base-200/50 animate-pulse"></div>
+    <!-- 加载骨架 -->
+    <div v-if="loading && tasks.length === 0" class="space-y-3">
+      <div v-for="i in 4" :key="i" class="h-24 app-surface rounded-xl animate-pulse"></div>
     </div>
 
-    <!-- Empty State -->
-    <div v-else-if="!error && filteredTasks.length === 0" class="flex flex-col items-center justify-center py-24 text-center bg-base-100 rounded-3xl border border-base-200/80 shadow-sm">
-      <div class="w-16 h-16 bg-base-200/70 rounded-2xl flex items-center justify-center mb-4 text-base-content/30">
-        <Download :size="32" />
-      </div>
-      <h3 class="text-lg font-black tracking-tight mb-1">{{ searchQuery || currentFilter !== 'all' ? $t('downloads.action.noMatches') : $t('downloads.empty.title') }}</h3>
-      <p class="text-xs text-base-content/50 max-w-sm mx-auto leading-relaxed">
-        {{ searchQuery || currentFilter !== 'all' ? $t('downloads.action.filterHint') : $t('downloads.empty.desc') }}
-      </p>
-    </div>
+    <!-- 空状态 -->
+    <EmptyState
+      v-else-if="!error && filteredTasks.length === 0"
+      :title="searchQuery || currentFilter !== 'all' ? $t('downloads.action.noMatches') : $t('downloads.empty.title')"
+      :description="searchQuery || currentFilter !== 'all' ? $t('downloads.action.filterHint') : $t('downloads.empty.desc')"
+    >
+      <template #icon><Download :size="22" /></template>
+    </EmptyState>
 
     <!-- Download List -->
     <div v-else class="grid gap-4">
