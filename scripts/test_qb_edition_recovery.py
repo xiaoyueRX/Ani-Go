@@ -125,6 +125,8 @@ def run(binary, program):
             destination.request("torrents/delete", {"hashes": high_hash+"|"+low_hash, "deleteFiles": "false"})
             wait_for("online downloader reporting both hashes absent", lambda: service.api("downloads"), lambda tasks: not tasks)
             missing = service.api(route)
+            if service.api(route + "/download-tasks")["tasks"] != {low_hash: "missing"}:
+                raise RuntimeError("Expected only the unfinished torrent to be reported missing")
             if library_versions(missing, packs, ["2160p"], downloads, home / "剧集") != first_ids:
                 raise RuntimeError("Removing downloader tasks changed the completed library")
             if not any(r["id"] == pending["id"] and r["torrent_hash"] == low_hash for r in missing["episodes"]):
@@ -135,6 +137,8 @@ def run(binary, program):
             wait_for("same 1080p hash restored from retained files", lambda: destination.info(low_hash),
                      lambda task: task.get("completed") == PIECE_SIZE and "checking" not in task["state"].lower())
             restored = service.api(route)
+            if service.api(route + "/download-tasks")["tasks"] != {low_hash: "present"}:
+                raise RuntimeError("The restored task is still reported missing")
             remaining, = [r for r in restored["episodes"] if r["torrent_hash"] == low_hash]
             if remaining["id"] != pending["id"] or remaining["status"] != "downloading":
                 raise RuntimeError("The restored incomplete task lost its history or entered the library")
@@ -149,6 +153,8 @@ def run(binary, program):
                 return sum(r["status"] == "organized" for r in detail["episodes"]) == 2*len(NAMES)
 
             complete = wait_for("both editions organized", lambda: service.api(route), both_editions)
+            if service.api(route + "/download-tasks")["tasks"]:
+                raise RuntimeError("Completed editions should no longer need a downloader check")
             ids = library_versions(complete, packs, ["2160p", "1080p"], downloads, home / "剧集")
             if ids["2160p"] != first_ids["2160p"] or pending["id"] not in {i for i, _ in ids["1080p"]}:
                 raise RuntimeError("Organizing the second edition changed the history of the original releases")

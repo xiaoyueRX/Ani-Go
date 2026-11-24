@@ -136,6 +136,13 @@ jobs:
           if [[ "$RUNNER_OS" == Windows ]]; then py=python; else py=python3; fi
           file "$QB"
           "$py" scripts/test_qb_runtime.py "./anigo$(go env GOEXE)" --qbittorrent "$QB"
+      - name: Restore two editions of a season with qBittorrent
+        if: ${{ !cancelled() && steps.qb.outcome == 'success' }}
+        env:
+          QB: ${{ steps.qb.outputs.executable }}
+        run: |
+          if [[ "$RUNNER_OS" == Windows ]]; then py=python; else py=python3; fi
+          "$py" scripts/test_qb_edition_recovery.py "./anigo$(go env GOEXE)" --qbittorrent "$QB"
       - name: Copy across volumes and seed after restarting qBittorrent
         if: ${{ !cancelled() && steps.qb.outcome == 'success' && (matrix.os == 'windows' || matrix.os == 'darwin') }}
         env:

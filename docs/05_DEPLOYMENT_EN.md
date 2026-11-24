@@ -32,6 +32,14 @@ Move mode stages the complete file on the media library's filesystem, commits th
 
 The default series layout uses `Title (Year)/Season 1` or `Title/Season 1` when the year is unknown. Jellyfin can use the parentheses to identify the title and year separately. After an upgrade, if the only existing directory for the same title and year uses the older `TitleYear` layout, later episodes and seasons continue there. You can set a custom TV template in Settings.
 
+### Reuse existing files after a qBittorrent task disappears
+
+If a subscription still shows a download in progress, check that Ani-Go can reach the original qBittorrent instance. If the task was removed from qBittorrent and its files are still on disk:
+
+1. Add the original torrent in a stopped state. Check its info hash, save location and selected files. For a multi-file torrent the save location is usually the parent of the torrent’s top-level directory. Check each release or resolution separately.
+2. Run **Force recheck**. A preallocated file can already show its full size on disk. qBittorrent verifies the pieces to determine how much data is missing. Preserve the original file selection for a partial-season download.
+3. Start the task after verification. Complete editions can resume seeding, and incomplete editions will download the remaining pieces. Ani-Go uses the original task identifier to reconnect the episode history. Multiple editions can appear in the library while each episode counts once toward season progress.
+
 ### Pause library writes when a media volume disconnects
 
 After a volume disconnects, its path can reveal a writable directory on the system disk. To protect a TV library, first verify the correct volume is mounted. Place a regular file named `.anigo-volume-id` in the effective `TV_BASE_PATH` directory and write a single identifier such as `nas-tv`. Set `TV_VOLUME_ID=nas-tv` in the Ani-Go deployment environment and restart the service. Use `MOVIE_VOLUME_ID` and `OVA_VOLUME_ID` for movies and specials, each with a marker in its own library root. Use the same ID for categories sharing the same root. When changing a library path in the web UI, verify the new root and place its marker there first.
