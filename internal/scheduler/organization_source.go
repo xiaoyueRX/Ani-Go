@@ -12,8 +12,10 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/downloader"
+	"github.com/xiaoyueRX/Ani-Go/internal/magnet"
 	"github.com/xiaoyueRX/Ani-Go/internal/organizer"
 	"github.com/xiaoyueRX/Ani-Go/internal/parser"
+	"gorm.io/gorm/clause"
 )
 
 // 卷身份故障按本轮、同一个库根和同一原因合并。只延后日志输出，逐文件校验照常执行。
@@ -119,6 +121,37 @@ func holdBoundMember(ctx context.Context, ep database.Episode, kind, reason stri
 	return ep.OrganizationSnapshot(database.DB.WithContext(ctx)).Updates(updates).Error
 }
 
+// 旧成员可能只留下文件名和订阅源的估算大小。用下载器与本地文件共同验证的结果补全来源。
+func bindMeasuredMember(ctx context.Context, ep database.Episode, task core.DownloadTask, file downloader.CompletedFile) ([]database.Episode, error) {
+	id := magnet.CanonicalTaskID(ep.TorrentHash)
+	if magnet.CanonicalTaskID(task.Hash) != id && magnet.CanonicalTaskID(task.ClientID) != id {
+		return nil, fmt.Errorf("%w: 当前下载任务与该成员原先绑定的任务不一致", errOrganizationReview)
+	}
+	rel, err := filepath.Rel(task.SavePath, file.Path)
+	if err != nil || !filepath.IsLocal(rel) {
+		return nil, fmt.Errorf("%w: 下载器成员超出任务保存目录", errOrganizationReview)
+	}
+	key := database.EpisodeFileReservationKey(ep.SubscriptionID, ep.TorrentHash, rel)
+	hashCondition := "torrent_hash = ?"
+	if magnet.IsHexInfoHash(id) {
+		hashCondition += " COLLATE NOCASE"
+	}
+	db := database.DB.WithContext(ctx)
+	owner := db.Model(&database.Episode{}).Select("1").Where("id <> ? AND subscription_id = ?", ep.ID, ep.SubscriptionID).
+		Where("reservation_key = ? OR (source_file = ? AND "+hashCondition+")", key, rel, ep.TorrentHash)
+	var saved database.Episode
+	result := ep.OrganizationSnapshot(db).Model(&saved).Where("NOT EXISTS (?)", owner).
+		Clauses(clause.Returning{}).Updates(map[string]any{"source_file": rel, "download_root": task.SavePath,
+		"file_size": file.Size, "source_mod_time": file.ModTime, "reservation_key": key})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return nil, fmt.Errorf("%w: 记录已变更或已有其他记录绑定同一下载成员", errOrganizationReview)
+	}
+	return []database.Episode{saved}, nil
+}
+
 // 已绑定文件的记录始终按原成员核对；未绑定的多视频任务依据每个文件的身份拆分。
 func (s *Scheduler) organizationSource(ctx context.Context, ep database.Episode, sub database.Subscription, dl core.Downloader) (string, []database.Episode, error) {
 	movie := movieSubscription(sub)
@@ -209,6 +242,10 @@ func (s *Scheduler) organizationSource(ctx context.Context, ep database.Episode,
 			}
 			if movie && ep.ConfirmedIdentity == "" && (!singleVideo || movieExtraSource(sub, ep.SourceFile, ep)) {
 				return "", nil, holdBoundMember(ctx, ep, database.ReviewMovieSelection, "请核对下载任务并确认该文件为电影正片", file)
+			}
+			if ep.SourceModTime == 0 && (file.ModTime != 0 || file.Size != ep.FileSize) {
+				members, err := bindMeasuredMember(ctx, ep, task, file)
+				return "", members, err
 			}
 			return file.Path, nil, nil
 		}
