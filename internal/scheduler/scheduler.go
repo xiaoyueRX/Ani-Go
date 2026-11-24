@@ -31,6 +31,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/downloader"
 	"github.com/xiaoyueRX/Ani-Go/internal/httpx"
+	"github.com/xiaoyueRX/Ani-Go/internal/magnet"
 	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
 )
@@ -1193,9 +1194,19 @@ func isEpisodeExists(infoHash string) bool {
 	if database.DB == nil {
 		return false
 	}
+	trimmed := strings.TrimSpace(infoHash)
+	if trimmed == "" {
+		return false
+	}
 	var count int64
+	if magnet.IsHexInfoHash(trimmed) {
+		database.DB.Model(&database.Episode{}).
+			Where("origin_key = ? OR torrent_hash = ? COLLATE NOCASE", strings.ToLower(trimmed), trimmed).
+			Count(&count)
+		return count > 0
+	}
 	database.DB.Model(&database.Episode{}).
-		Where("torrent_hash = ?", infoHash).
+		Where("origin_key = ? OR torrent_hash = ?", strings.ToLower(trimmed), trimmed).
 		Count(&count)
 	return count > 0
 }

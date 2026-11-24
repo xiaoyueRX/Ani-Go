@@ -12,6 +12,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
 	"github.com/xiaoyueRX/Ani-Go/internal/downloader"
+	"github.com/xiaoyueRX/Ani-Go/internal/magnet"
 	"gorm.io/gorm"
 )
 
@@ -40,7 +41,7 @@ func (s *Scheduler) enqueue(ctx context.Context, sub database.Subscription, item
 		key = fmt.Sprintf("%d/%d/%g", sub.ID, season, number)
 	}
 	now := time.Now()
-	ep := database.Episode{SubscriptionID: sub.ID, Season: season, Number: number, Title: item.Title, OriginalName: item.Title, Status: "submitting", TorrentHash: item.InfoHash, TorrentURL: item.URL, MagnetURL: item.MagnetURL, OriginKey: origin, ReservationKey: &key, GroupName: item.GroupName, Resolution: item.Resolution, FileSize: item.Size, DownloadStartedAt: &now}
+	ep := database.Episode{SubscriptionID: sub.ID, Season: season, Number: number, Title: item.Title, OriginalName: item.Title, Status: "submitting", TorrentHash: strings.TrimSpace(item.InfoHash), TorrentURL: item.URL, MagnetURL: item.MagnetURL, OriginKey: origin, ReservationKey: &key, GroupName: item.GroupName, Resolution: item.Resolution, FileSize: item.Size, DownloadStartedAt: &now}
 	var reserved bool
 	err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current database.Subscription
@@ -49,7 +50,11 @@ func (s *Scheduler) enqueue(ctx context.Context, sub database.Subscription, item
 			return r.Error
 		}
 		sub = current
-		query := tx.Model(&database.Episode{}).Where("origin_key = ? OR torrent_hash = ?", origin, origin)
+		hashCondition := "origin_key = ? OR torrent_hash = ?"
+		if magnet.IsHexInfoHash(origin) {
+			hashCondition = "origin_key = ? OR torrent_hash = ? COLLATE NOCASE"
+		}
+		query := tx.Model(&database.Episode{}).Where(hashCondition, origin, origin)
 		if item.URL != "" {
 			query = query.Or("torrent_url = ?", item.URL)
 		}

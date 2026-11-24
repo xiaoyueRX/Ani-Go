@@ -70,15 +70,7 @@ func (s *FileSelection) add(root, name string, size int64, complete bool) error 
 
 func (q *QBittorrent) CompletedFiles(ctx context.Context, task core.DownloadTask) (FileSelection, error) {
 	var result FileSelection
-	if err := q.ensureLogin(ctx); err != nil {
-		return result, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, q.host+"/api/v2/torrents/files?hash="+url.QueryEscape(task.Hash), nil)
-	if err != nil {
-		return result, err
-	}
-	req.Header.Set("Referer", q.host)
-	resp, err := q.httpClient.Do(req)
+	resp, err := q.getWithSession(ctx, "/api/v2/torrents/files?hash="+url.QueryEscape(task.Hash))
 	if err != nil {
 		return result, err
 	}

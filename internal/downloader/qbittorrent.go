@@ -201,59 +201,18 @@ func (q *QBittorrent) addWithRetry(ctx context.Context, item core.TorrentItem, s
 
 // List 获取所有下载任务列表
 func (q *QBittorrent) List(ctx context.Context) ([]core.DownloadTask, error) {
-	if err := q.ensureLogin(ctx); err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		q.host+"/api/v2/torrents/info", nil)
-	if err != nil {
-		return nil, fmt.Errorf("创建查询请求失败: %w", err)
-	}
-	req.Header.Set("Referer", q.host)
-
-	resp, err := q.httpClient.Do(req)
+	resp, err := q.getWithSession(ctx, "/api/v2/torrents/info")
 	if err != nil {
 		return nil, fmt.Errorf("查询下载列表失败: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// 若遇到 401/403 认证过期，尝试重新登录并重试一次
-	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
-		_ = resp.Body.Close()
-		q.loginMu.Lock()
-		q.loggedIn = false
-		q.loginMu.Unlock()
-		if loginErr := q.login(ctx); loginErr != nil {
-			return nil, fmt.Errorf("重新登录失败: %w", loginErr)
-		}
-		reqRetry, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			q.host+"/api/v2/torrents/info", nil)
-		if err != nil {
-			return nil, err
-		}
-		reqRetry.Header.Set("Referer", q.host)
-		respRetry, err := q.httpClient.Do(reqRetry)
-		if err != nil {
-			return nil, fmt.Errorf("查询下载列表重试失败: %w", err)
-		}
-		defer respRetry.Body.Close()
-		if respRetry.StatusCode == http.StatusNoContent {
-			return []core.DownloadTask{}, nil
-		}
-		if respRetry.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("查询下载列表重试返回状态码: %d", respRetry.StatusCode)
-		}
-		return parseQBittorrentList(respRetry.Body)
-	}
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return nil, fmt.Errorf("查询下载列表返回状态码: %d", resp.StatusCode)
-	}
-
 	// 204 = 空列表，返回空数组
 	if resp.StatusCode == http.StatusNoContent {
 		return []core.DownloadTask{}, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("查询下载列表返回状态码: %d", resp.StatusCode)
 	}
 
 	// qBittorrent API 返回 JSON，这里用简单 JSON 解析
@@ -272,30 +231,18 @@ func (q *QBittorrent) GetStatus(ctx context.Context, hash string) (core.Download
 		return core.DownloadTask{}, fmt.Errorf("种子 hash 不能为空")
 	}
 
-	if err := q.ensureLogin(ctx); err != nil {
-		return core.DownloadTask{}, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		q.host+"/api/v2/torrents/info?hashes="+cleanHash, nil)
-	if err != nil {
-		return core.DownloadTask{}, fmt.Errorf("创建查询请求失败: %w", err)
-	}
-	req.Header.Set("Referer", q.host)
-
-	resp, err := q.httpClient.Do(req)
+	resp, err := q.getWithSession(ctx, "/api/v2/torrents/info?hashes="+url.QueryEscape(cleanHash))
 	if err != nil {
 		return core.DownloadTask{}, fmt.Errorf("查询种子状态失败: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return core.DownloadTask{}, fmt.Errorf("查询种子状态返回状态码: %d", resp.StatusCode)
-	}
-
 	// 204 = 空结果，种子不存在
 	if resp.StatusCode == http.StatusNoContent {
 		return core.DownloadTask{}, fmt.Errorf("种子未找到: %s", hash)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return core.DownloadTask{}, fmt.Errorf("查询种子状态返回状态码: %d", resp.StatusCode)
 	}
 
 	tasks, err := parseQBittorrentList(resp.Body)
@@ -316,23 +263,11 @@ func (q *QBittorrent) Delete(ctx context.Context, hash string, deleteFiles bool)
 		return fmt.Errorf("种子 hash 不能为空")
 	}
 
-	if err := q.ensureLogin(ctx); err != nil {
-		return err
-	}
-
 	data := url.Values{}
 	data.Set("hashes", cleanHash)
 	data.Set("deleteFiles", strconv.FormatBool(deleteFiles))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		q.host+"/api/v2/torrents/delete", strings.NewReader(data.Encode()))
-	if err != nil {
-		return fmt.Errorf("创建删除请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Referer", q.host)
-
-	resp, err := q.httpClient.Do(req)
+	resp, err := q.postFormWithSession(ctx, "/api/v2/torrents/delete", data)
 	if err != nil {
 		return fmt.Errorf("删除种子请求失败: %w", err)
 	}
@@ -354,10 +289,6 @@ func (q *QBittorrent) Pause(ctx context.Context, hash string) error {
 		return fmt.Errorf("种子 hash 不能为空")
 	}
 
-	if err := q.ensureLogin(ctx); err != nil {
-		return err
-	}
-
 	data := url.Values{}
 	data.Set("hashes", cleanHash)
 
@@ -365,15 +296,7 @@ func (q *QBittorrent) Pause(ctx context.Context, hash string) error {
 	endpoints := []string{"/api/v2/torrents/stop", "/api/v2/torrents/pause"}
 	var lastErr error
 	for _, ep := range endpoints {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			q.host+ep, strings.NewReader(data.Encode()))
-		if err != nil {
-			return fmt.Errorf("创建暂停请求失败: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("Referer", q.host)
-
-		resp, err := q.httpClient.Do(req)
+		resp, err := q.postFormWithSession(ctx, ep, data)
 		if err != nil {
 			return fmt.Errorf("暂停种子请求失败: %w", err)
 		}
@@ -405,10 +328,6 @@ func (q *QBittorrent) Resume(ctx context.Context, hash string) error {
 		return fmt.Errorf("种子 hash 不能为空")
 	}
 
-	if err := q.ensureLogin(ctx); err != nil {
-		return err
-	}
-
 	data := url.Values{}
 	data.Set("hashes", cleanHash)
 
@@ -416,15 +335,7 @@ func (q *QBittorrent) Resume(ctx context.Context, hash string) error {
 	endpoints := []string{"/api/v2/torrents/start", "/api/v2/torrents/resume"}
 	var lastErr error
 	for _, ep := range endpoints {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			q.host+ep, strings.NewReader(data.Encode()))
-		if err != nil {
-			return fmt.Errorf("创建恢复请求失败: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("Referer", q.host)
-
-		resp, err := q.httpClient.Do(req)
+		resp, err := q.postFormWithSession(ctx, ep, data)
 		if err != nil {
 			return fmt.Errorf("恢复种子请求失败: %w", err)
 		}
@@ -456,22 +367,11 @@ func (q *QBittorrent) AddTags(ctx context.Context, hash string, tags string) err
 		return fmt.Errorf("种子 hash 不能为空")
 	}
 
-	if err := q.ensureLogin(ctx); err != nil {
-		return err
-	}
 	data := url.Values{}
 	data.Set("hashes", cleanHash)
 	data.Set("tags", tags)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		q.host+"/api/v2/torrents/addTags", strings.NewReader(data.Encode()))
-	if err != nil {
-		return fmt.Errorf("创建添加标签请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Referer", q.host)
-
-	resp, err := q.httpClient.Do(req)
+	resp, err := q.postFormWithSession(ctx, "/api/v2/torrents/addTags", data)
 	if err != nil {
 		return fmt.Errorf("添加标签请求失败: %w", err)
 	}
@@ -519,25 +419,45 @@ func (q *QBittorrent) IsAvailable(ctx context.Context) bool {
 
 // getWithSession 只重试一次失效会话；并发请求不能作废其他请求刚续签的会话。
 func (q *QBittorrent) getWithSession(ctx context.Context, endpoint string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, q.host+endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Referer", q.host)
+	return q.doWithSession(ctx, http.MethodGet, endpoint, "", "")
+}
+
+func (q *QBittorrent) postFormWithSession(ctx context.Context, endpoint string, data url.Values) (*http.Response, error) {
+	return q.doWithSession(ctx, http.MethodPost, endpoint, data.Encode(), "application/x-www-form-urlencoded")
+}
+
+// doWithSession 执行需登录态的 qBittorrent HTTP 请求；遇 401/403 时排空响应、按代次失效旧会话并重试一次。
+func (q *QBittorrent) doWithSession(ctx context.Context, method, endpoint, body, contentType string) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
 		if err := q.ensureLogin(ctx); err != nil {
 			return nil, err
 		}
+		var bodyReader io.Reader
+		if body != "" {
+			bodyReader = strings.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, q.host+endpoint, bodyReader)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Referer", q.host)
+		if method == http.MethodPost {
+			req.Header.Set("Origin", q.host)
+			if contentType != "" {
+				req.Header.Set("Content-Type", contentType)
+			}
+		}
 		q.loginMu.Lock()
 		session := q.sessionGen
 		q.loginMu.Unlock()
-		resp, err := q.httpClient.Do(req.Clone(ctx))
+		resp, err := q.httpClient.Do(req)
 		if err != nil {
 			return nil, err
 		}
 		if attempt != 0 || (resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden) {
 			return resp, nil
 		}
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		q.loginMu.Lock()
 		if q.sessionGen == session {

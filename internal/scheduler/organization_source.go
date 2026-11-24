@@ -256,22 +256,39 @@ func (s *Scheduler) organizationSource(ctx context.Context, ep database.Episode,
 	if content == "" {
 		return "", nil, nil
 	}
+	info, err := os.Lstat(content)
+	if err != nil {
+		return "", nil, err
+	}
 	if ep.SourceFile != "" {
 		if !filepath.IsLocal(ep.SourceFile) {
 			return "", nil, fmt.Errorf("%w: 已绑定成员不是本地相对路径", errOrganizationReview)
 		}
-		if movie && ep.ConfirmedIdentity == "" {
-			// 无清单的下载器只有明确以该文件为整个任务内容时，才能证明它是唯一视频。
-			if filepath.Clean(content) != filepath.Join(ep.DownloadRoot, ep.SourceFile) || movieExtraSource(sub, ep.SourceFile, ep) {
+		if info.IsDir() {
+			if movie && ep.ConfirmedIdentity == "" {
+				// 无清单的下载器只有明确以该文件为整个任务内容时，才能证明它是唯一视频。
 				return "", nil, holdBoundMember(ctx, ep, database.ReviewMovieSelection, "请确认任务选择的电影正片", downloader.CompletedFile{Size: ep.FileSize, ModTime: ep.SourceModTime})
 			}
-		} else {
 			content = filepath.Join(content, ep.SourceFile)
+			info, err = os.Lstat(content)
+			if err != nil {
+				return "", nil, err
+			}
+		} else {
+			if filepath.Base(content) != ep.SourceFile || (ep.DownloadRoot != "" && filepath.Clean(content) != filepath.Join(ep.DownloadRoot, ep.SourceFile)) {
+				if movie && ep.ConfirmedIdentity == "" {
+					return "", nil, holdBoundMember(ctx, ep, database.ReviewMovieSelection, "请确认任务选择的电影正片", downloader.CompletedFile{Size: ep.FileSize, ModTime: ep.SourceModTime})
+				}
+				return "", nil, fmt.Errorf("%w: 下载器任务文件与已绑定成员不一致", errOrganizationReview)
+			}
+			if movie && ep.ConfirmedIdentity == "" && movieExtraSource(sub, ep.SourceFile, ep) {
+				file := downloader.CompletedFile{Size: ep.FileSize, ModTime: ep.SourceModTime}
+				if info.Mode().IsRegular() {
+					file = downloader.CompletedFile{Size: info.Size(), ModTime: info.ModTime().UnixNano()}
+				}
+				return "", nil, holdBoundMember(ctx, ep, database.ReviewMovieSelection, "请确认任务选择的电影正片", file)
+			}
 		}
-	}
-	info, err := os.Lstat(content)
-	if err != nil {
-		return "", nil, err
 	}
 	if info.IsDir() {
 		if !batch || ep.SourceFile != "" || (task.SavePath != "" && filepath.Clean(content) == filepath.Clean(task.SavePath)) {

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/xiaoyueRX/Ani-Go/internal/core"
 )
 
 func TestParseQBittorrentList_EmptyAndEOF(t *testing.T) {
@@ -351,4 +353,127 @@ func TestConvertAria2Status_BittorrentInfoName(t *testing.T) {
 	if task.Hash != "abc123hash" {
 		t.Errorf("期望 Hash 为 'abc123hash', 实际得到: %q", task.Hash)
 	}
+}
+
+func TestQBittorrentOperationsRecoverAfterRestart(t *testing.T) {
+	runCase := func(t *testing.T, op func(t *testing.T, qb *QBittorrent, tmpDir string)) {
+		t.Helper()
+		var sessionSeq atomic.Int32
+		sessionSeq.Store(1)
+		var logins atomic.Int32
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v2/auth/login" {
+				n := logins.Add(1)
+				sid := "v1"
+				if sessionSeq.Load() > 1 {
+					sid = "v2"
+				}
+				_ = n
+				http.SetCookie(w, &http.Cookie{Name: "SID", Value: sid, Path: "/"})
+				_, _ = w.Write([]byte("Ok."))
+				return
+			}
+			wantSID := "v1"
+			if sessionSeq.Load() > 1 {
+				wantSID = "v2"
+			}
+			sid, err := r.Cookie("SID")
+			if err != nil || sid.Value != wantSID {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			switch r.URL.Path {
+			case "/api/v2/app/version":
+				_, _ = w.Write([]byte("v4.6.3"))
+			case "/api/v2/torrents/info":
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`[{"hash":"deadbeef01","name":"Demo","save_path":"/dl","state":"uploading","progress":1,"size":10,"amount_left":0,"completed":10}]`))
+			case "/api/v2/torrents/files":
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`[{"name":"Demo.mkv","size":10,"priority":1,"progress":1}]`))
+			case "/api/v2/torrents/stop", "/api/v2/torrents/start":
+				w.WriteHeader(http.StatusNotFound)
+			case "/api/v2/torrents/pause", "/api/v2/torrents/resume", "/api/v2/torrents/addTags", "/api/v2/torrents/delete":
+				w.WriteHeader(http.StatusOK)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		qb := NewQBittorrent(server.URL, "admin", "pass", "ani-go")
+		if !qb.IsAvailable(t.Context()) {
+			t.Fatal("首次建立会话失败")
+		}
+		if logins.Load() != 1 {
+			t.Fatalf("期望首次登录 1 次，实际 %d 次", logins.Load())
+		}
+		// 模拟 qBittorrent 重启导致原 SID=v1 失效
+		sessionSeq.Store(2)
+
+		op(t, qb, t.TempDir())
+		if logins.Load() != 2 {
+			t.Fatalf("期望遇 403 后自动重登为 2 次登录，实际 %d 次", logins.Load())
+		}
+	}
+
+	t.Run("List", func(t *testing.T) {
+		runCase(t, func(t *testing.T, qb *QBittorrent, _ string) {
+			tasks, err := qb.List(t.Context())
+			if err != nil || len(tasks) != 1 || tasks[0].Hash != "deadbeef01" {
+				t.Fatalf("List 恢复失败: tasks=%+v err=%v", tasks, err)
+			}
+		})
+	})
+
+	t.Run("GetStatus", func(t *testing.T) {
+		runCase(t, func(t *testing.T, qb *QBittorrent, _ string) {
+			task, err := qb.GetStatus(t.Context(), "deadbeef01")
+			if err != nil || task.Hash != "deadbeef01" {
+				t.Fatalf("GetStatus 恢复失败: task=%+v err=%v", task, err)
+			}
+		})
+	})
+
+	t.Run("CompletedFiles", func(t *testing.T) {
+		runCase(t, func(t *testing.T, qb *QBittorrent, tmpDir string) {
+			sel, err := qb.CompletedFiles(t.Context(), core.DownloadTask{Hash: "deadbeef01", SavePath: tmpDir})
+			if err != nil || len(sel.Files) != 1 {
+				t.Fatalf("CompletedFiles 恢复失败: sel=%+v err=%v", sel, err)
+			}
+		})
+	})
+
+	t.Run("Pause_Fallback4x", func(t *testing.T) {
+		runCase(t, func(t *testing.T, qb *QBittorrent, _ string) {
+			if err := qb.Pause(t.Context(), "deadbeef01"); err != nil {
+				t.Fatalf("Pause 恢复与 404 回退失败: %v", err)
+			}
+		})
+	})
+
+	t.Run("Resume_Fallback4x", func(t *testing.T) {
+		runCase(t, func(t *testing.T, qb *QBittorrent, _ string) {
+			if err := qb.Resume(t.Context(), "deadbeef01"); err != nil {
+				t.Fatalf("Resume 恢复与 404 回退失败: %v", err)
+			}
+		})
+	})
+
+	t.Run("AddTags", func(t *testing.T) {
+		runCase(t, func(t *testing.T, qb *QBittorrent, _ string) {
+			if err := qb.AddTags(t.Context(), "deadbeef01", "ani-go"); err != nil {
+				t.Fatalf("AddTags 恢复失败: %v", err)
+			}
+		})
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		runCase(t, func(t *testing.T, qb *QBittorrent, _ string) {
+			if err := qb.Delete(t.Context(), "deadbeef01", false); err != nil {
+				t.Fatalf("Delete 恢复失败: %v", err)
+			}
+		})
+	})
 }
