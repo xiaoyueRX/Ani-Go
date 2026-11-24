@@ -68,7 +68,7 @@ func TestPluginRestoreUpdatesLivePanelAndCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	const cred = "/api/plugins/restore-example/panel/credential"
-	panelCall(t, mux, "PUT", cred, `{"access_token":"panel-private-original"}`, 200)
+	panelCall(t, mux, "PUT", cred, `{"access_token":"panel-private-original","expected_url":"`+p.URL+`"}`, 200)
 	panelCall(t, mux, "POST", "/api/backup/create", "{}", 200)
 	files, err := bm.ListBackups()
 	if err != nil || len(files) != 1 {
@@ -79,7 +79,7 @@ func TestPluginRestoreUpdatesLivePanelAndCredentials(t *testing.T) {
 	if err := m.AddOrUpdatePlugin(p); err != nil {
 		t.Fatal(err)
 	}
-	panelCall(t, mux, "PUT", cred, `{"access_token":"panel-private-later"}`, 200)
+	panelCall(t, mux, "PUT", cred, `{"access_token":"panel-private-later","expected_url":"`+p.URL+`"}`, 200)
 	_, previous, _ := m.PanelSnapshot(p.ID)
 	restore, _ := json.Marshal(map[string]string{"name": files[0].Name})
 	panelCall(t, mux, "POST", "/api/backup/restore", string(restore), 200)
@@ -109,14 +109,14 @@ func TestPanelTypedRequestsAndEmptyTaskPage(t *testing.T) {
 	mux := http.NewServeMux()
 	(&Server{pluginManager: m}).registerRoutes(mux)
 	const root = "/api/plugins/cloud-115/panel/"
-	for _, body := range []string{`{"access_token":"example","extra":true}`, `{"access_token":"example"}{}`} {
+	for _, body := range []string{`{"access_token":"example","expected_url":"","extra":true}`, `{"access_token":"example","expected_url":""}{}`} {
 		panelCall(t, mux, "PUT", root+"credential", body, 400)
 	}
 	got := panelCall(t, mux, "GET", root+"credential", "", 200)
 	if !strings.Contains(got, `"configured":false`) {
 		t.Fatal("无效的通用凭据请求改写了设置")
 	}
-	panelCall(t, mux, "PUT", root+"credential", `{"access_token":"example"}`, 200)
+	panelCall(t, mux, "PUT", root+"credential", `{"access_token":"example","expected_url":""}`, 200)
 	pages := 0
 	_, scope, _ := m.PanelSnapshot(plugin.Cloud115ID)
 	scope.SetService(plugin.PanelService, panelRunFunc(func(_ context.Context, _ plugin.PanelAction, _, _ string, page int) (plugin.PanelResult, error) {
@@ -150,12 +150,13 @@ func TestPanelCredentialProviderFollowsOwningScope(t *testing.T) {
 	scope.RegisterService(plugin.PanelCredentialService, plugin.PanelCredentialStorage{EnvironmentKey: key})
 	const root = "/api/plugins/alternate-provider/panel/"
 	const cred = root + "credential"
-	panelCall(t, mux, "PUT", cred, `{"access_token":"panel-private-separate"}`, 200)
+	const target = `https://panel.example/action`
+	panelCall(t, mux, "PUT", cred, `{"access_token":"panel-private-separate","expected_url":"`+target+`"}`, 200)
 	t.Setenv(key, "panel-private-environment")
 	if got := panelCall(t, mux, "GET", cred, "", 200); !strings.Contains(got, `"source":"environment"`) {
 		t.Fatal("插件私有环境来源未生效")
 	}
-	panelCall(t, mux, "PUT", cred, `{"access_token":"panel-private-overwrite"}`, 409)
+	panelCall(t, mux, "PUT", cred, `{"access_token":"panel-private-overwrite","expected_url":"`+target+`"}`, 409)
 	panelCall(t, mux, "DELETE", cred, "", 409)
 	if got := panelCall(t, mux, "GET", "/api/plugins/ordinary-provider/panel/credential", "", 200); !strings.Contains(got, `"source":"none"`) {
 		t.Fatal("另一插件读取了本插件的凭据声明")

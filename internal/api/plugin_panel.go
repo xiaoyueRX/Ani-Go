@@ -69,18 +69,28 @@ func (s *Server) handlePanelCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := panelRequestContext(r, scope)
 	defer cancel()
-	s.servePanelCredential(w, r.WithContext(ctx), scope, true)
+	s.servePanelCredential(w, r.WithContext(ctx), info.URL, scope, true)
 }
 
-func (s *Server) servePanelCredential(w http.ResponseWriter, r *http.Request, scope plugin.PluginContext, strict bool) {
+func (s *Server) servePanelCredential(w http.ResponseWriter, r *http.Request, currentURL string, scope plugin.PluginContext, strict bool) {
 	var update *string
 	switch r.Method {
 	case http.MethodPut:
 		var req struct {
-			Token string `json:"access_token"`
+			Token       string          `json:"access_token"`
+			ExpectedURL json.RawMessage `json:"expected_url"`
 		}
 		if strict {
 			if !decodePluginRequest(w, r, &req, false) {
+				return
+			}
+			expectedURL, urlOK := panelRequestField(req.ExpectedURL, "")
+			if !urlOK || req.ExpectedURL == nil {
+				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "请提供已确认的插件目标地址"})
+				return
+			}
+			if expectedURL != currentURL {
+				writeJSON(w, http.StatusConflict, errorResponse{Error: "插件目标已变更，请刷新后重新保存凭据"})
 				return
 			}
 		} else if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req) != nil {

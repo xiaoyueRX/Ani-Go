@@ -43,7 +43,7 @@ func (s *Server) withCloud115(next func(http.ResponseWriter, *http.Request, clou
 }
 
 func (s *Server) handleCloud115Config(w http.ResponseWriter, r *http.Request, _ cloud115Tasks, scope plugin.PluginContext) {
-	s.servePanelCredential(w, r, scope, false)
+	s.servePanelCredential(w, r, "", scope, false)
 }
 
 func (s *Server) handleCloud115Tasks(w http.ResponseWriter, r *http.Request, client cloud115Tasks, scope plugin.PluginContext) {

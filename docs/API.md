@@ -261,7 +261,7 @@ The read-only download task check returns one result per bound task in the subsc
 | 保存或更新 | 向 `POST /api/plugins/save` 或 `POST /api/plugins/custom` 发送单份 Webhook 清单。读取回执 `id`、`enabled` 和 `status`。省略 ID 时以服务端分配值为准。更新已有清单保留原开关。保留 ID 冲突返回 409。 |
 | 启停 | 向 `POST /api/plugins/toggle` 发送 `{"id":"cloud-115","enabled":true}`，或使用路径中的 ID 并发送 `{"enabled":true}`。未知 ID 返回 404。 |
 | 导出、删除与重载 | 自定义列表省略共享密钥。删除自定义插件一并清理其开关和面板凭据。重载成功返回 `message`、`count` 和 `plugins`。 |
-| 面板凭据 | 对 `/api/plugins/{id}/panel/credential` 使用 GET、PUT、DELETE。写入格式为 `{"access_token":"<服务令牌>"}`。读取只返回 `configured` 与 `source`。 |
+| 面板凭据 | 对 `/api/plugins/{id}/panel/credential` 使用 GET、PUT、DELETE。写入格式为 `{"access_token":"<服务令牌>","expected_url":"<确认时显示的完整地址或空字符串>"}`（社区插件为当前清单完整地址，内置插件为空字符串；缺失或类型错误返回 400，目标已变更返回 409）。读取只返回 `configured` 与 `source`。 |
 | 面板动作 | 向 `/api/plugins/{id}/panel/actions/{action}` 提交 `{"input":"…"}` 或任务列表查询 `{"page":2}`。回执为文字消息或含 `page`、`page_count`、`tasks` 的分页结果。 |
 
 搜索结果中的磁力动作另传 `placement:"search_result"` 与 `expected_url`。社区目标是用户确认的清单完整地址，内置插件使用空字符串。两项必须同时出现，输入错误返回 400，已变更的目标或入口返回 409。

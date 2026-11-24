@@ -1977,19 +1977,20 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [access_token]
+              required: [access_token, expected_url]
               properties:
                 access_token: {type: string, format: password, writeOnly: true}
+                expected_url: {type: string, description: 用户确认的完整 Webhook 地址或内置插件的空字符串。只用于比对当前清单。}
       responses:
         '200':
           description: 配置已保存
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PanelCredentialState'}
-        '400': {description: 令牌或请求无效}
+        '400': {description: 令牌、目标确认或请求无效}
         '401': {description: Ani-Go 登录凭证无效}
         '404': {description: 插件未声明面板或凭据}
-        '409': {description: 面板未启用或环境变量已提供凭据}
+        '409': {description: 面板未启用、环境变量已提供凭据或插件目标已变更}
         '500':
           description: 服务执行或持久化失败
           content:

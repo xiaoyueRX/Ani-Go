@@ -149,15 +149,19 @@ def register_plugins(service, retired_token):
     # 发行程序只准许公开 HTTPS 面板。样例无事件；所有动作测试只走本地验证。
     manifest["url"] = "https://127.0.0.1/actions"
     service.api("plugins/save", "POST", manifest, status=400)
-    manifest["url"] = "https://plugin.invalid/old"
+    old_url = "https://plugin.invalid/old"
+    manifest["url"] = old_url
     service.api("plugins/save", "POST", manifest)
     credential = COMMUNITY_API + "/panel/credential"
-    if service.api(credential, "PUT", {"access_token": retired_token}) != {"configured": True, "source": "stored"}:
+    if service.api(credential, "PUT", {"access_token": retired_token, "expected_url": old_url}) != {"configured": True, "source": "stored"}:
         raise RuntimeError("The community panel did not accept its own credential")
     manifest["url"] = COMMUNITY_URL
     service.api("plugins/save", "POST", manifest)
     if service.api(credential) != {"configured": False, "source": "none"}:
         raise RuntimeError("A replacement endpoint inherited the retired panel credential")
+    service.api(credential, "PUT", {"access_token": retired_token, "expected_url": old_url}, status=409)
+    if service.api(credential) != {"configured": False, "source": "none"}:
+        raise RuntimeError("A stale credential target check persisted a credential")
     service.api(COMMUNITY_API + "/toggle", "POST", {"enabled": False})
     service.api("plugins/cloud-115/toggle", "POST", {"enabled": True})
     if service.api(CLOUD_CREDENTIAL) != {"configured": True, "source": "environment"}:

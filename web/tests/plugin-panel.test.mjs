@@ -63,7 +63,7 @@ test('115 使用通用凭据、动作与分页接口，保存后清空密钥并�
     },
     put: async (path, body) => {
       assert.equal(path, endpoint + '/credential')
-      assert.deepEqual({ ...body }, { access_token: 'test-secret' })
+      assert.deepEqual({ ...body }, { access_token: 'test-secret', expected_url: '' })
       configured = true
       return { data: { configured, source: 'stored' } }
     },
@@ -381,4 +381,33 @@ test('官方面板翻译任何已知声明文案，未知标签与社区文本�
   assert.match(await c.markup('en'), /Plain text from provider/)
   const d = await mount({}, { ...plugin, origin: 'community', is_builtin: false })
   assert.match(await d.markup('en'), /common.refresh/)
+})
+
+test('社区插件保存凭据携带当前目标 URL，服务端拒绝旧目标时保留未保存状态并提示错误', async () => {
+  const community = {
+    id: 'community-cred', origin: 'community', url: 'https://example.org/current',
+    panel: { credential: { label: 'API key', required: true }, actions: [{ id: 'ping', label: 'Ping', result: 'message' }] },
+  }
+  const sent = []
+  let rejectConflict = false
+  const c = await mount({
+    get: async () => ({ data: { configured: false, source: 'none' } }),
+    put: async (path, body) => {
+      sent.push([path, { ...body }])
+      if (rejectConflict) throw { isAxiosError: true, response: { status: 409, data: { error: '插件目标已变更' } } }
+      return { data: { configured: true, source: 'stored' } }
+    },
+  }, community)
+  c.tokenInput.value = 'community-token'
+  rejectConflict = true
+  await c.updateToken('save')
+  assert.deepEqual(sent, [['/plugins/community-cred/panel/credential', { access_token: 'community-token', expected_url: 'https://example.org/current' }]])
+  assert.equal(c.config.value?.source, 'none')
+  assert.equal(c.error.value, 'configWriteFailed')
+  assert.equal(c.tokenInput.value, 'community-token')
+  rejectConflict = false
+  await c.updateToken('save')
+  assert.equal(c.config.value?.source, 'stored')
+  assert.equal(c.error.value, '')
+  assert.equal(c.tokenInput.value, '')
 })

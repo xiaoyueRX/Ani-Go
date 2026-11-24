@@ -60,7 +60,7 @@ func TestPanelActionsAndCredentialLifecycle(t *testing.T) {
 	const root = "/api/plugins/first/panel/"
 	const cred = root + "credential"
 	const send = root + "actions/send"
-	const update = `{"access_token":"panel-private-example"}`
+	const update = `{"access_token":"panel-private-example","expected_url":"https://panel.example/action"}`
 	panelCall(t, auth.AuthMiddleware(mux), "GET", cred, "", 401)
 	panelCall(t, mux, "POST", send, `{"input":"hi"}`, 409)
 	panelCall(t, mux, "POST", root+"actions/undeclared", "{}", 404)
@@ -213,7 +213,7 @@ func TestPanelCloud115CredentialCompatibility(t *testing.T) {
 			t.Fatalf("配置状态 %s", got)
 		}
 	}
-	panelCall(t, mux, "PUT", generic, `{"access_token":"panel-private-115"}`, 200)
+	panelCall(t, mux, "PUT", generic, `{"access_token":"panel-private-115","expected_url":""}`, 200)
 	check(legacy, "stored")
 	panelCall(t, mux, "DELETE", legacy, "", 200)
 	check(generic, "none")
@@ -247,7 +247,7 @@ func TestPanelChecksReturnedResultBeforeExposingIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	const path = "/api/plugins/result-contract/panel/"
-	panelCall(t, mux, "PUT", path+"credential", `{"access_token":"fixture-service-token"}`, 200)
+	panelCall(t, mux, "PUT", path+"credential", `{"access_token":"fixture-service-token","expected_url":"https://panel.example/action"}`, 200)
 	_, scope, _ := m.PanelSnapshot(p.ID)
 	for _, tc := range []struct {
 		action, body string
@@ -267,4 +267,70 @@ func TestPanelChecksReturnedResultBeforeExposingIt(t *testing.T) {
 			t.Fatal("公开了服务凭据")
 		}
 	}
+}
+
+func TestPanelCredentialRequiresCurrentTargetURL(t *testing.T) {
+	setupTestDB(t)
+	t.Setenv("CLOUD115_ACCESS_TOKEN", "")
+	m := plugin.NewManager(&dummyEventBus{})
+	t.Cleanup(m.StopAll)
+	if err := m.Enable(plugin.Cloud115ID); err != nil {
+		t.Fatal(err)
+	}
+	p := testPanelManifest("target-check")
+	if err := m.AddOrUpdatePlugin(p); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	(&Server{pluginManager: m}).registerRoutes(mux)
+
+	const cred = "/api/plugins/target-check/panel/credential"
+	const send = "/api/plugins/target-check/panel/actions/send"
+	for _, invalid := range []string{
+		`{"access_token":"panel-private-missing-url"}`,
+		`{"access_token":"panel-private-null-url","expected_url":null}`,
+		`{"access_token":"panel-private-bad-type","expected_url":123}`,
+	} {
+		panelCall(t, mux, "PUT", cred, invalid, 400)
+	}
+
+	oldURL := p.URL
+	p.URL = "https://panel.example/updated"
+	if err := m.AddOrUpdatePlugin(p); err != nil {
+		t.Fatal(err)
+	}
+	staleBody, _ := json.Marshal(map[string]string{
+		"access_token": "panel-private-stale-target",
+		"expected_url": oldURL,
+	})
+	panelCall(t, mux, "PUT", cred, string(staleBody), 409)
+	if got := panelCall(t, mux, "GET", cred, "", 200); !strings.Contains(got, `"source":"none"`) {
+		t.Fatalf("目标 URL 冲突后仍保存了凭据: %s", got)
+	}
+	_, scope, _ := m.PanelSnapshot(p.ID)
+	calls := 0
+	scope.SetService(plugin.PanelService, panelRunFunc(func(_ context.Context, _ plugin.PanelAction, token, _ string, _ int) (plugin.PanelResult, error) {
+		calls++
+		return plugin.PanelResult{Message: token}, nil
+	}))
+	panelCall(t, mux, "POST", send, `{"input":"hi"}`, 409)
+	if calls != 0 {
+		t.Fatal("未配置有效凭据时不应执行动作")
+	}
+
+	currentBody, _ := json.Marshal(map[string]string{
+		"access_token": "panel-private-current-target",
+		"expected_url": p.URL,
+	})
+	panelCall(t, mux, "PUT", cred, string(currentBody), 200)
+	if got := panelCall(t, mux, "GET", cred, "", 200); !strings.Contains(got, `"source":"stored"`) {
+		t.Fatalf("匹配当前 URL 保存失败: %s", got)
+	}
+
+	// 内置 115 插件：通用面板接口必须传 expected_url:""，旧兼容接口仍可省略 expected_url。
+	const cloudCred = "/api/plugins/cloud-115/panel/credential"
+	panelCall(t, mux, "PUT", cloudCred, `{"access_token":"panel-private-115-no-url"}`, 400)
+	panelCall(t, mux, "PUT", cloudCred, `{"access_token":"panel-private-115-bad-url","expected_url":"https://panel.example/"}`, 409)
+	panelCall(t, mux, "PUT", cloudCred, `{"access_token":"panel-private-115-ok","expected_url":""}`, 200)
+	panelCall(t, mux, "PUT", "/api/plugins/cloud-115/config", `{"access_token":"panel-private-115-legacy"}`, 200)
 }

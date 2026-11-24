@@ -83,7 +83,7 @@ async function updateToken(action: 'save' | 'clear') {
   try {
     const url = endpoint.value + '/credential'
     const { data } = action === 'save'
-      ? await request.put<Credential>(url, { access_token: token })
+      ? await request.put<Credential>(url, { access_token: token, expected_url: props.plugin.url ?? '' })
       : await request.delete<Credential>(url)
     tokenInput.value = ''
     inputs.value = Object.create(null)
