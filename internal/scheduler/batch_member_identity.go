@@ -37,3 +37,15 @@ func batchEpisodeReviewReason(rel string, sub database.Subscription, season int,
 	}
 	return ""
 }
+
+// 只有原始编号和已解析的季内编号都不在发行范围内时才产生冲突，保留可验证的跨季编号映射。
+func batchRangeReviewReason(first, last, season int, number, sourceNumber float32) string {
+	if first == 0 || season <= 0 || number <= 0 {
+		return ""
+	}
+	within := func(n float32) bool { return n >= float32(first) && n <= float32(last) }
+	if within(number) || within(sourceNumber) {
+		return ""
+	}
+	return fmt.Sprintf("文件集号 %g 与合集声明的 %d–%d 集不一致，请核对季内集号", number, first, last)
+}

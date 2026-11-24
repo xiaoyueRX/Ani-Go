@@ -97,6 +97,10 @@ func boundIdentityProblem(ep database.Episode, sub database.Subscription, size, 
 		}
 		name := filepath.Base(ep.SourceFile)
 		parsed := parser.ExtractEpisodeDetailed(strings.TrimSuffix(name, filepath.Ext(name)))
+		first, last := parser.DeclaredEpisodeRange(ep.OriginalName)
+		if reason := batchRangeReviewReason(first, last, ep.Season, ep.Number, parsed.Episode); reason != "" {
+			return kind, reason
+		}
 		if parsed.ExplicitSeason && parsed.Episode > 0 && (ep.Season != parsed.Season || ep.Number != parsed.Episode) {
 			return kind, "绑定文件标记的季集发生冲突，请确认"
 		}

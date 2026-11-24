@@ -24,6 +24,11 @@ func mediaFile(name string) bool { return core.IsVideoFile(name) }
 // 同一任务的每个源文件有独立记录；一项需要复核时，其余成员仍可整理。
 func (s *Scheduler) expandBatch(ctx context.Context, parent database.Episode, sub database.Subscription, dir string, selection *verifiedSelection) ([]database.Episode, error) {
 	var members []database.Episode
+	release := parent.OriginalName
+	if release == "" {
+		release = parent.Title
+	}
+	first, last := parser.DeclaredEpisodeRange(release)
 	visit := func(path string, size, modTime int64, issue string) error {
 		rel, err := filepath.Rel(dir, path)
 		if err != nil || !filepath.IsLocal(rel) {
@@ -77,6 +82,9 @@ func (s *Scheduler) expandBatch(ctx context.Context, parent database.Episode, su
 				member.Season, member.Number = parent.Season, parent.Number
 			}
 			why := batchEpisodeReviewReason(rel, sub, member.Season, member.Number)
+			if why == "" {
+				why = batchRangeReviewReason(first, last, member.Season, member.Number, parsed.Episode)
+			}
 			if why == "" && single && parent.Number > 0 && parsed.Episode > 0 && (member.Season != parent.Season || member.Number != parent.Number) {
 				why = "源文件季集与订阅下载时确认的季集不一致"
 			}
