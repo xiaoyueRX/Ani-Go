@@ -1,6 +1,7 @@
 """在两个可写文件系统上验证跨卷复制、媒体卷标恢复及 qBittorrent 重启后的独立做种。"""
 
 import argparse
+from contextlib import contextmanager
 import errno
 import hashlib
 import json
@@ -56,6 +57,24 @@ def ports_closed(client):
     return True
 
 
+@contextmanager
+def occupy_peer_port(client, *, listen):
+    """占用原选端口，验证 qB 只使用自己成功监听的新端口。"""
+    with socket.socket() as occupied:
+        if os.name == "nt":
+            occupied.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        occupied.bind((HOST, 0))
+        if listen:
+            occupied.listen()
+        port = occupied.getsockname()[1]
+        client.peer_port = port
+        with client.running():
+            if client.peer_port == port:
+                raise RuntimeError(f"qBittorrent advertised occupied peer port {port} (listening={listen})")
+            print(f"qBittorrent rebound occupied peer port {port} to {client.peer_port} (listening={listen}).", flush=True)
+            yield
+
+
 def organized(detail):
     episodes = detail["episodes"]
     return (len(episodes) == 1 and episodes[0]["status"] == "organized"
@@ -108,7 +127,7 @@ def run(binary, qb, root, library, feed, publish, *, check_marker=False):
         sub = service.api("subscriptions", "POST", {"title_cn": TITLE, "custom_path": str(primary.downloads)}, status=201)
         route = f"subscriptions/{sub['id']}"
         service.api(route, "PUT", {"total_episodes": 1})
-        with seed.running():
+        with (occupy_peer_port(seed, listen=False) if check_marker else seed.running()):
             torrent_hash, torrent_path = publish(Path(FILENAME).stem, PAYLOAD)
             seed.add(feed, torrent_path)
             wait_for("source qBittorrent hash check", lambda: seed.info(torrent_hash), lambda row: row.get("progress") == 1)
@@ -139,7 +158,8 @@ def run(binary, qb, root, library, feed, publish, *, check_marker=False):
     wait_for("primary qBittorrent to close before restart", lambda: ports_closed(primary), bool)
 
     # 此时原始种源已退出。私有种子没有 tracker 或 Web Seed，空接收端只连接重新启动的主下载器。
-    with primary.running(), app() as restarted, receiver.running():
+    receiver_run = occupy_peer_port(receiver, listen=True) if check_marker else receiver.running()
+    with primary.running(), app() as restarted, receiver_run:
         job = wait_for("completed torrent restored after restart", lambda: primary.info(torrent_hash),
                        lambda row: row.get("progress") == 1)
         if not Path(job["content_path"]).samefile(source):

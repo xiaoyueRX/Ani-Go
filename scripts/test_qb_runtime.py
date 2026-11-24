@@ -8,6 +8,7 @@ import http.cookiejar
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import sqlite3
@@ -72,6 +73,33 @@ class QB:
         if self.request("torrents/add", {"urls": feed_url + torrent_path, "savepath": str(self.downloads)}).strip() == b"Fails.":
             raise RuntimeError("qBittorrent rejected the local torrent")
 
+    def ensure_peer_listener(self):
+        last_id = -1
+        failures = []
+
+        def bind_event():
+            nonlocal last_id
+            rows = json.loads(self.request(f"log/main?last_known_id={last_id}"))
+            if rows:
+                last_id = rows[-1]["id"]
+            for row in reversed(rows):
+                # qB 日志正文会翻译，监听回执中的协议、端口和类型在各语言中一致。
+                port = re.search(r"\bTCP/(\d+)\b", row["message"])
+                if row["type"] in (2, 8) and port and int(port[1]) == self.peer_port and HOST in row["message"]:
+                    return row
+            return None
+
+        for attempt in range(3):
+            event = wait_for(f"qBittorrent's TCP bind result for {HOST}:{self.peer_port}", bind_event, bool, timeout=8)
+            if event["type"] == 2:  # INFO，进程已成功监听。
+                return
+            failures.append(event["message"])
+            if attempt < 2:  # CRITICAL，进程明确报告绑定失败。
+                port = free_port()
+                self.request("app/setPreferences", {"json": json.dumps({"listen_port": port})})
+                self.peer_port = port
+        raise RuntimeError("qBittorrent could not bind its peer listener: " + " | ".join(failures))
+
     @contextmanager
     def running(self):
         args = [self.program, "--profile=" + str(self.profile),
@@ -87,6 +115,7 @@ class QB:
                 except URLError:
                     return False
             wait_for("private qBittorrent Web UI", login, bool, timeout=45)
+            self.ensure_peer_listener()
             # 四个私有种子必须能同时上传，避免默认三个上传名额把新一集排在队尾。
             self.request("app/setPreferences", {"json": json.dumps({"queueing_enabled": False})})
             yield self
