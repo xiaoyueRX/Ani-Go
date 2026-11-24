@@ -33,9 +33,9 @@ func Init(dbPath string) error {
 		separator = "&"
 	}
 	var err error
+	// 单连接下，事务与后台查询共享 GORM 的预编译缓存会互相等待连接和语句。
 	DB, err = gorm.Open(sqlite.Open(dbPath+separator+"_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"), &gorm.Config{
-		PrepareStmt: true, // 复用预编译语句缓存，降低 SQLite 解析开销与 CPU 峰值
-		Logger:      logger.Default.LogMode(logger.Warn),
+		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		return err

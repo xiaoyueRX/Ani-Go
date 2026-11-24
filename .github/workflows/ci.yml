@@ -61,6 +61,8 @@ jobs:
           go build -trimpath -ldflags="-s -w -X main.version=ci-$GITHUB_SHA" -o "$binary" .
           if [[ "$TARGET_OS" == windows ]]; then py=python; else py=python3; fi
           "$py" scripts/test_platform_runtime.py "./$binary"
+      - name: Edit a subscription while its background reader waits for SQLite
+        run: go test -v -count=1 -run '^TestUpdateSubscriptionWhileFirstReadWaitsForConnection$' ./internal/database
       - name: Upgrade an official v0.7.0 installation and restore its data
         if: ${{ !cancelled() && steps.application.outcome == 'success' }}
         env:
