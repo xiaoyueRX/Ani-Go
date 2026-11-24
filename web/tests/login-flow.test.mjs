@@ -15,9 +15,25 @@ function loadWith(file, deps, globals = {}) {
   return exports
 }
 
+test('路由依赖清单标识与实际导入的页面一致', async () => {
+  // 让 VM 中的显式动态导入返回模块路径，避免单元测试执行 Vue 页面及其网络操作。
+  const components = new Proxy({}, {
+    get: (_, path) => ({ __esModule: true, default: path.replace('../views/', 'src/views/') }),
+  })
+  const { routes } = loadWith('router/routes.ts', components)
+  const { createRouter, createMemoryHistory } = require('vue-router')
+  const router = createRouter({ routes, history: createMemoryHistory() })
+  for (const record of router.getRoutes()) {
+    const load = record.components?.default
+    if (load) assert.equal((await load()).default, record.meta.sourceModule, record.path)
+  }
+  assert.deepEqual(router.resolve('/settings').matched.map(record => record.meta.sourceModule),
+    ['src/views/Layout.vue', 'src/views/SettingsPage.vue'])
+})
+
 test('登出状态打开下载深链接会保留原始路径、查询与片段', () => {
   let guard
-  loadWith('router/index.ts', { 'vue-router': {
+  loadWith('router/index.ts', { './routes': { routes: [] }, 'vue-router': {
     createWebHistory() {}, createRouter: () => ({ beforeEach: fn => { guard = fn } }),
   } }, { localStorage: { getItem: () => null } })
   const next = guard({ path: '/downloads', fullPath: '/downloads?from=home#tasks' })

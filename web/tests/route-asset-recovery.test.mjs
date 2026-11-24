@@ -8,7 +8,7 @@ function pending() {
   return { promise, resolve }
 }
 
-function browser(t, currentPath = '/subscriptions') {
+function browser(t, currentPath = '/subscriptions', bindViews = false) {
   const old = '/assets/index-aaaaaaaa.js', next = '/assets/index-bbbbbbbb.js'
   const doc = entry => ({ querySelector: () => entry ? { getAttribute: () => entry } : null })
   const hooks = {}
@@ -36,7 +36,12 @@ function browser(t, currentPath = '/subscriptions') {
     }
   }
   const globals = {
-    window, document: { ...doc(old), addEventListener: (_event, listener) => { hooks.linkError = listener } },
+    window, document: {
+      querySelector: selector => selector.startsWith('meta')
+        ? (bindViews ? { getAttribute: () => 'sha256-' + 'A'.repeat(43) + '=' } : null)
+        : doc(old).querySelector(),
+      addEventListener: (_event, listener) => { hooks.linkError = listener },
+    },
     HTMLLinkElement: Link, location, sessionStorage: storage,
     fetch: (...args) => {
       calls.push(args)
@@ -69,7 +74,8 @@ function browser(t, currentPath = '/subscriptions') {
   const records = new Map()
   function begin(fullPath) {
     const path = new URL(fullPath, location.origin).pathname.replace(/^\/subscriptions\/\d+$/, '/subscriptions/:id')
-    if (!records.has(path)) records.set(path, { path })
+    const sources = { '/settings': 'SettingsPage', '/search': 'Search', '/downloads': 'Downloads' }
+    if (!records.has(path)) records.set(path, bindViews ? { path, meta: { sourceModule: 'src/views/' + sources[path] + '.vue' } } : { path })
     const to = { fullPath, matched: [records.get(path)] }
     hooks.before?.(to)
     return to
@@ -81,6 +87,7 @@ function browser(t, currentPath = '/subscriptions') {
   }
   return {
     old, begin, fail, hooks, calls, loads, window, history, jumps,
+    manifest: data => assets.get('/route-manifest.json')?.resolve(Response.json(data)),
     failedLink: (path, rel = 'modulepreload') => hooks.linkError?.({ target: new Link(path, rel) }),
     asset: (path, type, status = 200) => assets.get(path).resolve(new Response('file', { status, headers: { 'Content-Type': type } })),
     reload: () => installAssetRecovery(router),
@@ -363,5 +370,71 @@ test('重取失败模块期间改选暖页，不会被迟到的资源导航打�
   b.hooks.after(b.begin('/downloads'))
   b.asset(js, 'application/javascript')
   await settle()
+  assert.deepEqual(b.loads, [])
+})
+
+const sharedJS = '/assets/timer-123abcd.js'
+const settingsJS = '/assets/SettingsPage-456abcd.js'
+const searchJS = '/assets/Search-789abcd.js'
+const testManifest = {
+  'index.html': { file: 'assets/index-aaaaaaaa.js', src: 'index.html', isEntry: true },
+  'src/views/Search.vue': { file: searchJS.slice(1), src: 'src/views/Search.vue', isDynamicEntry: true, imports: ['_timer.js'] },
+  '_timer.js': { file: sharedJS.slice(1) },
+}
+async function searchAfterOutage(b) {
+  b.fail(b.begin('/settings'))
+  b.failedLink(settingsJS)
+  b.failedLink(sharedJS)
+  b.respond(b.old)
+  await settle()
+  b.fail(b.begin('/search'))
+  b.failedLink(searchJS)
+  b.offline()
+  await settle()
+  b.fail(b.begin('/search'))
+  b.respond(b.old)
+  await settle()
+}
+
+test('搜索恢复忽略无关设置文件，保留以前就失败的共享依赖', async t => {
+  const b = browser(t, '/subscriptions', true)
+  await searchAfterOutage(b)
+  assert.equal(b.calls.at(-1)[0], '/route-manifest.json')
+  b.manifest(testManifest)
+  await settle()
+  assert.deepEqual(b.calls.filter(([path]) => path.startsWith('/assets/')).map(([path]) => path), [sharedJS, searchJS])
+  b.asset(searchJS, 'text/javascript')
+  b.asset(sharedJS, 'text/javascript', 503)
+  await settle()
+  assert.deepEqual(b.loads, [])
+  b.fail(b.begin('/search'))
+  await settle()
+  b.asset(sharedJS, 'text/javascript')
+  await settle()
+  assert.deepEqual(b.loads, [['assign', '/search']])
+  assert.equal(b.calls.filter(([path]) => path === '/route-manifest.json').length, 1)
+})
+
+test('拿不到本构建的准确清单时须重新验证全部实际失败文件', async t => {
+  const b = browser(t, '/subscriptions', true)
+  await searchAfterOutage(b)
+  b.manifest({ ...testManifest, 'index.html': { file: 'assets/index-other.js', isEntry: true } })
+  await settle()
+  assert.deepEqual(b.calls.filter(([path]) => path.startsWith('/assets/')).map(([path]) => path), [settingsJS, sharedJS, searchJS])
+  b.asset(settingsJS, 'text/javascript', 503)
+  b.asset(sharedJS, 'text/javascript')
+  b.asset(searchJS, 'text/javascript')
+  await settle()
+  assert.deepEqual(b.loads, [])
+})
+
+test('清单在途时用户已切入暖页，迟到的清单不再发起资产请求或整页导航', async t => {
+  const b = browser(t, '/subscriptions', true)
+  await searchAfterOutage(b)
+  assert.equal(b.calls.at(-1)[0], '/route-manifest.json')
+  b.hooks.after(b.begin('/downloads'))
+  b.manifest(testManifest)
+  await settle()
+  assert.equal(b.calls.filter(([path]) => path.startsWith('/assets/')).length, 0)
   assert.deepEqual(b.loads, [])
 })

@@ -7,6 +7,66 @@ function entryScript(doc: Document) {
   return src && /^\/assets\/index-[\w-]+\.js$/.test(src) ? src : null
 }
 
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function localKey(value: unknown): value is string {
+  return typeof value === 'string' && /^[\w.-]+(?:\/[\w.-]+)*$/.test(value)
+    && !value.split('/').some(part => part === '.' || part === '..')
+}
+
+function asset(path: unknown, suffix: '.js' | '.css'): path is string {
+  return typeof path === 'string' && path.endsWith(suffix) && /^assets\/[\w.-]+-[\w-]+\.(?:js|css)$/.test(path)
+}
+
+function staticAssets(manifest: unknown, sources: string[], original: string) {
+  if (!object(manifest)) return
+  const entry = manifest['index.html']
+  if (!object(entry) || entry.isEntry !== true || entry.file !== original.slice(1)) return
+  for (const source of sources) {
+    const chunk = manifest[source]
+    if (!object(chunk) || chunk.src !== source || chunk.isDynamicEntry !== true) return
+  }
+
+  const files = new Set<string>()
+  const visited = new Set<string>()
+  const queue = ['index.html', ...sources]
+  while (queue.length) {
+    const key = queue.pop()!
+    if (visited.has(key)) continue
+    visited.add(key)
+    const chunk = Object.hasOwn(manifest, key) && manifest[key]
+    if (!object(chunk) || !asset(chunk.file, '.js')) return
+    const styles = chunk.css === undefined ? [] : chunk.css
+    const imports = chunk.imports === undefined ? [] : chunk.imports
+    if (!Array.isArray(styles) || !styles.every(path => asset(path, '.css'))) return
+    if (!Array.isArray(imports) || !imports.every(localKey)) return
+    files.add('/' + chunk.file)
+    for (const css of styles) files.add('/' + css)
+    // dynamicImports 是其它用户操作才会加载的模块，不是渲染当前页面的前置依赖。
+    for (const dep of imports) queue.push(dep)
+  }
+  return files
+}
+
+// 首次恢复时才取清单。完整性校验绑定当前文档的构建，校验失败则沿用全量复验。
+export function routeAssetScope(original: string, integrity?: string | null) {
+  let manifest: Promise<unknown> | undefined
+  return async (sources: unknown[]) => {
+    if (!integrity || !/^sha256-[A-Za-z0-9+/]{43}=$/.test(integrity) || !('integrity' in Request.prototype)) return
+    if (!sources.length || !sources.every((key): key is string => localKey(key) && key.startsWith('src/views/') && key.endsWith('.vue'))) return
+    const request = manifest ??= fetch('/route-manifest.json', {
+      cache: 'no-store', redirect: 'error', integrity, signal: AbortSignal.timeout(5000),
+    }).then(response => {
+      if (response.ok && response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() === 'application/json') return response.json()
+    }).catch(() => undefined)
+    const files = staticAssets(await request, sources, original)
+    if (!files && manifest === request) manifest = undefined
+    return files
+  }
+}
+
 type EntryState = 'changed' | 'same' | 'unavailable' | 'unverified'
 
 interface RouteFailure {
@@ -34,7 +94,8 @@ function revisit(history: RouterHistory, pop: Traversal, current: () => boolean,
 }
 
 // WebKit 会跨文档复用失败的 modulepreload，包含路由模块的相对依赖。
-function trackFailedPreloads() {
+function trackFailedPreloads(original: string) {
+  const assetScope = routeAssetScope(original, document.querySelector('meta[name="anigo-route-manifest"]')?.getAttribute('content'))
   const failed = new Map<string, Promise<boolean> | null>()
   document.addEventListener('error', ({ target }) => {
     if (!(target instanceof HTMLLinkElement)) return
@@ -59,8 +120,12 @@ function trackFailedPreloads() {
     } catch { return false }
   }
 
-  return async () => {
+  return async (to: RouteLocationNormalized, current: () => boolean) => {
+    if (!failed.size) return true
+    const required = await assetScope(to.matched.map(record => record.meta?.sourceModule))
+    if (!current()) return false
     const results = await Promise.all(Array.from(failed, ([path, pending]) => {
+      if (required && !required.has(path)) return true
       if (pending) return pending
       const request = refetch(path).then(ok => {
         if (ok) failed.delete(path)
@@ -78,7 +143,7 @@ export function installAssetRecovery(router: Router) {
   const original = entryScript(document)
   if (!original) return
 
-  const restorePreloads = trackFailedPreloads()
+  const restorePreloads = trackFailedPreloads(original)
   const failures = new WeakSet<Error>()
   const history = router.options.history
   let nextTraversal: Traversal | undefined
@@ -159,7 +224,7 @@ export function installAssetRecovery(router: Router) {
     try {
       if (sessionStorage.getItem(recoveryKey)) return
     } catch { return }
-    if (entry === 'same' && (!await restorePreloads() || active !== intent)) return
+    if (entry === 'same' && (!await restorePreloads(to, () => active === intent) || active !== intent)) return
     function load(replace: boolean) {
       // 新文档成功进入页面才解除标记，避免混合部署反复刷新。
       try { sessionStorage.setItem(recoveryKey, '1') } catch { return }
