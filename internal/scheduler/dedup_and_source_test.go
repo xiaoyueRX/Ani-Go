@@ -66,6 +66,37 @@ func TestHexInfoHashDeduplicationIsCaseInsensitive(t *testing.T) {
 	if !isEpisodeExists(lowerV2) {
 		t.Fatalf("isEpisodeExists(%q) = false，期望命中 64 位十六进制哈希", lowerV2)
 	}
+
+	// 验证补全阶段 prefetchKnownReleases 对大小写十六进制哈希的预加载去重（不依赖 OriginKey 与 URL）。
+	historyItems := []core.TorrentItem{
+		{
+			Title:    "Series [01-02]",
+			URL:      "https://example.org/history-unique.torrent",
+			InfoHash: lowerHash,
+		},
+		{
+			Title:    "Series [03-04]",
+			URL:      "https://example.org/history-unique-v2.torrent",
+			InfoHash: lowerV2,
+		},
+	}
+	known := prefetchKnownReleases(context.Background(), historyItems)
+	if !known.hexHashes[lowerHash] {
+		t.Fatalf("prefetchKnownReleases 未命中大写已存哈希 %q 的小写变体 %q", upperHash, lowerHash)
+	}
+	if !known.hexHashes[lowerV2] {
+		t.Fatalf("prefetchKnownReleases 未命中 64 位大写已存哈希 %q 的小写变体 %q", upperV2, lowerV2)
+	}
+	s = Scheduler{
+		source:     pipelineSource{history: historyItems},
+		downloader: dl,
+	}
+	if err := s.supplementOne(context.Background(), sub); err != nil {
+		t.Fatalf("supplementOne 返回意外错误: %v", err)
+	}
+	if dl.calls.Load() != 0 {
+		t.Fatalf("supplementOne 应对大小写不同的十六进制哈希去重，实际调用下载器 %d 次", dl.calls.Load())
+	}
 }
 
 func TestNonFileListerBoundSingleFileOrganizesWithoutJoiningFilenameTwice(t *testing.T) {

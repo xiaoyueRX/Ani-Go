@@ -1236,6 +1236,7 @@ func countStalledEpisodes(subID uint, timeout time.Duration) int {
 	var count int64
 	database.DB.Model(&database.Episode{}).
 		Where("subscription_id = ?", subID).
+		Where(database.StalledEpisodePredicate).
 		Where("(status = 'pending' AND created_at < ?) OR (status = 'downloading' AND download_started_at < ?)", cutoff, cutoff).
 		Count(&count)
 	return int(count)
@@ -1243,6 +1244,9 @@ func countStalledEpisodes(subID uint, timeout time.Duration) int {
 
 // batchStalledCounts 批量获取多个订阅的超时剧集数
 func batchStalledCounts(subIDs []uint, timeout time.Duration) map[uint]int {
+	if len(subIDs) == 0 {
+		return map[uint]int{}
+	}
 	cutoff := time.Now().Add(-timeout)
 	type stalledResult struct {
 		SubscriptionID uint
@@ -1252,6 +1256,7 @@ func batchStalledCounts(subIDs []uint, timeout time.Duration) map[uint]int {
 	database.DB.Model(&database.Episode{}).
 		Select("subscription_id, count(*) as count").
 		Where("subscription_id IN ?", subIDs).
+		Where(database.StalledEpisodePredicate).
 		Where("(status = 'pending' AND created_at < ?) OR (status = 'downloading' AND download_started_at < ?)", cutoff, cutoff).
 		Group("subscription_id").
 		Find(&results)

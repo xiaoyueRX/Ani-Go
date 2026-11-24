@@ -182,3 +182,28 @@ func TestIsTaskReadyForSeedCleanup(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanSatisfiedSeedsChecksThresholdsBeforeFilter(t *testing.T) {
+	mock := &mockDownloader{
+		tasks: []core.DownloadTask{
+			{Hash: "short-time", Name: "short-time", Progress: 1.0, Status: "uploading", Ratio: 5.0, SeedingTime: 30},
+			{Hash: "low-ratio", Name: "low-ratio", Progress: 1.0, Status: "uploading", Ratio: 0.5, SeedingTime: 500},
+			{Hash: "eligible", Name: "eligible", Progress: 1.0, Status: "uploading", Ratio: 2.0, SeedingTime: 500},
+		},
+	}
+
+	var checked []string
+	cleaned, err := CleanSatisfiedSeeds(context.Background(), mock, 100*time.Second, 1.0, func(task core.DownloadTask) bool {
+		checked = append(checked, task.Hash)
+		return true
+	})
+	if err != nil {
+		t.Fatalf("CleanSatisfiedSeeds 失败: %v", err)
+	}
+	if cleaned != 1 || len(mock.deleted) != 1 || mock.deleted[0] != "eligible" {
+		t.Fatalf("期望仅清理 eligible，实际 cleaned=%d deleted=%v", cleaned, mock.deleted)
+	}
+	if len(checked) != 1 || checked[0] != "eligible" {
+		t.Fatalf("未满足做种时长或分享率的任务不应触发过滤回调，实际 checked=%v", checked)
+	}
+}

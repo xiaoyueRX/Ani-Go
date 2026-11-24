@@ -20,6 +20,12 @@ var DB *gorm.DB
 // OrganizerQueuePredicate 与部分索引共用固定状态，让 SQLite 能识别队列条件。
 const OrganizerQueuePredicate = "status IN ('downloaded', 'renaming')"
 
+// DownloadQueuePredicate 与部分索引共用活动任务和待绑定条件，让空载下载轮询无需扫描已整理历史。
+const DownloadQueuePredicate = "status IN ('downloading', 'submitting', 'retrying', 'downloaded') OR (status = 'organized' AND (torrent_hash = '' OR (torrent_hash >= 'url:' AND torrent_hash < 'url;')))"
+
+// StalledEpisodePredicate 与部分索引共用超时统计的待查状态。
+const StalledEpisodePredicate = "status IN ('pending', 'downloading')"
+
 func Init(dbPath string) error {
 	// 普通磁盘路径可能位于首次挂载的空卷内。
 	if dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file:") {
@@ -72,6 +78,17 @@ func Init(dbPath string) error {
 			WHERE deleted_at IS NULL AND (` + OrganizerQueuePredicate + ` OR move_source_path <> '')`).Error; err != nil {
 			return err
 		}
+		if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_episode_download_work ON episodes(status, deleted_at)
+			WHERE deleted_at IS NULL AND (` + DownloadQueuePredicate + `)`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_episode_stalled_work ON episodes(subscription_id, status)
+			WHERE deleted_at IS NULL AND ` + StalledEpisodePredicate).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_episode_client_hash_nocase ON episodes(torrent_hash COLLATE NOCASE)`).Error; err != nil {
+			return err
+		}
 		if err := migrateEpisodeLabels(tx, legacyEpisodeStatus); err != nil {
 			return err
 		}
@@ -82,6 +99,11 @@ func Init(dbPath string) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	// 收集已有表的索引统计信息（sqlite_stat1），避免大库在 MULTI-INDEX OR / IN 查询时误选 deleted_at 索引。
+	if err := DB.Exec("PRAGMA optimize=0x10002").Error; err != nil {
+		log.Printf("⚠️ 执行数据库查询统计优化失败: %v", err)
 	}
 
 	log.Printf("✅ 数据库初始化完成: %s", dbPath)

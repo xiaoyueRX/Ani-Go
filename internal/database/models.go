@@ -67,7 +67,7 @@ type Episode struct {
 	SourceModTime      int64 `json:"-"`
 	DownloadRoot       string
 	MagnetURL          string
-	TorrentURL         string
+	TorrentURL         string `gorm:"index"`
 	OriginalName       string
 	MoveSourcePath     string `gorm:"index:idx_episode_move_pending,where:move_source_path <> ''" json:"-"`
 	MoveSourceModTime  int64  `json:"-"`
@@ -85,7 +85,7 @@ type Episode struct {
 type DownloadRecord struct {
 	gorm.Model
 	TorrentHash string `gorm:"uniqueIndex;not null"`
-	TorrentURL  string
+	TorrentURL  string `gorm:"index"`
 	SourceName  string
 	AddedAt     time.Time
 }

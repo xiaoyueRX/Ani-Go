@@ -50,23 +50,23 @@ func CleanSatisfiedSeeds(ctx context.Context, dl core.Downloader, minSeedTime ti
 			continue
 		}
 
-		// 2. 自定义安全检查（必须满足外部业务约束，如媒体库已整理入库）
-		if canDelete != nil && !canDelete(task) {
-			continue
-		}
-
-		// 3. 检查做种时长限制（含 SeedingTime == 0 的刚完成任务，不得绕过最小做种时长）
+		// 2. 先检查做种时长与分享率门槛，未达标任务不触发数据库归属查询
 		if minSeedTime > 0 {
 			if time.Duration(task.SeedingTime)*time.Second < minSeedTime {
 				continue
 			}
 		}
 
-		// 4. 检查分享率限制
+		// 3. 检查分享率限制
 		if minRatio > 0 {
 			if task.Ratio < minRatio {
 				continue
 			}
+		}
+
+		// 4. 自定义安全检查（必须满足外部业务约束，如媒体库已整理入库）
+		if canDelete != nil && !canDelete(task) {
+			continue
 		}
 
 		// 5. 执行安全删除：强制传入 deleteFiles = false（保留已下载与硬链接的媒体文件）

@@ -205,7 +205,7 @@ func normalizeAnimeType(t string) string {
 func savedTemplate(key string) string {
 	if database.DB != nil {
 		var setting database.Setting
-		if err := database.DB.Where("key = ?", key).First(&setting).Error; err == nil {
+		if res := database.DB.Where("key = ?", key).Limit(1).Find(&setting); res.Error == nil && res.RowsAffected > 0 {
 			return setting.Value
 		}
 	}
@@ -258,7 +258,7 @@ func (o *TVOrganizer) isHardLinkEnabled() bool {
 	useHardLink := o.useHardLink
 	if database.DB != nil {
 		var hlSetting database.Setting
-		if err := database.DB.Where("key = ?", "USE_HARDLINK").First(&hlSetting).Error; err == nil {
+		if res := database.DB.Where("key = ?", "USE_HARDLINK").Limit(1).Find(&hlSetting); res.Error == nil && res.RowsAffected > 0 {
 			useHardLink = (hlSetting.Value == "true" || hlSetting.Value == "1")
 		}
 	}

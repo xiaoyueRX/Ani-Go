@@ -745,20 +745,33 @@ func (m *NotifyManager) handleFailure(n Notifier, msg *NotifyMessage, renderedCo
 	}
 }
 
-// retryScheduler 重试调度器
+// retryScheduler 重试调度器；无待重试消息时停止定时器以避免空载定时唤醒。
 func (m *NotifyManager) retryScheduler() {
 	defer m.wg.Done()
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	var ticker *time.Ticker
+	var tickC <-chan time.Time
+	defer func() {
+		if ticker != nil {
+			ticker.Stop()
+		}
+	}()
 
 	var pending []*NotifyMessage
 	for {
+		if len(pending) == 0 && ticker != nil {
+			ticker.Stop()
+			ticker = nil
+			tickC = nil
+		} else if len(pending) > 0 && ticker == nil {
+			ticker = time.NewTicker(5 * time.Second)
+			tickC = ticker.C
+		}
 		select {
 		case <-m.ctx.Done():
 			return
 		case msg := <-m.retryChan:
 			pending = append(pending, msg)
-		case now := <-ticker.C:
+		case now := <-tickC:
 			remaining := pending[:0]
 			for _, msg := range pending {
 				if !now.Before(msg.NextRunAt) {

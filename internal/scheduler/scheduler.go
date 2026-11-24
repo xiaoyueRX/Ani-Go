@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -453,7 +454,7 @@ func (s *Scheduler) processRSSFeed(ctx context.Context, items []core.TorrentItem
 // downloading 状态的 episodes 建内存索引，再与 qB 任务列表匹配，
 // 将每轮 N+1 次查询降为 1 次，消除无谓的 DB 往返与日志噪音
 func (s *Scheduler) pollDownloads(ctx context.Context) {
-	if s.downloader == nil {
+	if s.downloader == nil || database.DB == nil {
 		return
 	}
 	if !s.pollDownloadsRunning.CompareAndSwap(false, true) {
@@ -461,17 +462,25 @@ func (s *Scheduler) pollDownloads(ctx context.Context) {
 	}
 	defer s.pollDownloadsRunning.Store(false)
 
+	var episodes []database.Episode
+	// 显式限定队列状态，确保 SQLite 优先命中部分索引 idx_episode_download_work。
+	if err := database.DB.WithContext(ctx).
+		Where("status IN ('downloading', 'submitting', 'retrying', 'downloaded', 'organized')").
+		Where(database.DownloadQueuePredicate).
+		Find(&episodes).Error; err != nil {
+		log.Printf("查询待核对的剧集失败: %v", err)
+		return
+	}
+	if len(episodes) == 0 {
+		return
+	}
+
 	tasks, err := s.downloader.List(ctx)
 	if err != nil {
 		log.Printf("❌ 获取下载列表失败: %v", err)
 		return
 	}
 
-	var episodes []database.Episode
-	if err := database.DB.Where("status IN ? OR ((torrent_hash = '' OR torrent_hash LIKE 'url:%') AND status IN ?)", []string{"downloading", "submitting", "retrying", "downloaded"}, []string{"organized"}).Find(&episodes).Error; err != nil {
-		log.Printf("查询待核对的剧集失败: %v", err)
-		return
-	}
 	index := newDownloadIndex(tasks, episodes)
 	for _, ep := range episodes {
 		task, ok := index.match(ep)
@@ -974,6 +983,7 @@ func (s *Scheduler) scanSubscription(ctx context.Context, sub database.Subscript
 		})
 	}
 
+	candidates := make([]core.TorrentItem, 0, len(items))
 	for _, item := range items {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -990,14 +1000,17 @@ func (s *Scheduler) scanSubscription(ctx context.Context, sub database.Subscript
 				}
 			}
 		}
-		if !matchesHistoryRelease(item, sub, filter) {
-			continue
+		if matchesHistoryRelease(item, sub, filter) {
+			candidates = append(candidates, item)
 		}
+	}
 
-		if item.URL != "" && isDuplicate(item.URL) {
-			continue
+	known := prefetchKnownReleases(ctx, candidates)
+	for _, item := range candidates {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if item.InfoHash != "" && isEpisodeExists(item.InfoHash) {
+		if known.hasURL(item.URL) || known.hasHash(item.InfoHash) {
 			continue
 		}
 
@@ -1011,6 +1024,7 @@ func (s *Scheduler) scanSubscription(ctx context.Context, sub database.Subscript
 		if !added {
 			continue
 		}
+		known.mark(item)
 
 		if s.bus != nil {
 			s.bus.Publish(core.Event{
@@ -1209,6 +1223,122 @@ func isEpisodeExists(infoHash string) bool {
 		Where("origin_key = ? OR torrent_hash = ?", strings.ToLower(trimmed), trimmed).
 		Count(&count)
 	return count > 0
+}
+
+type knownReleaseSet struct {
+	urls       map[string]bool
+	originKeys map[string]bool
+	hexHashes  map[string]bool
+	rawHashes  map[string]bool
+}
+
+// prefetchKnownReleases 批量预查待补全候选中已下载的 URL 与哈希集合，消除循环内 N+1 查询。
+func prefetchKnownReleases(ctx context.Context, items []core.TorrentItem) knownReleaseSet {
+	set := knownReleaseSet{
+		urls:       make(map[string]bool),
+		originKeys: make(map[string]bool),
+		hexHashes:  make(map[string]bool),
+		rawHashes:  make(map[string]bool),
+	}
+	if database.DB == nil || len(items) == 0 {
+		return set
+	}
+	var urls, origins, hexes, raws []string
+	seenURL, seenOrigin, seenHex, seenRaw := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, item := range items {
+		if item.URL != "" && !seenURL[item.URL] {
+			seenURL[item.URL] = true
+			urls = append(urls, item.URL)
+		}
+		h := strings.TrimSpace(item.InfoHash)
+		if h == "" {
+			continue
+		}
+		lower := strings.ToLower(h)
+		if !seenOrigin[lower] {
+			seenOrigin[lower] = true
+			origins = append(origins, lower)
+		}
+		if magnet.IsHexInfoHash(h) {
+			if !seenHex[lower] {
+				seenHex[lower] = true
+				hexes = append(hexes, lower)
+			}
+		} else if !seenRaw[h] {
+			seenRaw[h] = true
+			raws = append(raws, h)
+		}
+	}
+	db := database.DB.WithContext(ctx)
+	for chunk := range slices.Chunk(urls, 200) {
+		var found []string
+		if err := db.Model(&database.DownloadRecord{}).Where("torrent_url IN ?", chunk).Pluck("torrent_url", &found).Error; err == nil {
+			for _, u := range found {
+				set.urls[u] = true
+			}
+		}
+	}
+	for chunk := range slices.Chunk(origins, 200) {
+		var found []string
+		if err := db.Model(&database.Episode{}).Where("origin_key IN ?", chunk).Pluck("origin_key", &found).Error; err == nil {
+			for _, o := range found {
+				set.originKeys[o] = true
+			}
+		}
+	}
+	for chunk := range slices.Chunk(hexes, 200) {
+		var found []string
+		if err := db.Model(&database.Episode{}).Where("torrent_hash COLLATE NOCASE IN ?", chunk).Pluck("torrent_hash", &found).Error; err == nil {
+			for _, h := range found {
+				set.hexHashes[strings.ToLower(h)] = true
+			}
+		}
+	}
+	for chunk := range slices.Chunk(raws, 200) {
+		var found []string
+		if err := db.Model(&database.Episode{}).Where("torrent_hash IN ?", chunk).Pluck("torrent_hash", &found).Error; err == nil {
+			for _, h := range found {
+				set.rawHashes[h] = true
+			}
+		}
+	}
+	return set
+}
+
+func (k knownReleaseSet) hasURL(raw string) bool {
+	return raw != "" && k.urls[raw]
+}
+
+func (k knownReleaseSet) hasHash(infoHash string) bool {
+	trimmed := strings.TrimSpace(infoHash)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if k.originKeys[lower] {
+		return true
+	}
+	if magnet.IsHexInfoHash(trimmed) {
+		return k.hexHashes[lower]
+	}
+	return k.rawHashes[trimmed]
+}
+
+func (k knownReleaseSet) mark(item core.TorrentItem) {
+	if item.URL != "" {
+		k.urls[item.URL] = true
+	}
+	trimmed := strings.TrimSpace(item.InfoHash)
+	if trimmed == "" {
+		return
+	}
+	lower := strings.ToLower(trimmed)
+	k.originKeys[lower] = true
+	if magnet.IsHexInfoHash(trimmed) {
+		k.hexHashes[lower] = true
+	} else {
+		k.rawHashes[trimmed] = true
+	}
 }
 
 // 自动订阅：从 Mikan RSS 未匹配的种子自动创建订阅
@@ -1502,7 +1632,7 @@ func (s *Scheduler) pollSeedCleanup(ctx context.Context) {
 		}
 
 		var eps []database.Episode
-		if err := database.DB.Where("(LOWER(torrent_hash) = LOWER(?) OR torrent_hash = ?) AND deleted_at IS NULL", cleanHash, cleanHash).Find(&eps).Error; err != nil || len(eps) == 0 {
+		if err := database.DB.Select("status", "final_path", "organized_at").Where("torrent_hash = ? COLLATE NOCASE", cleanHash).Find(&eps).Error; err != nil || len(eps) == 0 {
 			// 未在本地剧集库中找到对应记录（非本系统管理或尚未关联），为安全起见绝不删除未受管种子
 			return false
 		}
