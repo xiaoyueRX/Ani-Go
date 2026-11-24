@@ -470,10 +470,14 @@ def check_cold_rollback_tab(browser, candidate, legacy, root):
     wait = WebDriverWait(browser, 20)
     with running(candidate, live / "home", environment(live), service):
         candidate_entry, unloaded = downloads_assets(service)
-        browser.get(base + "/login")
+        browser.get(base + "/subscriptions")
+        # 直接等受保护页面回到登录，避免 WebKit 在两份登录文档更替时返回旧输入框。
+        wait.until(lambda b: b.execute_script("""
+            return location.pathname === '/login'
+                && new URLSearchParams(location.search).get('redirect') === '/subscriptions'
+        """))
         browser.execute_script("localStorage.setItem('lang','zh');"
                                "localStorage.setItem('ani-go-setup-wizard-dismissed','true')")
-        browser.get(base + "/subscriptions")
         user = wait.until(EC.element_to_be_clickable((By.ID, "login-username")))
         fill_login_field(browser, user, "admin")
         fill_login_field(browser, browser.find_element(By.ID, "login-password"), password)
@@ -499,8 +503,16 @@ def check_cold_rollback_tab(browser, candidate, legacy, root):
     with running(candidate, live / "home", environment(live), service):
         navigate("/settings")
         settings_page = EC.visibility_of_element_located((By.XPATH, "//main//h1[normalize-space(.)='系统设置']"))
-        wait.until(lambda b: urlsplit(b.current_url).path == "/settings" and settings_page(b),
-                   "Retrying the failed settings navigation did not work after reconnecting")
+        try:
+            wait.until(lambda b: urlsplit(b.current_url).path == "/settings" and settings_page(b))
+        except TimeoutException:
+            state = browser.execute_script("""
+                return {path: location.pathname, heading: document.querySelector('main h1')?.innerText ?? null,
+                    originalDocument: !!window.rollbackSourceDocument, ready: document.readyState,
+                    entries: performance.getEntriesByType('resource').map(e => new URL(e.name).pathname)
+                        .filter(path => path === '/' || path.startsWith('/assets/SettingsPage-')).slice(-8)}
+            """)
+            raise RuntimeError(f"The settings navigation did not recover after reconnecting: {state}") from None
         check_session()
         document_changed = browser.execute_script("return !window.rollbackSourceDocument")
         browser.back()
