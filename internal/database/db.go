@@ -101,9 +101,15 @@ func Init(dbPath string) error {
 		return err
 	}
 
-	// 收集已有表的索引统计信息（sqlite_stat1），避免大库在 MULTI-INDEX OR / IN 查询时误选 deleted_at 索引。
-	if err := DB.Exec("PRAGMA optimize=0x10002").Error; err != nil {
-		log.Printf("⚠️ 执行数据库查询统计优化失败: %v", err)
+	// 使用 analysis_limit 限制采样页数后执行 ANALYZE（兼容 modernc.org/sqlite v1.23.1 的 SQLite 3.41.2），
+	// 为已有数据表生成 sqlite_stat1，避免大库在 MULTI-INDEX OR / IN / COLLATE NOCASE 查询时误选 deleted_at 索引。
+	if err := DB.Connection(func(tx *gorm.DB) error {
+		if err := tx.Exec("PRAGMA analysis_limit=400").Error; err != nil {
+			return err
+		}
+		return tx.Exec("ANALYZE").Error
+	}); err != nil {
+		log.Printf("⚠️ 执行数据库查询统计分析失败: %v", err)
 	}
 
 	log.Printf("✅ 数据库初始化完成: %s", dbPath)
