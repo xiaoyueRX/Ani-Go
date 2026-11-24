@@ -33,6 +33,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/notifier"
 	v2 "github.com/xiaoyueRX/Ani-Go/internal/notifier/v2"
 	"github.com/xiaoyueRX/Ani-Go/internal/organizer"
+	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 	"github.com/xiaoyueRX/Ani-Go/internal/plugin"
 	"github.com/xiaoyueRX/Ani-Go/internal/search"
 	"github.com/xiaoyueRX/Ani-Go/internal/source"
@@ -81,7 +82,7 @@ type createSubscriptionRequest struct {
 	MikanID          string   `json:"mikan_id"`
 	MetadataID       string   `json:"metadata_id"`
 	MetadataProvider string   `json:"metadata_provider"`
-	Season           int      `json:"season"`
+	Season           *int     `json:"season"`
 	TitleCN          string   `json:"title_cn"`
 	BangumiID        string   `json:"bangumi_id"`
 	SubgroupName     string   `json:"subgroup_name"`
@@ -94,7 +95,7 @@ type createSubscriptionRequest struct {
 }
 
 type batchSubscriptionItem struct {
-	Season           int      `json:"season"`
+	Season           *int     `json:"season"`
 	MikanID          string   `json:"mikan_id"`
 	MetadataID       string   `json:"metadata_id"`
 	MetadataProvider string   `json:"metadata_provider"`
@@ -332,6 +333,13 @@ func (s *Server) handleGetSubgroups(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, names)
 }
 
+func newSubscriptionSeason(title string, requested *int) int {
+	if requested == nil {
+		return parser.CatalogSeason(title)
+	}
+	return *requested
+}
+
 // handleBatchCreateSubscriptions 批量创建订阅
 // POST /api/subscriptions/batch
 func (s *Server) handleBatchCreateSubscriptions(w http.ResponseWriter, r *http.Request) {
@@ -364,7 +372,8 @@ func (s *Server) handleBatchCreateSubscriptions(w http.ResponseWriter, r *http.R
 			continue
 		}
 
-		if item.Season < 0 {
+		season := newSubscriptionSeason(item.TitleCN, item.Season)
+		if season < 0 {
 			resp.Failed = append(resp.Failed, batchSubResult{Title: item.TitleCN, Error: "季号不能为负数"})
 			continue
 		}
@@ -373,7 +382,7 @@ func (s *Server) handleBatchCreateSubscriptions(w http.ResponseWriter, r *http.R
 
 		sub := database.Subscription{
 			TitleCN:          item.TitleCN,
-			Season:           item.Season,
+			Season:           season,
 			BangumiID:        item.BangumiID,
 			SubgroupName:     subgroup,
 			AllowedSubgroups: allowed,
@@ -443,7 +452,8 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if req.Season < 0 {
+	season := newSubscriptionSeason(req.TitleCN, req.Season)
+	if season < 0 {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "季号不能为负数"})
 		return
 	}
@@ -451,7 +461,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 
 	sub := database.Subscription{
 		TitleCN:          req.TitleCN,
-		Season:           req.Season,
+		Season:           season,
 		MikanID:          req.MikanID,
 		MetadataID:       req.MetadataID,
 		MetadataProvider: req.MetadataProvider,
@@ -1535,14 +1545,15 @@ func (s *Server) handleTestCustomRegex(w http.ResponseWriter, r *http.Request) {
 
 	info := source.ParseMikanTitle(req.Title)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"title":      info.Title,
-		"raw_title":  info.RawTitle,
-		"subgroup":   info.Subgroup,
-		"season":     info.Season,
-		"episode":    info.Episode,
-		"resolution": info.Resolution,
-		"is_batch":   info.IsBatch,
-		"is_special": info.IsSpecial,
+		"title":          info.Title,
+		"raw_title":      info.RawTitle,
+		"subgroup":       info.Subgroup,
+		"season":         info.Season,
+		"catalog_season": parser.CatalogSeason(req.Title),
+		"episode":        info.Episode,
+		"resolution":     info.Resolution,
+		"is_batch":       info.IsBatch,
+		"is_special":     info.IsSpecial,
 	})
 }
 

@@ -961,6 +961,7 @@ export default {
       preparing: 'Reading release titles…',
       title: 'Series title',
       season: 'Season',
+      autoSeason: 'From title',
       group: 'Release group',
       resolution: 'Resolution',
       any: 'Any',

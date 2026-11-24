@@ -157,7 +157,7 @@ components:
         mikan_id: {type: string}
         metadata_id: {type: string}
         metadata_provider: {type: string}
-        season: {type: integer, minimum: 0, default: 1, description: 省略或填 0 按第 1 季创建。}
+        season: {type: integer, minimum: 0, description: 省略时按作品标题中的明确季号创建。标题未标季或有冲突时选择第 1 季；显式填 0 也按第 1 季创建。}
         title_cn: {type: string}
         bangumi_id: {type: string}
         subgroup_name: {type: string}
@@ -206,7 +206,7 @@ components:
         metadata_id: {type: string}
         metadata_provider: {type: string}
         title_cn: {type: string}
-        season: {type: integer, minimum: 0, default: 1, description: 省略或填 0 按第 1 季创建。}
+        season: {type: integer, minimum: 0, description: 省略时按作品标题中的明确季号创建。标题未标季或有冲突时选择第 1 季；显式填 0 也按第 1 季创建。}
         bangumi_id: {type: string}
         cover_url: {type: string}
         subgroups:
@@ -2835,6 +2835,7 @@ paths:
                   raw_title: {type: string}
                   subgroup: {type: string}
                   season: {type: integer}
+                  catalog_season: {type: integer, minimum: 1, description: 该作品标题用于新建订阅时的默认季号。}
                   episode: {type: number}
                   resolution: {type: string}
                   is_batch: {type: boolean}

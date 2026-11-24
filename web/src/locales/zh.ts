@@ -962,6 +962,7 @@ export default {
       preparing: '正在解析发布标题…',
       title: '作品名',
       season: '季数',
+      autoSeason: '按作品名识别',
       group: '字幕组',
       resolution: '分辨率',
       any: '不限',

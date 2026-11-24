@@ -17,6 +17,7 @@ import { bindDialogSession } from '../utils/dialogSession'
 interface ParsedRelease {
   title: string
   season: number
+  catalog_season?: number
   episode: number
   subgroup: string
   resolution: string
@@ -27,7 +28,7 @@ interface ReviewRow {
   id: number
   items: ReviewRelease[]
   title: string
-  season: number
+  season: number | ''
   subgroup: string
   resolution: string
   rss: string
@@ -44,7 +45,7 @@ const sending = ref(false)
 const saved = ref(0)
 const session = bindDialogSession(localStorage, () => dialog.value?.close())
 const ready = computed(() => !loading.value && !sending.value && rows.value.length > 0 && rows.value.every(row =>
-  row.title.trim() && Number.isSafeInteger(row.season) && row.season >= 1))
+  row.title.trim() && (row.season === '' ? !!row.items[0]?.bangumi_id : Number.isSafeInteger(row.season) && row.season >= 1)))
 
 function key(row: ReviewRow) {
   const item = row.items[0]
@@ -58,7 +59,7 @@ async function prepare() {
   for (const [index, item] of props.items.entries()) {
     if (!session.active()) return
     let parsed = parsedTitles.get(item.title)
-    if (!item.bangumi_id && parsed === undefined) {
+    if (parsed === undefined) {
       try {
         const { data } = await request.post<ParsedRelease>('/settings/custom-regex/test', { title: item.title }, session.options)
         parsed = data
@@ -70,11 +71,12 @@ async function prepare() {
     }
     const candidate = typeof parsed?.title === 'string' ? parsed.title.trim() : ''
     const recognized = parsed && (parsed.episode > 0 || parsed.is_batch || parsed.is_special) && candidate !== item.title.trim()
+    const season = item.bangumi_id ? parsed?.catalog_season : parsed?.season
     const row: ReviewRow = {
       id: index, items: [item], title: item.bangumi_id ? item.title : recognized ? candidate : '',
-      season: parsed && Number.isSafeInteger(parsed.season) && parsed.season > 0 ? parsed.season : 1,
-      subgroup: typeof parsed?.subgroup === 'string' ? parsed.subgroup : '',
-      resolution: typeof parsed?.resolution === 'string' ? parsed.resolution : '', rss: '', error: '',
+      season: typeof season === 'number' && Number.isSafeInteger(season) && season > 0 ? season : item.bangumi_id ? '' : 1,
+      subgroup: !item.bangumi_id && typeof parsed?.subgroup === 'string' ? parsed.subgroup : '',
+      resolution: !item.bangumi_id && typeof parsed?.resolution === 'string' ? parsed.resolution : '', rss: '', error: '',
     }
     const groupKey = row.title ? key(row) : 'release-' + index
     const prior = grouped.get(groupKey)
@@ -109,7 +111,7 @@ async function submit() {
     const item = row.items[0]!
     try {
       await request.post('/subscriptions', {
-        title_cn: row.title.trim(), season: row.season,
+        title_cn: row.title.trim(), season: row.season === '' ? undefined : row.season,
         bangumi_id: item.source === 'Mikan' ? undefined : item.bangumi_id || undefined,
         mikan_id: item.source === 'Mikan' ? item.bangumi_id || undefined : undefined,
         cover_url: item.cover_url || undefined, rss_url: row.rss.trim() || undefined,
@@ -159,7 +161,7 @@ onUnmounted(session.abort)
               <input v-model="row.title" required class="input input-bordered w-full" />
             </label>
             <label class="space-y-1 text-sm"><span>{{ t('search.review.season') }}</span>
-              <input v-model.number="row.season" required type="number" min="1" step="1" class="input input-bordered w-full" />
+              <input v-model.number="row.season" :required="!row.items[0]?.bangumi_id" :placeholder="row.items[0]?.bangumi_id ? t('search.review.autoSeason') : undefined" type="number" min="1" step="1" class="input input-bordered w-full" />
             </label>
           </div>
           <div class="grid grid-cols-2 gap-2">

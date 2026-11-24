@@ -105,3 +105,34 @@ test('批量确认绑定打开时的登录，换会话后不继续提交后续�
   assert.deepEqual(calls, ['original'])
   assert.equal(c.saved.value, 0)
 })
+
+test('目录作品审阅保留原片名、预填标题中的季号且允许明确选择第一季', async () => {
+  const saved=[]
+  const item={title:'星岛 第二季',source:'Mikan',bangumi_id:'42'}
+  const c=await setup([item,item],async (url,body)=>{
+    if (url.endsWith('/test')) return {data:{title:'星岛',season:1,catalog_season:2,subgroup:'unexpected',resolution:'1080p'}}
+    saved.push(body); return {data:{}}
+  })
+  assert.equal(c.rows.value.length,1)
+  assert.equal(c.rows.value[0].title,item.title)
+  assert.equal(c.rows.value[0].season,2)
+  assert.equal(c.rows.value[0].subgroup,'')
+  assert.equal(c.rows.value[0].resolution,'')
+  c.rows.value[0].season=1
+  await c.submit()
+  assert.equal(saved[0].season,1)
+  assert.equal(saved[0].title_cn,item.title)
+})
+
+test('目录预览不可用时保留片名，省略季号交给创建接口推断', async () => {
+  const saved=[]
+  const c=await setup([{title:'星岛 第二季',source:'Mikan',bangumi_id:'42'}],async (url,body)=>{
+    if (url.endsWith('/test')) throw Error('offline')
+    saved.push(body); return {data:{}}
+  })
+  assert.equal(c.rows.value[0].title,'星岛 第二季')
+  assert.equal(c.rows.value[0].season,'')
+  await c.submit()
+  assert.equal(saved.length,1)
+  assert.equal(saved[0].season,undefined)
+})
