@@ -9,6 +9,11 @@ function entryScript(doc: Document) {
 
 type EntryState = 'changed' | 'same' | 'unavailable' | 'unverified'
 
+interface RouteFailure {
+  unavailable: boolean
+  checking?: RouteLocationNormalized
+}
+
 interface Traversal {
   path: string
   position: number
@@ -28,23 +33,67 @@ function revisit(history: RouterHistory, pop: Traversal, current: () => boolean,
   else resume()
 }
 
+// WebKit 会跨文档复用失败的 modulepreload，包含路由模块的相对依赖。
+function trackFailedPreloads() {
+  const failed = new Map<string, Promise<boolean> | null>()
+  document.addEventListener('error', ({ target }) => {
+    if (!(target instanceof HTMLLinkElement)) return
+    const url = new URL(target.href)
+    if (url.origin !== location.origin || url.search || url.hash) return
+    if (!/^\/assets\/[\w.-]+-[\w-]+\.(js|css)$/.test(url.pathname)) return
+    const rel = url.pathname.endsWith('.js') ? 'modulepreload' : 'stylesheet'
+    if (target.rel === rel && !failed.has(url.pathname)) failed.set(url.pathname, null)
+  }, true)
+
+  async function refetch(path: string) {
+    try {
+      const response = await fetch(path, { cache: 'reload', redirect: 'error', signal: AbortSignal.timeout(15000) })
+      const type = response.headers.get('Content-Type')?.split(';')[0]?.trim().toLowerCase() ?? ''
+      const valid = path.endsWith('.css') ? type === 'text/css' : /^(?:text|application)\/(?:java|ecma)script$/.test(type)
+      if (!response.ok || !valid) {
+        await response.body?.cancel()
+        return false
+      }
+      await response.blob()
+      return true
+    } catch { return false }
+  }
+
+  return async () => {
+    const results = await Promise.all(Array.from(failed, ([path, pending]) => {
+      if (pending) return pending
+      const request = refetch(path).then(ok => {
+        if (ok) failed.delete(path)
+        else failed.set(path, null)
+        return ok
+      })
+      failed.set(path, request)
+      return request
+    }))
+    return results.every(ok => ok)
+  }
+}
+
 export function installAssetRecovery(router: Router) {
   const original = entryScript(document)
   if (!original) return
 
+  const restorePreloads = trackFailedPreloads()
   const failures = new WeakSet<Error>()
   const history = router.options.history
   let nextTraversal: Traversal | undefined
   let intent: { route: RouteLocationNormalized; pop?: Traversal; checked?: boolean } | undefined
   // 静态路由记录在各个 URL 参数间共享；同一标签的内存仅随路由种类增长。
-  const routeFailures = new WeakMap<RouteRecordNormalized, { unavailable: boolean }>()
+  const routeFailures = new WeakMap<RouteRecordNormalized, RouteFailure>()
   let checking: Promise<EntryState> | undefined
   let lastEntry: EntryState = 'unverified'
   let checkedUntil = 0
+  let checkedRoute: RouteRecordNormalized | undefined
 
-  function checkEntry() {
+  function checkEntry(record: RouteRecordNormalized) {
     if (checking) return checking
-    if (Date.now() < checkedUntil) return Promise.resolve(lastEntry)
+    // 新页面的模块也失败时要重新确认部署，先前页面的结果只用于限制它自身的重试频率。
+    if (checkedRoute === record && Date.now() < checkedUntil) return Promise.resolve(lastEntry)
     checking = fetch('/', { cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(5000) })
       .then(async (response): Promise<EntryState> => {
         if ([502, 503, 504].includes(response.status)) return 'unavailable'
@@ -55,6 +104,7 @@ export function installAssetRecovery(router: Router) {
       })
       .catch((): EntryState => 'unavailable')
       .then(result => {
+        checkedRoute = record
         lastEntry = result
         // 整站停服时，允许下一次主动导航立即重试。重复上报同一次导航仍只检查一次。
         checkedUntil = result === 'unavailable' ? 0 : Date.now() + 5000
@@ -92,8 +142,15 @@ export function installAssetRecovery(router: Router) {
     if (!record) return
     const failedRoute = routeFailures.get(record) ?? { unavailable: false }
     routeFailures.set(record, failedRoute)
-    const entry = await checkEntry()
-    if (entry === 'unavailable') failedRoute.unavailable = true
+    const anotherAttempt = !!failedRoute.checking
+    failedRoute.checking = to
+    let entry = await checkEntry(record)
+    if (entry === 'unavailable') {
+      failedRoute.unavailable = true
+      // 用户再次点击时旧请求尚未结束，新操作可以在旧连接失败后再确认一次。
+      if (anotherAttempt && active === intent) entry = await checkEntry(record)
+    }
+    if (failedRoute.checking === to) delete failedRoute.checking
     if (active !== intent) return
     // 浏览器会记住失败的动态导入。只有用户再次打开停服时失败的页面才恢复同一版本。
     if (entry !== 'changed' && !(entry === 'same' && failedRoute.unavailable)) return
@@ -102,6 +159,7 @@ export function installAssetRecovery(router: Router) {
     try {
       if (sessionStorage.getItem(recoveryKey)) return
     } catch { return }
+    if (entry === 'same' && (!await restorePreloads() || active !== intent)) return
     function load(replace: boolean) {
       // 新文档成功进入页面才解除标记，避免混合部署反复刷新。
       try { sessionStorage.setItem(recoveryKey, '1') } catch { return }

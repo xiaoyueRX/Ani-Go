@@ -28,9 +28,23 @@ function browser(t, currentPath = '/subscriptions') {
     page.resolve(result)
     page = pending()
   }
+  const assets = new Map()
+  class Link {
+    constructor(path, rel) {
+      this.href = new URL(path, location).href
+      this.rel = rel
+    }
+  }
   const globals = {
-    window, document: doc(old), location, sessionStorage: storage,
-    fetch: (...args) => { calls.push(args); return page.promise },
+    window, document: { ...doc(old), addEventListener: (_event, listener) => { hooks.linkError = listener } },
+    HTMLLinkElement: Link, location, sessionStorage: storage,
+    fetch: (...args) => {
+      calls.push(args)
+      if (args[0] === '/') return page.promise
+      const asset = pending()
+      assets.set(args[0], asset)
+      return asset.promise
+    },
     DOMParser: class { parseFromString(entry) { return doc(entry) } },
   }
   for (const [key, value] of Object.entries(globals)) {
@@ -67,6 +81,8 @@ function browser(t, currentPath = '/subscriptions') {
   }
   return {
     old, begin, fail, hooks, calls, loads, window, history, jumps,
+    failedLink: (path, rel = 'modulepreload') => hooks.linkError?.({ target: new Link(path, rel) }),
+    asset: (path, type, status = 200) => assets.get(path).resolve(new Response('file', { status, headers: { 'Content-Type': type } })),
     reload: () => installAssetRecovery(router),
     respond(entry = next, status = 200) { finish(new Response(entry, { status, headers: { 'Content-Type': 'text/html' } })) },
     offline() { finish(Promise.reject(new TypeError('offline'))) },
@@ -271,6 +287,81 @@ test('站点检查迟于对应页面成功时，不会重新标记已经打开�
   await settle()
   b.fail(b.begin('/subscriptions/3'))
   b.respond(b.old)
+  await settle()
+  assert.deepEqual(b.loads, [])
+})
+
+test('其它页面刚校验过相同入口时，新路由首次模块失败仍检查换版', async t => {
+  const b = browser(t)
+  b.fail(b.begin('/settings'))
+  b.respond(b.old)
+  await settle()
+  b.hooks.after(b.begin('/search'))
+  assert.deepEqual(b.loads, [])
+  b.fail(b.begin('/downloads'))
+  assert.equal(b.calls.length, 2)
+  b.respond()
+  await settle()
+  assert.deepEqual(b.loads, [['assign', '/downloads']])
+})
+
+for (const online of [true, false]) {
+  test('再次点击只共享到上一轮断网结果后，只重新检查一次首页：' + online, async t => {
+    const b = browser(t), path = '/settings'
+    b.fail(b.begin(path))
+    b.fail(b.begin(path))
+    assert.equal(b.calls.length, 1)
+    b.offline()
+    await settle()
+    assert.equal(b.calls.length, 2)
+    if (online) b.respond(b.old)
+    else b.offline()
+    await settle()
+    assert.equal(b.calls.length, 2)
+    assert.deepEqual(b.loads, online ? [['assign', path]] : [])
+  })
+}
+
+test('同版重连只复取报告失败的同源构建文件，全部有效后才加载目标', async t => {
+  const b = browser(t), to = '/settings', js = '/assets/one-abc123.js', css = '/assets/theme-def456.css'
+  b.fail(b.begin(to))
+  for (const path of [js, js, 'https://other.test/assets/one-abc123.js', '/api/plugin.js', js + '?s=x']) b.failedLink(path)
+  b.failedLink(css, 'stylesheet')
+  b.offline()
+  await settle()
+  b.fail(b.begin(to))
+  b.respond(b.old)
+  await settle()
+  assert.deepEqual(b.calls.slice(2).map(([path, opt]) => [path, opt.cache]), [[js, 'reload'], [css, 'reload']])
+  b.asset(css, 'text/css')
+  b.asset(js, 'text/html')
+  await settle()
+  assert.deepEqual(b.loads, [])
+  b.fail(b.begin(to))
+  await settle()
+  b.asset(js, 'text/javascript', 503)
+  await settle()
+  assert.deepEqual(b.loads, [])
+  b.fail(b.begin(to))
+  await settle()
+  b.asset(js, 'application/javascript; charset=utf-8')
+  await settle()
+  assert.deepEqual(b.loads, [['assign', to]])
+  assert.equal(b.calls.filter(([path]) => path === css).length, 1)
+})
+
+test('重取失败模块期间改选暖页，不会被迟到的资源导航打断', async t => {
+  const b = browser(t), js = '/assets/one-abc123.js'
+  b.fail(b.begin('/settings'))
+  b.failedLink(js)
+  b.offline()
+  await settle()
+  b.fail(b.begin('/settings'))
+  b.respond(b.old)
+  await settle()
+  assert.equal(b.calls.at(-1)[0], js)
+  b.hooks.after(b.begin('/downloads'))
+  b.asset(js, 'application/javascript')
   await settle()
   assert.deepEqual(b.loads, [])
 })
