@@ -700,6 +700,12 @@ export default {
     supplement: '补全',
   },
   detail: {
+    tasks: {
+      check: '核对下载任务', checking: '正在核对下载任务…', checkedAt: '{time} 已核对',
+      present: '任务存在', missing: '下载器中未找到任务', unknown: '任务状态待确认',
+      failed: '暂时无法核对任务，请检查下载器连接后重试。',
+      restoreHelp: '恢复缺失任务时，请在下载器中使用原种子、原目录和原选集，校验已有文件后回到这里重新核对。'
+    },
     files: {
       selected: '核对所选库文件', all: '核对全部已整理文件', checking: '正在核对库文件…',
       result: '库文件核对 · {count} 项 · {time}', currentPath: '未设置卷标识，本次仅核对当前媒体库路径。',

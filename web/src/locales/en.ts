@@ -699,6 +699,12 @@ export default {
     supplement: 'Supplement',
   },
   detail: {
+    tasks: {
+      check: 'Check download tasks', checking: 'Checking download tasks…', checkedAt: 'Checked at {time}',
+      present: 'Task found', missing: 'Task missing from downloader', unknown: 'Task presence unconfirmed',
+      failed: 'Could not check tasks. Check the downloader connection and try again.',
+      restoreHelp: 'To recover a missing task, add the original torrent in your downloader with its original directory and file selection. Verify the files, then check again here.'
+    },
     files: {
       selected: 'Check selected library files', all: 'Check all organized files', checking: 'Checking library files…',
       result: 'Library file check · {count} items · {time}', currentPath: 'No volume ID is configured. This check covers the current library path.',

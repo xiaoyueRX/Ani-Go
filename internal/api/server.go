@@ -268,6 +268,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/subscriptions/batch", s.handleBatchCreateSubscriptions)
 	mux.HandleFunc("GET /api/subgroups", s.handleGetSubgroups)
 	mux.HandleFunc("GET /api/subscriptions/{id}", s.handleGetSubscription)
+	mux.HandleFunc("GET /api/subscriptions/{id}/download-tasks", s.handleSubscriptionDownloadTasks)
 	mux.HandleFunc("PUT /api/subscriptions/{id}", s.handleUpdateSubscription)
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", s.handleDeleteSubscription)
 	mux.HandleFunc("POST /api/subscriptions/batch-delete", s.handleBatchDeleteSubscriptions)

@@ -81,6 +81,49 @@ function proxyImage(url: string | undefined): string {
 const sub = ref<Subscription | null>(null)
 const episodes = ref<Episode[]>([])
 const loading = ref(true)
+type TaskState = 'present' | 'missing' | 'unknown'
+function boundTaskKey(ep: Episode) {
+  if (ep.status !== 'downloading' && ep.status !== 'downloaded') return ''
+  const key = ep.torrent_hash?.trim().toLowerCase() || ''
+  return key.startsWith('url:') ? '' : key
+}
+const taskScope = computed(() => [...new Set(episodes.value.map(boundTaskKey).filter(Boolean))].sort().join(','))
+const taskStates = ref<Record<string, TaskState>>({})
+const taskCheckFailed = ref(false)
+const checkingTasks = ref(false)
+const checkedTasksAt = ref(0)
+const hasMissingTask = computed(() => Object.values(taskStates.value).includes('missing'))
+let taskRequest: AbortController | undefined
+function episodeTaskState(ep: Episode) {
+  return taskStates.value[boundTaskKey(ep)]
+}
+async function checkDownloadTasks() {
+  taskRequest?.abort()
+  const controller = new AbortController()
+  taskRequest = controller
+  taskStates.value = {}
+  taskCheckFailed.value = false
+  checkedTasksAt.value = 0
+  checkingTasks.value = !!taskScope.value
+  if (!checkingTasks.value) return
+  try {
+    const { data } = await request.get(`/subscriptions/${id}/download-tasks`, { signal: controller.signal })
+    if (!controller.signal.aborted) {
+      if (!data?.tasks || typeof data.tasks !== 'object' || Array.isArray(data.tasks)) {
+        taskCheckFailed.value = true
+        return
+      }
+      taskStates.value = data.tasks
+      checkedTasksAt.value = Date.now()
+    }
+  } catch {
+    if (!controller.signal.aborted) taskCheckFailed.value = true
+  } finally {
+    if (!controller.signal.aborted) checkingTasks.value = false
+  }
+}
+// 同一批任务只在打开详情时核对一次，定时刷新剧集列表不重复读取下载器。
+watch(taskScope, () => { void checkDownloadTasks() })
 const error = ref('')
 const actionError = ref('')
 let detailRead = 0
@@ -525,6 +568,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', refreshVisibleDetail)
 })
 onUnmounted(() => {
+  taskRequest?.abort()
   clearFileReport()
   ++detailRead
   window.clearInterval(refreshTimer)
@@ -761,11 +805,17 @@ onUnmounted(() => {
             <h2 class="text-2xl font-black tracking-tight italic uppercase">{{ t('detail.logs.title') }}</h2>
             <span class="text-[10px] font-black uppercase tracking-widest text-base-content/20 mt-1">{{ t('detail.logs.count', { count: episodes.length }) }}</span>
          </div>
-         <div v-if="hasOrganizedFiles" class="px-4">
-           <button type="button" class="btn btn-sm btn-ghost" :disabled="verifyingFiles || bulkActionLoading || updatingEps.size > 0" @click="verifyFiles('organized')">
+         <div v-if="hasOrganizedFiles || taskScope" class="flex flex-wrap items-center gap-2 px-4">
+           <button v-if="taskScope" class="btn btn-sm btn-ghost" type="button" @click="checkDownloadTasks" :disabled="checkingTasks">
+             <RefreshCw :size="16" /> {{ t(checkingTasks ? 'detail.tasks.checking' : 'detail.tasks.check') }}
+           </button>
+           <span v-if="checkedTasksAt" class="text-xs text-base-content/70">{{ t('detail.tasks.checkedAt', { time: new Date(checkedTasksAt).toLocaleTimeString(locale) }) }}</span>
+           <button v-if="hasOrganizedFiles" type="button" class="btn btn-sm btn-ghost" :disabled="verifyingFiles || bulkActionLoading || updatingEps.size > 0" @click="verifyFiles('organized')">
              <FileCheck2 :size="16" /> {{ t('detail.files.all') }}
            </button>
          </div>
+         <p v-if="taskCheckFailed" role="status" class="px-4 text-sm text-warning">{{ t('detail.tasks.failed') }}</p>
+         <p v-if="hasMissingTask" role="status" class="px-4 text-sm">{{ t('detail.tasks.restoreHelp') }}</p>
          <p v-if="verifyingFiles" role="status" class="px-4 text-sm">{{ t('detail.files.checking') }}</p>
          <details v-if="fileReport" open class="rounded-2xl border border-base-300 bg-base-100 p-4 text-sm">
            <summary class="cursor-pointer font-semibold" aria-live="polite">{{ t('detail.files.result', { count: fileReport.rows.length, time: new Date(fileReport.checkedAt).toLocaleTimeString(locale) }) }}</summary>
@@ -890,9 +940,17 @@ onUnmounted(() => {
                             <p v-else-if="ep.review_kind === 'episode_identity' || ep.review_kind === 'movie_selection'" class="text-xs text-base-content/70">{{ t('detail.review.missingSource') }}</p>
                           </div>
                         </div>
+                        <div v-else-if="episodeTaskState(ep) === 'missing'" class="min-w-32 text-xs text-warning">
+                          <span>{{ t('detail.tasks.missing') }}</span>
+                          <code class="block select-all break-all text-base-content/70">{{ ep.torrent_hash }}</code>
+                        </div>
+                        <span v-else-if="boundTaskKey(ep) && episodeTaskState(ep) !== 'present'" class="text-xs text-base-content/70">
+                          {{ t(checkingTasks ? 'detail.tasks.checking' : 'detail.tasks.unknown') }}
+                        </span>
                         <span v-else-if="ep.is_stalled" class="flex items-center gap-1.5 text-warning font-black uppercase text-[9px] tracking-widest bg-warning/5 px-3 py-1.5 rounded-full border border-warning/10">
                           <AlertTriangle :size="12" /> {{ t('detail.logs.integrity.stalled') }}
                         </span>
+                        <span v-else-if="episodeTaskState(ep) === 'present'" class="text-xs text-base-content/70">{{ t('detail.tasks.present') }}</span>
                         <span v-else class="text-[10px] font-black opacity-10 tracking-widest uppercase pl-2">{{ t('detail.logs.integrity.verified') }}</span>
                       </td>
                       <td>

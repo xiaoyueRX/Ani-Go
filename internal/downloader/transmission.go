@@ -121,8 +121,7 @@ func (t *Transmission) callWithRetry(ctx context.Context, method string, args ma
 	sid := t.sessionID
 	t.mu.Unlock()
 
-	trTagCounter.Add(1)
-	tag := int(trTagCounter.Load())
+	tag := int(trTagCounter.Add(1))
 	reqBody := trRequest{Method: method, Arguments: args, Tag: tag}
 	bodyBytes, _ := json.Marshal(reqBody)
 
@@ -187,8 +186,11 @@ func (t *Transmission) callWithRetry(ctx context.Context, method string, args ma
 	}
 
 	var trResp trResponse
-	if err := json.NewDecoder(resp.Body).Decode(&trResp); err != nil {
+	if err := decodeSingleJSON(resp.Body, &trResp); err != nil {
 		return trResponse{}, fmt.Errorf("Transmission RPC 响应解析失败: %w", err)
+	}
+	if trResp.Tag != 0 && trResp.Tag != tag {
+		return trResponse{}, fmt.Errorf("Transmission 响应标识与请求不符")
 	}
 	if trResp.Result != "success" {
 		return trResp, fmt.Errorf("Transmission RPC 返回错误: result=%s", trResp.Result)

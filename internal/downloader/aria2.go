@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -100,7 +102,7 @@ func (a *Aria2) callWithRetry(ctx context.Context, method string, params []inter
 	// 如果设置了 token，在 params 前追加 "token:" 前缀
 	// aria2 RPC 格式: method(params[0]=token:secret, params[1], ...)
 	callParams := make([]interface{}, 0, len(params)+1)
-	if a.token != "" {
+	if a.token != "" && method != "system.multicall" {
 		callParams = append(callParams, "token:"+a.token)
 	}
 	callParams = append(callParams, params...)
@@ -153,8 +155,14 @@ func (a *Aria2) callWithRetry(ctx context.Context, method string, params []inter
 	}
 
 	var arResp aria2Resp
-	if err := json.NewDecoder(resp.Body).Decode(&arResp); err != nil {
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(&arResp); err != nil {
 		return nil, fmt.Errorf("Aria2 RPC 响应解析失败: %w", err)
+	}
+	if method == "system.multicall" {
+		if _, tail := dec.Token(); tail != io.EOF || arResp.ID != id {
+			return nil, fmt.Errorf("Aria2 批量查询响应无效")
+		}
 	}
 	if arResp.Error != nil {
 		return nil, fmt.Errorf("Aria2 RPC 错误 [%d]: %s", arResp.Error.Code, arResp.Error.Message)
@@ -514,4 +522,153 @@ func max(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// system.multicall 要求将密钥放在各个子调用内。
+type aria2PresenceCall struct {
+	gid    string
+	Method string `json:"methodName"`
+	Params []any  `json:"params"`
+}
+
+func (a *Aria2) presenceCall(method string, params ...any) aria2PresenceCall {
+	if a.token != "" {
+		params = append([]any{"token:" + a.token}, params...)
+	}
+	return aria2PresenceCall{Method: method, Params: params}
+}
+
+// successfulAriaResult 解开 multicall 单项成功结果；错误项是 JSON 对象。
+func successfulAriaResult(raw json.RawMessage, dst any) bool {
+	var values []json.RawMessage
+	return json.Unmarshal(raw, &values) == nil && len(values) == 1 &&
+		!bytes.Equal(bytes.TrimSpace(values[0]), []byte("null")) && json.Unmarshal(values[0], dst) == nil
+}
+
+const ariaPresencePageSize = 256
+
+// 只有三个队列的结果完整且包含有效任务，才能以查询不到为依据报告缺失。
+func recordAriaHashPresence(replies []json.RawMessage, hashes, result map[string]bool) bool {
+	answered, complete := false, true
+	for i, reply := range replies {
+		var tasks []aria2Status
+		if !successfulAriaResult(reply, &tasks) {
+			complete = false
+			continue
+		}
+		answered = true
+		if i > 0 && len(tasks) >= ariaPresencePageSize {
+			complete = false
+		}
+		for _, task := range tasks {
+			if task.GID == "" || task.Status == "" {
+				complete = false
+				continue
+			}
+			if task.Status == "removed" {
+				continue
+			}
+			hash := strings.ToLower(task.InfoHash)
+			if hash == "" {
+				// 只有 GID 的任务可能仍在获取种子元数据，无法排除与所查哈希的关系。
+				complete = false
+				continue
+			}
+			if _, wanted := hashes[hash]; !wanted {
+				continue
+			}
+			if len(task.FollowedBy) > 0 {
+				// 元数据任务可能还在历史里，实际下载的子任务归属尚不明确。
+				hashes[hash] = false
+			} else {
+				result[hash] = true
+			}
+		}
+	}
+	if complete {
+		for hash, canConfirmMissing := range hashes {
+			if canConfirmMissing && !result[hash] {
+				result[hash] = false
+			}
+		}
+	}
+	return answered
+}
+
+func recordAriaGIDPresence(gid string, reply json.RawMessage, result map[string]bool) bool {
+	var task aria2Status
+	if successfulAriaResult(reply, &task) && strings.EqualFold(task.GID, gid) && task.Status != "" {
+		if len(task.FollowedBy) == 0 {
+			result[gid] = task.Status != "removed"
+		}
+		return true
+	}
+	var fault struct {
+		Code    int
+		Message string
+	}
+	if json.Unmarshal(reply, &fault) == nil && fault.Code == 1 && strings.EqualFold(fault.Message, "GID "+gid+" is not found") {
+		result[gid] = false
+		return true
+	}
+	return false
+}
+
+// TaskPresence 只读检查绑定标识。省略的键表示下载器未提供足够信息。
+func (a *Aria2) TaskPresence(ctx context.Context, ids []string) (map[string]bool, error) {
+	keys := []string{"gid", "infoHash", "status", "followedBy"}
+	hashes := make(map[string]bool)
+	var calls []aria2PresenceCall
+	for _, input := range ids {
+		id := strings.ToLower(strings.TrimSpace(input))
+		if len(id) != 16 && len(id) != 40 {
+			continue
+		}
+		if _, err := hex.DecodeString(id); err != nil {
+			continue
+		}
+		if len(id) == 16 {
+			call := a.presenceCall("aria2.tellStatus", id, keys)
+			call.gid = id
+			calls = append(calls, call)
+		} else {
+			hashes[id] = true
+		}
+	}
+	if len(hashes) > 0 {
+		// 三个队列在同一次 RPC 中读取；限制历史查询的字段及条数。
+		queues := []aria2PresenceCall{
+			a.presenceCall("aria2.tellActive", keys),
+			a.presenceCall("aria2.tellWaiting", 0, ariaPresencePageSize, keys),
+			a.presenceCall("aria2.tellStopped", 0, ariaPresencePageSize, keys),
+		}
+		calls = append(queues, calls...)
+	}
+	result := make(map[string]bool)
+	var queues []json.RawMessage
+	answered := false
+	for batch := range slices.Chunk(calls, 64) {
+		raw, err := a.call(ctx, "system.multicall", []any{batch})
+		if err != nil {
+			return nil, err
+		}
+		var replies []json.RawMessage
+		if json.Unmarshal(raw, &replies) != nil || len(replies) != len(batch) {
+			return nil, fmt.Errorf("Aria2 任务核对响应不完整")
+		}
+		for i, call := range batch {
+			if call.gid == "" {
+				queues = append(queues, replies[i])
+			} else if recordAriaGIDPresence(call.gid, replies[i], result) {
+				answered = true
+			}
+		}
+	}
+	if len(queues) > 0 && recordAriaHashPresence(queues, hashes, result) {
+		answered = true
+	}
+	if len(calls) > 0 && !answered {
+		return nil, fmt.Errorf("Aria2 未返回可确认的任务状态")
+	}
+	return result, nil
 }

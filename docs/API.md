@@ -50,6 +50,7 @@ curl -fsS -H "Authorization: Bearer $jwt" "$base/api/plugins"
 | `POST` | `/api/subscriptions/batch` | JWT | 批量创建订阅（最多 20 部） |
 | `GET` | `/api/subgroups` | JWT | 已有字幕组去重列表 |
 | `GET` | `/api/subscriptions/{id}` | JWT | 订阅详情 + 剧集列表 |
+| `GET` | `/api/subscriptions/{id}/download-tasks` | JWT | 核对订阅中等待下载或整理的已绑定下载任务 |
 | `PUT` | `/api/subscriptions/{id}` | JWT | 部分更新订阅。省略 `custom_path` 保留指定下载目录，空字符串或 `null` 恢复下载器默认目录。 |
 | `DELETE` | `/api/subscriptions/{id}` | JWT | 删除订阅（`?delete_files=` 可选） |
 | `POST` | `/api/subscriptions/batch-delete` | JWT | 批量删除（最多 100 部） |
@@ -210,6 +211,10 @@ curl -fsS -H "Authorization: Bearer $jwt" -H 'Content-Type: application/json' \
 - 批量创建发送 `{"items":[…]}`，每批 1–20 项，各项可传 `season`，和单条创建采用相同的判重条件。按项读取 `success` 和 `failed`。单条或全量补全异步执行，202 表示已受理。全量补全最多同时处理三个订阅，同一订阅已有扫描时共享该次结果。
 - 批量删除与恢复订阅发送 `{"ids":[1,2]}`。删除剧集向所属订阅的 `episodes/batch-delete` 发送 `{"ids":[1],"delete_files":false}`，单次 1–1000 个剧集 ID。跨订阅选择返回 404。删除共享下载的文件时会返回 409；下载器执行失败返回 502。[删除与文件归属](../internal/api/episodes.go)
 - 写入手动标记时发送 `{"status":"completed"}`，可用值还有 `pending`、`downloading`、`failed`。发送 `{"status":""}` 可清除。成功响应中的 `status` 和 `manual_status` 均回显本次标记。读取订阅详情时，剧集的 `status` 是实际下载或整理状态，`manual_status` 是用户标记。整理进度和完结统计按实际状态计算。
+
+订阅详情打开时会通过 `GET /api/subscriptions/{id}/download-tasks` 核对状态为 `downloading` 或 `downloaded` 的已绑定任务；同种子的多个成员只查一次。返回的 `tasks` 对象以小写任务标识为键。值为 `present`（找到）、`missing`（当前下载器已确认没有该任务）或 `unknown`（任务标识或队列信息不足）。`502` 表示下载器连接或响应异常，`503` 表示当前下载器不可用。此检查只读；要恢复缺失项，请在下载器中使用原种子、原目录与选集校验已有文件，然后再次核对。
+
+The read-only download task check returns one result per bound task in the subscription. A `missing` result refers to the current downloader. `unknown`, HTTP 502 and HTTP 503 leave presence unconfirmed. To recover an original task, restore its torrent, directory and file selection in the downloader, verify the files, then check again.
 
 通过 `POST /api/subscriptions/{id}/verify-files` 发送 `{"ids":[12,18]}`，一次选择 1–100 条当前订阅记录。重复 ID 按首次出现次序返回一条结果。未知、已删除或其它订阅的 ID 使整批返回 404。请求只接受 ID；服务器根据当前媒体库设置和已保存的最终路径核对文件，不读取媒体内容。响应示例：
 

@@ -509,36 +509,42 @@ func (q *QBittorrent) IsAvailable(ctx context.Context) bool {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodGet, q.host+"/api/v2/app/version", nil)
+	resp, err := q.getWithSession(timeoutCtx, "/api/v2/app/version")
 	if err != nil {
 		return false
 	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent
+}
+
+// getWithSession 只重试一次失效会话；并发请求不能作废其他请求刚续签的会话。
+func (q *QBittorrent) getWithSession(ctx context.Context, endpoint string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, q.host+endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Referer", q.host)
-	for attempt := 0; attempt < 2; attempt++ {
-		if err := q.ensureLogin(timeoutCtx); err != nil {
-			return false
+	for attempt := 0; ; attempt++ {
+		if err := q.ensureLogin(ctx); err != nil {
+			return nil, err
 		}
 		q.loginMu.Lock()
 		session := q.sessionGen
 		q.loginMu.Unlock()
-		resp, err := q.httpClient.Do(req.Clone(timeoutCtx))
+		resp, err := q.httpClient.Do(req.Clone(ctx))
 		if err != nil {
-			return false
+			return nil, err
 		}
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
-			return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent
+		if attempt != 0 || (resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden) {
+			return resp, nil
 		}
-		if attempt == 0 {
-			// 服务重启可使未到期的 Cookie 失效；只作废本次探测使用的会话。
-			q.loginMu.Lock()
-			if q.sessionGen == session {
-				q.loggedIn = false
-			}
-			q.loginMu.Unlock()
+		resp.Body.Close()
+		q.loginMu.Lock()
+		if q.sessionGen == session {
+			q.loggedIn = false
 		}
+		q.loginMu.Unlock()
 	}
-	return false
 }
 
 // ensureLogin 确保已登录，如果未登录或 Cookie 过期则登录

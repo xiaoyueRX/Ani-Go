@@ -1359,6 +1359,36 @@ paths:
         '500': {description: 补全调度器未配置}
         '401': {$ref: '#/components/responses/LoginRequired'}
 
+  /subscriptions/{id}/download-tasks:
+    get:
+      tags: [Episodes]
+      summary: 核对当前下载器的任务 / Check bound download tasks
+      description: Read-only presence check for distinct bound tasks on downloading or downloaded episodes. Unknown means that the downloader could not confirm that identifier.
+      operationId: checkSubscriptionDownloadTasks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Task presence by lowercase identifier
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tasks]
+                properties:
+                  tasks:
+                    type: object
+                    additionalProperties: {type: string, enum: [present, missing, unknown]}
+        '400': {description: Invalid subscription ID}
+        '401': {$ref: '#/components/responses/LoginRequired'}
+        '404': {description: Subscription not found}
+        '500': {description: Could not read subscription records}
+        '502': {description: Downloader connection or response failed}
+        '503': {description: No supported downloader configured}
+
   /subscriptions/{id}/verify-files:
     post:
       tags: [Episodes]
