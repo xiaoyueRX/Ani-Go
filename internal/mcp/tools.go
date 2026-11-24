@@ -12,6 +12,7 @@ import (
 
 	"github.com/xiaoyueRX/Ani-Go/internal/core"
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 	"gorm.io/gorm"
 )
 
@@ -214,7 +215,7 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 				},
 				"season": {
 					Type:        "integer",
-					Description: "季号（默认为 1，范围 1-100）",
+					Description: "季号（1-100）。省略时使用标题中的明确季号，未标季或有冲突时默认为 1。",
 				},
 				"rss_url": {
 					Type:        "string",
@@ -244,9 +245,12 @@ func (s *Server) RegisterAnimeOpsTools(deps AnimeOpsDeps) {
 			return ErrorResult("番剧标题长度不能超过 255 个字符"), nil
 		}
 
-		season, _, err := parseBoundedIntArg(args, "season", 1, 1, 100, false)
+		season, hasSeason, err := parseBoundedIntArg(args, "season", 1, 1, 100, false)
 		if err != nil {
 			return ErrorResult("季号必须是 1~100 之间的整数"), nil
+		}
+		if !hasSeason {
+			season = parser.CatalogSeason(title)
 		}
 
 		rssURL, _, err := parseStringArg(args, "rss_url")

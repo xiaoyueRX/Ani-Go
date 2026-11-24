@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -963,5 +964,16 @@ func TestAllTools_ValidationNilGuardsAndSecurity(t *testing.T) {
 	}
 	if resOKCfg, _ := s.CallTool(ctx, "update_system_config", map[string]interface{}{"key": "TV_BASE_PATH", "value": "/media/Anime"}); resOKCfg.IsError {
 		t.Errorf("合法配置项 TV_BASE_PATH 更新失败: %+v", resOKCfg)
+	}
+
+	// 同一作品的明确季号与用户手动选择应当能分别保存。
+	for _, args := range []map[string]interface{}{{"title": "星岛 第二季"}, {"title": "星岛 第二季", "season": float64(1)}} {
+		if result, err := s.CallTool(ctx, "add_subscription", args); err != nil || result.IsError {
+			t.Fatalf("按目录标题或指定季号订阅失败: %v, %+v", err, result)
+		}
+	}
+	var seasons []int
+	if err := db.Model(&database.Subscription{}).Where("title_cn = ?", "星岛 第二季").Order("id").Pluck("season", &seasons).Error; err != nil || !slices.Equal(seasons, []int{2, 1}) {
+		t.Errorf("目录默认和显式季号应分别为 2、1，实际 %v，错误 %v", seasons, err)
 	}
 }

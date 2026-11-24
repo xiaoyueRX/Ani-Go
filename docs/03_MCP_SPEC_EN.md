@@ -16,7 +16,7 @@ Call `tools/list` for the exact parameter schemas available in a deployment. The
 | --- | --- |
 | `search_anime` | Search releases with `keyword` and optional `source` and `limit`. |
 | `list_subscriptions` | List subscriptions and progress with optional `enabled_only`, `limit` and `offset`. |
-| `add_subscription` | Create a subscription with `title` and optional `season`, `rss_url` and `subgroup`. The same title can be tracked in different seasons. A duplicate title and season returns a tool error. |
+| `add_subscription` | Create a subscription with `title` and optional `season`, `rss_url` and `subgroup`. If omitted, the season comes from an unambiguous season number in the title and otherwise defaults to season 1. The same title can be tracked in different seasons. A duplicate title and season returns a tool error. |
 | `remove_subscription` | Remove a subscription by `subscription_id`. |
 | `get_downloads` | Inspect the selected downloader, optionally filtering by `status` and paginating. |
 | `trigger_refresh` | Start historical supplements for enabled subscriptions in the background. |

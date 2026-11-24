@@ -16,7 +16,7 @@ Ani-Go 提供使用 HTTP + SSE 的 MCP 服务。初始化握手公布协议版�
 | --- | --- |
 | `search_anime` | 用 `keyword` 搜索资源，可传 `source`、`limit`。 |
 | `list_subscriptions` | 查看订阅及进度，可用 `enabled_only`、`limit`、`offset` 筛选与分页。 |
-| `add_subscription` | 用 `title` 创建订阅，可传 `season`、`rss_url`、`subgroup`。同标题同季返回工具错误，同标题可分季订阅。 |
+| `add_subscription` | 用 `title` 创建订阅，可传 `season`、`rss_url`、`subgroup`。省略 `season` 时采用标题中的明确季号，未标季或有冲突时默认为第一季。同标题同季返回工具错误，同标题可分季订阅。 |
 | `remove_subscription` | 按 `subscription_id` 取消订阅。 |
 | `get_downloads` | 查询当前下载器的队列，可按 `status` 筛选及分页。 |
 | `trigger_refresh` | 在后台为启用中的订阅触发历史补全。 |
