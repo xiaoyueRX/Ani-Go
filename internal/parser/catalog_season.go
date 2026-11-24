@@ -12,15 +12,15 @@ const catalogSeasonJoin = `\s*(?:[-~～–—/、,，+&至到和及]|and|to)\s*`
 var combinedCatalogSeasons = regexp.MustCompile(`(?i)(?:第\s*` + catalogCNNumber + `\s*季?` + catalogSeasonJoin + `(?:第\s*)?` + catalogCNNumber + `\s*季|(?:^|[^a-z0-9])(?:seasons?|s)\s*[0-9]{1,2}` + catalogSeasonJoin + `[0-9]{1,2}(?:$|[^a-z0-9]))`)
 var singleCNSeason = regexp.MustCompile(`^(?:[一二三四五六七八九]|[一二三四五六七八九]?十[一二三四五六七八九]?)$`)
 
-// CatalogSeason 只从作品标题中一致的明确季号推断新增订阅的季。模糊或合季标题沿用第一季默认值。
-func CatalogSeason(title string) int {
-	title = sanitizeControlRunes(truncateRunes(title, maxParserInputRunes))
-	if combinedCatalogSeasons.MatchString(title) {
-		return 1
+// unambiguousSeason 检查单个标题或路径片段中是否存在唯一一致的季号。
+// 遇到合季表达式、非法中文数字或互相冲突的季标记时标记为歧义。
+func unambiguousSeason(text string, minSeason int) (season int, explicit bool, ambiguous bool) {
+	text = sanitizeControlRunes(truncateRunes(text, maxParserInputRunes))
+	if combinedCatalogSeasons.MatchString(text) {
+		return 0, false, true
 	}
-	season := 0
 	for _, pattern := range []*regexp.Regexp{reSeasonNum, reSeasonCN, reTorrentSeason, reSeasonOrd, reTorrentSxxExx} {
-		for remaining := title; ; {
+		for remaining := text; ; {
 			match := pattern.FindStringSubmatchIndex(remaining)
 			if match == nil {
 				break
@@ -29,17 +29,31 @@ func CatalogSeason(title string) int {
 			value, _ := strconv.Atoi(number)
 			if pattern == reSeasonCN {
 				if !singleCNSeason.MatchString(number) {
-					return 1
+					return 0, false, true
 				}
 				value = parseCNNumber(number)
 			}
-			if value < 1 || value > maxSeasonNumber || (season != 0 && season != value) {
-				return 1
+			low := minSeason
+			if pattern == reSeasonOrd && low < 1 {
+				low = 1
+			}
+			if value < low || value > maxSeasonNumber || (explicit && season != value) {
+				return 0, false, true
 			}
 			season = value
+			explicit = true
 			// 保留匹配末尾的分隔符，使 S02/S03 的后一个标记也能被识别。
 			remaining = remaining[match[3]:]
 		}
 	}
-	return max(1, season)
+	return season, explicit, false
+}
+
+// CatalogSeason 只从作品标题中一致的明确季号推断新增订阅的季。模糊或合季标题沿用第一季默认值。
+func CatalogSeason(title string) int {
+	season, explicit, ambiguous := unambiguousSeason(title, 1)
+	if ambiguous || !explicit {
+		return 1
+	}
+	return season
 }

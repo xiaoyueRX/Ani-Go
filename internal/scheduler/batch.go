@@ -66,9 +66,16 @@ func (s *Scheduler) expandBatch(ctx context.Context, parent database.Episode, su
 					parsed.Episode = float32(n)
 				}
 			}
+			dirSeason, dirExplicit, dirAmbiguous := parser.DirectorySeason(rel)
 			member.Season, member.Number = parsed.Season, parsed.Episode
-			if !parsed.ExplicitSeason && !parsed.IsSpecial && member.Season == 1 && parent.Season > 1 {
-				member.Season = parent.Season
+			if !parsed.ExplicitSeason && !parsed.IsSpecial {
+				if dirExplicit {
+					if dirSeason > 0 {
+						member.Season = dirSeason
+					}
+				} else if !dirAmbiguous && member.Season == 1 && parent.Season > 1 {
+					member.Season = parent.Season
+				}
 			}
 			// 跳过附加内容、明确季号和未知号码，不凭连续数列推断跨季偏移。
 			if !parsed.ExplicitSeason && !parsed.IsSpecial && member.Season == sub.Season && member.Season > 1 && sub.TotalEpisodes > 0 &&
@@ -78,7 +85,7 @@ func (s *Scheduler) expandBatch(ctx context.Context, parent database.Episode, su
 					member.Number = cached.Episode
 				}
 			}
-			if single && member.Number == 0 && parent.Number > 0 && !parsed.IsSpecial {
+			if single && member.Number == 0 && parent.Number > 0 && !parsed.IsSpecial && !dirAmbiguous && (!dirExplicit || dirSeason == parent.Season) {
 				member.Season, member.Number = parent.Season, parent.Number
 			}
 			why := batchEpisodeReviewReason(rel, sub, member.Season, member.Number)

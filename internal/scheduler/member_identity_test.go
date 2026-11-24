@@ -546,3 +546,154 @@ func TestConfirmedLegacySourceRemainsWhenAnotherRowOwnsTheLibraryPath(t *testing
 		t.Fatalf("共享路径未保留待复核：%+v %v", ep, err)
 	}
 }
+
+func TestBatchChecksParentDirectorySeasonMarkers(t *testing.T) {
+	t.Run("第一季订阅隔离跨季及歧义目录", func(t *testing.T) {
+		db := pipelineDB(t)
+		sub := database.Subscription{TitleCN: "Show", Season: 1, AnimeType: "tv", TotalEpisodes: 12}
+		savePipelineRow(t, db, &sub)
+		ep := database.Episode{SubscriptionID: sub.ID, Season: 1, TorrentHash: "season-dirs-1", OriginalName: "Show Complete", Status: "downloaded"}
+		savePipelineRow(t, db, &ep)
+		root, lib := t.TempDir(), t.TempDir()
+		dl := &memberListDownloader{}
+		dl.tasks = []core.DownloadTask{{Hash: ep.TorrentHash, SavePath: root, ContentPath: root, Progress: 1, Status: "completed"}}
+		sources := []string{
+			"Season 1/01.mkv",
+			"Season 2/01.mkv",
+			"Season 1-2/02.mkv",
+			"Season 1/Season 2/03.mkv",
+			"Season 0/01.mkv",
+			"Season 0/Show S00E01.mkv",
+			"Season 2/Show S01E04.mkv",
+		}
+		for _, name := range sources {
+			p := filepath.Join(root, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(name), 0600); err != nil {
+				t.Fatal(err)
+			}
+			dl.files.Files = append(dl.files.Files, downloader.CompletedFile{Path: p, Size: int64(len(name))})
+		}
+		s := Scheduler{downloader: dl, organizer: organizer.New("Show/S{season:02}E{ep:02}{ext}", "", "", lib, "", true, nil)}
+		s.pollOrganizer(context.Background())
+		s.pollOrganizer(context.Background())
+
+		var members []database.Episode
+		if err := db.Where("subscription_id = ?", sub.ID).Order("source_file").Find(&members).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(members) != len(sources) {
+			t.Fatalf("拆分成员数 %d，期望 %d", len(members), len(sources))
+		}
+		for _, m := range members {
+			rel := filepath.ToSlash(m.SourceFile)
+			switch rel {
+			case "Season 1/01.mkv":
+				data, err := os.ReadFile(m.FinalPath)
+				if m.Status != "organized" || m.Season != 1 || m.Number != 1 || err != nil || string(data) != rel {
+					t.Fatalf("第一季正片未正确入库: %+v %v", m, err)
+				}
+			case "Season 0/Show S00E01.mkv":
+				data, err := os.ReadFile(m.FinalPath)
+				if m.Status != "organized" || m.Season != 0 || m.Number != 1 || err != nil || string(data) != rel {
+					t.Fatalf("特别篇未正确入库: %+v %v", m, err)
+				}
+			default:
+				if m.Status != database.EpisodeNeedsReview || m.ReviewKind != database.ReviewEpisodeIdentity || m.Number != 0 || m.FinalPath != "" {
+					t.Fatalf("跨季或歧义目录成员未进入身份复核 (%s): %+v", rel, m)
+				}
+				if data, err := os.ReadFile(filepath.Join(m.DownloadRoot, m.SourceFile)); err != nil || string(data) != rel {
+					t.Fatalf("待复核原件发生变更 (%s): %v", rel, err)
+				}
+			}
+		}
+		progress, err := database.FinishedEpisodeCounts(db, []uint{sub.ID})
+		if err != nil || progress[sub.ID] != 1 {
+			t.Fatalf("仅应统计 1 集正片进度: %v %v", progress, err)
+		}
+	})
+
+	t.Run("第二季订阅不让第一季目录继承父季号", func(t *testing.T) {
+		db := pipelineDB(t)
+		sub := database.Subscription{TitleCN: "Show", Season: 2, AnimeType: "tv", TotalEpisodes: 12}
+		savePipelineRow(t, db, &sub)
+		ep := database.Episode{SubscriptionID: sub.ID, Season: 2, TorrentHash: "season-dirs-2", OriginalName: "Show Complete", Status: "downloaded"}
+		savePipelineRow(t, db, &ep)
+		root, lib := t.TempDir(), t.TempDir()
+		dl := &memberListDownloader{}
+		dl.tasks = []core.DownloadTask{{Hash: ep.TorrentHash, SavePath: root, ContentPath: root, Progress: 1, Status: "completed"}}
+		sources := []string{
+			"Season 1/01.mkv",
+			"Season 2/01.mkv",
+			"Season 1/Extras/Show S00E15.mkv",
+			"Season 2/Extras/Show S00E15.mkv",
+		}
+		for _, name := range sources {
+			p := filepath.Join(root, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(name), 0600); err != nil {
+				t.Fatal(err)
+			}
+			dl.files.Files = append(dl.files.Files, downloader.CompletedFile{Path: p, Size: int64(len(name))})
+		}
+		s := Scheduler{downloader: dl, organizer: organizer.New("Show/S{season:02}E{ep:02}{ext}", "", "", lib, "", true, nil)}
+		s.pollOrganizer(context.Background())
+		s.pollOrganizer(context.Background())
+
+		var members []database.Episode
+		if err := db.Where("subscription_id = ?", sub.ID).Order("source_file").Find(&members).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(members) != len(sources) {
+			t.Fatalf("拆分成员数 %d，期望 %d", len(members), len(sources))
+		}
+		for _, m := range members {
+			rel := filepath.ToSlash(m.SourceFile)
+			switch rel {
+			case "Season 2/01.mkv":
+				data, err := os.ReadFile(m.FinalPath)
+				if m.Status != "organized" || m.Season != 2 || m.Number != 1 || err != nil || string(data) != rel {
+					t.Fatalf("第二季正片未正确入库: %+v %v", m, err)
+				}
+			case "Season 2/Extras/Show S00E15.mkv":
+				data, err := os.ReadFile(m.FinalPath)
+				if m.Status != "organized" || m.Season != 0 || m.Number != 15 || err != nil || string(data) != rel {
+					t.Fatalf("第二季明确特别篇未正确入库: %+v %v", m, err)
+				}
+			default:
+				if m.Status != database.EpisodeNeedsReview || m.ReviewKind != database.ReviewEpisodeIdentity || m.Number != 0 || m.FinalPath != "" {
+					t.Fatalf("第一季目录成员未隔离 (%s): %+v", rel, m)
+				}
+			}
+		}
+		progress, err := database.FinishedEpisodeCounts(db, []uint{sub.ID})
+		if err != nil || progress[sub.ID] != 1 {
+			t.Fatalf("第二季仅应统计 1 集正片进度: %v %v", progress, err)
+		}
+	})
+
+	t.Run("已绑定成员复检时拦截跨季目录并允许人工确认后放行", func(t *testing.T) {
+		sub := database.Subscription{Season: 1, AnimeType: "tv"}
+		ep := database.Episode{
+			Season:        1,
+			Number:        1,
+			TorrentHash:   "bound-dir",
+			DownloadRoot:  t.TempDir(),
+			SourceFile:    filepath.Join("Season 2", "01.mkv"),
+			OriginalName:  "Show Complete",
+			FileSize:      4,
+			SourceModTime: 8,
+		}
+		if kind, why := boundIdentityProblem(ep, sub, 4, 8); kind != database.ReviewEpisodeIdentity || why == "" {
+			t.Fatalf("已绑定的跨季目录成员未被拦截: kind=%q why=%q", kind, why)
+		}
+		ep.ConfirmedIdentity = ep.ConfirmationSignature(database.ReviewEpisodeIdentity)
+		if _, why := boundIdentityProblem(ep, sub, 4, 8); why != "" {
+			t.Fatalf("已人工确认的成员仍被阻止: %s", why)
+		}
+	})
+}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/xiaoyueRX/Ani-Go/internal/database"
+	"github.com/xiaoyueRX/Ani-Go/internal/parser"
 )
 
 // 只检查独立的片头、片尾和菜单标记，避免把 OPUS 等编码信息当作花絮。
@@ -18,6 +19,25 @@ func batchEpisodeReviewReason(rel string, sub database.Subscription, season int,
 	if supplementalVideoName.MatchString(stem) {
 		return fmt.Sprintf("请核对片头、片尾或菜单的归属：%s", rel)
 	}
+	subSeason := max(1, sub.Season)
+	dirSeason, dirExplicit, dirAmbiguous := parser.DirectorySeason(rel)
+	if dirAmbiguous {
+		return fmt.Sprintf("目录包含多个或冲突的季标记，请核对归属：%s", rel)
+	}
+	if dirExplicit {
+		if dirSeason == 0 {
+			if season != 0 || number <= 0 {
+				return fmt.Sprintf("目录标记为特别篇（第 0 季），缺少明确的特别篇集号：%s", rel)
+			}
+		} else {
+			if dirSeason != subSeason {
+				return fmt.Sprintf("目录标记为第 %d 季，订阅为第 %d 季：%s", dirSeason, subSeason, rel)
+			}
+			if season > 0 && season != dirSeason {
+				return fmt.Sprintf("目录标记为第 %d 季，文件标记为第 %d 季：%s", dirSeason, season, rel)
+			}
+		}
+	}
 	if season == 0 && number > 0 {
 		return ""
 	}
@@ -28,8 +48,8 @@ func batchEpisodeReviewReason(rel string, sub database.Subscription, season int,
 		}
 	}
 	if number > 0 && season > 0 {
-		if season != max(1, sub.Season) {
-			return fmt.Sprintf("文件标记为第 %d 季，订阅为第 %d 季：%s", season, max(1, sub.Season), rel)
+		if season != subSeason {
+			return fmt.Sprintf("文件标记为第 %d 季，订阅为第 %d 季：%s", season, subSeason, rel)
 		}
 		if sub.TotalEpisodes > 0 && number > float32(sub.TotalEpisodes) {
 			return fmt.Sprintf("文件集号 %g 超过本季已知的 %d 集，请核对本季集号：%s", number, sub.TotalEpisodes, rel)
