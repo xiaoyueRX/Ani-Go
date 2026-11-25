@@ -5,7 +5,7 @@ import request from '../utils/request'
 import {
   Antenna, LayoutGrid, RefreshCw,
   AlertTriangle, X, Calendar,
-  Image, Check, Clock, Plus, Loader2, SlidersHorizontal,
+  Image, Check, Clock, Loader2, SlidersHorizontal,
   Search, WifiOff, Info, History, Sparkles, ListChecks, CheckCircle, XCircle
 } from 'lucide-vue-next'
 import OnboardingModal from '../components/OnboardingModal.vue'
@@ -13,6 +13,7 @@ import ChangelogModal from '../components/ChangelogModal.vue'
 import { useVersion } from '../composables/useVersion'
 import { useAuth } from '../composables/useAuth'
 import { useI18n } from 'vue-i18n'
+import { resolveMikanSelectionPayload } from '../utils/subscriptionRules'
 
 const { t, locale } = useI18n()
 const { isAuthenticated, isOfflineMode, initAuth, checkAuth } = useAuth()
@@ -342,28 +343,42 @@ function toggleModalSubgroup(name: string) {
   modalSelectedSubgroups.value = next
 }
 
-async function subscribeFromModal(options?: { subgroupName?: string; rssUrl?: string }) {
+async function subscribeFromModal() {
   const item = selectedItem.value
   if (!item || modalSubscribing.value) return
   modalSubscribing.value = true
   modalSubError.value = ''
 
-  const picked = options?.subgroupName
-    ? [options.subgroupName]
-    : Array.from(modalSelectedSubgroups.value)
+  const picked = Array.from(modalSelectedSubgroups.value)
+  const isMikan = item.source === 'Mikan'
+  const mikanPayload = isMikan
+    ? resolveMikanSelectionPayload(modalGroups.value, picked)
+    : null
+
+  const subgroupName = isMikan
+    ? mikanPayload?.subgroup_name
+    : (picked.length === 1 ? picked[0] : (picked.length > 1 ? '' : undefined))
+  const subgroupNames = isMikan
+    ? mikanPayload?.subgroup_names
+    : (picked.length ? picked : undefined)
+  const allowedSubgroups = isMikan
+    ? mikanPayload?.allowed_subgroups
+    : (picked.length ? picked : undefined)
+  const rssUrl = isMikan ? (mikanPayload?.rss_url || undefined) : undefined
 
   try {
     const title = selectedMetadata.value?.anime?.title_cn?.trim() || item.title
     const { data } = await request.post<{ id?: number }>('/subscriptions', {
       title_cn: title,
-      bangumi_id: item.source === 'Mikan' ? undefined : item.bangumi_id || undefined,
-      mikan_id: item.source === 'Mikan' ? item.bangumi_id || undefined : undefined,
+      bangumi_id: isMikan ? undefined : item.bangumi_id || undefined,
+      mikan_id: isMikan ? item.bangumi_id || undefined : undefined,
       metadata_id: item.source === 'BGM.tv' ? item.bangumi_id : undefined,
       metadata_provider: item.source === 'BGM.tv' ? 'BGM.tv' : undefined,
       cover_url: item.cover_url || '',
-      rss_url: options?.rssUrl || undefined,
-      subgroup_name: picked[0] || undefined,
-      allowed_subgroups: picked.length ? picked : undefined,
+      rss_url: rssUrl,
+      subgroup_name: subgroupName,
+      subgroup_names: subgroupNames,
+      allowed_subgroups: allowedSubgroups,
     })
     registerSubId(data?.id, [item.bangumi_id, item.title, title])
     if (item.bangumi_id) {
@@ -1113,47 +1128,68 @@ onUnmounted(() => {
               {{ modalSubError }}
             </p>
 
-            <!-- Mikan 源拉取专属字幕组列表 -->
+            <!-- Mikan 源拉取专属字幕组列表（多选复选框） -->
             <template v-if="selectedItem.source === 'Mikan'">
               <div v-if="modalGroupsLoading" class="flex items-center gap-2 text-xs text-[var(--v2-ink-muted)] py-1">
                 <Loader2 :size="13" class="animate-spin text-[var(--v2-accent)]" />
                 <span>{{ $t('schedule.modal.loadingGroups') }}</span>
               </div>
               <div v-else-if="modalGroups.length > 0" class="space-y-1.5">
-                <p class="text-[11px] font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.pickMikanGroup') }}</p>
-                <div class="max-h-32 overflow-y-auto space-y-1 pr-0.5">
-                  <button
+                <div class="flex items-center justify-between gap-2 text-[11px]">
+                  <p class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.pickMikanGroup') }}</p>
+                  <span v-if="modalSelectedSubgroups.size > 0" class="font-mono text-[var(--v2-accent)] font-semibold">
+                    {{ $t('schedule.modal.selectedCount', { count: modalSelectedSubgroups.size }) }}
+                  </span>
+                </div>
+                <div class="max-h-36 overflow-y-auto space-y-1 pr-0.5">
+                  <label
                     v-for="g in modalGroups"
                     :key="g.rss_url"
-                    type="button"
-                    class="w-full v2-panel-muted hover:border-[var(--v2-accent)]/50 px-2.5 py-1.5 flex items-center justify-between text-left text-xs transition-colors cursor-pointer"
-                    :disabled="modalSubscribing"
-                    @click="subscribeFromModal({ subgroupName: g.name, rssUrl: g.rss_url })"
+                    class="w-full rounded-lg border px-2.5 py-2 flex items-center gap-2.5 text-left text-xs transition-colors cursor-pointer select-none"
+                    :class="modalSelectedSubgroups.has(g.name)
+                      ? 'bg-[var(--v2-accent)]/12 border-[var(--v2-accent)] text-[var(--v2-ink)]'
+                      : 'v2-panel-muted hover:border-[var(--v2-accent)]/40 text-[var(--v2-ink)]'"
                   >
-                    <span class="truncate font-medium text-[var(--v2-ink)]">{{ g.name }}</span>
-                    <Plus :size="13" class="text-[var(--v2-accent)] shrink-0" />
-                  </button>
+                    <input
+                      type="checkbox"
+                      class="checkbox checkbox-sm checkbox-primary shrink-0"
+                      :checked="modalSelectedSubgroups.has(g.name)"
+                      :disabled="modalSubscribing"
+                      @change="toggleModalSubgroup(g.name)"
+                    />
+                    <span class="truncate font-medium flex-1">{{ g.name }}</span>
+                  </label>
                 </div>
               </div>
               <p v-else-if="modalGroupsError" class="text-[11px] text-amber-400">{{ modalGroupsError }}</p>
             </template>
 
-            <!-- Bangumi / Yuc 或通用字幕组快速多选筹码 -->
+            <!-- Bangumi / Yuc 或无专属组时的通用字幕组复选框多选 -->
             <div v-if="selectedItem.source !== 'Mikan' || (!modalGroupsLoading && modalGroups.length === 0)" class="space-y-1.5">
-              <p class="text-[11px] font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.quickSubgroups') }}</p>
+              <div class="flex items-center justify-between gap-2 text-[11px]">
+                <p class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.quickSubgroups') }}</p>
+                <span v-if="modalSelectedSubgroups.size > 0" class="font-mono text-[var(--v2-accent)] font-semibold">
+                  {{ $t('schedule.modal.selectedCount', { count: modalSelectedSubgroups.size }) }}
+                </span>
+              </div>
               <div class="flex flex-wrap gap-1.5">
-                <button
+                <label
                   v-for="grp in COMMON_SUBGROUPS.slice(0, 6)"
                   :key="grp"
-                  type="button"
-                  class="px-2 py-0.5 rounded-full text-[11px] border transition-colors cursor-pointer"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border transition-colors cursor-pointer select-none"
                   :class="modalSelectedSubgroups.has(grp)
                     ? 'bg-[var(--v2-accent)]/15 border-[var(--v2-accent)] text-[var(--v2-accent)] font-semibold'
                     : 'bg-[var(--v2-surface-2)] border-[var(--v2-border)] text-[var(--v2-ink-muted)] hover:text-[var(--v2-ink)]'"
-                  @click="toggleModalSubgroup(grp)"
                 >
-                  {{ grp }}
-                </button>
+                  <input
+                    type="checkbox"
+                    class="checkbox checkbox-xs checkbox-primary"
+                    :checked="modalSelectedSubgroups.has(grp)"
+                    :disabled="modalSubscribing"
+                    @change="toggleModalSubgroup(grp)"
+                  />
+                  <span>{{ grp }}</span>
+                </label>
               </div>
             </div>
 
@@ -1165,8 +1201,9 @@ onUnmounted(() => {
                 @click="subscribeFromModal()"
               >
                 <Loader2 v-if="modalSubscribing" :size="14" class="animate-spin" />
-                <Plus v-else :size="14" />
+                <Check v-else :size="14" />
                 <span>{{ modalSubscribing ? $t('schedule.modal.subscribing') : $t('schedule.modal.directSub') }}</span>
+                <span v-if="!modalSubscribing && modalSelectedSubgroups.size > 0" class="font-mono text-[11px] opacity-85">({{ modalSelectedSubgroups.size }})</span>
               </button>
               <button
                 type="button"

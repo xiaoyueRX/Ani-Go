@@ -13,7 +13,7 @@ function loadRulesModule() {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   })
   const exports = {}
-  runInNewContext(outputText, { exports, require })
+  runInNewContext(outputText, { exports, require, URL })
   return exports
 }
 
@@ -79,4 +79,34 @@ test('损坏的 JSON 输入不会抛出异常并可安全降级为空状态', ()
   assert.deepEqual(parsed.includeKeywords, [])
   assert.deepEqual(parsed.excludeKeywords, [])
   assert.deepEqual(parsed.allowedSubgroups, [])
+})
+
+test('Mikan 字幕组选择按单选、多选与留空分支正确构造 RSS 与白名单', () => {
+  const { stripMikanSubgroupParam, resolveMikanSelectionPayload } = loadRulesModule()
+  const groups = [
+    { name: 'ANi', rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583' },
+    { name: 'LoliHouse', rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=370' },
+  ]
+
+  assert.equal(
+    stripMikanSubgroupParam('https://mikanani.me/RSS/Bangumi?bangumiId=3141&SubGroupId=583'),
+    'https://mikanani.me/RSS/Bangumi?bangumiId=3141',
+  )
+  assert.equal(stripMikanSubgroupParam('not-a-url'), '')
+
+  const one = clone(resolveMikanSelectionPayload(groups, ['LoliHouse']))
+  assert.equal(one.subgroup_name, 'LoliHouse')
+  assert.deepEqual(one.allowed_subgroups, ['LoliHouse'])
+  assert.equal(one.rss_url, 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=370')
+
+  const many = clone(resolveMikanSelectionPayload(groups, ['ANi', 'LoliHouse']))
+  assert.equal(many.subgroup_name, '')
+  assert.deepEqual(many.subgroup_names, ['ANi', 'LoliHouse'])
+  assert.deepEqual(many.allowed_subgroups, ['ANi', 'LoliHouse'])
+  assert.equal(many.rss_url, 'https://mikanani.me/RSS/Bangumi?bangumiId=3141')
+
+  const none = clone(resolveMikanSelectionPayload(groups, []))
+  assert.equal(none.subgroup_name, undefined)
+  assert.equal(none.allowed_subgroups, undefined)
+  assert.equal(none.rss_url, 'https://mikanani.me/RSS/Bangumi?bangumiId=3141')
 })

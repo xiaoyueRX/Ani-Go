@@ -122,3 +122,58 @@ test('订阅详情支持立即补全、状态筛选及含文件选项删除', as
   assert.deepEqual(calls.find(c => c[0] === 'DELETE'), ['DELETE', '/subscriptions/9', true])
   assert.equal(pushed.at(-1), '/subscriptions')
 })
+
+test('时间表与搜索页 Mikan 弹窗支持多选勾选后再点击确认提交', async () => {
+  const mikanGroups = [
+    { name: 'ANi', rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583' },
+    { name: 'LoliHouse', rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=370' },
+  ]
+  const schPosts = []
+  const { component: sch } = view('views/Schedule', {
+    get: async () => ({ data: [] }),
+    post: async (url, body) => {
+      schPosts.push([url, JSON.parse(JSON.stringify(body))])
+      return { data: { id: 101 } }
+    },
+  })
+  sch.selectedItem.value = { title: '芙莉莲', url: '', source: 'Mikan', bangumi_id: '3141', info_hash: '', cover_url: '' }
+  sch.modalGroups.value = mikanGroups
+
+  // 勾选仅不触发提交，点击确认才提交（多选分支）
+  sch.toggleModalSubgroup('ANi')
+  sch.toggleModalSubgroup('LoliHouse')
+  assert.equal(schPosts.length, 0)
+  await sch.subscribeFromModal()
+  assert.equal(schPosts.length, 1)
+  assert.equal(schPosts[0][1].rss_url, 'https://mikanani.me/RSS/Bangumi?bangumiId=3141')
+  assert.deepEqual(schPosts[0][1].allowed_subgroups, ['ANi', 'LoliHouse'])
+  assert.deepEqual(schPosts[0][1].subgroup_names, ['ANi', 'LoliHouse'])
+
+  // 仅勾选 1 个时保留专属 RSS
+  schPosts.length = 0
+  sch.modalSelectedSubgroups.value = new Set(['LoliHouse'])
+  await sch.subscribeFromModal()
+  assert.equal(schPosts[0][1].rss_url, 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=370')
+  assert.equal(schPosts[0][1].subgroup_name, 'LoliHouse')
+
+  // 搜索页 Mikan 弹窗多选后再确认提交
+  const searchPosts = []
+  const { component: search } = view('views/Search', {
+    get: async () => ({ data: [] }),
+    post: async (url, body) => {
+      searchPosts.push([url, JSON.parse(JSON.stringify(body))])
+      return { data: { id: 102 } }
+    },
+  })
+  search.selectedItem.value = { title: '芙莉莲', url: 'https://mikanani.me/Home/Bangumi/3141', magnet: '', source: 'Mikan', bangumi_id: '3141' }
+  search.subgroups.value = mikanGroups
+  search.showGroupModal.value = true
+  search.toggleModalSubgroup('ANi')
+  search.toggleModalSubgroup('LoliHouse')
+  assert.equal(searchPosts.length, 0)
+  await search.confirmGroupSubscribe()
+  assert.equal(searchPosts.length, 1)
+  assert.equal(searchPosts[0][1].rss_url, 'https://mikanani.me/RSS/Bangumi?bangumiId=3141')
+  assert.deepEqual(searchPosts[0][1].allowed_subgroups, ['ANi', 'LoliHouse'])
+  assert.equal(search.showGroupModal.value, false)
+})

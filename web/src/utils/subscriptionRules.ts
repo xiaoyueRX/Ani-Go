@@ -175,3 +175,66 @@ export function summarizeRules(sub: {
   }
   return items
 }
+
+export interface MikanGroupOption {
+  name: string
+  rss_url: string
+}
+
+export interface MikanSelectionPayload {
+  subgroup_name?: string
+  subgroup_names?: string[]
+  allowed_subgroups?: string[]
+  rss_url?: string
+}
+
+export function stripMikanSubgroupParam(rawUrl?: string): string {
+  const clean = (rawUrl || '').trim()
+  if (!clean) return ''
+  try {
+    const u = new URL(clean)
+    for (const key of Array.from(u.searchParams.keys())) {
+      if (key.toLowerCase() === 'subgroupid') {
+        u.searchParams.delete(key)
+      }
+    }
+    return u.toString()
+  } catch {
+    return ''
+  }
+}
+
+export function resolveMikanSelectionPayload(
+  groups: MikanGroupOption[],
+  selectedNames: string[],
+): MikanSelectionPayload {
+  const picked = dedupeTags(selectedNames)
+  if (picked.length === 1) {
+    const target = picked[0]!
+    const matched = groups.find(g => g.name.trim().toLowerCase() === target.toLowerCase())
+    return {
+      subgroup_name: target,
+      subgroup_names: [target],
+      allowed_subgroups: [target],
+      rss_url: matched?.rss_url?.trim() || '',
+    }
+  }
+  if (picked.length > 1) {
+    const firstLower = picked[0]!.toLowerCase()
+    const matched = groups.find(g => g.name.trim().toLowerCase() === firstLower) || groups[0]
+    const seriesRss = stripMikanSubgroupParam(matched?.rss_url)
+    return {
+      subgroup_name: '',
+      subgroup_names: picked,
+      allowed_subgroups: picked,
+      rss_url: seriesRss || undefined,
+    }
+  }
+  const seriesRss = stripMikanSubgroupParam(groups[0]?.rss_url)
+  return {
+    subgroup_name: undefined,
+    subgroup_names: undefined,
+    allowed_subgroups: undefined,
+    rss_url: seriesRss || undefined,
+  }
+}

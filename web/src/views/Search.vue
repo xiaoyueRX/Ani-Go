@@ -12,6 +12,7 @@ import {
   CheckSquare, Square, ListChecks, CloudUpload, Globe
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
+import { resolveMikanSelectionPayload } from '../utils/subscriptionRules'
 
 const { t, locale } = useI18n()
 
@@ -537,6 +538,16 @@ function markReviewedItems(items: ReviewRelease[], createdId?: number) {
 function closeGroups() {
   groupRequest?.abort()
   showGroupModal.value = false
+  selectedModalSubgroups.value = new Set()
+}
+
+const selectedModalSubgroups = ref<Set<string>>(new Set())
+
+function toggleModalSubgroup(name: string) {
+  const next = new Set(selectedModalSubgroups.value)
+  if (next.has(name)) next.delete(name)
+  else next.add(name)
+  selectedModalSubgroups.value = next
 }
 
 async function openSubscribe(item: TorrentItem) {
@@ -550,6 +561,7 @@ async function openSubscribe(item: TorrentItem) {
   groupRequest = current
   selectedItem.value = item
   subgroups.value = []
+  selectedModalSubgroups.value = new Set()
   subgroupSearch.value = ''
   groupError.value = ''
   showGroupModal.value = true
@@ -573,13 +585,20 @@ declare global {
   }
 }
 
-async function saveSubscription(item: TorrentItem, rssUrl: string, subgroupName?: string) {
+async function saveSubscription(
+  item: TorrentItem,
+  rssUrl: string,
+  subgroupName?: string,
+  allowedSubgroups?: string[],
+) {
   const { data } = await request.post<{ id?: number }>('/subscriptions', {
     title_cn: item.title,
     bangumi_id: item.source === 'Mikan' ? undefined : item.bangumi_id,
     mikan_id: item.source === 'Mikan' ? item.bangumi_id : undefined,
     rss_url: rssUrl || undefined,
     subgroup_name: subgroupName || undefined,
+    subgroup_names: allowedSubgroups?.length ? allowedSubgroups : undefined,
+    allowed_subgroups: allowedSubgroups?.length ? allowedSubgroups : undefined,
     filter_json: JSON.stringify({ source_url: item.url }),
     cover_url: item.cover_url || '',
   })
@@ -587,18 +606,37 @@ async function saveSubscription(item: TorrentItem, rssUrl: string, subgroupName?
   registerSubscribedId(data?.id, [item.bangumi_id, item.title])
 }
 
-async function subscribe(item: TorrentItem, rssUrl: string, subgroupName?: string) {
+async function subscribe(
+  item: TorrentItem,
+  rssUrl: string,
+  subgroupName?: string,
+  allowedSubgroups?: string[],
+) {
   if (groupSubmitting.value) return
   groupSubmitting.value = true
   try {
-    await saveSubscription(item, rssUrl, subgroupName)
+    await saveSubscription(item, rssUrl, subgroupName, allowedSubgroups)
     window.showToast?.(t('search.subscribed', { title: item.title }) || `成功订阅: ${item.title}`, 'success')
-    showGroupModal.value = false
+    closeGroups()
   } catch (e: any) {
     window.showToast?.(t('search.subscribeFailed', { error: e.response?.data?.error || e.message }) || '订阅失败', 'error')
   } finally {
     groupSubmitting.value = false
   }
+}
+
+async function confirmGroupSubscribe() {
+  if (!selectedItem.value) return
+  const payload = resolveMikanSelectionPayload(
+    subgroups.value,
+    Array.from(selectedModalSubgroups.value),
+  )
+  await subscribe(
+    selectedItem.value,
+    payload.rss_url || '',
+    payload.subgroup_name,
+    payload.allowed_subgroups,
+  )
 }
 
 async function copyMagnet(item: TorrentItem) {
@@ -1148,28 +1186,40 @@ function sourceBadgeClass(source: string): string {
           </div>
         </div>
 
-        <div v-else class="space-y-2 max-h-72 overflow-y-auto">
-          <button
+        <div v-else class="space-y-2 max-h-72 overflow-y-auto pr-0.5">
+          <label
             v-for="g in filteredSubgroups"
             :key="g.rss_url"
-            type="button"
-            class="w-full v2-panel-muted hover:border-[var(--v2-accent)]/40 p-3 flex items-center justify-between text-left transition-colors cursor-pointer"
-            :disabled="groupSubmitting"
-            @click="selectedItem && subscribe(selectedItem, g.rss_url, g.name)"
+            class="w-full rounded-xl border p-3 flex items-center gap-3 text-left transition-colors cursor-pointer select-none"
+            :class="selectedModalSubgroups.has(g.name)
+              ? 'bg-[var(--v2-accent)]/12 border-[var(--v2-accent)]'
+              : 'v2-panel-muted hover:border-[var(--v2-accent)]/40'"
           >
-            <div class="flex items-center gap-2.5 min-w-0">
+            <input
+              type="checkbox"
+              class="checkbox checkbox-sm checkbox-primary shrink-0"
+              :checked="selectedModalSubgroups.has(g.name)"
+              :disabled="groupSubmitting"
+              @change="toggleModalSubgroup(g.name)"
+            />
+            <div class="flex items-center gap-2 min-w-0 flex-1">
               <User :size="14" class="text-[var(--v2-accent)] shrink-0" />
-              <span class="font-semibold text-xs truncate">{{ g.name }}</span>
+              <span class="font-semibold text-xs truncate text-[var(--v2-ink)]">{{ g.name }}</span>
             </div>
-            <Plus :size="15" class="text-[var(--v2-accent)] shrink-0" />
-          </button>
+          </label>
         </div>
 
-        <div v-if="subgroups.length > 0" class="pt-2 flex justify-between items-center text-xs border-t border-[var(--v2-border)]">
-          <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" :disabled="groupSubmitting" @click="selectedItem && subscribe(selectedItem, '')">
-            {{ t('search.modal.proceed') }}
-          </button>
-          <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" :disabled="groupSubmitting" @click="closeGroups">{{ $t('search.modal.cancel') }}</button>
+        <div v-if="subgroups.length > 0" class="pt-2 flex justify-between items-center gap-2 text-xs border-t border-[var(--v2-border)]">
+          <span class="text-[var(--v2-ink-muted)]">
+            {{ selectedModalSubgroups.size > 0 ? $t('schedule.modal.selectedCount', { count: selectedModalSubgroups.size }) : $t('search.modal.proceed') }}
+          </span>
+          <div class="flex items-center gap-2">
+            <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" :disabled="groupSubmitting" @click="closeGroups">{{ $t('search.modal.cancel') }}</button>
+            <button type="button" class="v2-btn v2-btn-primary v2-btn-sm px-4" :disabled="groupSubmitting" @click="confirmGroupSubscribe">
+              <span>{{ $t('search.modal.confirm') }}</span>
+              <span v-if="selectedModalSubgroups.size > 0" class="font-mono text-[11px] opacity-85">({{ selectedModalSubgroups.size }})</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
