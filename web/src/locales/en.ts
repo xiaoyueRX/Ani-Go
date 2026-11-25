@@ -412,7 +412,7 @@ export default {
       metaMappingDesc: 'Bidirectional disambiguation and episode mapping between Bangumi and TMDB',
       geekNamingDesc: 'Standardized file renaming, episode numbering, and hardlinking',
       nfoScraperDesc: 'Automatically scrapes and generates standard NFO files for Kodi/Jellyfin/Emby',
-      extendedNotifiersDesc: 'Drives 18 notification channels and delivery queue monitoring',
+      extendedNotifiersDesc: 'Drives multi-channel notifications and delivery queue monitoring',
       notifyDeliveryMonitoring: 'Delivery Monitoring & History',
       notifyChannelSettings: 'Channel Configuration',
       deliveryRate: 'Delivery Rate',
@@ -420,6 +420,8 @@ export default {
       yucScheduleDesc: 'yuc.wiki anime schedule data source and auto-sync',
       viewSchedule: 'View Schedule',
       dataMigrateDesc: 'Migrate existing data from AutoBangumi or ani-rss',
+      goMetadataSettings: 'Metadata Settings',
+      goPathSettings: 'Library Settings',
     },
     pluginPanel: {
       optional: '(optional)',

@@ -43,9 +43,9 @@ func (p *ExtendedNotifiersPlugin) GetInfo() PluginInfo {
 	return PluginInfo{
 		ID:          "extended-notifiers",
 		Name:        "消息通知推送",
-		Description: "全协议消息通知推送中心，基于 v2.NotifyManager 统一纳管 Telegram、企业微信、飞书、钉钉、QQ (OneBot)、Bark、Server酱、Discord、Slack、Gotify、Ntfy、Pushover、Email SMTP、Matrix、LINE、WhatsApp、Signal 等 18+ 渠道消息提醒与事件推送。",
+		Description: "全协议消息通知推送中心，基于 v2.NotifyManager 统一纳管 Telegram、企业微信、飞书、钉钉、QQ (OneBot)、Bark、Server酱、Discord、Slack、Gotify、Ntfy、Pushover、Email SMTP、Matrix、LINE、WhatsApp、Signal、微信公众号等多渠道消息提醒与事件推送。",
 		Version:     "2.0.0",
-		Author:      "xiaoyue",
+		Author:      "xiaoyueRX",
 		AuthorURL:   "https://github.com/xiaoyueRX",
 		Icon:        "Bell",
 		IsBuiltIn:   true,
@@ -82,6 +82,20 @@ func (p *ExtendedNotifiersPlugin) Init(bus core.EventBus, ctx core.Context) erro
 	ctrl := p.controller
 	p.mu.Unlock()
 
+	// 若尚未显式注入控制器，尝试从核心服务注册表发现 NotifyController
+	if ctrl == nil {
+		if svc, ok := pctx.GetService(core.ServiceNotifier); ok && svc != nil {
+			if resolved, ok := svc.(NotifyController); ok {
+				p.mu.Lock()
+				if p.controller == nil {
+					p.controller = resolved
+				}
+				ctrl = p.controller
+				p.mu.Unlock()
+			}
+		}
+	}
+
 	if ctrl != nil {
 		needReload := !wasEnabled || !ctrl.IsEnabled()
 		ctrl.SetEnabled(true)
@@ -117,9 +131,7 @@ func (p *ExtendedNotifiersPlugin) Stop(bus core.EventBus) error {
 
 	if pctx != nil {
 		pctx.Dispose()
-	}
-
-	if ctrl != nil {
+	} else if ctrl != nil {
 		ctrl.SetEnabled(false)
 	}
 	if wasEnabled {

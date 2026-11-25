@@ -171,12 +171,6 @@ func main() {
 		pluginMgr,
 		cfg.Organizer.OVABasePath,
 	)
-	// 极客命名插件为可选功能，默认关闭以避免改变既有媒体库路径；
-	// 仅当显式设置 ANIGO_GEEK_NAMING=1 时启用
-	if os.Getenv("ANIGO_GEEK_NAMING") == "1" {
-		plugin.InitGeekNaming(org.GetHookManager())
-		log.Println("🧪 极客命名插件已启用 (ANIGO_GEEK_NAMING=1)")
-	}
 	log.Println("✅ 文件整理器已就绪")
 
 	// 初始化通知系统 v2（支持全部 16 种通道统一队列分发与重试）
@@ -221,15 +215,14 @@ func main() {
 	}
 	// 备份仅接受本次构建实际内置的面板和快照中声明的社区授权。
 	sched.GetBackupManager().SetBuiltinPanelManifests(pluginMgr.GetPluginList())
-	if !notifyMgr.IsEnabled() {
-		notifyMgr.Reload()
-	}
-	var names []string
-	for _, notifier := range notifyMgr.Notifiers() {
-		names = append(names, notifier.Name())
-	}
-	if len(names) > 0 {
-		log.Printf("🔔 已配置 %d 个通知渠道: %v", len(names), names)
+	if notifyMgr.IsEnabled() {
+		var names []string
+		for _, notifier := range notifyMgr.Notifiers() {
+			names = append(names, notifier.Name())
+		}
+		if len(names) > 0 {
+			log.Printf("🔔 已配置 %d 个通知渠道: %v", len(names), names)
+		}
 	}
 	schedulerDone := sched.StartAsync(ctx)
 

@@ -16,7 +16,8 @@ import {
   Sparkles, Copy, Palette,
   Search, Zap, ExternalLink,
   Play, AlertCircle, Globe, X,
-  Plus, RotateCcw, Activity, Filter, Clock, Calendar
+  Plus, RotateCcw, Activity, Filter, Clock, Calendar,
+  Link2, FolderCheck, Film, CloudDownload, Puzzle
 } from 'lucide-vue-next'
 import { currentVersion, useVersion } from '../composables/useVersion'
 
@@ -161,6 +162,27 @@ function pluginRunning(plugin: { enabled: boolean; status?: string }) {
 function isPluginActive(id: string): boolean {
   const p = pluginList.value.find(item => item.id === id)
   return p ? pluginRunning(p) : false
+}
+
+function pluginIconComponent(icon?: string) {
+  switch (icon) {
+    case 'Link':
+      return Link2
+    case 'FolderCheck':
+      return FolderCheck
+    case 'Calendar':
+      return Calendar
+    case 'Database':
+      return Database
+    case 'Bell':
+      return Bell
+    case 'Film':
+      return Film
+    case 'CloudDownload':
+      return CloudDownload
+    default:
+      return Puzzle
+  }
 }
 
 const tabGroups = computed(() => {
@@ -2263,7 +2285,7 @@ onUnmounted(() => {
           </div>
           <div class="space-y-1 max-w-md mx-auto">
             <h4 class="text-sm font-bold text-[var(--v2-ink)]">消息通知推送插件已停用</h4>
-            <p class="text-xs text-[var(--v2-ink-muted)] leading-relaxed">消息通知推送功能由内建扩展通知插件提供。启用后可配置 16 种推送渠道并查看投递监控流水。</p>
+            <p class="text-xs text-[var(--v2-ink-muted)] leading-relaxed">消息通知推送功能由内建扩展通知插件提供。启用后可配置多渠道消息推送并查看投递监控流水。</p>
           </div>
           <div class="flex items-center justify-center gap-2">
             <button type="button" @click="enableNotifyPlugin" class="v2-btn v2-btn-primary v2-btn-sm">
@@ -2315,18 +2337,24 @@ onUnmounted(() => {
             >
               <div class="space-y-2">
                 <div class="flex items-start justify-between gap-2">
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <h4 class="font-bold text-sm text-[var(--v2-ink)]">{{ plugin.name }}</h4>
-                      <span class="v2-pill font-mono text-[10px]">v{{ plugin.version || '1.0' }}</span>
+                  <div class="flex items-start gap-2.5 min-w-0">
+                    <div class="w-8 h-8 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)] text-[var(--v2-accent)] flex items-center justify-center shrink-0 mt-0.5">
+                      <component :is="pluginIconComponent(plugin.icon)" :size="16" />
                     </div>
-                    <div class="flex items-center gap-1.5 mt-1 text-[10px] flex-wrap">
-                      <span class="v2-pill h-5">{{ plugin.origin === 'official' ? $t('settings.plugins.official') : $t('settings.plugins.community') }}</span>
-                      <span v-if="plugin.status === 'suspended'" class="badge badge-warning badge-xs">{{ $t('settings.plugins.statusSuspended') }}</span>
-                      <span v-else-if="plugin.status === 'loading'" class="badge badge-warning badge-xs">{{ $t('settings.plugins.statusLoading') }}</span>
-                      <span v-else-if="plugin.status === 'disposing'" class="badge badge-warning badge-xs">{{ $t('settings.plugins.statusDisposing') }}</span>
-                      <span v-else-if="pluginRunning(plugin)" class="text-emerald-400 font-semibold">{{ $t('settings.plugins.statusRunning') }}</span>
-                      <span v-else class="text-[var(--v2-ink-subtle)]">{{ $t('settings.plugins.statusStopped') }}</span>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <h4 class="font-bold text-sm text-[var(--v2-ink)]">{{ plugin.name }}</h4>
+                        <span class="v2-pill font-mono text-[10px]">v{{ plugin.version || '1.0' }}</span>
+                      </div>
+                      <div class="flex items-center gap-1.5 mt-1 text-[10px] flex-wrap">
+                        <span class="v2-pill h-5">{{ plugin.origin === 'official' ? $t('settings.plugins.official') : $t('settings.plugins.community') }}</span>
+                        <span v-if="plugin.status === 'suspended'" class="badge badge-warning badge-xs">{{ $t('settings.plugins.statusSuspended') }}</span>
+                        <span v-else-if="plugin.status === 'loading'" class="badge badge-warning badge-xs">{{ $t('settings.plugins.statusLoading') }}</span>
+                        <span v-else-if="plugin.status === 'disposing'" class="badge badge-warning badge-xs">{{ $t('settings.plugins.statusDisposing') }}</span>
+                        <span v-else-if="plugin.status === 'error'" class="badge badge-error badge-xs">{{ $t('settings.plugins.statusError') }}</span>
+                        <span v-else-if="pluginRunning(plugin)" class="text-emerald-400 font-semibold">{{ $t('settings.plugins.statusRunning') }}</span>
+                        <span v-else class="text-[var(--v2-ink-subtle)]">{{ $t('settings.plugins.statusStopped') }}</span>
+                      </div>
                     </div>
                   </div>
                   <div class="flex items-center gap-1.5 shrink-0">
@@ -2382,10 +2410,31 @@ onUnmounted(() => {
                 </div>
                 <div v-else-if="plugin.id === 'yuc_schedule'" class="flex items-center justify-between gap-2">
                   <span class="text-[11px] text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.yucScheduleDesc') }}</span>
-                  <router-link to="/schedule" class="v2-btn v2-btn-sm">
+                  <router-link to="/schedule" class="v2-btn v2-btn-sm shrink-0">
                     <Calendar :size="12" />
                     <span>{{ $t('settings.plugins.viewSchedule') }}</span>
                   </router-link>
+                </div>
+                <div v-else-if="plugin.id === 'metadata-mapping'" class="flex items-center justify-between gap-2">
+                  <span class="text-[11px] text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.metaMappingDesc') }}</span>
+                  <button type="button" class="v2-btn v2-btn-sm shrink-0" @click="activeTab = 'metadata'">
+                    <Link2 :size="12" />
+                    <span>{{ $t('settings.plugins.goMetadataSettings') }}</span>
+                  </button>
+                </div>
+                <div v-else-if="plugin.id === 'standard-naming'" class="flex items-center justify-between gap-2">
+                  <span class="text-[11px] text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.geekNamingDesc') }}</span>
+                  <button type="button" class="v2-btn v2-btn-sm shrink-0" @click="activeTab = 'paths'">
+                    <FolderCheck :size="12" />
+                    <span>{{ $t('settings.plugins.goPathSettings') }}</span>
+                  </button>
+                </div>
+                <div v-else-if="plugin.id === 'nfo_scraper'" class="flex items-center justify-between gap-2">
+                  <span class="text-[11px] text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.nfoScraperDesc') }}</span>
+                  <button type="button" class="v2-btn v2-btn-sm shrink-0" @click="activeTab = 'paths'">
+                    <Film :size="12" />
+                    <span>{{ $t('settings.plugins.goPathSettings') }}</span>
+                  </button>
                 </div>
                 <div v-else class="flex items-center justify-between gap-2 text-[11px] text-[var(--v2-ink-subtle)]">
                   <span>{{ $t('settings.plugins.serviceRunning') }}</span>

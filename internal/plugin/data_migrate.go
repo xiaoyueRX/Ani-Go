@@ -34,7 +34,7 @@ func (p *DataMigratePlugin) GetInfo() PluginInfo {
 		Name:        "数据导入与迁移",
 		Description: desc,
 		Version:     "1.1.0",
-		Author:      "xiaoyue",
+		Author:      "xiaoyueRX",
 		AuthorURL:   "https://github.com/xiaoyueRX",
 		Icon:        "Database",
 		IsBuiltIn:   true,

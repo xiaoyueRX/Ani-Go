@@ -425,6 +425,18 @@ func (s *Server) handleBatchCreateSubscriptions(w http.ResponseWriter, r *http.R
 		}
 
 		resp.Success = append(resp.Success, batchSubResult{Title: item.TitleCN, ID: sub.ID})
+		if s.eventBus != nil {
+			s.eventBus.Publish(core.Event{
+				Type: core.EventSubscriptionAdded,
+				Payload: map[string]any{
+					"subscription_id": sub.ID,
+					"title":           sub.TitleCN,
+					"bangumi_id":      sub.BangumiID,
+					"mikan_id":        sub.MikanID,
+				},
+				Time: time.Now(),
+			})
+		}
 
 		// 异步补全 ID 及触发首次补全
 		go func(subID uint) {
@@ -508,6 +520,19 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		log.Printf("❌ 创建订阅失败: %v", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "创建订阅失败"})
 		return
+	}
+
+	if s.eventBus != nil {
+		s.eventBus.Publish(core.Event{
+			Type: core.EventSubscriptionAdded,
+			Payload: map[string]any{
+				"subscription_id": sub.ID,
+				"title":           sub.TitleCN,
+				"bangumi_id":      sub.BangumiID,
+				"mikan_id":        sub.MikanID,
+			},
+			Time: time.Now(),
+		})
 	}
 
 	// 如果有 BangumiID 但前端未提供 RSS URL，后台异步解析 Mikan 字幕组 RSS

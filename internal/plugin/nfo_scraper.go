@@ -105,7 +105,7 @@ func (p *NFOScraperPlugin) GetInfo() PluginInfo {
 		Name:        "Bangumi NFO 刮削器",
 		Description: "媒体库元数据自动生成插件。当剧集整理入库后，自动为 Jellyfin / Emby / Kodi 生成标准 tvshow.nfo、movie.nfo 与 episode.nfo，下载海报并关联 Bangumi / TMDB / IMDB 信息。",
 		Version:     "1.1.0",
-		Author:      "xiaoyue",
+		Author:      "xiaoyueRX",
 		AuthorURL:   "https://github.com/xiaoyueRX",
 		Icon:        "Film",
 		IsBuiltIn:   true,
@@ -471,6 +471,9 @@ func (p *NFOScraperPlugin) downloadPoster(ctx context.Context, targetDir, coverU
 
 	// 快速跳过已存在海报，同时对同路径并发下载去重
 	p.posterMu.Lock()
+	if p.posterInFlight == nil {
+		p.posterInFlight = make(map[string]struct{})
+	}
 	if _, err := os.Stat(posterPath); err == nil {
 		p.posterMu.Unlock()
 		return

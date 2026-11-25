@@ -153,7 +153,7 @@ async function checkYucPlugin() {
     const { data } = await request.get('/plugins')
     if (Array.isArray(data)) {
       const p = data.find((item: any) => item.id === 'yuc_schedule')
-      isYucPluginEnabled.value = !!(p && p.enabled)
+      isYucPluginEnabled.value = !!(p && p.enabled && (!p.status || p.status === 'active'))
       if (!isYucPluginEnabled.value && scheduleSource.value === 'yuc') {
         scheduleSource.value = 'mikan'
       }

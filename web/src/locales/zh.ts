@@ -420,6 +420,8 @@ export default {
       yucScheduleDesc: '長門番堂新番时间表数据源与自动同步',
       viewSchedule: '查看时间表',
       dataMigrateDesc: '从 AutoBangumi 或 ani-rss 迁移现有数据',
+      goMetadataSettings: '元数据设置',
+      goPathSettings: '媒体库路径设置',
     },
     pluginPanel: {
       optional: '（可选）',

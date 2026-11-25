@@ -15,8 +15,8 @@ var (
 	DefaultGeekNamingPlugin = &GeekNamingPlugin{}
 )
 
-func init() {
-	DefaultGeekNamingPlugin.enabled.Store(true)
+type organizerHookProvider interface {
+	GetHookManager() *core.WaterfallHookManager
 }
 
 // GeekNamingPlugin 媒体库规范重命名插件
@@ -32,12 +32,12 @@ func (p *GeekNamingPlugin) GetInfo() PluginInfo {
 		Name:        "媒体库规范重命名",
 		Description: "在番剧入库与文件整理时，遵循 Plex/Emby/Jellyfin 刮削规范，自动格式化文件名与季集目录结构。",
 		Version:     "1.0.0",
-		Author:      "xiaoyue",
+		Author:      "xiaoyueRX",
 		AuthorURL:   "https://github.com/xiaoyueRX",
 		Icon:        "FolderCheck",
 		IsBuiltIn:   true,
 		Type:        "builtin",
-		Events:      []string{core.EventFileOrganized},
+		Events:      []string{},
 	}
 }
 
@@ -62,8 +62,21 @@ func (p *GeekNamingPlugin) Init(bus core.EventBus, ctx core.Context) error {
 	p.enabled.Store(true)
 	p.mu.Unlock()
 
+	var hookMgr *core.WaterfallHookManager
+	if svc, ok := pctx.GetService(core.ServiceOrganizer); ok && svc != nil {
+		if provider, ok := svc.(organizerHookProvider); ok {
+			hookMgr = provider.GetHookManager()
+		}
+	}
+	if hookMgr != nil {
+		registerStandardNamingHook(hookMgr, p.enabled.Load)
+	}
+
 	pctx.OnDispose(func() {
 		p.enabled.Store(false)
+		if hookMgr != nil {
+			hookMgr.UnregisterHooksByName("StandardNaming")
+		}
 	})
 
 	pctx.Logf("媒体库规范重命名插件已启用")
@@ -90,13 +103,21 @@ func InitGeekNaming(mgr *core.WaterfallHookManager) {
 	if mgr == nil {
 		return
 	}
+	DefaultGeekNamingPlugin.enabled.Store(true)
+	registerStandardNamingHook(mgr, DefaultGeekNamingPlugin.enabled.Load)
+}
+
+func registerStandardNamingHook(mgr *core.WaterfallHookManager, isEnabled func() bool) {
+	if mgr == nil {
+		return
+	}
 	mgr.UnregisterHooksByName("StandardNaming")
 	mgr.RegisterNamingHook(core.PriorityHigh, "StandardNaming", func(ctx context.Context, input interface{}) (interface{}, error) {
 		in, ok := input.(core.NamingHookInput)
 		if !ok {
 			return nil, fmt.Errorf("规范命名钩子收到无效输入类型: %T", input)
 		}
-		if !DefaultGeekNamingPlugin.enabled.Load() {
+		if isEnabled != nil && !isEnabled() {
 			return core.NamingHookOutput{
 				RenderedPath: in.RenderedPath,
 			}, nil
