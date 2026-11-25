@@ -1123,145 +1123,213 @@ onUnmounted(() => {
       <div class="modal-backdrop" @click="batchResultModal = false"></div>
     </dialog>
 
-    <!-- 番剧快速详情弹窗 -->
+    <!-- 番剧快速详情弹窗（桌面左右双栏 / 手机紧凑自适应） -->
     <dialog :class="['modal', { 'modal-open': selectedItem }]">
-      <div v-if="selectedItem" class="modal-box max-w-sm p-0 overflow-hidden">
-        <div class="relative w-full aspect-[3/3.6] bg-[var(--v2-surface-2)]">
-          <img v-if="selectedItem.cover_url" :src="proxyImage(selectedItem.cover_url)" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
-          <div class="absolute inset-0 bg-gradient-to-t from-[var(--v2-surface)] via-transparent to-transparent"></div>
-          <button type="button" class="w-8 h-8 rounded-full bg-black/55 text-white flex items-center justify-center absolute top-3 right-3 hover:bg-black/80" @click="selectedItem = null">
-            <X :size="15" />
-          </button>
+      <div
+        v-if="selectedItem"
+        class="modal-box w-full max-w-md md:max-w-3xl p-0 overflow-hidden max-h-[88dvh] md:max-h-[600px] flex flex-col md:flex-row"
+      >
+        <!-- 桌面端左侧竖版海报栏 -->
+        <div class="hidden md:block md:w-[270px] lg:w-[290px] shrink-0 relative bg-[var(--v2-surface-2)] border-r border-[var(--v2-border)] min-h-[420px]">
+          <img
+            v-if="selectedItem.cover_url"
+            :src="proxyImage(selectedItem.cover_url)"
+            :alt="selectedMetadata?.anime?.title_cn || selectedItem.title"
+            class="w-full h-full object-cover"
+            decoding="async"
+            referrerpolicy="no-referrer"
+          />
+          <div v-else class="w-full h-full flex items-center justify-center text-[var(--v2-ink-subtle)]/40">
+            <Image :size="36" />
+          </div>
+          <div class="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/75 via-black/25 to-transparent pointer-events-none"></div>
+          <div class="absolute top-3 left-3 flex items-center gap-1.5">
+            <span class="px-2 py-0.5 rounded-md bg-black/65 backdrop-blur-sm text-[11px] font-semibold text-white border border-white/15">
+              {{ selectedItem.source || 'Mikan' }}
+            </span>
+          </div>
+          <div v-if="isItemSubscribed(selectedItem)" class="absolute bottom-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/90 text-white text-[11px] font-semibold shadow">
+            <Check :size="12" />
+            <span>{{ $t('schedule.modal.alreadySubscribed') }}</span>
+          </div>
         </div>
-        <div class="p-5 space-y-4">
-          <div>
-            <h3 class="text-base font-bold text-[var(--v2-ink)]">{{ selectedMetadata?.anime?.title_cn || selectedItem.title }}</h3>
-            <div v-if="selectedMetadata?.anime?.year" class="text-xs font-mono text-[var(--v2-accent)] mt-1">
-              {{ selectedMetadata.anime.year }} • {{ selectedMetadata.anime.total_eps || '?' }} EP
+
+        <!-- 右侧主操作栏（顶部固定头 + 中间滚动区 + 底部固定按钮） -->
+        <div class="flex-1 min-w-0 flex flex-col min-h-0">
+          <!-- 固定头部：手机端为左缩略封面+右信息横排，桌面端简洁展示元信息 -->
+          <div class="shrink-0 px-4 sm:px-5 pt-4 sm:pt-5 pb-3 border-b border-[var(--v2-border)] flex items-start gap-3">
+            <!-- 手机端紧凑缩略海报 -->
+            <div class="md:hidden w-20 aspect-[2/3] rounded-xl overflow-hidden shrink-0 border border-[var(--v2-border)] bg-[var(--v2-surface-2)] relative">
+              <img
+                v-if="selectedItem.cover_url"
+                :src="proxyImage(selectedItem.cover_url)"
+                :alt="selectedMetadata?.anime?.title_cn || selectedItem.title"
+                class="w-full h-full object-cover"
+                decoding="async"
+                referrerpolicy="no-referrer"
+              />
+              <div v-else class="w-full h-full flex items-center justify-center text-[var(--v2-ink-subtle)]/40">
+                <Image :size="22" />
+              </div>
             </div>
-            <div class="flex flex-wrap gap-2 mt-2 text-xs text-[var(--v2-ink-muted)]">
-              <span class="v2-pill"><Clock :size="11" /> {{ selectedItem.aired_time || 'TBA' }}</span>
-              <span class="v2-pill"><Calendar :size="11" /> {{ selectedItem.aired_date || 'TBA' }}</span>
+
+            <div class="flex-1 min-w-0 space-y-1.5">
+              <div class="flex items-start justify-between gap-2">
+                <h3 class="text-base sm:text-lg font-bold text-[var(--v2-ink)] leading-snug line-clamp-2">
+                  {{ selectedMetadata?.anime?.title_cn || selectedItem.title }}
+                </h3>
+                <button
+                  type="button"
+                  aria-label="关闭弹窗"
+                  class="w-8 h-8 rounded-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] text-[var(--v2-ink-muted)] hover:text-[var(--v2-ink)] hover:border-[var(--v2-border-strong)] flex items-center justify-center shrink-0 cursor-pointer"
+                  @click="selectedItem = null"
+                >
+                  <X :size="15" />
+                </button>
+              </div>
+              <div v-if="selectedMetadata?.anime?.year" class="text-xs font-mono text-[var(--v2-accent)] font-semibold">
+                {{ selectedMetadata.anime.year }} • {{ selectedMetadata.anime.total_eps || '?' }} EP
+              </div>
+              <div class="flex flex-wrap gap-1.5 text-[11px] text-[var(--v2-ink-muted)]">
+                <span class="v2-pill"><Clock :size="11" /> {{ selectedItem.aired_time || 'TBA' }}</span>
+                <span class="v2-pill"><Calendar :size="11" /> {{ selectedItem.aired_date || 'TBA' }}</span>
+                <span class="v2-pill md:hidden">{{ selectedItem.source || 'Mikan' }}</span>
+              </div>
             </div>
           </div>
 
-          <div v-if="metaLoading" class="py-6 flex justify-center">
-            <span class="loading loading-spinner loading-md text-[var(--v2-accent)]"></span>
-          </div>
-          <p v-else-if="selectedMetadata?.anime?.description" class="text-xs text-[var(--v2-ink-muted)] leading-relaxed line-clamp-4">
-            {{ selectedMetadata.anime.description }}
-          </p>
-
-          <!-- 内联快速订阅与已订阅直达 -->
-          <div v-if="isItemSubscribed(selectedItem)" class="space-y-2 pt-1">
-            <div class="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-400 flex items-center gap-2">
-              <Check :size="14" />
-              <span>{{ $t('schedule.modal.alreadySubscribed') }}</span>
+          <!-- 中间可滚动内容区：简介 + 字幕组选择 -->
+          <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 py-3.5 space-y-3.5">
+            <div v-if="metaLoading" class="py-6 flex justify-center">
+              <span class="loading loading-spinner loading-md text-[var(--v2-accent)]"></span>
             </div>
-            <button
-              v-if="resolveSubscribedId(selectedItem)"
-              type="button"
-              class="v2-btn v2-btn-primary w-full"
-              @click="() => { const id = resolveSubscribedId(selectedItem); selectedItem = null; if (id) router.push(`/subscriptions/${id}`) }"
-            >
-              <span>{{ $t('schedule.modal.viewDetail') }}</span>
-            </button>
-          </div>
-
-          <div v-else-if="isAuthenticated" class="space-y-2.5 pt-1 border-t border-[var(--v2-border)]">
-            <p v-if="modalSubError" role="alert" class="text-xs text-red-400 bg-red-500/10 border border-red-500/25 rounded-lg px-2.5 py-1.5">
-              {{ modalSubError }}
+            <p v-else-if="selectedMetadata?.anime?.description" class="text-xs text-[var(--v2-ink-muted)] leading-relaxed line-clamp-3 md:line-clamp-4">
+              {{ selectedMetadata.anime.description }}
             </p>
 
-            <!-- 默认字幕组提示条 -->
-            <div class="flex items-center justify-between gap-2 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] px-2.5 py-1.5 text-[11px]">
-              <span class="text-[var(--v2-ink-muted)] truncate">
-                <template v-if="defaultSubgroups.length > 0">
-                  {{ $t('schedule.modal.defaultSummary', { groups: defaultSubgroups.join('、') }) }}
-                </template>
-                <template v-else>
-                  {{ $t('schedule.modal.defaultNone') }}
-                </template>
-              </span>
-              <button
-                type="button"
-                class="text-[var(--v2-accent)] font-semibold hover:underline shrink-0 cursor-pointer"
-                @click="openDefaultSubgroupEditor"
-              >
-                {{ defaultSubgroups.length > 0 ? $t('schedule.modal.editDefault') : $t('schedule.modal.setDefault') }}
-              </button>
+            <div v-if="isItemSubscribed(selectedItem)" class="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2.5 text-xs font-semibold text-emerald-400 flex items-center gap-2">
+              <Check :size="14" class="shrink-0" />
+              <span>{{ $t('schedule.modal.alreadySubscribed') }}</span>
             </div>
 
-            <!-- Mikan 源拉取专属字幕组列表（多选复选框） -->
-            <template v-if="selectedItem.source === 'Mikan'">
-              <div v-if="modalGroupsLoading" class="flex items-center gap-2 text-xs text-[var(--v2-ink-muted)] py-1">
-                <Loader2 :size="13" class="animate-spin text-[var(--v2-accent)]" />
-                <span>{{ $t('schedule.modal.loadingGroups') }}</span>
+            <div v-else-if="isAuthenticated" class="space-y-3 pt-1" :class="{ 'border-t border-[var(--v2-border)] pt-3': !metaLoading && !!selectedMetadata?.anime?.description }">
+              <p v-if="modalSubError" role="alert" class="text-xs text-red-400 bg-red-500/10 border border-red-500/25 rounded-lg px-2.5 py-1.5">
+                {{ modalSubError }}
+              </p>
+
+              <!-- 默认字幕组提示条 -->
+              <div class="flex items-center justify-between gap-2 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] px-3 py-2 text-[11px]">
+                <span class="text-[var(--v2-ink-muted)] truncate">
+                  <template v-if="defaultSubgroups.length > 0">
+                    {{ $t('schedule.modal.defaultSummary', { groups: defaultSubgroups.join('、') }) }}
+                  </template>
+                  <template v-else>
+                    {{ $t('schedule.modal.defaultNone') }}
+                  </template>
+                </span>
+                <button
+                  type="button"
+                  class="text-[var(--v2-accent)] font-semibold hover:underline shrink-0 cursor-pointer"
+                  @click="openDefaultSubgroupEditor"
+                >
+                  {{ defaultSubgroups.length > 0 ? $t('schedule.modal.editDefault') : $t('schedule.modal.setDefault') }}
+                </button>
               </div>
-              <div v-else-if="modalGroups.length > 0" class="space-y-1.5" :class="{ 'ring-2 ring-[var(--v2-accent)]/60 rounded-xl p-1.5 -m-1.5 transition-all': highlightSubgroupList }">
+
+              <!-- Mikan 源拉取专属字幕组列表（多选复选框） -->
+              <template v-if="selectedItem.source === 'Mikan'">
+                <div v-if="modalGroupsLoading" class="flex items-center gap-2 text-xs text-[var(--v2-ink-muted)] py-2">
+                  <Loader2 :size="13" class="animate-spin text-[var(--v2-accent)]" />
+                  <span>{{ $t('schedule.modal.loadingGroups') }}</span>
+                </div>
+                <div v-else-if="modalGroups.length > 0" class="space-y-2" :class="{ 'ring-2 ring-[var(--v2-accent)]/60 rounded-xl p-1.5 -m-1.5 transition-all': highlightSubgroupList }">
+                  <div class="flex items-center justify-between gap-2 text-[11px]">
+                    <p class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.pickMikanGroup') }}</p>
+                    <span v-if="modalSelectedSubgroups.size > 0" class="font-mono text-[var(--v2-accent)] font-semibold">
+                      {{ $t('schedule.modal.selectedCount', { count: modalSelectedSubgroups.size }) }}
+                    </span>
+                  </div>
+                  <div class="space-y-1.5">
+                    <label
+                      v-for="g in modalGroups"
+                      :key="g.rss_url"
+                      class="w-full rounded-lg border px-3 py-2 flex items-center gap-2.5 text-left text-xs transition-colors cursor-pointer select-none"
+                      :class="modalSelectedSubgroups.has(g.name)
+                        ? 'bg-[var(--v2-accent)]/12 border-[var(--v2-accent)] text-[var(--v2-ink)]'
+                        : 'v2-panel-muted hover:border-[var(--v2-accent)]/40 text-[var(--v2-ink)]'"
+                    >
+                      <input
+                        type="checkbox"
+                        class="checkbox checkbox-sm checkbox-primary shrink-0"
+                        :checked="modalSelectedSubgroups.has(g.name)"
+                        :disabled="modalSubscribing"
+                        @change="toggleModalSubgroup(g.name)"
+                      />
+                      <span class="truncate font-medium flex-1">{{ g.name }}</span>
+                      <span v-if="isDefaultSubgroup(g.name)" class="px-1.5 py-0.5 rounded bg-[var(--v2-accent)]/15 text-[var(--v2-accent)] text-[10px] font-semibold shrink-0">
+                        {{ $t('schedule.modal.defaultTag') }}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+                <p v-else-if="modalGroupsError" class="text-[11px] text-amber-400">{{ modalGroupsError }}</p>
+              </template>
+
+              <!-- Bangumi / Yuc 或无专属组时的通用字幕组复选框多选 -->
+              <div v-if="selectedItem.source !== 'Mikan' || (!modalGroupsLoading && modalGroups.length === 0)" class="space-y-2" :class="{ 'ring-2 ring-[var(--v2-accent)]/60 rounded-xl p-1.5 -m-1.5 transition-all': highlightSubgroupList }">
                 <div class="flex items-center justify-between gap-2 text-[11px]">
-                  <p class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.pickMikanGroup') }}</p>
+                  <p class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.quickSubgroups') }}</p>
                   <span v-if="modalSelectedSubgroups.size > 0" class="font-mono text-[var(--v2-accent)] font-semibold">
                     {{ $t('schedule.modal.selectedCount', { count: modalSelectedSubgroups.size }) }}
                   </span>
                 </div>
-                <div class="max-h-36 overflow-y-auto space-y-1 pr-0.5">
+                <div class="flex flex-wrap gap-1.5">
                   <label
-                    v-for="g in modalGroups"
-                    :key="g.rss_url"
-                    class="w-full rounded-lg border px-2.5 py-2 flex items-center gap-2.5 text-left text-xs transition-colors cursor-pointer select-none"
-                    :class="modalSelectedSubgroups.has(g.name)
-                      ? 'bg-[var(--v2-accent)]/12 border-[var(--v2-accent)] text-[var(--v2-ink)]'
-                      : 'v2-panel-muted hover:border-[var(--v2-accent)]/40 text-[var(--v2-ink)]'"
+                    v-for="grp in COMMON_SUBGROUPS.slice(0, 6)"
+                    :key="grp"
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border transition-colors cursor-pointer select-none"
+                    :class="modalSelectedSubgroups.has(grp)
+                      ? 'bg-[var(--v2-accent)]/15 border-[var(--v2-accent)] text-[var(--v2-accent)] font-semibold'
+                      : 'bg-[var(--v2-surface-2)] border-[var(--v2-border)] text-[var(--v2-ink-muted)] hover:text-[var(--v2-ink)]'"
                   >
                     <input
                       type="checkbox"
-                      class="checkbox checkbox-sm checkbox-primary shrink-0"
-                      :checked="modalSelectedSubgroups.has(g.name)"
+                      class="checkbox checkbox-xs checkbox-primary"
+                      :checked="modalSelectedSubgroups.has(grp)"
                       :disabled="modalSubscribing"
-                      @change="toggleModalSubgroup(g.name)"
+                      @change="toggleModalSubgroup(grp)"
                     />
-                    <span class="truncate font-medium flex-1">{{ g.name }}</span>
-                    <span v-if="isDefaultSubgroup(g.name)" class="px-1.5 py-0.5 rounded bg-[var(--v2-accent)]/15 text-[var(--v2-accent)] text-[10px] font-semibold shrink-0">
-                      {{ $t('schedule.modal.defaultTag') }}
-                    </span>
+                    <span>{{ grp }}</span>
+                    <span v-if="isDefaultSubgroup(grp)" class="text-[10px] font-bold opacity-85">·{{ $t('schedule.modal.defaultTag') }}</span>
                   </label>
                 </div>
               </div>
-              <p v-else-if="modalGroupsError" class="text-[11px] text-amber-400">{{ modalGroupsError }}</p>
-            </template>
+            </div>
+          </div>
 
-            <!-- Bangumi / Yuc 或无专属组时的通用字幕组复选框多选 -->
-            <div v-if="selectedItem.source !== 'Mikan' || (!modalGroupsLoading && modalGroups.length === 0)" class="space-y-1.5" :class="{ 'ring-2 ring-[var(--v2-accent)]/60 rounded-xl p-1.5 -m-1.5 transition-all': highlightSubgroupList }">
-              <div class="flex items-center justify-between gap-2 text-[11px]">
-                <p class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.quickSubgroups') }}</p>
-                <span v-if="modalSelectedSubgroups.size > 0" class="font-mono text-[var(--v2-accent)] font-semibold">
-                  {{ $t('schedule.modal.selectedCount', { count: modalSelectedSubgroups.size }) }}
-                </span>
-              </div>
-              <div class="flex flex-wrap gap-1.5">
-                <label
-                  v-for="grp in COMMON_SUBGROUPS.slice(0, 6)"
-                  :key="grp"
-                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border transition-colors cursor-pointer select-none"
-                  :class="modalSelectedSubgroups.has(grp)
-                    ? 'bg-[var(--v2-accent)]/15 border-[var(--v2-accent)] text-[var(--v2-accent)] font-semibold'
-                    : 'bg-[var(--v2-surface-2)] border-[var(--v2-border)] text-[var(--v2-ink-muted)] hover:text-[var(--v2-ink)]'"
-                >
-                  <input
-                    type="checkbox"
-                    class="checkbox checkbox-xs checkbox-primary"
-                    :checked="modalSelectedSubgroups.has(grp)"
-                    :disabled="modalSubscribing"
-                    @change="toggleModalSubgroup(grp)"
-                  />
-                  <span>{{ grp }}</span>
-                  <span v-if="isDefaultSubgroup(grp)" class="text-[10px] font-bold opacity-85">·{{ $t('schedule.modal.defaultTag') }}</span>
-                </label>
-              </div>
+          <!-- 固定底部操作栏：始终在视口底部可用 -->
+          <div class="shrink-0 px-4 sm:px-5 py-3 border-t border-[var(--v2-border)] bg-[var(--v2-surface)]">
+            <div v-if="isItemSubscribed(selectedItem)" class="flex items-center gap-2">
+              <button
+                v-if="resolveSubscribedId(selectedItem)"
+                type="button"
+                class="v2-btn v2-btn-primary flex-1"
+                @click="() => { const id = resolveSubscribedId(selectedItem); selectedItem = null; if (id) router.push(`/subscriptions/${id}`) }"
+              >
+                <span>{{ $t('schedule.modal.viewDetail') }}</span>
+              </button>
+              <button
+                type="button"
+                class="v2-btn"
+                :class="{ 'flex-1': !resolveSubscribedId(selectedItem) }"
+                @click="router.push(`/search?q=${encodeURIComponent(selectedItem?.title || '')}`)"
+              >
+                <Search :size="15" />
+                <span>{{ $t('schedule.modal.searchAndSub') }}</span>
+              </button>
             </div>
 
-            <div class="flex gap-2">
+            <div v-else-if="isAuthenticated" class="flex items-center gap-2">
               <button
                 type="button"
                 class="v2-btn v2-btn-primary flex-1"
@@ -1280,14 +1348,28 @@ onUnmounted(() => {
                 @click="openCustomFormFromModal"
               >
                 <SlidersHorizontal :size="14" />
+                <span class="hidden sm:inline">{{ $t('schedule.modal.customRules') }}</span>
+              </button>
+              <button
+                type="button"
+                class="v2-btn shrink-0"
+                :title="$t('schedule.modal.searchAndSub')"
+                @click="router.push(`/search?q=${encodeURIComponent(selectedItem?.title || '')}`)"
+              >
+                <Search :size="14" />
               </button>
             </div>
-          </div>
 
-          <button type="button" class="v2-btn w-full" :class="{ 'v2-btn-primary': !isAuthenticated && !isItemSubscribed(selectedItem) }" @click="router.push(`/search?q=${encodeURIComponent(selectedItem?.title || '')}`)">
-            <Search :size="15" />
-            <span>{{ $t('schedule.modal.searchAndSub') }}</span>
-          </button>
+            <button
+              v-else
+              type="button"
+              class="v2-btn v2-btn-primary w-full"
+              @click="router.push(`/search?q=${encodeURIComponent(selectedItem?.title || '')}`)"
+            >
+              <Search :size="15" />
+              <span>{{ $t('schedule.modal.searchAndSub') }}</span>
+            </button>
+          </div>
         </div>
       </div>
       <div class="modal-backdrop" @click="selectedItem = null"></div>
