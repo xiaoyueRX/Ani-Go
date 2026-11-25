@@ -15,12 +15,16 @@ function loadThemeModule(initialStorage = new Map(), initialDomTheme = 'anigo-da
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   })
-  let domTheme = initialDomTheme
+  const attrs = new Map([['data-theme', initialDomTheme]])
+  const cssVars = new Map()
   let metaColor = '#09090b'
   const document = {
     documentElement: {
-      getAttribute: name => (name === 'data-theme' ? domTheme : null),
-      setAttribute: (name, value) => { if (name === 'data-theme') domTheme = value },
+      getAttribute: name => attrs.get(name) ?? null,
+      setAttribute: (name, value) => attrs.set(name, String(value)),
+      style: {
+        setProperty: (k, v) => cssVars.set(k, String(v)),
+      },
     },
     querySelector: selector => (selector === 'meta[name="theme-color"]'
       ? { setAttribute: (_attr, value) => { metaColor = value } }
@@ -38,7 +42,9 @@ function loadThemeModule(initialStorage = new Map(), initialDomTheme = 'anigo-da
   })
   return {
     mod: exports,
-    getDomTheme: () => domTheme,
+    getDomTheme: () => attrs.get('data-theme'),
+    getAttr: name => attrs.get(name),
+    getCssVar: name => cssVars.get(name),
     getMetaColor: () => metaColor,
   }
 }
@@ -151,4 +157,93 @@ test('基础 UI 组件均可正确渲染标题、状态、无障碍属性与插�
   assert.match(badgeHtml, /text-success/)
   assert.match(badgeHtml, /bg-success/)
   assert.match(badgeHtml, /已入库/)
+})
+
+test('官方预设主题包含多套风格并支持即时切换结构与配色变量', () => {
+  const storage = new Map()
+  const ctx = loadThemeModule(storage)
+  const { builtinThemes, activePackId, activeStyleId, selectTheme, selectStyle } = ctx.mod.useTheme()
+
+  assert.equal(builtinThemes.length, 3)
+  for (const pack of builtinThemes) {
+    assert.ok(pack.styles.length >= 3, pack.id)
+    assert.ok(pack.styles.some(s => s.mode === 'anigo-dark'), `${pack.id} 应含暗色`)
+    assert.ok(pack.styles.some(s => s.mode === 'anigo-light'), `${pack.id} 应含亮色`)
+  }
+
+  selectTheme('studio-grid', 'carbon-amber')
+  assert.equal(activePackId.value, 'studio-grid')
+  assert.equal(activeStyleId.value, 'carbon-amber')
+  assert.equal(ctx.getAttr('data-theme-pack'), 'studio-grid')
+  assert.equal(ctx.getAttr('data-theme-style'), 'carbon-amber')
+  assert.equal(ctx.getDomTheme(), 'anigo-dark')
+  assert.equal(ctx.getCssVar('--v2-accent'), '#f59e0b')
+  assert.equal(ctx.getCssVar('--v2-radius-panel'), '0.375rem')
+  assert.equal(ctx.getMetaColor(), '#0a0b0d')
+
+  selectStyle('blueprint-light')
+  assert.equal(activeStyleId.value, 'blueprint-light')
+  assert.equal(ctx.getDomTheme(), 'anigo-light')
+  assert.equal(ctx.getCssVar('--v2-accent'), '#2563eb')
+  assert.equal(ctx.getMetaColor(), '#f1f5f9')
+})
+
+test('支持导入与导出多色彩第三方主题，拒绝非法 CSS 注入并在删除后回退默认', () => {
+  const storage = new Map()
+  const ctx = loadThemeModule(storage)
+  const {
+    importCustomTheme,
+    selectTheme,
+    exportThemeJson,
+    removeCustomTheme,
+    customThemes,
+    activePackId,
+    activeStyleId,
+    validateThemePack,
+  } = { ...ctx.mod.useTheme(), validateThemePack: ctx.mod.validateThemePack }
+
+  const validJson = JSON.stringify(ctx.mod.THIRD_PARTY_THEME_TEMPLATE)
+  const imported = importCustomTheme(validJson)
+  assert.equal(imported.ok, true)
+  assert.equal(customThemes.value.length, 1)
+
+  selectTheme('neo-tokyo-custom', 'neon-magenta')
+  assert.equal(activePackId.value, 'neo-tokyo-custom')
+  assert.equal(activeStyleId.value, 'neon-magenta')
+  assert.equal(ctx.getCssVar('--v2-accent'), '#e879f9')
+
+  const exported = exportThemeJson('neo-tokyo-custom')
+  assert.match(exported, /"schema": "anigo-theme-v1"/)
+  assert.match(exported, /neon-magenta/)
+
+  removeCustomTheme('neo-tokyo-custom')
+  assert.equal(customThemes.value.length, 0)
+  assert.equal(activePackId.value, 'cinema')
+  assert.equal(activeStyleId.value, 'obsidian-vermilion')
+
+  const malicious = validateThemePack({
+    schema: 'anigo-theme-v1',
+    id: 'bad-theme',
+    name: '恶意主题',
+    styles: [{
+      id: 'evil',
+      name: 'Evil',
+      mode: 'anigo-dark',
+      colors: { bg: '#000; background: url(https://evil)', surface: '#111', ink: '#fff', accent: '#f00' },
+    }],
+  })
+  assert.equal(malicious.ok, false)
+
+  const conflict = validateThemePack({
+    schema: 'anigo-theme-v1',
+    id: 'cinema',
+    name: 'Conflict',
+    styles: [{
+      id: 'c1',
+      name: 'C1',
+      mode: 'anigo-dark',
+      colors: { bg: '#000000', surface: '#111111', ink: '#ffffff', accent: '#ff5c28' },
+    }],
+  })
+  assert.equal(conflict.ok, false)
 })

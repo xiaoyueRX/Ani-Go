@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   Calendar, LayoutGrid, Search, Download, Settings,
-  Sun, Moon, Languages, Plus, ArrowRight, Command
+  Sun, Moon, Languages, Plus, ArrowRight, Command, Palette
 } from 'lucide-vue-next'
 import { useTheme } from '../../composables/useTheme'
 
@@ -41,6 +41,16 @@ const actions = computed(() => {
     { id: 'settings', label: t('nav.settings'), group: locale.value === 'zh' ? '页面导航' : 'Navigate', icon: Settings, run: () => go('/settings') },
     { id: 'new-sub', label: locale.value === 'zh' ? '手动新增订阅' : 'Add Subscription', group: locale.value === 'zh' ? '快捷动作' : 'Quick Actions', icon: Plus, run: () => go('/subscriptions/new') },
     {
+      id: 'theme-studio',
+      label: locale.value === 'zh' ? '主题与色彩工坊 (预设 / 第三方)' : 'Theme & Color Studio',
+      group: locale.value === 'zh' ? '外观与语言' : 'Appearance',
+      icon: Palette,
+      run: () => {
+        window.dispatchEvent?.(new CustomEvent('anigo-open-theme-studio'))
+        emit('close')
+      },
+    },
+    {
       id: 'theme',
       label: isDark.value ? t('nav.themeLight') : t('nav.themeDark'),
       group: locale.value === 'zh' ? '外观与语言' : 'Appearance',
@@ -55,7 +65,7 @@ const actions = computed(() => {
       run: () => {
         const next = locale.value === 'zh' ? 'en' : 'zh'
         locale.value = next
-        localStorage.setItem('locale', next)
+        localStorage.setItem('lang', next)
         emit('close')
       },
     },

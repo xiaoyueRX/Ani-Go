@@ -51,11 +51,21 @@
   --v2-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --v2-shadow: 0 14px 36px -18px rgba(0, 0, 0, 0.72);
   --v2-dock-bg: rgba(18, 18, 21, 0.84);
+  --v2-radius-panel: 0.875rem;
+  --v2-radius-muted: 0.75rem;
+  --v2-radius-btn: 0.625rem;
+  --v2-radius-btn-sm: 0.5rem;
+  --v2-radius-input: 0.625rem;
+  --v2-dock-radius: 9999px;
+  --v2-blur: 20px;
+  --v2-bg-image: radial-gradient(ellipse 70% 34% at 50% -10%, color-mix(in srgb, var(--v2-accent) 14%, transparent), transparent);
+  --v2-bg-size: auto;
+  --v2-bg-repeat: no-repeat;
   --app-border: var(--v2-border);
   --app-border-strong: var(--v2-border-strong);
   --app-muted: var(--v2-ink-muted);
   --app-subtle: var(--v2-ink-subtle);
-  --radius-box: 0.75rem;
+  --radius-box: var(--v2-radius-muted);
 }
 
 [data-theme="anigo-light"],
@@ -83,11 +93,21 @@
   --v2-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
   --v2-shadow: 0 10px 28px -14px rgba(20, 20, 23, 0.12);
   --v2-dock-bg: rgba(255, 255, 255, 0.86);
+  --v2-radius-panel: 0.875rem;
+  --v2-radius-muted: 0.75rem;
+  --v2-radius-btn: 0.625rem;
+  --v2-radius-btn-sm: 0.5rem;
+  --v2-radius-input: 0.625rem;
+  --v2-dock-radius: 9999px;
+  --v2-blur: 20px;
+  --v2-bg-image: radial-gradient(ellipse 70% 34% at 50% -10%, color-mix(in srgb, var(--v2-accent) 12%, transparent), transparent);
+  --v2-bg-size: auto;
+  --v2-bg-repeat: no-repeat;
   --app-border: var(--v2-border);
   --app-border-strong: var(--v2-border-strong);
   --app-muted: var(--v2-ink-muted);
   --app-subtle: var(--v2-ink-subtle);
-  --radius-box: 0.75rem;
+  --radius-box: var(--v2-radius-muted);
 }
 
 html,
@@ -100,8 +120,9 @@ body {
 }
 
 body {
-  background-image: radial-gradient(ellipse 70% 34% at 50% -10%, color-mix(in srgb, var(--v2-accent) 12%, transparent), transparent);
-  background-repeat: no-repeat;
+  background-image: var(--v2-bg-image);
+  background-size: var(--v2-bg-size);
+  background-repeat: var(--v2-bg-repeat);
   min-height: 100vh;
 }
 
@@ -114,24 +135,30 @@ body {
 .v2-panel {
   background-color: var(--v2-surface);
   border: 1px solid var(--v2-border);
-  border-radius: 0.875rem;
+  border-radius: var(--v2-radius-panel);
   box-shadow: var(--v2-highlight);
 }
 
 .v2-panel-muted {
   background-color: var(--v2-surface-2);
   border: 1px solid var(--v2-border);
-  border-radius: 0.75rem;
+  border-radius: var(--v2-radius-muted);
 }
 
 .v2-nav-dock {
   background-color: var(--v2-surface-2);
   border: 1px solid var(--v2-border);
-  border-radius: 9999px;
+  border-radius: var(--v2-dock-radius);
   padding: 0.25rem;
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+}
+
+.v2-glass {
+  background-color: var(--v2-dock-bg);
+  backdrop-filter: blur(var(--v2-blur));
+  -webkit-backdrop-filter: blur(var(--v2-blur));
 }
 
 .v2-btn {
@@ -141,7 +168,7 @@ body {
   gap: 0.45rem;
   height: 2.25rem;
   padding: 0 0.9rem;
-  border-radius: 0.625rem;
+  border-radius: var(--v2-radius-btn);
   font-size: 0.8125rem;
   font-weight: 600;
   line-height: 1;
@@ -193,14 +220,14 @@ body {
   height: 1.9rem;
   padding: 0 0.65rem;
   font-size: 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--v2-radius-btn-sm);
 }
 
 .v2-input {
   width: 100%;
   height: 2.375rem;
   padding: 0 0.75rem;
-  border-radius: 0.625rem;
+  border-radius: var(--v2-radius-input);
   border: 1px solid var(--v2-border-strong);
   background-color: var(--v2-surface-2);
   color: var(--v2-ink);

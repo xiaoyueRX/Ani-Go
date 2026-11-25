@@ -19,9 +19,26 @@
         var t = localStorage.getItem('ani-go-theme');
         if (t === 'anigo-light' || t === 'anigo-dark') {
           document.documentElement.setAttribute('data-theme', t);
-          var m = document.querySelector('meta[name="theme-color"]');
-          if (m) m.setAttribute('content', t === 'anigo-light' ? '#f5f3ee' : '#09090b');
         }
+        var p = localStorage.getItem('ani-go-theme-pack');
+        var s = localStorage.getItem('ani-go-theme-style');
+        if (p) document.documentElement.setAttribute('data-theme-pack', p);
+        if (s) document.documentElement.setAttribute('data-theme-style', s);
+        var varsRaw = localStorage.getItem('ani-go-theme-vars');
+        var bgCol = t === 'anigo-light' ? '#f5f3ee' : '#09090b';
+        if (varsRaw) {
+          var vars = JSON.parse(varsRaw);
+          if (vars && typeof vars === 'object') {
+            for (var k in vars) {
+              if (k.indexOf('--v2-') === 0 && typeof vars[k] === 'string') {
+                document.documentElement.style.setProperty(k, vars[k]);
+              }
+            }
+            if (typeof vars['--v2-bg'] === 'string') bgCol = vars['--v2-bg'];
+          }
+        }
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute('content', bgCol);
       } catch (e) {}
     </script>
   </head>

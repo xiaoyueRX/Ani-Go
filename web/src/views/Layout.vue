@@ -6,7 +6,7 @@ import request from '../utils/request'
 import {
   Menu, LogOut, Antenna, Languages, ExternalLink,
   Calendar, LayoutGrid, Search, Download, Settings,
-  Sparkles, X, TriangleAlert, Sun, Moon, Command
+  Sparkles, X, TriangleAlert, Sun, Moon, Command, Palette
 } from 'lucide-vue-next'
 import { loadCurrentVersion, useVersion } from '../composables/useVersion'
 
@@ -44,7 +44,29 @@ function applyTheme(next: ThemeName) {
 }
 
 function toggleTheme() {
-  applyTheme(currentTheme.value === 'anigo-dark' ? 'anigo-light' : 'anigo-dark')
+  const before = typeof document !== 'undefined' ? document.documentElement?.getAttribute('data-theme') : null
+  if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+    window.dispatchEvent?.(new CustomEvent('anigo-toggle-theme-mode'))
+  }
+  const after = typeof document !== 'undefined' ? document.documentElement?.getAttribute('data-theme') : null
+  if (!after || after === before) {
+    applyTheme(currentTheme.value === 'anigo-dark' ? 'anigo-light' : 'anigo-dark')
+  }
+}
+
+function openThemeStudio() {
+  isUserMenuOpen.value = false
+  isDrawerOpen.value = false
+  if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+    window.dispatchEvent?.(new CustomEvent('anigo-open-theme-studio'))
+  }
+}
+
+function onThemeChanged(event: Event) {
+  const mode = (event as CustomEvent).detail?.mode
+  if (mode === 'anigo-light' || mode === 'anigo-dark') {
+    currentTheme.value = mode
+  }
 }
 
 const { currentVersion, latestVersion, hasNewVersion, checkGitHubUpdate, updating, updateProgress, triggerUpdate, canSelfUpdate } = useVersion()
@@ -120,6 +142,7 @@ function handleDocClick(event: MouseEvent) {
 
 onUnmounted(() => {
   window.removeEventListener?.('avatar-updated', updateAvatar)
+  window.removeEventListener?.('anigo-theme-changed', onThemeChanged)
   if (typeof document !== 'undefined') {
     document.removeEventListener?.('click', handleDocClick)
   }
@@ -127,6 +150,7 @@ onUnmounted(() => {
 
 onMounted(async () => {
   window.addEventListener('avatar-updated', updateAvatar)
+  window.addEventListener('anigo-theme-changed', onThemeChanged)
   if (typeof document !== 'undefined') {
     document.addEventListener?.('click', handleDocClick)
     const domTheme = document.documentElement?.getAttribute('data-theme')
@@ -145,11 +169,15 @@ onMounted(async () => {
     isDefaultPassword.value = !!data.is_default_password
   } catch { /* 401 handled by interceptor */ }
 
-  // 若后台配置开启了自动检查更新，则在启动后静默探测
+  // 若后台配置开启了自动检查更新，则在启动后静默探测，并水合主题配置
   try {
     const { data: settings } = await request.get('/settings')
     if (settings.AUTO_CHECK_UPDATE === 'true') {
       checkGitHubUpdate()
+    }
+    if ((settings.UI_THEME_PACK || settings.UI_THEME_STYLE || settings.UI_CUSTOM_THEMES) &&
+        typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+      window.dispatchEvent?.(new CustomEvent('anigo-hydrate-theme-settings', { detail: settings }))
     }
   } catch (e) {
     console.error('Failed to fetch settings for update check:', e)
@@ -241,6 +269,16 @@ function closeDrawer() {
             <Command :size="13" />
             <span class="hidden xl:inline">{{ locale === 'zh' ? '快捷跳转' : 'Jump' }}</span>
             <kbd class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--v2-surface)] border border-[var(--v2-border)] text-[var(--v2-ink-subtle)]">⌘K</kbd>
+          </button>
+
+          <button
+            type="button"
+            class="w-8 h-8 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] hover:bg-[var(--v2-surface-2)] flex items-center justify-center text-[var(--v2-ink-muted)] hover:text-[var(--v2-accent)] transition-colors cursor-pointer"
+            :title="locale === 'zh' ? '主题与配色' : 'Themes & Colors'"
+            aria-label="主题与配色"
+            @click="openThemeStudio"
+          >
+            <Palette :size="15" />
           </button>
 
           <button
@@ -358,6 +396,10 @@ function closeDrawer() {
           class="absolute right-0 mt-2 w-48 v2-panel p-1.5 shadow-xl z-50 border border-[var(--v2-border-strong)]"
         >
           <div class="px-3 py-1.5 text-xs font-semibold text-[var(--v2-ink-muted)] truncate">{{ username || 'admin' }}</div>
+          <button type="button" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium hover:bg-[var(--v2-surface-2)]" @click="openThemeStudio">
+            <Palette :size="14" class="text-[var(--v2-accent)]" />
+            <span>{{ locale === 'zh' ? '主题与配色' : 'Themes' }}</span>
+          </button>
           <button type="button" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium hover:bg-[var(--v2-surface-2)]" @click="toggleTheme">
             <Sun v-if="currentTheme === 'anigo-dark'" :size="14" class="text-[var(--v2-accent)]" />
             <Moon v-else :size="14" class="text-[var(--v2-accent)]" />
@@ -503,7 +545,10 @@ function closeDrawer() {
                 <div class="text-[11px] text-emerald-500">{{ $t('nav.activeNow') }}</div>
               </div>
             </div>
-            <div class="grid grid-cols-3 gap-1 pt-2 border-t border-[var(--v2-border)]">
+            <div class="grid grid-cols-4 gap-1 pt-2 border-t border-[var(--v2-border)]">
+              <button type="button" @click="openThemeStudio" class="v2-btn v2-btn-ghost v2-btn-sm justify-center" :aria-label="locale === 'zh' ? '主题与配色' : 'Themes'">
+                <Palette :size="14" class="text-[var(--v2-accent)]" />
+              </button>
               <button type="button" @click="toggleTheme" class="v2-btn v2-btn-ghost v2-btn-sm justify-center" :aria-label="themeLabel">
                 <Sun v-if="currentTheme === 'anigo-dark'" :size="14" />
                 <Moon v-else :size="14" />

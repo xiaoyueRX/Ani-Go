@@ -6,13 +6,14 @@ import request from '../utils/request'
 import { downloaderForms, downloaderProbe, type DownloaderType } from '../utils/setupDownloader'
 import PluginPanel from '../components/PluginPanel.vue'
 import UserAvatar from '../components/v2/UserAvatar.vue'
+import ThemeAppearancePanel from '../components/v2/ThemeAppearancePanel.vue'
 import {
   Check, Antenna, Download,
   Folder, Bell, Cpu,
   Timer, Lock, FileText,
   Eye, EyeOff, RefreshCw,
   Database, Upload, Trash2,
-  Sparkles, Copy,
+  Sparkles, Copy, Palette,
   Search, Zap, ExternalLink,
   Play, AlertCircle, Globe, X
 } from 'lucide-vue-next'
@@ -125,6 +126,7 @@ const tabGroups = computed(() => {
     {
       name: t('settings.groups.core'),
       tabs: [
+        { key: 'appearance', label: locale.value === 'zh' ? '外观与主题' : 'Themes & Appearance', icon: Palette, ready: true },
         { key: 'paths', label: t('settings.tabs.paths'), icon: Folder, ready: true },
         { key: 'downloader', label: t('settings.tabs.downloader'), icon: Download, ready: true },
       ]
@@ -1261,6 +1263,9 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+
+        <!-- 外观与多套主题工坊 -->
+        <ThemeAppearancePanel v-else-if="activeTab === 'appearance'" />
 
         <!-- v2 框架待迁移分组占位卡片（ai, customRegex, notify, backup） -->
         <div v-else class="v2-panel p-8 sm:p-10 text-center space-y-3">
