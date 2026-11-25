@@ -9,6 +9,7 @@ import {
   Sparkles, X, TriangleAlert, Sun, Moon, Command, Palette
 } from 'lucide-vue-next'
 import { loadCurrentVersion, useVersion } from '../composables/useVersion'
+import { setAppLocale } from '../i18n'
 
 const router = useRouter()
 const route = useRoute()
@@ -115,8 +116,7 @@ const resolvedAvatarSrc = computed(() => {
 const userInitial = computed(() => (username.value?.trim().slice(0, 1).toUpperCase() || 'A'))
 
 function toggleLanguage() {
-  locale.value = locale.value === 'zh' ? 'en' : 'zh'
-  localStorage.setItem('lang', locale.value)
+  void setAppLocale(locale.value === 'zh' ? 'en' : 'zh')
 }
 
 function openCommandPalette() {

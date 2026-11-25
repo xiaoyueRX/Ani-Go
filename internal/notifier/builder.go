@@ -173,17 +173,13 @@ func BuildAllNotifiers(get func(key string) string) []v2.Notifier {
 // BuildAllNotifiersFromSettingsAndEnv 从环境变量与数据库设置构建全部已配置的通知器
 // 遵循 AGENTS.md 三级优先律：环境变量 (os.Getenv) > 数据库 (database.Setting)
 func BuildAllNotifiersFromSettingsAndEnv() []v2.Notifier {
+	settingsMap := database.LoadSettingsMap(database.DB)
 	notifiers := BuildAllNotifiers(func(key string) string {
 		if envVal := strings.TrimSpace(os.Getenv(key)); envVal != "" {
 			return envVal
 		}
-		if database.DB != nil {
-			var s database.Setting
-			if err := database.DB.Where("key = ?", key).First(&s).Error; err == nil {
-				if dbVal := strings.TrimSpace(s.Value); dbVal != "" {
-					return dbVal
-				}
-			}
+		if dbVal := strings.TrimSpace(settingsMap[key]); dbVal != "" {
+			return dbVal
 		}
 		return ""
 	})

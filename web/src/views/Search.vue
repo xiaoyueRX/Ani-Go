@@ -998,7 +998,7 @@ function sourceBadgeClass(source: string): string {
           />
 
           <div v-if="item.cover_url" class="w-11 h-15 rounded-lg bg-[var(--v2-surface-2)] shrink-0 overflow-hidden border border-[var(--v2-border)] hidden sm:block">
-            <img :src="proxyImage(item.cover_url)" :alt="item.title" class="w-full h-full object-cover" loading="lazy" />
+            <img :src="proxyImage(item.cover_url)" :alt="item.title" class="w-full h-full object-cover" loading="lazy" decoding="async" />
           </div>
 
           <div class="min-w-0 flex-1 space-y-1.5">

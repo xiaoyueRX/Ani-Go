@@ -964,6 +964,7 @@ onUnmounted(() => {
                   :alt="item.title"
                   class="relative z-10 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                   loading="lazy"
+                  decoding="async"
                   referrerpolicy="no-referrer"
                   @error="(e: Event) => { (e.target as HTMLImageElement).style.opacity = '0' }"
                 />
@@ -1014,6 +1015,7 @@ onUnmounted(() => {
                   :alt="item.title"
                   class="relative z-10 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                   loading="lazy"
+                  decoding="async"
                   referrerpolicy="no-referrer"
                   @error="(e: Event) => { (e.target as HTMLImageElement).style.opacity = '0' }"
                 />

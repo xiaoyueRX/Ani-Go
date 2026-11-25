@@ -25,6 +25,7 @@ function session(health, update = {}) {
     vue: { ...vue, onMounted: fn => mounted.push(fn) },
     'vue-router': { useRouter: () => ({}), useRoute: () => ({}) },
     'vue-i18n': { useI18n: () => ({}) },
+    '../i18n': { setAppLocale: async () => {} },
     '../utils/request': { get: async path => {
       calls.push(path)
       assert.ok(Object.hasOwn(responses, path), path)

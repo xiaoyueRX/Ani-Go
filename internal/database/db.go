@@ -39,8 +39,9 @@ func Init(dbPath string) error {
 		separator = "&"
 	}
 	var err error
-	// 单连接下，事务与后台查询共享 GORM 的预编译缓存会互相等待连接和语句。
-	DB, err = gorm.Open(sqlite.Open(dbPath+separator+"_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"), &gorm.Config{
+	// 单连接下，事务与后台查询共享 GORM 的预编译缓存会互相等待连接和语句；
+	// 限制页缓存为 2 MiB，临时表存内存，控制 NAS 低内存占用。
+	DB, err = gorm.Open(sqlite.Open(dbPath+separator+"_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=temp_store(MEMORY)&_pragma=cache_size(-2000)"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
@@ -114,6 +115,22 @@ func Init(dbPath string) error {
 
 	log.Printf("✅ 数据库初始化完成: %s", dbPath)
 	return nil
+}
+
+// LoadSettingsMap 单次批量加载全部系统设置，避免启动和热重载阶段逐键 N+1 查询。
+func LoadSettingsMap(db *gorm.DB) map[string]string {
+	result := make(map[string]string)
+	if db == nil {
+		return result
+	}
+	var rows []Setting
+	if err := db.Select("key", "value").Find(&rows).Error; err != nil {
+		return result
+	}
+	for _, r := range rows {
+		result[r.Key] = r.Value
+	}
+	return result
 }
 
 // InitDefaultUser 只在空用户表中创建管理员，支持部署预置口令。

@@ -79,20 +79,17 @@ func main() {
 	}
 	log.Println("✅ JWT 密钥已从数据库加载或自动生成 (持久化存储)")
 
-	// 从数据库设置表合并 Web UI 中保存的配置（env var 优先，数据库作回退）
+	// 从数据库设置表批量合并 Web UI 中保存的配置（env var 优先，数据库作回退）
 	startupDefaults := *cfg
-	cfg.MergeFromSettings(func(key string) (string, bool) {
-		var s database.Setting
-		res := database.DB.Where("key = ?", key).Limit(1).Find(&s)
-		if res.RowsAffected == 0 {
-			return "", false
-		}
-		return s.Value, true
-	})
+	startupSettings := database.LoadSettingsMap(database.DB)
+	getStartupSetting := func(key string) (string, bool) {
+		v, ok := startupSettings[key]
+		return v, ok
+	}
+	cfg.MergeFromSettings(getStartupSetting)
 
 	// 初始化默认设置（仅当 stall_timeout_hours 键不存在时写入，避免与用户已配置的值冲突）
-	var stallSetting database.Setting
-	if err := database.DB.Where("key = ?", "stall_timeout_hours").First(&stallSetting).Error; err != nil {
+	if _, ok := startupSettings["stall_timeout_hours"]; !ok {
 		database.DB.Create(&database.Setting{Key: "stall_timeout_hours", Value: "24"})
 	}
 
@@ -120,14 +117,8 @@ func main() {
 		}
 	}()
 
-	// 从数据库加载用户自定义正则解析规则
-	source.LoadCustomPatternsFromSettings(func(key string) (string, bool) {
-		var s database.Setting
-		if err := database.DB.Where("key = ?", key).First(&s).Error; err != nil {
-			return "", false
-		}
-		return s.Value, true
-	})
+	// 从已批量读取的数据库设置加载用户自定义正则解析规则
+	source.LoadCustomPatternsFromSettings(getStartupSetting)
 
 	// 初始化资源源
 	sourceConfig := *cfg

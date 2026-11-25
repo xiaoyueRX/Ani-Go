@@ -879,6 +879,7 @@ onUnmounted(() => {
               :alt="sub.title_cn"
               class="w-full h-full object-cover"
               loading="lazy"
+              decoding="async"
             />
             <Image v-else :size="18" class="text-[var(--v2-ink-subtle)]" />
           </div>

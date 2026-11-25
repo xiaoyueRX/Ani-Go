@@ -151,7 +151,9 @@ func StartServer(ctx context.Context, host string, port int, version string, all
 
 	apiHandler := auth.ProxyHeadersMiddleware(
 		auth.CORSMiddleware(allowedOrigins)(
-			auth.AuthMiddleware(mux),
+			gzipMiddleware(
+				auth.AuthMiddleware(mux),
+			),
 		),
 	)
 

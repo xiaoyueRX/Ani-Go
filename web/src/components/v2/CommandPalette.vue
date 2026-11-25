@@ -7,6 +7,7 @@ import {
   Sun, Moon, Languages, Plus, ArrowRight, Command, Palette
 } from 'lucide-vue-next'
 import { useTheme } from '../../composables/useTheme'
+import { setAppLocale } from '../../i18n'
 
 const props = defineProps<{
   open: boolean
@@ -64,8 +65,7 @@ const actions = computed(() => {
       icon: Languages,
       run: () => {
         const next = locale.value === 'zh' ? 'en' : 'zh'
-        locale.value = next
-        localStorage.setItem('lang', next)
+        void setAppLocale(next)
         emit('close')
       },
     },

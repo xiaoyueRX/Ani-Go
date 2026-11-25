@@ -50,10 +50,19 @@ export function view(path, request, { route = {}, storage = new Map(), props = {
       isDefaultSubgroup: name => defaultSubgroupsRef.value.some(d => d.toLowerCase() === String(name).trim().toLowerCase()),
     }),
   }
+  const localeStub = vue.ref('en')
+  const i18nStub = {
+    setAppLocale: async lang => {
+      localeStub.value = lang
+      storage.set('lang', lang)
+    },
+  }
   const modules = {
     vue: { ...vue, onMounted: fn => mounted.push(fn), onUnmounted: fn => unmounted.push(fn) },
     'vue-router': { onBeforeRouteLeave() {}, useRouter: () => router, useRoute: () => ({ params: {}, query: {}, ...route }) },
-    'vue-i18n': { useI18n: () => ({ t: translate, te: translationExists, locale: vue.ref('en') }) },
+    'vue-i18n': { useI18n: () => ({ t: translate, te: translationExists, locale: localeStub }) },
+    '../i18n': i18nStub,
+    '../../i18n': i18nStub,
     '../utils/request': request,
     './utils/request': request,
     '../utils/subscriptionListHistory': require('../src/utils/subscriptionListHistory.ts'),

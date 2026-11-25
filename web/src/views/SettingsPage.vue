@@ -1432,9 +1432,19 @@ function copyAllLogs() {
   window.showToast?.('已复制全部日志', 'success')
 }
 
+function pollLogsIfVisible() {
+  if (activeTab.value === 'logs' && autoRefreshLogs.value && (typeof document === 'undefined' || !document.hidden)) {
+    void fetchLogs()
+  }
+}
+
 watch(() => activeTab.value === 'logs' && autoRefreshLogs.value, (val) => {
-  if (val) logTimer = setInterval(() => fetchLogs(), 3000)
-  else if (logTimer) { clearInterval(logTimer); logTimer = null }
+  if (val) {
+    if (!logTimer) logTimer = setInterval(pollLogsIfVisible, 3000)
+  } else if (logTimer) {
+    clearInterval(logTimer)
+    logTimer = null
+  }
 })
 
 function triggerAvatarSelect() {
@@ -1599,10 +1609,12 @@ onMounted(() => {
   fetchPlugins()
   loadTabResources(activeTab.value)
   window.addEventListener('keydown', handleGlobalKeydown)
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', pollLogsIfVisible)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', pollLogsIfVisible)
   if (logTimer) clearInterval(logTimer)
 })
 </script>

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -129,9 +130,99 @@ func (c *lruCache) touch(key string) {
 
 var (
 	isHexHash     = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+	reFourDigits  = regexp.MustCompile(`(\d{4})`)
+	reDigits      = regexp.MustCompile(`(\d+)`)
 	searchCacheMu sync.Mutex
 	searchCache   = newLRUCache(searchCacheMaxSize)
 )
+
+const (
+	scheduleCacheMaxSize = 16
+	scheduleCacheTTL     = 15 * time.Minute
+	subgroupCacheMaxSize = 128
+	subgroupCacheTTL     = 10 * time.Minute
+)
+
+type ttlCacheEntry[T any] struct {
+	val       T
+	expiresAt time.Time
+}
+
+type boundedTTLCache[T any] struct {
+	maxSize int
+	ttl     time.Duration
+	keys    []string
+	entries map[string]ttlCacheEntry[T]
+}
+
+func newBoundedTTLCache[T any](maxSize int, ttl time.Duration) *boundedTTLCache[T] {
+	return &boundedTTLCache[T]{
+		maxSize: maxSize,
+		ttl:     ttl,
+		keys:    make([]string, 0, maxSize),
+		entries: make(map[string]ttlCacheEntry[T], maxSize),
+	}
+}
+
+func (c *boundedTTLCache[T]) get(key string) (T, bool) {
+	entry, ok := c.entries[key]
+	if !ok {
+		var zero T
+		return zero, false
+	}
+	if time.Now().After(entry.expiresAt) {
+		c.deleteKey(key)
+		var zero T
+		return zero, false
+	}
+	c.touch(key)
+	return entry.val, true
+}
+
+func (c *boundedTTLCache[T]) set(key string, val T) {
+	entry := ttlCacheEntry[T]{val: val, expiresAt: time.Now().Add(c.ttl)}
+	if _, exists := c.entries[key]; exists {
+		c.entries[key] = entry
+		c.touch(key)
+		return
+	}
+	for len(c.keys) >= c.maxSize {
+		c.deleteKey(c.keys[0])
+	}
+	c.keys = append(c.keys, key)
+	c.entries[key] = entry
+}
+
+func (c *boundedTTLCache[T]) deleteKey(key string) {
+	delete(c.entries, key)
+	for i, k := range c.keys {
+		if k == key {
+			c.keys = slices.Delete(c.keys, i, i+1)
+			return
+		}
+	}
+}
+
+func (c *boundedTTLCache[T]) touch(key string) {
+	for i, k := range c.keys {
+		if k == key {
+			c.keys = append(slices.Delete(c.keys, i, i+1), key)
+			return
+		}
+	}
+}
+
+func cloneWeekDayItems(days []WeekDayItem) []WeekDayItem {
+	out := make([]WeekDayItem, len(days))
+	for i, d := range days {
+		out[i] = WeekDayItem{
+			DayOfWeek: d.DayOfWeek,
+			Label:     d.Label,
+			Items:     slices.Clone(d.Items),
+		}
+	}
+	return out
+}
 
 // ============================================================
 // MikanSource 实现 core.Source 接口
@@ -140,18 +231,25 @@ var (
 type MikanSource struct {
 	mu            sync.RWMutex
 	httpClient    *http.Client
+	mirrorClient  *http.Client
 	domain        string
 	proxyDomain   string
 	mirrorDomains []string // 镜像域名列表，GFW 下自动回退
+	cacheMu       sync.Mutex
+	scheduleCache *boundedTTLCache[[]WeekDayItem]
+	subgroupCache *boundedTTLCache[[]SubgroupInfo]
 }
 
 // NewMikanSource 创建新的 Mikan 资源源
 func NewMikanSource(domain, proxyDomain string, mirrorDomains []string) *MikanSource {
 	return &MikanSource{
 		httpClient:    httpx.New(30 * time.Second),
+		mirrorClient:  httpx.New(6 * time.Second),
 		domain:        domain,
 		proxyDomain:   proxyDomain,
 		mirrorDomains: mirrorDomains,
+		scheduleCache: newBoundedTTLCache[[]WeekDayItem](scheduleCacheMaxSize, scheduleCacheTTL),
+		subgroupCache: newBoundedTTLCache[[]SubgroupInfo](subgroupCacheMaxSize, subgroupCacheTTL),
 	}
 }
 
@@ -457,7 +555,63 @@ func (m *MikanSource) FetchWeekSchedule(ctx context.Context, year, season int) (
 	return nil, fmt.Errorf("failed to fetch schedule from Mikan")
 }
 
+func (m *MikanSource) getCachedSchedule(key string) ([]WeekDayItem, bool) {
+	m.cacheMu.Lock()
+	defer m.cacheMu.Unlock()
+	if m.scheduleCache == nil {
+		return nil, false
+	}
+	days, ok := m.scheduleCache.get(key)
+	if !ok {
+		return nil, false
+	}
+	return cloneWeekDayItems(days), true
+}
+
+func (m *MikanSource) setCachedSchedule(key string, days []WeekDayItem) {
+	if len(days) == 0 {
+		return
+	}
+	m.cacheMu.Lock()
+	defer m.cacheMu.Unlock()
+	if m.scheduleCache == nil {
+		m.scheduleCache = newBoundedTTLCache[[]WeekDayItem](scheduleCacheMaxSize, scheduleCacheTTL)
+	}
+	m.scheduleCache.set(key, cloneWeekDayItems(days))
+}
+
+func (m *MikanSource) getCachedSubgroups(key string) ([]SubgroupInfo, bool) {
+	m.cacheMu.Lock()
+	defer m.cacheMu.Unlock()
+	if m.subgroupCache == nil {
+		return nil, false
+	}
+	groups, ok := m.subgroupCache.get(key)
+	if !ok {
+		return nil, false
+	}
+	return slices.Clone(groups), true
+}
+
+func (m *MikanSource) setCachedSubgroups(key string, groups []SubgroupInfo) {
+	if len(groups) == 0 {
+		return
+	}
+	m.cacheMu.Lock()
+	defer m.cacheMu.Unlock()
+	if m.subgroupCache == nil {
+		m.subgroupCache = newBoundedTTLCache[[]SubgroupInfo](subgroupCacheMaxSize, subgroupCacheTTL)
+	}
+	m.subgroupCache.set(key, slices.Clone(groups))
+}
+
 func (m *MikanSource) fetchPath(ctx context.Context, path string, weekLabel map[int]string) ([]WeekDayItem, error) {
+	domain := m.GetDomain()
+	cacheKey := domain + "\x00" + path
+	if cached, ok := m.getCachedSchedule(cacheKey); ok {
+		return cached, nil
+	}
+
 	resp, err := m.tryMirrors(ctx, path)
 	if err != nil {
 		return nil, err
@@ -478,6 +632,8 @@ func (m *MikanSource) fetchPath(ctx context.Context, path string, weekLabel map[
 		return []WeekDayItem{}, nil
 	}
 
+	// 抓取完成后再取当前有效域名（tryMirrors 可能自动切换镜像）
+	domain = m.GetDomain()
 	var result []WeekDayItem
 	doc.Find(".sk-bangumi").Each(func(_ int, sel *goquery.Selection) {
 		dowStr, exists := sel.Attr("data-dayofweek")
@@ -516,7 +672,7 @@ func (m *MikanSource) fetchPath(ctx context.Context, path string, weekLabel map[
 				src, exists := listItem.Find(".b-lazy").Attr("data-src")
 				if exists && src != "" {
 					if strings.HasPrefix(src, "/") {
-						cover = "https://" + m.domain + src
+						cover = "https://" + domain + src
 					} else {
 						cover = src
 					}
@@ -525,7 +681,7 @@ func (m *MikanSource) fetchPath(ctx context.Context, path string, weekLabel map[
 
 			items = append(items, core.TorrentItem{
 				Title:      title,
-				URL:        "https://" + m.domain + href,
+				URL:        "https://" + domain + href,
 				BangumiID:  bangumiID,
 				SourceName: "Mikan",
 				AiredDate:  updateDate,
@@ -538,6 +694,7 @@ func (m *MikanSource) fetchPath(ctx context.Context, path string, weekLabel map[
 			result = append(result, WeekDayItem{DayOfWeek: dow, Label: label, Items: items})
 		}
 	})
+	m.setCachedSchedule(cacheKey, result)
 	return result, nil
 }
 
@@ -553,6 +710,12 @@ type SubgroupInfo struct {
 
 // FetchSubgroups 获取 Mikan 番剧详情页的所有字幕组列表及其 RSS URL
 func (m *MikanSource) FetchSubgroups(ctx context.Context, bangumiID string) ([]SubgroupInfo, error) {
+	domain := m.GetDomain()
+	cacheKey := domain + "\x00" + bangumiID
+	if cached, ok := m.getCachedSubgroups(cacheKey); ok {
+		return cached, nil
+	}
+
 	path := "/Home/Bangumi/" + bangumiID
 	resp, err := m.tryMirrors(ctx, path)
 	if err != nil {
@@ -570,6 +733,7 @@ func (m *MikanSource) FetchSubgroups(ctx context.Context, bangumiID string) ([]S
 		return nil, fmt.Errorf("解析 Mikan 详情页 HTML 失败: %w", err)
 	}
 
+	domain = m.GetDomain()
 	var groups []SubgroupInfo
 	doc.Find(".leftbar-item").Each(func(_ int, leftbar *goquery.Selection) {
 		groupName := strings.TrimSpace(leftbar.Find("a.subgroup-name").Text())
@@ -596,7 +760,7 @@ func (m *MikanSource) FetchSubgroups(ctx context.Context, bangumiID string) ([]S
 
 		rssURL := rssHref
 		if !strings.HasPrefix(rssURL, "http") {
-			rssURL = "https://" + m.domain + rssHref
+			rssURL = "https://" + domain + rssHref
 		}
 
 		groups = append(groups, SubgroupInfo{
@@ -605,7 +769,8 @@ func (m *MikanSource) FetchSubgroups(ctx context.Context, bangumiID string) ([]S
 		})
 	})
 
-	return groups, nil
+	m.setCachedSubgroups(cacheKey, groups)
+	return slices.Clone(groups), nil
 }
 
 // ResolveFirstRSSURL 从 BangumiID 获取 Mikan 详情页并提取第一个可用字幕组的 RSS URL
@@ -682,14 +847,12 @@ func (m *MikanSource) GetAnimeInfo(ctx context.Context, bangumiID string) (*Mika
 		text := s.Text()
 		if strings.Contains(text, "放送开始") {
 			// 提取年份，格式通常为 "放送开始： 2025-01-01"
-			re := regexp.MustCompile(`(\d{4})`)
-			if m := re.FindStringSubmatch(text); len(m) > 1 {
+			if m := reFourDigits.FindStringSubmatch(text); len(m) > 1 {
 				info.Year, _ = strconv.Atoi(m[1])
 			}
 		} else if strings.Contains(text, "总集数") {
 			// 提取总集数，格式为 "总集数： 12" 或 "总集数： 待定"
-			re := regexp.MustCompile(`(\d+)`)
-			if m := re.FindStringSubmatch(text); len(m) > 1 {
+			if m := reDigits.FindStringSubmatch(text); len(m) > 1 {
 				info.TotalEpisodes, _ = strconv.Atoi(m[1])
 			}
 		}

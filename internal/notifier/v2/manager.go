@@ -79,7 +79,7 @@ func NewNotifyManager(notifiers []Notifier, bus *event.Bus) *NotifyManager {
 		notifiers:   slices.Clone(notifiers),
 		bus:         bus,
 		tmplMgr:     tmplMgr,
-		workerCount: 4,
+		workerCount: 2,
 		stats:       make(map[string]int64),
 		routeRules: map[string][]string{
 			"download.started":   {}, // 全渠道
@@ -157,9 +157,9 @@ func (m *NotifyManager) Start() {
 		return
 	}
 	m.ctx, m.cancel = context.WithCancel(context.Background())
-	m.queue = make(chan *NotifyMessage, 5000)
-	m.retryChan = make(chan *NotifyMessage, 1000)
-	m.logQueue = make(chan *database.NotificationLog, 1000)
+	m.queue = make(chan *NotifyMessage, 256)
+	m.retryChan = make(chan *NotifyMessage, 128)
+	m.logQueue = make(chan *database.NotificationLog, 128)
 	m.logDone = make(chan struct{})
 	m.running = true
 	m.wg.Add(m.workerCount + 1)

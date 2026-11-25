@@ -5,6 +5,7 @@ import { loginDestination } from '../utils/loginRedirect'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
 import { useTheme } from '../composables/useTheme'
+import { setAppLocale } from '../i18n'
 import {
   AlertTriangle, User, Lock, LogIn, Languages, Sun, Moon,
   Search, FolderCheck, Sparkles
@@ -21,8 +22,7 @@ const error = ref('')
 const loading = ref(false)
 
 function toggleLanguage() {
-  locale.value = locale.value === 'zh' ? 'en' : 'zh'
-  localStorage.setItem('lang', locale.value)
+  void setAppLocale(locale.value === 'zh' ? 'en' : 'zh')
 }
 
 async function handleLogin() {

@@ -103,8 +103,14 @@ func (m *MikanSource) tryMirrors(ctx context.Context, path string) (*http.Respon
 		}
 	}
 
-	// 快速探测与请求客户端：单个镜像最长 6 秒，防止慢镜像/坏镜像长达 30 秒卡死整体流程
-	fastClient := httpx.New(6 * time.Second)
+	// 复用 6 秒超时探测客户端，防止慢镜像/坏镜像长期阻塞同时避免每次请求重复分配客户端
+	fastClient := m.mirrorClient
+	if fastClient == nil {
+		fastClient = m.httpClient
+	}
+	if fastClient == nil {
+		fastClient = httpx.New(6 * time.Second)
+	}
 
 	var lastErr error
 	for _, d := range domains {

@@ -111,6 +111,7 @@ const progressBarColor = computed(() => {
         @load="coverLoaded"
         @error="coverFailed"
         loading="lazy"
+        decoding="async"
       />
       <div
         v-else

@@ -1468,13 +1468,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 热重载自定义正则规则
-	source.LoadCustomPatternsFromSettings(func(key string) (string, bool) {
-		var setting database.Setting
-		if err := database.DB.Where("key = ?", key).First(&setting).Error; err != nil {
-			return "", false
-		}
-		return setting.Value, true
-	})
+	loadCustomPatternsFromDB()
 
 	_, cronChanged := req.Settings["BACKUP_CRON"]
 	_, keepChanged := req.Settings["BACKUP_KEEP_COUNT"]
@@ -1549,16 +1543,36 @@ func readLogTail(f *os.File, limit int) ([]string, int) {
 	return all[max(0, len(all)-limit):], len(all)
 }
 
+func loadCustomRegexSettingsMap() map[string]string {
+	result := make(map[string]string, 10)
+	if database.DB == nil {
+		return result
+	}
+	var rows []database.Setting
+	if err := database.DB.Select("key", "value").Where("key LIKE ?", "custom_regex_%").Find(&rows).Error; err != nil {
+		return result
+	}
+	for _, r := range rows {
+		result[r.Key] = r.Value
+	}
+	return result
+}
+
+func loadCustomPatternsFromDB() {
+	m := loadCustomRegexSettingsMap()
+	source.LoadCustomPatternsFromSettings(func(key string) (string, bool) {
+		v, ok := m[key]
+		return v, ok
+	})
+}
+
 // handleGetCustomRegex 获取当前自定义正则规则
 // GET /api/settings/custom-regex
 func (s *Server) handleGetCustomRegex(w http.ResponseWriter, r *http.Request) {
+	m := loadCustomRegexSettingsMap()
 	rawPatterns := make([]string, 10)
 	for i := 0; i < 10; i++ {
-		key := fmt.Sprintf("custom_regex_%d", i)
-		var setting database.Setting
-		if err := database.DB.Where("key = ?", key).First(&setting).Error; err == nil {
-			rawPatterns[i] = strings.TrimSpace(setting.Value)
-		}
+		rawPatterns[i] = strings.TrimSpace(m[fmt.Sprintf("custom_regex_%d", i)])
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"patterns":      rawPatterns,
@@ -1574,13 +1588,7 @@ func (s *Server) handleReloadCustomRegex(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "仅支持 POST"})
 		return
 	}
-	source.LoadCustomPatternsFromSettings(func(key string) (string, bool) {
-		var setting database.Setting
-		if err := database.DB.Where("key = ?", key).First(&setting).Error; err != nil {
-			return "", false
-		}
-		return setting.Value, true
-	})
+	loadCustomPatternsFromDB()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message":  "自定义正则已重新加载",
 		"compiled": source.GetCustomRegexPatterns(),
