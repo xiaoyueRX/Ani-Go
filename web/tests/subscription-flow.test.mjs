@@ -177,3 +177,62 @@ test('时间表与搜索页 Mikan 弹窗支持多选勾选后再点击确认提�
   assert.deepEqual(searchPosts[0][1].allowed_subgroups, ['ANi', 'LoliHouse'])
   assert.equal(search.showGroupModal.value, false)
 })
+
+test('未勾选直接点订阅时优先走默认字幕组，默认缺失时拦截并弹窗引导选择', async () => {
+  const mikanGroups = [
+    { name: 'ANi', rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583' },
+    { name: 'LoliHouse', rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=370' },
+  ]
+  const schPosts = []
+  const { component: sch } = view('views/Schedule', {
+    get: async () => ({ data: [] }),
+    post: async (url, body) => {
+      schPosts.push([url, JSON.parse(JSON.stringify(body))])
+      return { data: { id: 201 } }
+    },
+  })
+  sch.selectedItem.value = { title: '芙莉莲', url: '', source: 'Mikan', bangumi_id: '3141', info_hash: '', cover_url: '' }
+  sch.modalGroups.value = mikanGroups
+
+  // 1. 无默认且未勾选 -> 弹出 no_selection，不发 POST
+  await sch.subscribeFromModal()
+  assert.equal(sch.subgroupPromptMode.value, 'no_selection')
+  assert.equal(schPosts.length, 0)
+
+  // 2. 设置默认字幕组为番剧不存在的 桜都字幕组 -> 弹出 missing_default，不发 POST
+  sch.defaultSubgroups.value = ['桜都字幕组']
+  await sch.subscribeFromModal()
+  assert.equal(sch.subgroupPromptMode.value, 'missing_default')
+  assert.equal(schPosts.length, 0)
+
+  // 3. 在提示框点击“不限字幕组订阅” -> 正常提交
+  await sch.subscribeFromModal({ allowUnrestricted: true })
+  assert.equal(sch.subgroupPromptMode.value, null)
+  assert.equal(schPosts.length, 1)
+  assert.equal(schPosts[0][1].rss_url, 'https://mikanani.me/RSS/Bangumi?bangumiId=3141')
+
+  // 4. 默认含 ANi -> 未勾选直接点订阅自动使用 ANi 专属 RSS 提交
+  schPosts.length = 0
+  sch.defaultSubgroups.value = ['桜都字幕组', 'ANi']
+  await sch.subscribeFromModal()
+  assert.equal(schPosts.length, 1)
+  assert.equal(schPosts[0][1].subgroup_name, 'ANi')
+  assert.equal(schPosts[0][1].rss_url, 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583')
+
+  // 5. 搜索页同样拦截不存在的默认字幕组
+  const searchPosts = []
+  const { component: search } = view('views/Search', {
+    get: async () => ({ data: [] }),
+    post: async (url, body) => {
+      searchPosts.push([url, JSON.parse(JSON.stringify(body))])
+      return { data: { id: 202 } }
+    },
+  })
+  search.defaultSubgroups.value = ['桜都字幕组']
+  search.selectedItem.value = { title: '芙莉莲', url: 'https://mikanani.me/Home/Bangumi/3141', magnet: '', source: 'Mikan', bangumi_id: '3141' }
+  search.subgroups.value = mikanGroups
+  search.showGroupModal.value = true
+  await search.confirmGroupSubscribe()
+  assert.equal(search.searchSubgroupPromptMode.value, 'missing_default')
+  assert.equal(searchPosts.length, 0)
+})

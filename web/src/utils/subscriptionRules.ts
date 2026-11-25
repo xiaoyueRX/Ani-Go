@@ -238,3 +238,45 @@ export function resolveMikanSelectionPayload(
     rss_url: seriesRss || undefined,
   }
 }
+
+export type SubgroupSubmissionDecision =
+  | { action: 'submit'; groups: string[]; usedDefaults: boolean }
+  | { action: 'prompt_missing_default'; defaultSubgroups: string[] }
+  | { action: 'prompt_no_selection' }
+
+export function evaluateSubgroupSubmission(params: {
+  selectedNames: string[]
+  defaultSubgroups: string[]
+  availableGroups?: MikanGroupOption[] | null
+  hasLiveGroupList: boolean
+  allowUnrestricted?: boolean
+}): SubgroupSubmissionDecision {
+  const picked = dedupeTags(params.selectedNames)
+  if (picked.length > 0) {
+    return { action: 'submit', groups: picked, usedDefaults: false }
+  }
+  if (params.allowUnrestricted) {
+    return { action: 'submit', groups: [], usedDefaults: false }
+  }
+
+  const defaults = dedupeTags(params.defaultSubgroups)
+  if (defaults.length === 0) {
+    return { action: 'prompt_no_selection' }
+  }
+
+  if (params.hasLiveGroupList) {
+    const available = Array.isArray(params.availableGroups) ? params.availableGroups : []
+    const defaultSet = new Set(defaults.map(d => d.toLowerCase()))
+    const matched = dedupeTags(
+      available
+        .filter(g => typeof g?.name === 'string' && defaultSet.has(g.name.trim().toLowerCase()))
+        .map(g => g.name),
+    )
+    if (matched.length === 0) {
+      return { action: 'prompt_missing_default', defaultSubgroups: defaults }
+    }
+    return { action: 'submit', groups: matched, usedDefaults: true }
+  }
+
+  return { action: 'submit', groups: defaults, usedDefaults: true }
+}

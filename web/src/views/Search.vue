@@ -12,7 +12,8 @@ import {
   CheckSquare, Square, ListChecks, CloudUpload, Globe
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
-import { resolveMikanSelectionPayload } from '../utils/subscriptionRules'
+import { evaluateSubgroupSubmission, resolveMikanSelectionPayload } from '../utils/subscriptionRules'
+import { useDefaultSubgroups } from '../composables/useDefaultSubgroups'
 
 const { t, locale } = useI18n()
 
@@ -49,6 +50,7 @@ const rawError = ref('')
 const hasSearched = ref(false)
 const subscribed = ref<Set<string>>(new Set())
 const subscribedIdMap = ref<Map<string, number>>(new Map())
+const { defaultSubgroups, loadDefaultSubgroups, isDefaultSubgroup } = useDefaultSubgroups()
 
 const normalizeSubKey = (value?: string) => (value || '').trim().toLowerCase()
 
@@ -251,6 +253,7 @@ async function loadSubscribedList() {
 onMounted(async () => {
   loadSearchHistory()
   loadSubscribedList()
+  void loadDefaultSubgroups()
   void loadSourceSettings()
   void loadPluginTargets()
   window.addEventListener?.('focus', loadPluginTargets)
@@ -539,15 +542,24 @@ function closeGroups() {
   groupRequest?.abort()
   showGroupModal.value = false
   selectedModalSubgroups.value = new Set()
+  searchSubgroupPromptMode.value = null
+  highlightSearchGroups.value = false
 }
 
 const selectedModalSubgroups = ref<Set<string>>(new Set())
+const searchSubgroupPromptMode = ref<'missing_default' | 'no_selection' | null>(null)
+const highlightSearchGroups = ref(false)
 
 function toggleModalSubgroup(name: string) {
   const next = new Set(selectedModalSubgroups.value)
   if (next.has(name)) next.delete(name)
   else next.add(name)
   selectedModalSubgroups.value = next
+}
+
+function focusSearchSubgroupList() {
+  searchSubgroupPromptMode.value = null
+  highlightSearchGroups.value = true
 }
 
 async function openSubscribe(item: TorrentItem) {
@@ -611,12 +623,17 @@ async function subscribe(
   rssUrl: string,
   subgroupName?: string,
   allowedSubgroups?: string[],
+  usedDefaultGroups?: string[],
 ) {
   if (groupSubmitting.value) return
   groupSubmitting.value = true
   try {
     await saveSubscription(item, rssUrl, subgroupName, allowedSubgroups)
-    window.showToast?.(t('search.subscribed', { title: item.title }) || `成功订阅: ${item.title}`, 'success')
+    if (usedDefaultGroups?.length) {
+      window.showToast?.(t('schedule.modal.subscribeSuccessDefault', { title: item.title, groups: usedDefaultGroups.join('、') }), 'success')
+    } else {
+      window.showToast?.(t('search.subscribed', { title: item.title }) || `成功订阅: ${item.title}`, 'success')
+    }
     closeGroups()
   } catch (e: any) {
     window.showToast?.(t('search.subscribeFailed', { error: e.response?.data?.error || e.message }) || '订阅失败', 'error')
@@ -625,17 +642,30 @@ async function subscribe(
   }
 }
 
-async function confirmGroupSubscribe() {
+async function confirmGroupSubscribe(options?: { allowUnrestricted?: boolean }) {
   if (!selectedItem.value) return
+  const decision = evaluateSubgroupSubmission({
+    selectedNames: Array.from(selectedModalSubgroups.value),
+    defaultSubgroups: defaultSubgroups.value,
+    availableGroups: subgroups.value,
+    hasLiveGroupList: subgroups.value.length > 0,
+    allowUnrestricted: options?.allowUnrestricted,
+  })
+  if (decision.action !== 'submit') {
+    searchSubgroupPromptMode.value = decision.action === 'prompt_missing_default' ? 'missing_default' : 'no_selection'
+    return
+  }
+  searchSubgroupPromptMode.value = null
   const payload = resolveMikanSelectionPayload(
     subgroups.value,
-    Array.from(selectedModalSubgroups.value),
+    decision.groups,
   )
   await subscribe(
     selectedItem.value,
     payload.rss_url || '',
     payload.subgroup_name,
     payload.allowed_subgroups,
+    decision.usedDefaults ? decision.groups : undefined,
   )
 }
 
@@ -1186,7 +1216,7 @@ function sourceBadgeClass(source: string): string {
           </div>
         </div>
 
-        <div v-else class="space-y-2 max-h-72 overflow-y-auto pr-0.5">
+        <div v-else class="space-y-2 max-h-72 overflow-y-auto pr-0.5" :class="{ 'ring-2 ring-[var(--v2-accent)]/60 rounded-xl p-1 -m-1 transition-all': highlightSearchGroups }">
           <label
             v-for="g in filteredSubgroups"
             :key="g.rss_url"
@@ -1206,20 +1236,65 @@ function sourceBadgeClass(source: string): string {
               <User :size="14" class="text-[var(--v2-accent)] shrink-0" />
               <span class="font-semibold text-xs truncate text-[var(--v2-ink)]">{{ g.name }}</span>
             </div>
+            <span v-if="isDefaultSubgroup(g.name)" class="px-1.5 py-0.5 rounded bg-[var(--v2-accent)]/15 text-[var(--v2-accent)] text-[10px] font-semibold shrink-0">
+              {{ $t('schedule.modal.defaultTag') }}
+            </span>
           </label>
         </div>
 
         <div v-if="subgroups.length > 0" class="pt-2 flex justify-between items-center gap-2 text-xs border-t border-[var(--v2-border)]">
-          <span class="text-[var(--v2-ink-muted)]">
-            {{ selectedModalSubgroups.size > 0 ? $t('schedule.modal.selectedCount', { count: selectedModalSubgroups.size }) : $t('search.modal.proceed') }}
+          <span class="text-[var(--v2-ink-muted)] truncate">
+            <template v-if="selectedModalSubgroups.size > 0">
+              {{ $t('schedule.modal.selectedCount', { count: selectedModalSubgroups.size }) }}
+            </template>
+            <template v-else-if="defaultSubgroups.length > 0">
+              {{ $t('search.modal.willUseDefault', { groups: defaultSubgroups.join('、') }) }}
+            </template>
+            <template v-else>
+              {{ $t('search.modal.proceed') }}
+            </template>
           </span>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 shrink-0">
             <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" :disabled="groupSubmitting" @click="closeGroups">{{ $t('search.modal.cancel') }}</button>
-            <button type="button" class="v2-btn v2-btn-primary v2-btn-sm px-4" :disabled="groupSubmitting" @click="confirmGroupSubscribe">
+            <button type="button" class="v2-btn v2-btn-primary v2-btn-sm px-4" :disabled="groupSubmitting" @click="confirmGroupSubscribe()">
               <span>{{ $t('search.modal.confirm') }}</span>
               <span v-if="selectedModalSubgroups.size > 0" class="font-mono text-[11px] opacity-85">({{ selectedModalSubgroups.size }})</span>
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 搜索页缺失默认字幕组 / 未选择字幕组提示弹窗 -->
+    <div v-if="searchSubgroupPromptMode" class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+      <div class="w-full max-w-sm v2-panel p-5 space-y-4 shadow-2xl border border-[var(--v2-border-strong)]">
+        <div class="flex items-start gap-3">
+          <div class="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
+            <AlertTriangle :size="18" />
+          </div>
+          <div class="space-y-1 min-w-0">
+            <h3 class="text-base font-bold text-[var(--v2-ink)]">
+              {{ searchSubgroupPromptMode === 'missing_default' ? $t('schedule.modal.missingDefaultTitle') : $t('schedule.modal.noSelectionTitle') }}
+            </h3>
+            <p class="text-xs text-[var(--v2-ink-muted)] leading-relaxed">
+              {{ searchSubgroupPromptMode === 'missing_default'
+                ? $t('schedule.modal.missingDefaultDesc', { groups: defaultSubgroups.join('、') })
+                : $t('schedule.modal.noSelectionDesc') }}
+            </p>
+          </div>
+        </div>
+        <div class="space-y-2 pt-1">
+          <button type="button" class="v2-btn v2-btn-primary w-full" @click="focusSearchSubgroupList">
+            {{ $t('schedule.modal.goChooseSubgroup') }}
+          </button>
+          <button
+            type="button"
+            class="v2-btn v2-btn-ghost w-full"
+            :disabled="groupSubmitting"
+            @click="confirmGroupSubscribe({ allowUnrestricted: true })"
+          >
+            {{ $t('schedule.modal.subscribeAnySubgroup') }}
+          </button>
         </div>
       </div>
     </div>

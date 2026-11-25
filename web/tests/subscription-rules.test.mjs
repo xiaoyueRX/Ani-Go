@@ -110,3 +110,41 @@ test('Mikan 字幕组选择按单选、多选与留空分支正确构造 RSS 与
   assert.equal(none.allowed_subgroups, undefined)
   assert.equal(none.rss_url, 'https://mikanani.me/RSS/Bangumi?bangumiId=3141')
 })
+
+test('未勾选直接点订阅时按默认字幕组、缺失弹窗与无选择弹窗正确决策', () => {
+  const { evaluateSubgroupSubmission } = loadRulesModule()
+  const groups = [
+    { name: 'ANi', rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583' },
+    { name: 'Nix-Raws', rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=999' },
+  ]
+
+  // 1. 手动勾选优先
+  assert.deepEqual(
+    clone(evaluateSubgroupSubmission({ selectedNames: ['Nix-Raws'], defaultSubgroups: ['ANi'], availableGroups: groups, hasLiveGroupList: true })),
+    { action: 'submit', groups: ['Nix-Raws'], usedDefaults: false },
+  )
+
+  // 2. 未勾选且默认组存在于番剧列表 -> 命中默认（忽略大小写并还原真实组名）
+  assert.deepEqual(
+    clone(evaluateSubgroupSubmission({ selectedNames: [], defaultSubgroups: ['桜都字幕组', 'ani'], availableGroups: groups, hasLiveGroupList: true })),
+    { action: 'submit', groups: ['ANi'], usedDefaults: true },
+  )
+
+  // 3. 未勾选且番剧列表无任何默认组 -> 弹出 missing_default
+  assert.deepEqual(
+    clone(evaluateSubgroupSubmission({ selectedNames: [], defaultSubgroups: ['桜都字幕组'], availableGroups: groups, hasLiveGroupList: true })),
+    { action: 'prompt_missing_default', defaultSubgroups: ['桜都字幕组'] },
+  )
+
+  // 4. 未勾选且也未设置默认组 -> 弹出 no_selection
+  assert.deepEqual(
+    clone(evaluateSubgroupSubmission({ selectedNames: [], defaultSubgroups: [], availableGroups: groups, hasLiveGroupList: true })),
+    { action: 'prompt_no_selection' },
+  )
+
+  // 5. 弹窗内明确选“不限字幕组订阅” -> allowUnrestricted 放行
+  assert.deepEqual(
+    clone(evaluateSubgroupSubmission({ selectedNames: [], defaultSubgroups: ['桜都字幕组'], availableGroups: groups, hasLiveGroupList: true, allowUnrestricted: true })),
+    { action: 'submit', groups: [], usedDefaults: false },
+  )
+})

@@ -37,6 +37,19 @@ export function view(path, request, { route = {}, storage = new Map(), props = {
       checkAuth: async () => {},
     }),
   }
+  const defaultSubgroupsRef = vue.ref([])
+  const defaultSubgroupsStub = {
+    useDefaultSubgroups: () => ({
+      defaultSubgroups: defaultSubgroupsRef,
+      loadDefaultSubgroups: async () => defaultSubgroupsRef.value,
+      saveDefaultSubgroups: async names => {
+        const clean = Array.isArray(names) ? names.map(s => String(s).trim()).filter(Boolean) : []
+        defaultSubgroupsRef.value = clean
+        return clean
+      },
+      isDefaultSubgroup: name => defaultSubgroupsRef.value.some(d => d.toLowerCase() === String(name).trim().toLowerCase()),
+    }),
+  }
   const modules = {
     vue: { ...vue, onMounted: fn => mounted.push(fn), onUnmounted: fn => unmounted.push(fn) },
     'vue-router': { onBeforeRouteLeave() {}, useRouter: () => router, useRoute: () => ({ params: {}, query: {}, ...route }) },
@@ -53,6 +66,8 @@ export function view(path, request, { route = {}, storage = new Map(), props = {
     '../composables/useVersion': { currentVersion: vue.ref(''), useVersion: () => ({}) },
     '../composables/useAuth': authStub,
     './composables/useAuth': authStub,
+    '../composables/useDefaultSubgroups': defaultSubgroupsStub,
+    './composables/useDefaultSubgroups': defaultSubgroupsStub,
     '../composables/useTheme': themeStub,
     './composables/useTheme': themeStub,
     '../components/ui': {},

@@ -13,7 +13,8 @@ import ChangelogModal from '../components/ChangelogModal.vue'
 import { useVersion } from '../composables/useVersion'
 import { useAuth } from '../composables/useAuth'
 import { useI18n } from 'vue-i18n'
-import { resolveMikanSelectionPayload } from '../utils/subscriptionRules'
+import { evaluateSubgroupSubmission, resolveMikanSelectionPayload } from '../utils/subscriptionRules'
+import { useDefaultSubgroups } from '../composables/useDefaultSubgroups'
 
 const { t, locale } = useI18n()
 const { isAuthenticated, isOfflineMode, initAuth, checkAuth } = useAuth()
@@ -132,8 +133,10 @@ const subgroupPickerItem = ref<TorrentItem | null>(null)
 const selectedSubgroups = ref<Map<string, string[]>>(new Map())
 const currentSubgroupSet = ref<Set<string>>(new Set())
 const customSubgroupInput = ref('')
-const defaultSubgroups = ref<string[]>([])
+const { defaultSubgroups, loadDefaultSubgroups, saveDefaultSubgroups, isDefaultSubgroup } = useDefaultSubgroups()
 const defaultSubgroupPickerOpen = ref(false)
+const subgroupPromptMode = ref<'missing_default' | 'no_selection' | null>(null)
+const highlightSubgroupList = ref(false)
 
 const COMMON_SUBGROUPS = [
   '桜都字幕组', '千夏字幕组', '喵萌奶茶屋', 'LoliHouse',
@@ -291,6 +294,8 @@ async function handleItemClick(item: TorrentItem) {
   modalSubError.value = ''
   modalSelectedSubgroups.value = new Set()
   modalSubscribing.value = false
+  subgroupPromptMode.value = null
+  highlightSubgroupList.value = false
 
   if (item.bangumi_id) {
     metaLoading.value = true
@@ -343,27 +348,55 @@ function toggleModalSubgroup(name: string) {
   modalSelectedSubgroups.value = next
 }
 
-async function subscribeFromModal() {
+function focusModalSubgroupList() {
+  subgroupPromptMode.value = null
+  highlightSubgroupList.value = true
+}
+
+function openDefaultSubgroupEditor() {
+  subgroupPromptMode.value = null
+  currentSubgroupSet.value = new Set(defaultSubgroups.value)
+  customSubgroupInput.value = ''
+  defaultSubgroupPickerOpen.value = true
+}
+
+async function subscribeFromModal(options?: { allowUnrestricted?: boolean }) {
   const item = selectedItem.value
   if (!item || modalSubscribing.value) return
-  modalSubscribing.value = true
-  modalSubError.value = ''
 
   const picked = Array.from(modalSelectedSubgroups.value)
   const isMikan = item.source === 'Mikan'
+  const hasLiveGroupList = isMikan && modalGroups.value.length > 0
+  const decision = evaluateSubgroupSubmission({
+    selectedNames: picked,
+    defaultSubgroups: defaultSubgroups.value,
+    availableGroups: modalGroups.value,
+    hasLiveGroupList,
+    allowUnrestricted: options?.allowUnrestricted,
+  })
+
+  if (decision.action !== 'submit') {
+    subgroupPromptMode.value = decision.action === 'prompt_missing_default' ? 'missing_default' : 'no_selection'
+    return
+  }
+
+  subgroupPromptMode.value = null
+  modalSubscribing.value = true
+  modalSubError.value = ''
+
   const mikanPayload = isMikan
-    ? resolveMikanSelectionPayload(modalGroups.value, picked)
+    ? resolveMikanSelectionPayload(modalGroups.value, decision.groups)
     : null
 
   const subgroupName = isMikan
     ? mikanPayload?.subgroup_name
-    : (picked.length === 1 ? picked[0] : (picked.length > 1 ? '' : undefined))
+    : (decision.groups.length === 1 ? decision.groups[0] : (decision.groups.length > 1 ? '' : undefined))
   const subgroupNames = isMikan
     ? mikanPayload?.subgroup_names
-    : (picked.length ? picked : undefined)
+    : (decision.groups.length ? decision.groups : undefined)
   const allowedSubgroups = isMikan
     ? mikanPayload?.allowed_subgroups
-    : (picked.length ? picked : undefined)
+    : (decision.groups.length ? decision.groups : undefined)
   const rssUrl = isMikan ? (mikanPayload?.rss_url || undefined) : undefined
 
   try {
@@ -384,7 +417,11 @@ async function subscribeFromModal() {
     if (item.bangumi_id) {
       subscribedIds.value = { ...subscribedIds.value, [item.bangumi_id]: true }
     }
-    window.showToast?.(t('schedule.modal.subscribeSuccess', { title }), 'success')
+    if (decision.usedDefaults && decision.groups.length > 0) {
+      window.showToast?.(t('schedule.modal.subscribeSuccessDefault', { title, groups: decision.groups.join('、') }), 'success')
+    } else {
+      window.showToast?.(t('schedule.modal.subscribeSuccess', { title }), 'success')
+    }
   } catch (e: any) {
     modalSubError.value = e?.response?.data?.error || t('schedule.modal.subscribeFailed')
   } finally {
@@ -555,13 +592,12 @@ function cancelSubgroupPicker() {
   currentSubgroupSet.value = new Set()
 }
 
-function confirmDefaultSubgroups() {
-  defaultSubgroups.value = [...currentSubgroupSet.value]
+async function confirmDefaultSubgroups() {
+  await saveDefaultSubgroups([...currentSubgroupSet.value])
   defaultSubgroupPickerOpen.value = false
 }
 
 function skipDefaultSubgroups() {
-  defaultSubgroups.value = []
   defaultSubgroupPickerOpen.value = false
 }
 
@@ -589,8 +625,7 @@ function enterBatchMode() {
   batchMode.value = true
   selectedItems.value = new Set()
   selectedSubgroups.value = new Map()
-  defaultSubgroups.value = []
-  currentSubgroupSet.value = new Set()
+  currentSubgroupSet.value = new Set(defaultSubgroups.value)
   customSubgroupInput.value = ''
   defaultSubgroupPickerOpen.value = true
 }
@@ -599,7 +634,6 @@ function exitBatchMode() {
   batchMode.value = false
   selectedItems.value = new Set()
   selectedSubgroups.value = new Map()
-  defaultSubgroups.value = []
 }
 
 async function confirmBatchSubscribe() {
@@ -654,7 +688,7 @@ const selectedCount = computed(() => selectedItems.value.size)
 onMounted(async () => {
   await checkYucPlugin()
   await initAuth()
-  await Promise.all([fetchSchedule(true), loadSubscribedMap()])
+  await Promise.all([fetchSchedule(true), loadSubscribedMap(), loadDefaultSubgroups()])
   checkVersion()
 })
 
@@ -747,6 +781,11 @@ onUnmounted(() => {
               <span v-if="subscribedCount > 0" class="font-mono text-[10px] text-[var(--v2-accent)]">({{ subscribedCount }})</span>
             </button>
           </div>
+
+          <button v-if="!batchMode" type="button" class="v2-btn v2-btn-sm" @click="openDefaultSubgroupEditor" :title="$t('schedule.defaultBtnTooltip')">
+            <SlidersHorizontal :size="13" />
+            <span>{{ defaultSubgroups.length > 0 ? $t('schedule.defaultBtnSet', { groups: defaultSubgroups.slice(0, 2).join(', ') + (defaultSubgroups.length > 2 ? '…' : '') }) : $t('schedule.defaultBtnEmpty') }}</span>
+          </button>
 
           <button v-if="!batchMode" type="button" class="v2-btn v2-btn-sm" @click="enterBatchMode">
             <ListChecks :size="14" />
@@ -1021,10 +1060,10 @@ onUnmounted(() => {
     </div>
 
     <!-- 默认字幕组 / 单部字幕组 / 批量结果 Modal -->
-    <dialog :class="['modal', { 'modal-open': defaultSubgroupPickerOpen }]">
+    <dialog :class="['modal z-[1050]', { 'modal-open': defaultSubgroupPickerOpen }]">
       <div class="modal-box max-w-sm">
         <h3 class="text-base font-bold mb-1">设置默认字幕组</h3>
-        <p class="text-xs text-[var(--v2-ink-muted)] mb-4">所有已选番剧将使用该字幕组。如需逐部设置，点跳过即可。</p>
+        <p class="text-xs text-[var(--v2-ink-muted)] mb-4">未手动勾选字幕组直接点击订阅时，将优先匹配这里的默认字幕组。</p>
         <div class="space-y-1.5 max-h-48 overflow-y-auto mb-3">
           <button v-for="name in COMMON_SUBGROUPS" :key="name" type="button" class="w-full text-left px-3 py-2 rounded-lg text-xs font-semibold border transition-colors" :class="currentSubgroupSet.has(name) ? 'bg-[var(--v2-accent)] text-white border-[var(--v2-accent)]' : 'bg-[var(--v2-surface-2)] border-[var(--v2-border)]'" @click="toggleSubgroup(name)">
             {{ name }}
@@ -1034,9 +1073,13 @@ onUnmounted(() => {
           <input v-model="customSubgroupInput" type="text" placeholder="自定义字幕组" class="v2-input h-8 text-xs flex-1" @keyup.enter="addCustomSubgroup" />
           <button type="button" class="v2-btn v2-btn-sm" @click="addCustomSubgroup">添加</button>
         </div>
-        <div class="flex gap-2 justify-end">
-          <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="skipDefaultSubgroups">跳过</button>
-          <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" :disabled="currentSubgroupSet.size === 0" @click="confirmDefaultSubgroups">确认</button>
+        <div class="flex gap-2 justify-between items-center">
+          <button v-if="currentSubgroupSet.size > 0" type="button" class="text-xs text-[var(--v2-ink-muted)] hover:text-red-400 cursor-pointer" @click="currentSubgroupSet = new Set()">清空</button>
+          <span v-else></span>
+          <div class="flex gap-2">
+            <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="skipDefaultSubgroups">{{ batchMode ? '跳过' : '取消' }}</button>
+            <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" :disabled="batchMode && currentSubgroupSet.size === 0" @click="confirmDefaultSubgroups">确认</button>
+          </div>
         </div>
       </div>
       <div class="modal-backdrop" @click="skipDefaultSubgroups"></div>
@@ -1128,13 +1171,32 @@ onUnmounted(() => {
               {{ modalSubError }}
             </p>
 
+            <!-- 默认字幕组提示条 -->
+            <div class="flex items-center justify-between gap-2 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] px-2.5 py-1.5 text-[11px]">
+              <span class="text-[var(--v2-ink-muted)] truncate">
+                <template v-if="defaultSubgroups.length > 0">
+                  {{ $t('schedule.modal.defaultSummary', { groups: defaultSubgroups.join('、') }) }}
+                </template>
+                <template v-else>
+                  {{ $t('schedule.modal.defaultNone') }}
+                </template>
+              </span>
+              <button
+                type="button"
+                class="text-[var(--v2-accent)] font-semibold hover:underline shrink-0 cursor-pointer"
+                @click="openDefaultSubgroupEditor"
+              >
+                {{ defaultSubgroups.length > 0 ? $t('schedule.modal.editDefault') : $t('schedule.modal.setDefault') }}
+              </button>
+            </div>
+
             <!-- Mikan 源拉取专属字幕组列表（多选复选框） -->
             <template v-if="selectedItem.source === 'Mikan'">
               <div v-if="modalGroupsLoading" class="flex items-center gap-2 text-xs text-[var(--v2-ink-muted)] py-1">
                 <Loader2 :size="13" class="animate-spin text-[var(--v2-accent)]" />
                 <span>{{ $t('schedule.modal.loadingGroups') }}</span>
               </div>
-              <div v-else-if="modalGroups.length > 0" class="space-y-1.5">
+              <div v-else-if="modalGroups.length > 0" class="space-y-1.5" :class="{ 'ring-2 ring-[var(--v2-accent)]/60 rounded-xl p-1.5 -m-1.5 transition-all': highlightSubgroupList }">
                 <div class="flex items-center justify-between gap-2 text-[11px]">
                   <p class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.pickMikanGroup') }}</p>
                   <span v-if="modalSelectedSubgroups.size > 0" class="font-mono text-[var(--v2-accent)] font-semibold">
@@ -1158,6 +1220,9 @@ onUnmounted(() => {
                       @change="toggleModalSubgroup(g.name)"
                     />
                     <span class="truncate font-medium flex-1">{{ g.name }}</span>
+                    <span v-if="isDefaultSubgroup(g.name)" class="px-1.5 py-0.5 rounded bg-[var(--v2-accent)]/15 text-[var(--v2-accent)] text-[10px] font-semibold shrink-0">
+                      {{ $t('schedule.modal.defaultTag') }}
+                    </span>
                   </label>
                 </div>
               </div>
@@ -1165,7 +1230,7 @@ onUnmounted(() => {
             </template>
 
             <!-- Bangumi / Yuc 或无专属组时的通用字幕组复选框多选 -->
-            <div v-if="selectedItem.source !== 'Mikan' || (!modalGroupsLoading && modalGroups.length === 0)" class="space-y-1.5">
+            <div v-if="selectedItem.source !== 'Mikan' || (!modalGroupsLoading && modalGroups.length === 0)" class="space-y-1.5" :class="{ 'ring-2 ring-[var(--v2-accent)]/60 rounded-xl p-1.5 -m-1.5 transition-all': highlightSubgroupList }">
               <div class="flex items-center justify-between gap-2 text-[11px]">
                 <p class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.quickSubgroups') }}</p>
                 <span v-if="modalSelectedSubgroups.size > 0" class="font-mono text-[var(--v2-accent)] font-semibold">
@@ -1189,6 +1254,7 @@ onUnmounted(() => {
                     @change="toggleModalSubgroup(grp)"
                   />
                   <span>{{ grp }}</span>
+                  <span v-if="isDefaultSubgroup(grp)" class="text-[10px] font-bold opacity-85">·{{ $t('schedule.modal.defaultTag') }}</span>
                 </label>
               </div>
             </div>
@@ -1223,6 +1289,50 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="modal-backdrop" @click="selectedItem = null"></div>
+    </dialog>
+
+    <!-- 缺失默认字幕组 / 未选择字幕组提示弹窗 -->
+    <dialog :class="['modal z-[1100]', { 'modal-open': !!subgroupPromptMode }]">
+      <div v-if="subgroupPromptMode" class="modal-box max-w-sm space-y-4">
+        <div class="flex items-start gap-3">
+          <div class="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
+            <AlertTriangle :size="18" />
+          </div>
+          <div class="space-y-1 min-w-0">
+            <h3 class="text-base font-bold text-[var(--v2-ink)]">
+              {{ subgroupPromptMode === 'missing_default' ? $t('schedule.modal.missingDefaultTitle') : $t('schedule.modal.noSelectionTitle') }}
+            </h3>
+            <p class="text-xs text-[var(--v2-ink-muted)] leading-relaxed">
+              {{ subgroupPromptMode === 'missing_default'
+                ? $t('schedule.modal.missingDefaultDesc', { groups: defaultSubgroups.join('、') })
+                : $t('schedule.modal.noSelectionDesc') }}
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-2 pt-1">
+          <button type="button" class="v2-btn v2-btn-primary w-full" @click="focusModalSubgroupList">
+            {{ $t('schedule.modal.goChooseSubgroup') }}
+          </button>
+          <button
+            v-if="subgroupPromptMode === 'no_selection'"
+            type="button"
+            class="v2-btn w-full"
+            @click="openDefaultSubgroupEditor"
+          >
+            {{ $t('schedule.modal.setDefault') }}
+          </button>
+          <button
+            type="button"
+            class="v2-btn v2-btn-ghost w-full"
+            :disabled="modalSubscribing"
+            @click="subscribeFromModal({ allowUnrestricted: true })"
+          >
+            {{ $t('schedule.modal.subscribeAnySubgroup') }}
+          </button>
+        </div>
+      </div>
+      <div class="modal-backdrop" @click="subgroupPromptMode = null"></div>
     </dialog>
 
     <OnboardingModal />
