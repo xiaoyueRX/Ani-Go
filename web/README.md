@@ -2,7 +2,9 @@
 
 [English](README_EN.md) · [安装与运行](../README.md)
 
-管理界面使用 Vue 3、Vue Router、TypeScript 和 Vite。设置页的「插件与自动化」负责清单导入、启停和来源筛选。`PluginPanel.vue` 按 Ani-Go 面板声明渲染凭据、操作和任务列表。[作者指南](../docs/02_PLUGIN_SPEC.md) · [导入示例](../examples/plugins/cloud-tasks.json)
+管理界面使用 Vue 3、Vue Router、TypeScript、Vite 与纯 Tailwind CSS v4 原语。内置 3 套官方主题预设（每套 4 种明暗色彩风格），并支持导入、校验与导出第三方 `anigo-theme-v1` JSON 主题包；设置页「外观与主题」及顶部主题工坊抽屉会与 `/api/settings` 双向持久化主题偏好。
+
+设置页的「插件与自动化」负责清单导入、启停和来源筛选。`PluginPanel.vue` 按 Ani-Go 面板声明渲染凭据、操作和任务列表。[作者指南](../docs/02_PLUGIN_SPEC.md) · [导入示例](../examples/plugins/cloud-tasks.json)
 
 ## 本地开发
 

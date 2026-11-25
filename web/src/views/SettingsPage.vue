@@ -15,7 +15,8 @@ import {
   Database, Upload, Trash2,
   Sparkles, Copy, Palette,
   Search, Zap, ExternalLink,
-  Play, AlertCircle, Globe, X
+  Play, AlertCircle, Globe, X,
+  Plus, RotateCcw, Activity, Filter, Clock, Calendar
 } from 'lucide-vue-next'
 import { currentVersion, useVersion } from '../composables/useVersion'
 
@@ -66,10 +67,23 @@ const manualCheckMsg = ref('')
 const manualCheckMsgType = ref<'success' | 'error'>('success')
 const manualCheckResult = ref<string>('')
 
+// AI 模型列表
+const modelLoading = ref(false)
+const modelOptions = ref<{ label: string; value: string }[]>([])
+
+// 备份管理
+const backupLoading = ref(false)
+const backupList = ref<{ name: string; size: number; mod_time: string }[]>([])
+const creatingBackup = ref(false)
+const restoringBackup = ref(false)
+const deletingBackup = ref<string | null>(null)
+const showBackupEpisodes = ref(false)
+
 // 插件管理
 const pluginLoading = ref(false)
 const pluginList = ref<any[]>([])
 const pluginListError = ref('')
+const customPlugins = computed(() => pluginList.value.filter(p => !p.is_builtin))
 let pluginListRequest = 0
 const pendingPlugins = ref(new Set<string>())
 const pluginSourceFilter = ref<'all' | 'official' | 'community'>('all')
@@ -77,6 +91,34 @@ const visiblePlugins = computed(() => pluginList.value.filter(plugin =>
   pluginSourceFilter.value === 'all' ||
   (plugin.origin === 'official' ? 'official' : 'community') === pluginSourceFilter.value
 ))
+const showPluginModal = ref(false)
+const pluginModalTab = ref<'webhook' | 'json'>('webhook')
+const pluginForm = ref({
+  id: '',
+  name: '',
+  description: '',
+  version: '1.0.0',
+  author: 'User',
+  author_url: '',
+  type: 'webhook',
+  url: '',
+  secret: '',
+  events: ['download.completed', 'file.organized'] as string[]
+})
+const pluginJsonText = ref('')
+const pluginJsonError = ref('')
+const pluginSaving = ref(false)
+const pluginFileReading = ref(false)
+let pluginFileRequest = 0
+
+const availablePluginEvents = [
+  { id: 'subscription.added', label: 'subscriptionAdded' },
+  { id: 'download.started', label: 'downloadStarted' },
+  { id: 'download.completed', label: 'downloadCompleted' },
+  { id: 'file.organized', label: 'fileOrganized' },
+  { id: 'supplement.completed', label: 'supplementCompleted' },
+  { id: 'download.failed', label: 'downloadFailed' },
+]
 
 // 日志管理
 const logs = ref<string[]>([])
@@ -126,35 +168,35 @@ const tabGroups = computed(() => {
     {
       name: t('settings.groups.core'),
       tabs: [
-        { key: 'appearance', label: locale.value === 'zh' ? '外观与主题' : 'Themes & Appearance', icon: Palette, ready: true },
-        { key: 'paths', label: t('settings.tabs.paths'), icon: Folder, ready: true },
-        { key: 'downloader', label: t('settings.tabs.downloader'), icon: Download, ready: true },
+        { key: 'appearance', label: locale.value === 'zh' ? '外观与主题' : 'Themes & Appearance', icon: Palette },
+        { key: 'paths', label: t('settings.tabs.paths'), icon: Folder },
+        { key: 'downloader', label: t('settings.tabs.downloader'), icon: Download },
       ]
     },
     {
       name: t('settings.groups.sources'),
       tabs: [
-        { key: 'sources', label: t('settings.tabs.sources'), icon: Globe, ready: true },
-        { key: 'mikan', label: t('settings.tabs.mikan'), icon: Antenna, ready: true },
-        { key: 'bangumi', label: t('settings.tabs.bangumi'), icon: Antenna, ready: true },
+        { key: 'sources', label: t('settings.tabs.sources'), icon: Globe },
+        { key: 'mikan', label: t('settings.tabs.mikan'), icon: Antenna },
+        { key: 'bangumi', label: t('settings.tabs.bangumi'), icon: Antenna },
       ]
     },
     {
       name: t('settings.groups.extensions'),
       tabs: [
-        { key: 'plugins', label: t('settings.tabs.plugins'), icon: Sparkles, ready: true },
-        { key: 'ai', label: t('settings.tabs.ai'), icon: Cpu, ready: false },
-        { key: 'customRegex', label: t('settings.sections.customRegex'), icon: FileText, ready: false },
-        { key: 'notify', label: t('settings.tabs.notify'), icon: Bell, ready: false, pluginRequired: 'extended-notifiers' },
+        { key: 'plugins', label: t('settings.tabs.plugins'), icon: Sparkles },
+        { key: 'ai', label: t('settings.tabs.ai'), icon: Cpu },
+        { key: 'customRegex', label: t('settings.sections.customRegex'), icon: FileText },
+        { key: 'notify', label: t('settings.tabs.notify'), icon: Bell, pluginRequired: 'extended-notifiers' },
       ]
     },
     {
       name: t('settings.groups.system'),
       tabs: [
-        { key: 'scheduler', label: t('settings.tabs.scheduler'), icon: Timer, ready: true },
-        { key: 'logs', label: t('settings.tabs.logs'), icon: FileText, ready: true },
-        { key: 'account', label: t('settings.tabs.account'), icon: Lock, ready: true },
-        { key: 'backup', label: t('settings.tabs.backup'), icon: Database, ready: false },
+        { key: 'scheduler', label: t('settings.tabs.scheduler'), icon: Timer },
+        { key: 'backup', label: t('settings.tabs.backup'), icon: Database },
+        { key: 'logs', label: t('settings.tabs.logs'), icon: FileText },
+        { key: 'account', label: t('settings.tabs.account'), icon: Lock },
       ]
     }
   ]
@@ -173,6 +215,7 @@ interface FieldDef {
   placeholder: string
   type?: 'text' | 'password' | 'select' | 'switch'
   hint?: string
+  testChannel?: string
   testDownloader?: DownloaderType | 'current'
   selectOptions?: { label: string; value: string }[]
 }
@@ -348,6 +391,169 @@ const sectionsByTab = computed<Record<string, SectionDef[]>>(() => ({
       ]
     }
   ],
+  ai: [
+    {
+      title: t('settings.sections.aiModel'),
+      desc: t('settings.sections.aiModelDesc'),
+      fields: [
+        {
+          label: t('settings.fields.aiProtocol'), key: 'AI_PROTOCOL', placeholder: 'openai', type: 'select',
+          selectOptions: [
+            { label: t('settings.options.aiOpenai'), value: 'openai' },
+            { label: t('settings.options.aiGoogle'), value: 'google' },
+            { label: t('settings.options.aiAnthropic'), value: 'anthropic' },
+            { label: t('settings.options.aiOllama'), value: 'ollama' },
+          ]
+        },
+        { label: t('settings.fields.aiEndpoint'), key: 'AI_ENDPOINT', placeholder: 'https://api.openai.com/v1' },
+        { label: t('settings.fields.aiKey'), key: 'AI_API_KEY', placeholder: 'sk-...', type: 'password' },
+        { label: t('settings.fields.aiModel'), key: 'AI_MODEL', placeholder: 'gpt-4o-mini / deepseek-chat' },
+        { label: t('settings.fields.aiSmartSearch'), key: 'AI_SMART_SEARCH', placeholder: 'false', type: 'switch', hint: '搜索无果或中文别名多义时自动由 AI 改写多组英文/罗马音查询词。' },
+        { label: t('settings.fields.aiAutoDisambiguate'), key: 'AI_AUTO_DISAMBIGUATE', placeholder: 'false', type: 'switch', hint: '正则难以解析生肉或特番命名时回退至 AI 消歧提取季集信息。' },
+        { label: t('settings.fields.aiDailyQuota'), key: 'AI_DAILY_QUOTA_LIMIT', placeholder: '30' },
+      ]
+    }
+  ],
+  notify: [
+    {
+      title: t('settings.sections.notifyTg'),
+      desc: t('settings.sections.notifyTgDesc'),
+      fields: [
+        { label: t('settings.fields.tgToken'), key: 'TELEGRAM_BOT_TOKEN', placeholder: '123456:ABC...', type: 'password', testChannel: 'Telegram' },
+        { label: t('settings.fields.tgChatId'), key: 'TELEGRAM_CHAT_ID', placeholder: '123456789' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyWebhook'),
+      desc: t('settings.sections.notifyWebhookDesc'),
+      fields: [
+        { label: t('settings.fields.dingtalkWebhook'), key: 'DINGTALK_WEBHOOK', placeholder: 'https://oapi.dingtalk.com/...', testChannel: 'DingTalk' },
+        { label: t('settings.fields.dingtalkSecret'), key: 'DINGTALK_SECRET', placeholder: 'SEC...', type: 'password' },
+        { label: t('settings.fields.wecomWebhook'), key: 'WECOM_WEBHOOK', placeholder: 'https://qyapi.weixin.qq.com/...', testChannel: 'WeCom' },
+        { label: t('settings.fields.feishuWebhook'), key: 'FEISHU_WEBHOOK', placeholder: 'https://open.feishu.cn/...', testChannel: 'Feishu' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyQQ'),
+      desc: t('settings.sections.notifyQQDesc'),
+      fields: [
+        { label: t('settings.fields.qqHost'), key: 'ONEBOT_HOST', placeholder: 'http://localhost:5700', testChannel: 'OneBot' },
+        { label: t('settings.fields.qqToken'), key: 'ONEBOT_TOKEN', placeholder: 'Access Token', type: 'password' },
+        { label: t('settings.fields.qqUserId'), key: 'ONEBOT_USER_ID', placeholder: '10001' },
+        { label: t('settings.fields.qqGroupId'), key: 'ONEBOT_GROUP_ID', placeholder: '20002' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyBark'),
+      desc: t('settings.sections.notifyBarkDesc'),
+      fields: [
+        { label: t('settings.fields.barkKey'), key: 'BARK_DEVICE_KEY', placeholder: 'Bark Device Key', testChannel: 'Bark' },
+        { label: t('settings.fields.barkServer'), key: 'BARK_SERVER_URL', placeholder: 'https://api.day.app' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyServerChan'),
+      desc: t('settings.sections.notifyServerChanDesc'),
+      fields: [
+        { label: t('settings.fields.serverChanKey'), key: 'SERVERCHAN_KEY', placeholder: 'SCT...', type: 'password', testChannel: 'ServerChan' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyDiscord'),
+      desc: t('settings.sections.notifyDiscordDesc'),
+      fields: [
+        { label: t('settings.fields.discordWebhook'), key: 'DISCORD_WEBHOOK', placeholder: 'https://discord.com/api/webhooks/...', type: 'password', testChannel: 'Discord' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifySlack'),
+      desc: t('settings.sections.notifySlackDesc'),
+      fields: [
+        { label: t('settings.fields.slackWebhook'), key: 'SLACK_WEBHOOK', placeholder: 'https://hooks.slack.com/services/...', type: 'password', testChannel: 'Slack' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyGotify'),
+      desc: t('settings.sections.notifyGotifyDesc'),
+      fields: [
+        { label: t('settings.fields.gotifyUrl'), key: 'GOTIFY_URL', placeholder: 'https://gotify.example.com', testChannel: 'Gotify' },
+        { label: t('settings.fields.gotifyToken'), key: 'GOTIFY_TOKEN', placeholder: 'Application Token', type: 'password' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyNtfy'),
+      desc: t('settings.sections.notifyNtfyDesc'),
+      fields: [
+        { label: t('settings.fields.ntfyUrl'), key: 'NTFY_URL', placeholder: 'https://ntfy.sh', testChannel: 'Ntfy' },
+        { label: t('settings.fields.ntfyTopic'), key: 'NTFY_TOPIC', placeholder: 'my-anime-topic' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyPushover'),
+      desc: t('settings.sections.notifyPushoverDesc'),
+      fields: [
+        { label: t('settings.fields.pushoverToken'), key: 'PUSHOVER_TOKEN', placeholder: 'Application Token', type: 'password', testChannel: 'Pushover' },
+        { label: t('settings.fields.pushoverUser'), key: 'PUSHOVER_USER', placeholder: 'User Key' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyEmail'),
+      desc: t('settings.sections.notifyEmailDesc'),
+      fields: [
+        { label: t('settings.fields.smtpHost'), key: 'EMAIL_SMTP_HOST', placeholder: 'smtp.example.com', testChannel: 'Email' },
+        { label: t('settings.fields.smtpPort'), key: 'EMAIL_SMTP_PORT', placeholder: '465 / 587' },
+        { label: t('settings.fields.smtpUser'), key: 'EMAIL_SMTP_USER', placeholder: 'user@example.com' },
+        { label: t('settings.fields.smtpPass'), key: 'EMAIL_SMTP_PASS', placeholder: '••••••••', type: 'password' },
+        { label: t('settings.fields.smtpFrom'), key: 'EMAIL_SMTP_FROM', placeholder: '可选发件人，留空默认同用户名' },
+        { label: t('settings.fields.smtpTo'), key: 'EMAIL_SMTP_TO', placeholder: '接收者邮箱，多个用逗号隔开' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyMatrix'),
+      desc: t('settings.sections.notifyMatrixDesc'),
+      fields: [
+        { label: t('settings.fields.matrixHomeserver'), key: 'MATRIX_HOMESERVER', placeholder: 'https://matrix.org', testChannel: 'Matrix' },
+        { label: t('settings.fields.matrixToken'), key: 'MATRIX_TOKEN', placeholder: 'syt_...', type: 'password' },
+        { label: t('settings.fields.matrixRoomId'), key: 'MATRIX_ROOM_ID', placeholder: '!abc123:matrix.org' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyLine'),
+      desc: t('settings.sections.notifyLineDesc'),
+      fields: [
+        { label: t('settings.fields.lineChannelToken'), key: 'LINE_CHANNEL_TOKEN', placeholder: 'Channel Access Token', type: 'password', testChannel: 'LINE' },
+        { label: t('settings.fields.lineUserId'), key: 'LINE_USER_ID', placeholder: 'U1234567890abcdef...' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyWhatsapp'),
+      desc: t('settings.sections.notifyWhatsappDesc'),
+      fields: [
+        { label: t('settings.fields.whatsappPhoneId'), key: 'WHATSAPP_PHONE_ID', placeholder: '123456789012345', testChannel: 'WhatsApp' },
+        { label: t('settings.fields.whatsappToken'), key: 'WHATSAPP_TOKEN', placeholder: 'EAAB...', type: 'password' },
+        { label: t('settings.fields.whatsappTo'), key: 'WHATSAPP_TO', placeholder: '8613800138000' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifySignal'),
+      desc: t('settings.sections.notifySignalDesc'),
+      fields: [
+        { label: t('settings.fields.signalApiUrl'), key: 'SIGNAL_API_URL', placeholder: 'http://localhost:8080', testChannel: 'Signal' },
+        { label: t('settings.fields.signalSender'), key: 'SIGNAL_SENDER', placeholder: '+8613800138000' },
+        { label: t('settings.fields.signalRecipients'), key: 'SIGNAL_RECIPIENTS', placeholder: '+8613800138000' },
+      ]
+    },
+    {
+      title: t('settings.sections.notifyWechat'),
+      desc: t('settings.sections.notifyWechatDesc'),
+      fields: [
+        { label: t('settings.fields.wechatAppId'), key: 'WECHAT_APP_ID', placeholder: 'wx1234567890abcdef', testChannel: 'WeChat' },
+        { label: t('settings.fields.wechatAppSecret'), key: 'WECHAT_APP_SECRET', placeholder: 'abcdef1234567890...', type: 'password' },
+        { label: t('settings.fields.wechatUserId'), key: 'WECHAT_USER_ID', placeholder: 'oAbc123_xyz...' },
+        { label: t('settings.fields.wechatTemplateId'), key: 'WECHAT_TEMPLATE_ID', placeholder: 'ngqIpbwh8bUfcSsXYZ...' },
+      ]
+    },
+  ],
   scheduler: [
     {
       title: t('settings.sections.schedulerCycle'),
@@ -359,6 +565,17 @@ const sectionsByTab = computed<Record<string, SectionDef[]>>(() => ({
         { label: t('settings.fields.seedCleanupInterval'), key: 'SEED_CLEANUP_INTERVAL', placeholder: '1h' },
         { label: t('settings.fields.seedCleanupMinSeedTime'), key: 'SEED_CLEANUP_MIN_SEED_TIME', placeholder: '48h' },
         { label: t('settings.fields.seedCleanupMinRatio'), key: 'SEED_CLEANUP_MIN_RATIO', placeholder: '1.0' },
+      ]
+    }
+  ],
+  backup: [
+    {
+      title: t('settings.sections.backupCron'),
+      desc: t('settings.sections.backupCronDesc'),
+      fields: [
+        { label: t('settings.fields.backupPath'), key: 'BACKUP_PATH', placeholder: './data/backups' },
+        { label: t('settings.fields.backupCron'), key: 'BACKUP_CRON', placeholder: '0 0 * * *' },
+        { label: t('settings.fields.backupKeepCount'), key: 'BACKUP_KEEP_COUNT', placeholder: '7' },
       ]
     }
   ],
@@ -376,7 +593,23 @@ const allFields = computed(() => {
   return m
 })
 
-const currentTabSections = computed<SectionDef[]>(() => sectionsByTab.value[activeTab.value] || [])
+const currentTabSections = computed<SectionDef[]>(() => {
+  if (activeTab.value === 'notify' && !isPluginActive('extended-notifiers')) {
+    return []
+  }
+  return sectionsByTab.value[activeTab.value] || []
+})
+
+watch(() => isPluginActive('extended-notifiers'), (active) => {
+  if (!active && activeTab.value === 'notify') {
+    activeTab.value = 'plugins'
+  }
+})
+
+async function enableNotifyPlugin() {
+  const p = pluginList.value.find(item => item.id === 'extended-notifiers')
+  if (p && !p.enabled) await togglePlugin(p)
+}
 
 function getVal(key: string): string {
   return settings.value[key] || ''
@@ -384,6 +617,13 @@ function getVal(key: string): string {
 
 function setVal(key: string, val: string) {
   settings.value[key] = val
+}
+
+function isConfigured(key: string): boolean {
+  const val = settings.value[key]
+  const field = allFields.value[key]
+  if (field?.type === 'password') return val !== undefined
+  return val !== undefined && val.length > 0
 }
 
 function isSwitchEnabled(key: string): boolean {
@@ -406,6 +646,190 @@ function inputType(field: FieldDef): string {
 
 function selectValue(field: FieldDef): string {
   return getVal(field.key) || field.placeholder || field.selectOptions?.[0]?.value || ''
+}
+
+// MCP Server 状态与操作
+const showMcpToken = ref(false)
+const generatedMcpToken = ref('')
+const mcpConfigured = computed(() => !!generatedMcpToken.value || settings.value.MCP_TOKEN_CONFIGURED === 'true')
+const mcpGeneratingToken = ref(false)
+
+const mcpEndpointUrl = computed(() => {
+  const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://localhost:20001'
+  return `${origin}/mcp/sse`
+})
+
+const mcpClaudeConfigJson = computed(() => {
+  const token = generatedMcpToken.value || 'YOUR_MCP_TOKEN'
+  const config = {
+    mcpServers: {
+      'ani-go': {
+        url: mcpEndpointUrl.value,
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    }
+  }
+  return JSON.stringify(config, null, 2)
+})
+
+async function generateMCPToken() {
+  mcpGeneratingToken.value = true
+  try {
+    const { data } = await request.post('/mcp/token/generate')
+    if (data?.token) {
+      generatedMcpToken.value = data.token
+      showMcpToken.value = true
+      saved.value = true
+      setTimeout(() => { saved.value = false }, 2500)
+      window.showToast?.(t('settings.mcp.tokenGenerated'), 'success')
+    }
+  } catch (e: any) {
+    const errMsg = e.response?.data?.error || t('settings.mcp.generateFailed')
+    if (window.showToast) window.showToast(errMsg, 'error')
+    else error.value = errMsg
+  } finally {
+    mcpGeneratingToken.value = false
+  }
+}
+
+function copyText(text: string) {
+  if (!text) return
+  navigator.clipboard.writeText(text)
+  saved.value = true
+  setTimeout(() => { saved.value = false }, 2000)
+  window.showToast?.(t('settings.copied') || '已复制到剪贴板', 'success')
+}
+
+function copyClaudeConfig() {
+  copyText(mcpClaudeConfigJson.value)
+}
+
+function copyCursorConfig() {
+  copyText(mcpClaudeConfigJson.value)
+}
+
+// 自定义正则配置与测试
+const customRegexList = ref<string[]>(Array(10).fill(''))
+let savedRegex: string[] = Array(10).fill('')
+let regexRead = 0
+const customRegexCompiled = ref<string[]>([])
+const customRegexLoading = ref(false)
+const customRegexSaved = ref(false)
+const regexTestTitle = ref('')
+const regexTestResult = ref<any>(null)
+const regexTesting = ref(false)
+
+async function fetchCustomRegex() {
+  if (savingSettings.value || customRegexLoading.value) return
+  const sequence = ++regexRead
+  try {
+    const { data } = await request.get('/settings/custom-regex')
+    if (sequence !== regexRead) return
+    if (data.patterns && Array.isArray(data.patterns)) {
+      const list = Array(10).fill('')
+      for (let i = 0; i < 10; i++) {
+        list[i] = data.patterns[i] || ''
+      }
+      customRegexList.value = list.map((value, i) => customRegexList.value[i] === savedRegex[i] ? value : customRegexList.value[i])
+      savedRegex = list
+    }
+    if (data.compiled && Array.isArray(data.compiled)) {
+      customRegexCompiled.value = data.compiled
+    }
+  } catch (e: any) {
+    console.error('获取自定义正则失败', e)
+  }
+}
+
+function changedRegexSettings(): Record<string, string> {
+  const updates: Record<string, string> = {}
+  for (let i = 0; i < savedRegex.length; i++) {
+    const value = customRegexList.value[i] || ''
+    if (value !== savedRegex[i]) updates[`custom_regex_${i}`] = value
+  }
+  return updates
+}
+
+function rememberSavedRegex(changes: Record<string, string>) {
+  for (let i = 0; i < savedRegex.length; i++) {
+    const key = `custom_regex_${i}`
+    if (key in changes) savedRegex[i] = changes[key]
+  }
+}
+
+async function saveCustomRegex() {
+  if (savingSettings.value || customRegexLoading.value) return
+  ++regexRead
+  customRegexLoading.value = true
+  customRegexSaved.value = false
+  error.value = ''
+  try {
+    const updates = changedRegexSettings()
+    if (Object.keys(updates).length) {
+      await request.put('/settings', { settings: updates })
+      rememberSavedRegex(updates)
+    }
+    const { data } = await request.post('/settings/custom-regex/reload')
+    if (data.compiled && Array.isArray(data.compiled)) {
+      customRegexCompiled.value = data.compiled
+    }
+    customRegexSaved.value = true
+    setTimeout(() => { customRegexSaved.value = false }, 3000)
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '保存自定义正则失败'
+  } finally {
+    customRegexLoading.value = false
+  }
+}
+
+async function runRegexTest() {
+  if (!regexTestTitle.value.trim()) return
+  regexTesting.value = true
+  regexTestResult.value = null
+  try {
+    const { data } = await request.post('/settings/custom-regex/test', {
+      title: regexTestTitle.value.trim()
+    })
+    regexTestResult.value = data
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '测试解析失败'
+  } finally {
+    regexTesting.value = false
+  }
+}
+
+// RSS 实时源解析探针
+const rssInspectUrl = ref('')
+const rssInspectLoading = ref(false)
+const rssInspectResult = ref<any>(null)
+const rssInspectError = ref('')
+
+async function runRSSInspect() {
+  const url = rssInspectUrl.value.trim()
+  if (!url) {
+    rssInspectError.value = '请输入有效的 RSS URL'
+    return
+  }
+  rssInspectLoading.value = true
+  rssInspectError.value = ''
+  rssInspectResult.value = null
+  try {
+    const { data } = await request.post('/rss/preview', { url }, { timeout: 18000 })
+    if (data.success) rssInspectResult.value = data
+    else rssInspectError.value = data.error || '解析失败'
+  } catch (e: any) {
+    rssInspectError.value = e.response?.data?.error || '拉取或解析 RSS 失败，请检查链接连通性'
+  } finally {
+    rssInspectLoading.value = false
+  }
+}
+
+function fillMikanRSS() {
+  const mikanUrl = getVal('MIKAN_RSS_URL')
+  if (mikanUrl) rssInspectUrl.value = mikanUrl
+  else window.showToast?.('未配置个人 Mikan RSS 链接，可手动输入或粘贴字幕组 RSS', 'info')
 }
 
 async function fetchSettings() {
@@ -432,9 +856,10 @@ async function fetchSettings() {
 }
 
 async function saveAll() {
-  if (!settingsReady.value || savingSettings.value) return
+  if (!settingsReady.value || savingSettings.value || customRegexLoading.value) return
   savingSettings.value = true
   ++settingsRead
+  ++regexRead
   error.value = ''
   saved.value = false
   const changed: Record<string, string> = {}
@@ -446,10 +871,13 @@ async function saveAll() {
       changed[key] = val
     }
   }
+  const regexUpdates = changedRegexSettings()
+  Object.assign(changed, regexUpdates)
   try {
     if (Object.keys(changed).length) {
       await request.put('/settings', { settings: changed })
       Object.assign(savedSettings, changed)
+      rememberSavedRegex(regexUpdates)
     }
     saved.value = true
     window.showToast?.(t('settings.updateSuccess'), 'success')
@@ -459,6 +887,113 @@ async function saveAll() {
     window.showToast?.(error.value, 'error')
   } finally {
     savingSettings.value = false
+  }
+  if (saved.value && Object.keys(regexUpdates).length) void fetchCustomRegex()
+}
+
+// 通知投递历史与健康度分析
+const notifyLogs = ref<any[]>([])
+const notifyLogsLoading = ref(false)
+let notifyRead = 0
+const notifyLogsTotal = ref(0)
+const notifyLogsPage = ref(1)
+const notifyLogsPageSize = ref(10)
+const notifyFilterChannel = ref('all')
+const notifyFilterStatus = ref('all')
+const notifyStats = ref<{ total: number; success: number; failed: number; dlq: number; channel_stats: Record<string, { success: number; failed: number }> }>({
+  total: 0, success: 0, failed: 0, dlq: 0, channel_stats: {}
+})
+const clearingLogs = ref(false)
+
+async function fetchNotifyStats() {
+  try {
+    const { data } = await request.get('/notifications/stats')
+    if (data) notifyStats.value = data
+  } catch (e) {
+    console.error('获取通知统计失败', e)
+  }
+}
+
+async function fetchNotifyLogs() {
+  const sequence = ++notifyRead
+  notifyLogsLoading.value = true
+  try {
+    const { data } = await request.get('/notifications/logs', {
+      params: {
+        page: notifyLogsPage.value,
+        pageSize: notifyLogsPageSize.value,
+        channel: notifyFilterChannel.value === 'all' ? undefined : notifyFilterChannel.value,
+        status: notifyFilterStatus.value === 'all' ? undefined : notifyFilterStatus.value,
+      }
+    })
+    if (sequence !== notifyRead) return
+    notifyLogs.value = data.logs || []
+    notifyLogsTotal.value = data.total || 0
+  } catch (e) {
+    if (sequence === notifyRead) console.error('获取通知日志失败', e)
+  } finally {
+    if (sequence === notifyRead) notifyLogsLoading.value = false
+  }
+}
+
+async function clearNotifyLogs() {
+  if (!confirm('确定要清空全部通知投递历史记录吗？此操作不可撤销。')) return
+  clearingLogs.value = true
+  try {
+    await request.delete('/notifications/logs')
+    window.showToast?.('通知历史记录已清空', 'success')
+    notifyLogsPage.value = 1
+    await Promise.all([fetchNotifyLogs(), fetchNotifyStats()])
+  } catch (e: any) {
+    window.showToast?.(e.response?.data?.error || '清空通知记录失败', 'error')
+  } finally {
+    clearingLogs.value = false
+  }
+}
+
+async function sendTestNotify(channel: string) {
+  try {
+    const { data } = await request.post('/notify/test', {
+      channel,
+      title: 'Ani-Go 联通测试',
+      message: `来自 ${channel} 的自检通知，收到说明配置成功。`
+    })
+    if (data.success) {
+      saved.value = true
+      window.showToast?.(`已发送至 ${channel}`, 'success')
+      setTimeout(() => { saved.value = false }, 3000)
+    } else {
+      error.value = data.error || '测试发送失败'
+    }
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '发送测试请求失败'
+  }
+}
+
+async function fetchAIModels() {
+  const protocol = getVal('AI_PROTOCOL')
+  const endpoint = getVal('AI_ENDPOINT')
+  const apiKey = getVal('AI_API_KEY')
+  if (!endpoint) {
+    error.value = '请先填写 API 端点地址'
+    return
+  }
+  modelLoading.value = true
+  modelOptions.value = []
+  try {
+    const { data } = await request.post('/ai/models', { protocol, endpoint, apiKey }, { timeout: 15000 })
+    if (data.success && data.models && data.models.length > 0) {
+      modelOptions.value = data.models.map((m: string) => ({ label: m, value: m }))
+      if (!getVal('AI_MODEL')) setVal('AI_MODEL', data.models[0])
+      saved.value = true
+      setTimeout(() => { saved.value = false }, 2000)
+    } else {
+      error.value = data.error || '未获取到可用模型'
+    }
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '拉取模型列表失败'
+  } finally {
+    modelLoading.value = false
   }
 }
 
@@ -528,6 +1063,7 @@ async function testDownloader(type: DownloaderType | 'current') {
   }
 }
 
+// 插件管理逻辑
 async function fetchPlugins(afterChange = false) {
   const currentRequest = ++pluginListRequest
   pluginLoading.value = true
@@ -537,6 +1073,9 @@ async function fetchPlugins(afterChange = false) {
     if (!Array.isArray(data)) throw new Error()
     pluginList.value = data
     pluginListError.value = ''
+    if (activeTab.value === 'notify' && pluginList.value.some(p => p.id === 'extended-notifiers' && p.enabled && !pluginRunning(p))) {
+      activeTab.value = 'plugins'
+    }
     return true
   } catch {
     if (currentRequest === pluginListRequest) {
@@ -552,7 +1091,10 @@ async function reloadPlugins() {
   pluginLoading.value = true
   try {
     await request.post('/plugins/reload')
-    if (await fetchPlugins(true)) window.showToast?.('插件已重载', 'success')
+    if (!await fetchPlugins(true)) return
+    saved.value = true
+    window.showToast?.('插件已重载', 'success')
+    setTimeout(() => { saved.value = false }, 2500)
   } catch (e: any) {
     error.value = e.response?.data?.error || t('settings.plugins.reloadFailed')
   } finally {
@@ -568,7 +1110,9 @@ async function togglePlugin(p: { id: string; enabled: boolean; status?: string; 
     p.enabled = data.enabled
     p.status = data.status
     p.error = data.error
-    await fetchPlugins(true)
+    if (!await fetchPlugins(true)) return
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 2000)
   } catch (e: any) {
     error.value = e.response?.data?.error || t('settings.plugins.toggleFailed')
   } finally {
@@ -581,12 +1125,263 @@ async function deletePlugin(id: string) {
   pendingPlugins.value.add(id)
   try {
     await request.delete(`/plugins/${encodeURIComponent(id)}`)
-    await fetchPlugins(true)
+    if (!await fetchPlugins(true)) return
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 2000)
   } catch (e: any) {
     error.value = e.response?.data?.error || t('settings.plugins.deleteFailed')
   } finally {
     pendingPlugins.value.delete(id)
   }
+}
+
+function openAddPluginModal() {
+  if (pluginSaving.value) return
+  ++pluginFileRequest
+  pluginFileReading.value = false
+  pluginForm.value = {
+    id: '',
+    name: '',
+    description: '',
+    version: '1.0.0',
+    author: 'User',
+    author_url: '',
+    type: 'webhook',
+    url: '',
+    secret: '',
+    events: ['download.completed', 'file.organized']
+  }
+  pluginJsonText.value = JSON.stringify({
+    name: t('settings.plugins.exampleName'),
+    description: t('settings.plugins.exampleDescription'),
+    version: '1.0.0',
+    type: 'webhook',
+    url: 'https://your-server.com/webhook',
+    events: ['download.completed', 'file.organized']
+  }, null, 2)
+  pluginJsonError.value = ''
+  showPluginModal.value = true
+}
+
+function newCustomPluginID() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return 'custom-' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function submitPluginForm() {
+  if (pluginSaving.value || pluginFileReading.value) return
+  pluginSaving.value = true
+  pluginJsonError.value = ''
+  try {
+    if (pluginModalTab.value === 'webhook') {
+      if (!pluginForm.value.name.trim()) throw new Error(t('settings.plugins.nameRequired'))
+      if (!pluginForm.value.url.trim()) throw new Error(t('settings.plugins.urlRequired'))
+      if (pluginForm.value.events.length === 0) throw new Error(t('settings.plugins.eventsRequired'))
+      pluginForm.value.id ||= newCustomPluginID()
+      await request.post('/plugins/save', pluginForm.value)
+    } else {
+      const parsed = JSON.parse(pluginJsonText.value)
+      const isBundle = Array.isArray(parsed)
+      const items = isBundle ? parsed : [parsed]
+      if (!items.length || items.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+        throw new Error(t('settings.plugins.invalidManifest'))
+      }
+      for (const item of items) {
+        if (item.id == null || (typeof item.id === 'string' && !item.id.trim())) item.id = newCustomPluginID()
+      }
+      for (const [index, item] of items.entries()) {
+        try {
+          await request.post('/plugins/save', item)
+        } catch (e: any) {
+          pluginJsonText.value = JSON.stringify(isBundle ? items.slice(index) : item, null, 2)
+          if (!index) throw e
+          const reason = e.response?.data?.error || e.message || t('settings.plugins.saveFailed')
+          pluginJsonError.value = t('settings.plugins.partialImport', { count: index, total: items.length, reason })
+          await fetchPlugins(true)
+          return
+        }
+      }
+    }
+    showPluginModal.value = false
+    if (!await fetchPlugins(true)) return
+    saved.value = true
+    setTimeout(() => { saved.value = false }, 2500)
+  } catch (e: any) {
+    pluginJsonError.value = e.response?.data?.error || e.message || t('settings.plugins.saveFailed')
+  } finally {
+    pluginSaving.value = false
+  }
+}
+
+function exportPluginsJSON() {
+  if (!customPlugins.value.length || pluginListError.value) return
+  const dataStr = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(customPlugins.value, null, 2))
+  const dlAnchor = document.createElement('a')
+  dlAnchor.setAttribute('href', dataStr)
+  dlAnchor.setAttribute('download', `anigo-plugins-${new Date().toISOString().slice(0, 10)}.json`)
+  dlAnchor.click()
+}
+
+async function handlePluginFileImport(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || pluginSaving.value) return
+  input.value = ''
+  const current = ++pluginFileRequest
+  pluginFileReading.value = true
+  pluginJsonError.value = ''
+  try {
+    const contents = await file.text()
+    if (current === pluginFileRequest) pluginJsonText.value = contents
+  } catch {
+    if (current === pluginFileRequest) pluginJsonError.value = t('settings.plugins.fileReadFailed')
+  } finally {
+    if (current === pluginFileRequest) pluginFileReading.value = false
+  }
+}
+
+// 数据迁移状态与操作
+const showMigrateModal = ref(false)
+const migrateMode = ref<'upload' | 'path'>('upload')
+const migrateFile = ref<File | null>(null)
+const migratePath = ref('data/autobangumi.db')
+const migrating = ref(false)
+const migrateResult = ref<any>(null)
+const migrateError = ref('')
+
+function openMigrateModal() {
+  migrateFile.value = null
+  migratePath.value = 'data/autobangumi.db'
+  migrateResult.value = null
+  migrateError.value = ''
+  showMigrateModal.value = true
+}
+
+function onMigrateFileSelect(e: any) {
+  const file = e.target.files?.[0]
+  if (file) {
+    migrateFile.value = file
+    migrateError.value = ''
+  }
+}
+
+async function executeMigration() {
+  migrating.value = true
+  migrateError.value = ''
+  migrateResult.value = null
+  try {
+    if (migrateMode.value === 'upload') {
+      if (!migrateFile.value) {
+        throw new Error('请选择 AutoBangumi SQLite、ani.v2.json 或 ani-rss ZIP 备份')
+      }
+      const formData = new FormData()
+      formData.append('file', migrateFile.value)
+      const { data } = await request.post('/migrate', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      migrateResult.value = data.stats || data
+      window.showToast?.(t('settings.migrate.resultTitle'), 'success')
+      await fetchPlugins()
+    } else {
+      if (!migratePath.value.trim()) {
+        throw new Error('请输入源数据库文件路径')
+      }
+      const { data } = await request.post('/migrate', { source_path: migratePath.value.trim() })
+      migrateResult.value = data.stats || data
+      window.showToast?.(t('settings.migrate.resultTitle'), 'success')
+      await fetchPlugins()
+    }
+  } catch (e: any) {
+    migrateError.value = e.response?.data?.error || e.message || '迁移失败，请检查文件格式与权限'
+    window.showToast?.(migrateError.value, 'error')
+  } finally {
+    migrating.value = false
+  }
+}
+
+// 备份管理操作
+async function fetchBackupList() {
+  backupLoading.value = true
+  try {
+    const { data } = await request.get('/backup/list')
+    backupList.value = data || []
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '获取备份列表失败'
+  } finally {
+    backupLoading.value = false
+  }
+}
+
+async function createBackup() {
+  creatingBackup.value = true
+  try {
+    await request.post('/backup/create', { include_episodes: showBackupEpisodes.value })
+    saved.value = true
+    window.showToast?.('备份已创建', 'success')
+    setTimeout(() => { saved.value = false }, 2500)
+    await fetchBackupList()
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '创建备份失败'
+  } finally {
+    creatingBackup.value = false
+  }
+}
+
+async function restoreBackup(name: string) {
+  if (!confirm(`确定要从备份 "${name}" 恢复吗？这将覆盖当前设置和订阅数据。建议恢复后重启服务。`)) return
+  restoringBackup.value = true
+  try {
+    await request.post('/backup/restore', { name })
+    alert('恢复成功，建议重启服务生效')
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '恢复备份失败'
+  } finally {
+    restoringBackup.value = false
+  }
+}
+
+async function deleteBackup(name: string) {
+  if (!confirm(`确定要删除备份 "${name}" 吗？此操作不可撤销。`)) return
+  deletingBackup.value = name
+  try {
+    await request.delete(`/backup/${name}`)
+    await fetchBackupList()
+  } catch (e: any) {
+    error.value = e.response?.data?.error || '删除备份失败'
+  } finally {
+    deletingBackup.value = null
+  }
+}
+
+async function downloadBackup(name: string) {
+  try {
+    const response = await fetch(`/api/backup/download/${name}`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+    if (!response.ok) throw new Error('下载失败')
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.click()
+    window.URL.revokeObjectURL(url)
+  } catch (e: any) {
+    error.value = e.message || '下载备份失败'
+  }
+}
+
+function formatBackupSize(bytes: number): string {
+  if (bytes > 1e6) return (bytes / 1e6).toFixed(1) + ' MB'
+  if (bytes > 1e3) return (bytes / 1e3).toFixed(0) + ' KB'
+  return bytes + ' B'
+}
+
+function formatBackupTime(timeStr: string): string {
+  return new Date(timeStr).toLocaleString('zh-CN', {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  })
 }
 
 async function fetchLogs() {
@@ -763,14 +1558,24 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
+function loadTabResources(tab: string) {
+  if (tab === 'logs') fetchLogs()
+  else if (tab === 'customRegex') fetchCustomRegex()
+  else if (tab === 'backup') fetchBackupList()
+  else if (tab === 'notify') {
+    fetchNotifyLogs()
+    fetchNotifyStats()
+  }
+}
+
 watch(activeTab, (newTab) => {
-  if (newTab === 'logs') fetchLogs()
+  loadTabResources(newTab)
 })
 
 onMounted(() => {
   fetchSettings()
   fetchPlugins()
-  if (activeTab.value === 'logs') fetchLogs()
+  loadTabResources(activeTab.value)
   window.addEventListener('keydown', handleGlobalKeydown)
 })
 
@@ -798,7 +1603,7 @@ onUnmounted(() => {
         type="button"
         @click="saveAll"
         class="v2-btn v2-btn-primary shrink-0"
-        :disabled="loading || !settingsReady || savingSettings"
+        :disabled="loading || !settingsReady || savingSettings || customRegexLoading"
       >
         <Check :size="15" />
         <span>{{ $t('settings.saveAll') }}</span>
@@ -857,14 +1662,16 @@ onUnmounted(() => {
               <component :is="tab.icon" :size="15" class="shrink-0" />
               <span class="truncate">{{ tab.label }}</span>
             </div>
-            <span v-if="!tab.ready" class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[var(--v2-surface-2)] text-[var(--v2-ink-subtle)]">v2</span>
-            <span v-else-if="activeTab === tab.key" class="w-1.5 h-1.5 rounded-full bg-[var(--v2-accent)] shrink-0"></span>
+            <span v-if="activeTab === tab.key" class="w-1.5 h-1.5 rounded-full bg-[var(--v2-accent)] shrink-0"></span>
           </button>
         </div>
       </aside>
 
-      <!-- 右侧分组面板 -->
+      <!-- 右侧内容区 -->
       <div class="flex-1 min-w-0 w-full space-y-5">
+        <!-- 外观与多套主题工坊 -->
+        <ThemeAppearancePanel v-if="activeTab === 'appearance'" />
+
         <!-- Mikan / Bangumi 镜像测速与授权卡片 -->
         <div v-if="activeTab === 'mikan' || activeTab === 'bangumi'" class="v2-panel p-5 sm:p-6 space-y-4">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -901,7 +1708,50 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 通用分组渲染（paths, downloader, sources, mikan, bangumi, scheduler） -->
+        <!-- Bangumi OAuth 授权横幅 -->
+        <div v-if="activeTab === 'bangumi'" class="v2-panel p-5 sm:p-6 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="flex items-start gap-3 min-w-0">
+              <div class="w-10 h-10 rounded-xl bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] flex items-center justify-center shrink-0">
+                <Antenna :size="20" />
+              </div>
+              <div class="min-w-0 space-y-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h3 class="text-sm font-bold text-[var(--v2-ink)]">{{ $t('settings.bangumi.connectTitle') }}</h3>
+                  <span v-if="getVal('BGMTV_USERNAME')" class="badge badge-success badge-xs">
+                    {{ $t('settings.bangumi.bound') }}: {{ getVal('BGMTV_USERNAME') }}
+                  </span>
+                  <span v-else class="v2-pill text-[10px]">{{ $t('settings.bangumi.unconnected') }}</span>
+                </div>
+                <p class="text-xs text-[var(--v2-ink-muted)] leading-relaxed">{{ $t('settings.bangumi.connectDesc') }}</p>
+              </div>
+            </div>
+            <button type="button" @click="connectBangumi" class="v2-btn v2-btn-primary v2-btn-sm shrink-0">
+              <Antenna :size="14" />
+              <span>{{ $t('settings.bangumi.connectNow') }}</span>
+            </button>
+          </div>
+          <div class="v2-panel-muted p-3.5 text-xs text-[var(--v2-ink-muted)] space-y-1">
+            <p class="font-semibold text-[var(--v2-accent)]">{{ $t('settings.bangumi.tipsTitle') }}</p>
+            <p>{{ $t('settings.bangumi.tip1Token') }} <a href="https://next.bgm.tv/demo/access-token" target="_blank" class="text-[var(--v2-accent)] hover:underline font-semibold">{{ $t('settings.bangumi.tip1Link') }}</a> {{ $t('settings.bangumi.tip1Suffix') }}</p>
+            <p>{{ $t('settings.bangumi.tip2OAuth') }} <a href="https://bgm.tv/dev/app" target="_blank" class="text-[var(--v2-accent)] hover:underline font-semibold">{{ $t('settings.bangumi.tip2Link') }}</a> {{ $t('settings.bangumi.tip2Suffix') }}</p>
+          </div>
+        </div>
+
+        <!-- AI 预算警示横幅 -->
+        <div v-if="activeTab === 'ai'" class="v2-panel border-amber-500/35 bg-amber-500/8 p-5 space-y-2.5">
+          <div class="flex items-center gap-2 font-bold text-sm text-amber-400">
+            <AlertCircle :size="17" />
+            <span>{{ $t('settings.ai.warningTitle') }}</span>
+          </div>
+          <p class="text-xs text-[var(--v2-ink-muted)] leading-relaxed">{{ $t('settings.ai.warningDesc') }}</p>
+          <div class="flex flex-wrap items-center gap-2 pt-1">
+            <span class="v2-pill !h-auto !whitespace-normal max-w-full py-1 leading-snug font-mono text-[11px] border-amber-500/30 text-amber-400">{{ $t('settings.ai.badgeRecommend') }}: DeepSeek-V3 / Gemini 2.0 Flash / Ollama</span>
+            <span class="v2-pill !h-auto !whitespace-normal max-w-full py-1 leading-snug font-mono text-[11px] border-amber-500/30 text-amber-400">{{ $t('settings.ai.badgeProtection') }}</span>
+          </div>
+        </div>
+
+        <!-- 通用配置分组渲染（paths, downloader, sources, mikan, bangumi, ai, notify, scheduler, backup） -->
         <template v-if="currentTabSections.length > 0">
           <div v-for="section in currentTabSections" :key="section.title" class="v2-panel p-5 sm:p-6 space-y-5">
             <div class="border-b border-[var(--v2-border)] pb-3">
@@ -911,7 +1761,7 @@ onUnmounted(() => {
 
             <div class="grid gap-4">
               <div v-for="field in section.fields" :key="field.key" class="space-y-1.5">
-                <!-- 布尔 Switch 行（严格读取 val === 'true'，彻底修复旧 <select> 假开启 bug） -->
+                <!-- 布尔 Switch 行 -->
                 <div v-if="field.type === 'switch'" class="v2-panel-muted p-3.5 flex items-center justify-between gap-4">
                   <div class="min-w-0">
                     <div class="text-xs font-semibold text-[var(--v2-ink)]">{{ field.label }}</div>
@@ -932,10 +1782,21 @@ onUnmounted(() => {
                   </button>
                 </div>
 
-                <!-- 下拉或输入框 -->
+                <!-- 常规控件 -->
                 <template v-else>
                   <div class="flex items-center justify-between gap-2">
-                    <label class="text-xs font-semibold text-[var(--v2-ink-muted)]">{{ field.label }}</label>
+                    <label class="text-xs font-semibold text-[var(--v2-ink-muted)] flex items-center gap-1.5">
+                      <span>{{ field.label }}</span>
+                      <span v-if="isConfigured(field.key)" class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    </label>
+                    <button
+                      v-if="field.testChannel"
+                      type="button"
+                      class="text-xs font-semibold text-[var(--v2-accent)] hover:underline cursor-pointer bg-transparent border-0 p-0"
+                      @click="sendTestNotify(field.testChannel)"
+                    >
+                      {{ $t('settings.notify.sendTest') }}
+                    </button>
                     <button
                       v-if="field.testDownloader"
                       type="button"
@@ -956,6 +1817,37 @@ onUnmounted(() => {
                   >
                     <option v-for="opt in field.selectOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                   </select>
+
+                  <!-- AI 模型专用输入 + 拉取组合 -->
+                  <div v-else-if="field.key === 'AI_MODEL'" class="space-y-2">
+                    <div class="flex gap-2">
+                      <input
+                        type="text"
+                        :value="getVal(field.key)"
+                        @input="(e: Event) => setVal(field.key, (e.target as HTMLInputElement).value)"
+                        :placeholder="field.placeholder"
+                        class="v2-input font-mono text-xs flex-1"
+                      />
+                      <button
+                        type="button"
+                        @click="fetchAIModels"
+                        :disabled="modelLoading || !getVal('AI_ENDPOINT')"
+                        class="v2-btn shrink-0"
+                        :title="$t('settings.ai.fetchTooltip')"
+                      >
+                        <RefreshCw :size="13" :class="{ 'animate-spin': modelLoading }" />
+                        <span>{{ modelLoading ? $t('settings.ai.loadingModels') : $t('settings.ai.fetchModels') }}</span>
+                      </button>
+                    </div>
+                    <select
+                      v-if="modelOptions.length"
+                      :value="getVal('AI_MODEL')"
+                      @change="(e: Event) => setVal('AI_MODEL', (e.target as HTMLSelectElement).value)"
+                      class="v2-input font-mono text-xs cursor-pointer"
+                    >
+                      <option v-for="opt in modelOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    </select>
+                  </div>
 
                   <div v-else class="relative">
                     <input
@@ -982,33 +1874,443 @@ onUnmounted(() => {
           </div>
         </template>
 
-        <!-- 插件生态面板（保留 <h4> + checkbox + PluginPanel 契约） -->
-        <div v-else-if="activeTab === 'plugins'" class="v2-panel p-5 sm:p-6 space-y-5">
+        <!-- MCP Server 外部控制卡片 (AI 标签下) -->
+        <div v-if="activeTab === 'ai'" class="v2-panel p-5 sm:p-6 space-y-5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] flex items-center justify-center shrink-0">
+                <Cpu :size="19" />
+              </div>
+              <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h3 class="text-sm font-bold text-[var(--v2-ink)]">{{ $t('settings.mcp.title') }}</h3>
+                  <span class="v2-pill font-mono text-[10px]">SSE Protocol</span>
+                </div>
+                <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ $t('settings.mcp.desc') }}</p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              @click="generateMCPToken"
+              :disabled="mcpGeneratingToken"
+              class="v2-btn v2-btn-sm shrink-0"
+            >
+              <RefreshCw v-if="mcpGeneratingToken" :size="13" class="animate-spin" />
+              <Sparkles v-else :size="13" />
+              <span>{{ mcpConfigured ? $t('settings.mcp.regenToken') : $t('settings.mcp.generateToken') }}</span>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between text-xs">
+                <label class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('settings.mcp.endpointLabel') }}</label>
+                <span class="text-[10px] text-emerald-400 font-semibold">GET (SSE)</span>
+              </div>
+              <div class="flex gap-2">
+                <input type="text" readonly :value="mcpEndpointUrl" class="v2-input font-mono text-xs flex-1" />
+                <button type="button" @click="copyText(mcpEndpointUrl)" class="v2-btn px-3 shrink-0" :title="$t('settings.mcp.copyTooltip')">
+                  <Copy :size="13" />
+                </button>
+              </div>
+            </div>
+
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between text-xs">
+                <label class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('settings.mcp.tokenLabel') }}</label>
+                <span v-if="mcpConfigured" class="text-[10px] text-emerald-400 font-semibold">Bearer Auth</span>
+                <span v-else class="text-[10px] text-amber-400 font-semibold">{{ $t('settings.mcp.notConfigured') }}</span>
+              </div>
+              <div class="flex gap-2">
+                <input
+                  :type="showMcpToken ? 'text' : 'password'"
+                  readonly
+                  :value="generatedMcpToken"
+                  :placeholder="$t(mcpConfigured ? 'settings.mcp.tokenHidden' : 'settings.mcp.tokenPlaceholder')"
+                  class="v2-input font-mono text-xs flex-1"
+                />
+                <button type="button" @click="showMcpToken = !showMcpToken" class="v2-btn px-3 shrink-0">
+                  <EyeOff v-if="showMcpToken" :size="13" />
+                  <Eye v-else :size="13" />
+                </button>
+                <button type="button" @click="copyText(generatedMcpToken)" :disabled="!generatedMcpToken" class="v2-btn px-3 shrink-0" :title="$t('settings.mcp.copyTooltip')">
+                  <Copy :size="13" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="v2-panel-muted p-4 space-y-2.5">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="text-xs font-semibold text-[var(--v2-ink)] flex items-center gap-1.5">
+                <FileText :size="14" />
+                <span>{{ $t('settings.mcp.clientConfigTitle') }}</span>
+              </span>
+              <div class="flex items-center gap-2">
+                <button type="button" @click="copyClaudeConfig" :disabled="!generatedMcpToken" class="v2-btn v2-btn-primary v2-btn-sm">
+                  <Copy :size="12" />
+                  <span>{{ $t('settings.mcp.copyClaudeConfig') }}</span>
+                </button>
+                <button type="button" @click="copyCursorConfig" :disabled="!generatedMcpToken" class="v2-btn v2-btn-sm">
+                  <Copy :size="12" />
+                  <span>{{ $t('settings.mcp.copyCursorConfig') }}</span>
+                </button>
+              </div>
+            </div>
+            <pre class="text-[11px] font-mono bg-[#09090b] text-zinc-200 p-3 rounded-lg overflow-x-auto select-all border border-[var(--v2-border)]">{{ mcpClaudeConfigJson }}</pre>
+            <p class="text-[11px] text-[var(--v2-ink-subtle)]">{{ $t('settings.mcp.clientConfigHint') }}</p>
+          </div>
+        </div>
+
+        <!-- 自定义标题正则与 RSS 探针 -->
+        <div v-if="activeTab === 'customRegex'" class="space-y-5">
+          <div class="v2-panel p-5 sm:p-6 space-y-5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h3 class="text-sm font-bold text-[var(--v2-ink)]">{{ $t('settings.customRegexTab.title') }}</h3>
+                  <span class="v2-pill font-mono text-[10px]">{{ $t('settings.customRegexTab.compiledCount', { count: customRegexCompiled.length }) }}</span>
+                </div>
+                <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ $t('settings.customRegexTab.desc') }}</p>
+              </div>
+              <button
+                type="button"
+                class="v2-btn v2-btn-primary v2-btn-sm shrink-0"
+                @click="saveCustomRegex"
+                :disabled="customRegexLoading || savingSettings"
+              >
+                <RefreshCw v-if="customRegexLoading" :size="13" class="animate-spin" />
+                <Check v-else :size="13" />
+                <span>{{ customRegexSaved ? $t('settings.customRegexTab.savedSuccess') : $t('settings.customRegexTab.saveAndReload') }}</span>
+              </button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              <div v-for="index in 10" :key="index - 1" class="v2-panel-muted p-3.5 space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <label class="text-xs font-semibold text-[var(--v2-ink)] flex items-center gap-1.5">
+                    <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--v2-surface)] border border-[var(--v2-border)]">#{{ index - 1 }}</span>
+                    <span>{{ $t('settings.customRegexTab.slotLabel', { index: index - 1 }) }}</span>
+                  </label>
+                  <span v-if="customRegexList[index - 1]?.trim()" class="text-[10px] font-semibold text-emerald-400">已配置</span>
+                </div>
+                <input
+                  type="text"
+                  v-model="customRegexList[index - 1]"
+                  :placeholder="$t('settings.customRegexTab.slotPlaceholder')"
+                  class="v2-input font-mono text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- 正则实时沙盒测试 -->
+          <div class="v2-panel p-5 sm:p-6 space-y-4">
+            <div>
+              <h4 class="text-sm font-bold text-[var(--v2-ink)] flex items-center gap-2">
+                <Play :size="15" class="text-[var(--v2-accent)]" />
+                <span>{{ $t('settings.customRegexTab.testTitle') }}</span>
+              </h4>
+              <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ $t('settings.customRegexTab.testDesc') }}</p>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-2.5">
+              <input
+                type="text"
+                v-model="regexTestTitle"
+                :placeholder="$t('settings.customRegexTab.testInputPlaceholder')"
+                class="v2-input font-mono text-xs flex-1"
+                @keydown.enter="runRegexTest"
+              />
+              <button
+                type="button"
+                class="v2-btn v2-btn-primary shrink-0"
+                @click="runRegexTest"
+                :disabled="regexTesting || !regexTestTitle.trim()"
+              >
+                <RefreshCw v-if="regexTesting" :size="14" class="animate-spin" />
+                <Play v-else :size="14" />
+                <span>{{ regexTesting ? $t('settings.customRegexTab.testing') : $t('settings.customRegexTab.testBtn') }}</span>
+              </button>
+            </div>
+
+            <div v-if="regexTestResult" class="v2-panel-muted p-4 space-y-3">
+              <div class="flex items-center justify-between border-b border-[var(--v2-border)] pb-2 text-xs">
+                <span class="font-semibold text-[var(--v2-ink-muted)]">{{ $t('settings.customRegexTab.parseResult') }}</span>
+                <span class="v2-pill text-[10px]">解析完成</span>
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                <div class="p-3 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)] col-span-2">
+                  <div class="text-[11px] text-[var(--v2-ink-subtle)]">{{ $t('settings.customRegexTab.animeTitle') }}</div>
+                  <div class="font-bold font-mono truncate mt-0.5" :title="regexTestResult.title">{{ regexTestResult.title || '-' }}</div>
+                </div>
+                <div class="p-3 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)]">
+                  <div class="text-[11px] text-[var(--v2-ink-subtle)]">{{ $t('settings.customRegexTab.subgroup') }}</div>
+                  <div class="font-bold font-mono truncate mt-0.5">{{ regexTestResult.subgroup || '未识别' }}</div>
+                </div>
+                <div class="p-3 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)]">
+                  <div class="text-[11px] text-[var(--v2-ink-subtle)]">{{ $t('settings.customRegexTab.resolution') }}</div>
+                  <div class="font-bold font-mono text-[var(--v2-accent)] mt-0.5">{{ regexTestResult.resolution || '未知' }}</div>
+                </div>
+                <div class="p-3 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)]">
+                  <div class="text-[11px] text-[var(--v2-ink-subtle)]">{{ $t('settings.customRegexTab.season') }}</div>
+                  <div class="font-bold font-mono text-emerald-400 mt-0.5">S{{ regexTestResult.season }}</div>
+                </div>
+                <div class="p-3 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)]">
+                  <div class="text-[11px] text-[var(--v2-ink-subtle)]">{{ $t('settings.customRegexTab.episode') }}</div>
+                  <div class="font-bold font-mono text-[var(--v2-accent)] mt-0.5">E{{ regexTestResult.episode }}</div>
+                </div>
+                <div class="p-3 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)]">
+                  <div class="text-[11px] text-[var(--v2-ink-subtle)]">{{ $t('settings.customRegexTab.isBatch') }}</div>
+                  <div class="font-semibold mt-0.5" :class="regexTestResult.is_batch ? 'text-amber-400' : 'text-[var(--v2-ink-muted)]'">
+                    {{ regexTestResult.is_batch ? '合集 / Batch' : '单集' }}
+                  </div>
+                </div>
+                <div class="p-3 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)]">
+                  <div class="text-[11px] text-[var(--v2-ink-subtle)]">{{ $t('settings.customRegexTab.isSpecial') }}</div>
+                  <div class="font-semibold mt-0.5" :class="regexTestResult.is_special ? 'text-[var(--v2-accent)]' : 'text-[var(--v2-ink-muted)]'">
+                    {{ regexTestResult.is_special ? 'SP / OVA' : '常规剧集' }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- RSS 实时源深度探针 -->
+          <div class="v2-panel p-5 sm:p-6 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-bold text-[var(--v2-ink)]">RSS 实时源解析与正则特征探针</h3>
+                <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">实时拉取 Mikan、Nyaa 或字幕组订阅源，预览条目与正则提取结果</p>
+              </div>
+              <button type="button" class="v2-btn v2-btn-sm shrink-0" @click="fillMikanRSS">
+                自动填入我的 Mikan RSS
+              </button>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-2.5">
+              <input
+                type="text"
+                v-model="rssInspectUrl"
+                placeholder="输入或粘贴 RSS URL (如 https://mikanani.me/RSS/Bangumi?bangumiId=...)"
+                class="v2-input font-mono text-xs flex-1"
+                @keydown.enter="runRSSInspect"
+              />
+              <button
+                type="button"
+                class="v2-btn v2-btn-primary shrink-0"
+                @click="runRSSInspect"
+                :disabled="rssInspectLoading || !rssInspectUrl.trim()"
+              >
+                <RefreshCw v-if="rssInspectLoading" :size="14" class="animate-spin" />
+                <Play v-else :size="14" />
+                <span>{{ rssInspectLoading ? '正在探查中...' : '开始探查' }}</span>
+              </button>
+            </div>
+
+            <div v-if="rssInspectError" class="p-3 rounded-lg bg-red-500/10 border border-red-500/25 text-red-400 text-xs flex items-center gap-2">
+              <AlertCircle :size="15" />
+              <span>{{ rssInspectError }}</span>
+            </div>
+
+            <div v-if="rssInspectResult" class="space-y-3 pt-1">
+              <div class="v2-panel-muted p-3.5 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-xs font-bold text-[var(--v2-ink)] truncate">{{ rssInspectResult.feed?.title || 'RSS 订阅源' }}</div>
+                  <div class="text-[10px] font-mono text-[var(--v2-ink-subtle)] truncate">{{ rssInspectResult.feed?.url }}</div>
+                </div>
+                <span class="v2-pill font-mono text-[10px] shrink-0">共 {{ rssInspectResult.total }} 条</span>
+              </div>
+
+              <div class="space-y-2.5 max-h-[440px] overflow-y-auto pr-1">
+                <div v-for="(item, idx) in rssInspectResult.items" :key="idx" class="v2-panel-muted p-3.5 space-y-2 text-xs">
+                  <div class="font-semibold font-mono text-[var(--v2-ink)] break-all">{{ item.title }}</div>
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span v-if="item.parsed_title" class="badge badge-primary badge-xs">{{ item.parsed_title }}</span>
+                    <span v-if="item.episode > 0" class="v2-pill font-mono text-[10px]">E{{ item.episode }}</span>
+                    <span v-if="item.season > 0" class="v2-pill font-mono text-[10px]">S{{ item.season }}</span>
+                    <span v-if="item.subgroup" class="v2-pill font-mono text-[10px]">{{ item.subgroup }}</span>
+                    <span v-if="item.resolution" class="v2-pill font-mono text-[10px]">{{ item.resolution }}</span>
+                    <span v-if="item.is_batch" class="badge badge-warning badge-xs">合集</span>
+                    <span v-if="item.is_special" class="badge badge-neutral badge-xs">SP/OVA</span>
+                  </div>
+                  <div class="flex items-center justify-between text-[11px] font-mono text-[var(--v2-ink-subtle)] pt-1 border-t border-[var(--v2-border)]">
+                    <span>发布时间: {{ item.pub_date }}</span>
+                    <span>大小: {{ (item.size / 1e6).toFixed(1) }} MB</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 通知投递监控面板与未启用提示 -->
+        <div v-if="activeTab === 'notify' && isPluginActive('extended-notifiers')" class="v2-panel p-5 sm:p-6 space-y-5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] flex items-center justify-center shrink-0">
+                <Activity :size="19" />
+              </div>
+              <div>
+                <h3 class="text-sm font-bold text-[var(--v2-ink)] flex items-center gap-2 flex-wrap">
+                  <span>通知投递履历与送达监控</span>
+                  <span class="v2-pill font-mono text-[10px]">{{ notifyLogsTotal }} 条记录</span>
+                </h3>
+                <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">内建扩展通知器统一纳管 · 跟踪推送流水、失败重试与死信队列</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" class="v2-btn v2-btn-sm" @click="fetchNotifyLogs(); fetchNotifyStats()" :disabled="notifyLogsLoading">
+                <RefreshCw :size="13" :class="{ 'animate-spin': notifyLogsLoading }" />
+                <span>刷新流水</span>
+              </button>
+              <button type="button" class="v2-btn v2-btn-sm text-red-400" @click="clearNotifyLogs" :disabled="clearingLogs || notifyLogsTotal === 0">
+                <Trash2 :size="13" />
+                <span>清空记录</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div class="v2-panel-muted p-3.5">
+              <span class="text-[11px] font-semibold text-[var(--v2-ink-subtle)]">累计总投递</span>
+              <div class="text-xl font-bold font-mono mt-1 tabular-nums">{{ notifyStats.total }}</div>
+            </div>
+            <div class="v2-panel-muted p-3.5 border-emerald-500/25">
+              <span class="text-[11px] font-semibold text-emerald-400">送达成功率</span>
+              <div class="text-xl font-bold font-mono text-emerald-400 mt-1 tabular-nums">
+                {{ notifyStats.total > 0 ? ((notifyStats.success / notifyStats.total) * 100).toFixed(1) : '100' }}%
+              </div>
+            </div>
+            <div class="v2-panel-muted p-3.5 border-red-500/25">
+              <span class="text-[11px] font-semibold text-red-400">失败次数</span>
+              <div class="text-xl font-bold font-mono text-red-400 mt-1 tabular-nums">{{ notifyStats.failed }}</div>
+            </div>
+            <div class="v2-panel-muted p-3.5 border-amber-500/25">
+              <span class="text-[11px] font-semibold text-amber-400">死信隔离 (DLQ)</span>
+              <div class="text-xl font-bold font-mono text-amber-400 mt-1 tabular-nums">{{ notifyStats.dlq }}</div>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs font-semibold text-[var(--v2-ink-muted)] flex items-center gap-1">
+                <Filter :size="13" /> 筛选:
+              </span>
+              <select v-model="notifyFilterStatus" @change="notifyLogsPage = 1; fetchNotifyLogs()" class="v2-input h-8 w-36 text-xs cursor-pointer">
+                <option value="all">全部状态</option>
+                <option value="success">仅成功 (Success)</option>
+                <option value="failed">仅失败 (Failed)</option>
+                <option value="dlq">仅死信 (DLQ)</option>
+              </select>
+              <select v-model="notifyFilterChannel" @change="notifyLogsPage = 1; fetchNotifyLogs()" class="v2-input h-8 w-36 text-xs cursor-pointer">
+                <option value="all">全部渠道</option>
+                <option value="Telegram">Telegram</option>
+                <option value="WeChat">企业微信</option>
+                <option value="DingTalk">钉钉</option>
+                <option value="Feishu">飞书</option>
+                <option value="Bark">Bark</option>
+                <option value="ServerChan">Server酱</option>
+                <option value="Discord">Discord</option>
+                <option value="Slack">Slack</option>
+                <option value="Gotify">Gotify</option>
+                <option value="Ntfy">Ntfy</option>
+                <option value="Email">邮件 (Email)</option>
+                <option value="Pushover">Pushover</option>
+                <option value="Matrix">Matrix</option>
+              </select>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <button type="button" class="v2-btn v2-btn-sm" @click="if (notifyLogsPage > 1) { notifyLogsPage--; fetchNotifyLogs() }" :disabled="notifyLogsPage <= 1 || notifyLogsLoading">上一页</button>
+              <span class="font-mono text-[var(--v2-ink-muted)]">{{ notifyLogsPage }} / {{ Math.ceil(notifyLogsTotal / notifyLogsPageSize) || 1 }}</span>
+              <button type="button" class="v2-btn v2-btn-sm" @click="if (notifyLogsPage * notifyLogsPageSize < notifyLogsTotal) { notifyLogsPage++; fetchNotifyLogs() }" :disabled="notifyLogsPage * notifyLogsPageSize >= notifyLogsTotal || notifyLogsLoading">下一页</button>
+            </div>
+          </div>
+
+          <div v-if="notifyLogsLoading" class="py-10 flex justify-center">
+            <span class="loading loading-spinner loading-sm text-[var(--v2-accent)]"></span>
+          </div>
+          <div v-else-if="notifyLogs.length === 0" class="text-center py-8 border border-dashed border-[var(--v2-border-strong)] rounded-xl text-xs text-[var(--v2-ink-muted)] space-y-1">
+            <p class="font-semibold">暂无投递流水记录</p>
+            <p class="text-[11px] text-[var(--v2-ink-subtle)]">当触发下载、入库或点击测试通知时将在此记录流水</p>
+          </div>
+          <div v-else class="space-y-2.5">
+            <div v-for="log in notifyLogs" :key="log.ID" class="v2-panel-muted p-3.5 space-y-2 text-xs">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="badge badge-xs" :class="log.status === 'success' ? 'badge-success' : log.status === 'failed' ? 'badge-error' : 'badge-warning'">
+                    {{ log.status === 'success' ? '送达成功' : log.status === 'failed' ? '投递失败' : '死信丢弃' }}
+                  </span>
+                  <span class="v2-pill font-mono text-[10px]">{{ log.channel }}</span>
+                  <span class="font-semibold text-[var(--v2-ink)]">{{ log.title }}</span>
+                </div>
+                <span class="flex items-center gap-1 text-[11px] font-mono text-[var(--v2-ink-subtle)]">
+                  <Clock :size="12" />{{ new Date(log.CreatedAt).toLocaleString() }}
+                </span>
+              </div>
+              <div class="font-mono text-[11px] text-[var(--v2-ink-muted)] break-all bg-[var(--v2-surface)] p-2 rounded-lg border border-[var(--v2-border)]">{{ log.content }}</div>
+              <div v-if="log.error_msg" class="text-red-400 font-mono text-[11px] bg-red-500/10 p-2 rounded-lg border border-red-500/20 flex items-start gap-1.5">
+                <AlertCircle :size="13" class="shrink-0 mt-0.5" /><span>{{ log.error_msg }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="activeTab === 'notify' && !isPluginActive('extended-notifiers')" class="v2-panel p-8 text-center space-y-4">
+          <div class="w-12 h-12 rounded-2xl bg-[var(--v2-surface-2)] text-[var(--v2-ink-subtle)] flex items-center justify-center mx-auto">
+            <Bell :size="24" />
+          </div>
+          <div class="space-y-1 max-w-md mx-auto">
+            <h4 class="text-sm font-bold text-[var(--v2-ink)]">消息通知推送插件已停用</h4>
+            <p class="text-xs text-[var(--v2-ink-muted)] leading-relaxed">消息通知推送功能由内建扩展通知插件提供。启用后可配置 16 种推送渠道并查看投递监控流水。</p>
+          </div>
+          <div class="flex items-center justify-center gap-2">
+            <button type="button" @click="enableNotifyPlugin" class="v2-btn v2-btn-primary v2-btn-sm">
+              <Sparkles :size="13" />立即启用插件
+            </button>
+            <button type="button" @click="activeTab = 'plugins'" class="v2-btn v2-btn-sm">前往插件管理</button>
+          </div>
+        </div>
+
+        <!-- 插件生态面板 -->
+        <div v-if="activeTab === 'plugins'" class="v2-panel p-5 sm:p-6 space-y-5">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 class="text-sm font-bold text-[var(--v2-ink)]">{{ $t('settings.plugins.title') }}</h3>
               <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ $t('settings.plugins.desc') }}</p>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <select v-model="pluginSourceFilter" class="v2-input h-8 w-32 text-xs cursor-pointer">
                 <option value="all">{{ $t('settings.plugins.allSources') }}</option>
                 <option value="official">{{ $t('settings.plugins.official') }}</option>
                 <option value="community">{{ $t('settings.plugins.community') }}</option>
               </select>
+              <button type="button" class="v2-btn v2-btn-sm" @click="exportPluginsJSON" :disabled="!customPlugins.length || pluginLoading || !!pluginListError">
+                <Download :size="13" />
+                <span>{{ $t('settings.plugins.exportConfig') }}</span>
+              </button>
               <button type="button" class="v2-btn v2-btn-sm" @click="reloadPlugins" :disabled="pluginLoading || pendingPlugins.size > 0">
                 <RefreshCw :size="13" :class="{ 'animate-spin': pluginLoading }" />
                 <span>{{ $t('settings.plugins.reload') }}</span>
               </button>
+              <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" @click="openAddPluginModal">
+                <Plus :size="13" />
+                <span>{{ $t('settings.plugins.add') }}</span>
+              </button>
             </div>
           </div>
 
-          <div v-if="pluginListError" role="alert" class="text-xs text-red-400">{{ $t(pluginListError) }}</div>
+          <div v-if="pluginListError" role="alert" class="text-xs text-red-400 flex items-center gap-2">
+            <span>{{ $t(pluginListError) }}</span>
+            <button type="button" class="v2-btn v2-btn-sm" :disabled="pluginLoading" @click="fetchPlugins()">{{ $t('common.refresh') }}</button>
+          </div>
           <div v-else-if="!visiblePlugins.length" class="py-8 text-center text-xs text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.noPluginsFromSource') }}</div>
           <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div
               v-for="plugin in visiblePlugins"
               :key="plugin.id"
-              class="v2-panel-muted p-4 flex flex-col justify-between gap-3"
+              class="v2-panel-muted p-4 flex flex-col justify-between gap-3 min-w-0 [overflow-wrap:anywhere]"
               :class="{ 'border-[var(--v2-accent)]/35': plugin.enabled }"
             >
               <div class="space-y-2">
@@ -1018,9 +2320,12 @@ onUnmounted(() => {
                       <h4 class="font-bold text-sm text-[var(--v2-ink)]">{{ plugin.name }}</h4>
                       <span class="v2-pill font-mono text-[10px]">v{{ plugin.version || '1.0' }}</span>
                     </div>
-                    <div class="flex items-center gap-1.5 mt-1 text-[10px]">
+                    <div class="flex items-center gap-1.5 mt-1 text-[10px] flex-wrap">
                       <span class="v2-pill h-5">{{ plugin.origin === 'official' ? $t('settings.plugins.official') : $t('settings.plugins.community') }}</span>
-                      <span v-if="pluginRunning(plugin)" class="text-emerald-400 font-semibold">{{ $t('settings.plugins.statusRunning') }}</span>
+                      <span v-if="plugin.status === 'suspended'" class="badge badge-warning badge-xs">{{ $t('settings.plugins.statusSuspended') }}</span>
+                      <span v-else-if="plugin.status === 'loading'" class="badge badge-warning badge-xs">{{ $t('settings.plugins.statusLoading') }}</span>
+                      <span v-else-if="plugin.status === 'disposing'" class="badge badge-warning badge-xs">{{ $t('settings.plugins.statusDisposing') }}</span>
+                      <span v-else-if="pluginRunning(plugin)" class="text-emerald-400 font-semibold">{{ $t('settings.plugins.statusRunning') }}</span>
                       <span v-else class="text-[var(--v2-ink-subtle)]">{{ $t('settings.plugins.statusStopped') }}</span>
                     </div>
                   </div>
@@ -1045,19 +2350,126 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <p class="text-xs text-[var(--v2-ink-muted)] leading-relaxed">{{ plugin.description || $t('settings.plugins.noDesc') }}</p>
-                <div v-if="plugin.status === 'error' || plugin.error" class="p-2 rounded-lg bg-red-500/10 border border-red-500/25 text-red-400 text-[11px] font-mono">
+
+                <p v-if="plugin.status === 'suspended' && plugin.missing_dependencies?.length" class="rounded-lg bg-amber-500/10 border border-amber-500/25 p-2.5 text-xs text-amber-400">
+                  {{ $t('settings.plugins.missingDependencies', { names: plugin.missing_dependencies.join(', ') }) }}
+                </p>
+                <div v-else-if="plugin.status === 'error' || plugin.error" class="p-2 rounded-lg bg-red-500/10 border border-red-500/25 text-red-400 text-[11px] font-mono">
                   <AlertCircle :size="12" class="inline mr-1" />{{ plugin.error || $t('settings.plugins.statusError') }}
                 </div>
               </div>
-              <fieldset v-if="pluginRunning(plugin) && plugin.panel" class="min-w-0 pt-2 border-t border-[var(--v2-border)]" :disabled="pluginLoading || pendingPlugins.has(plugin.id)">
-                <PluginPanel :key="JSON.stringify([plugin.url, plugin.panel])" :plugin="plugin" />
+
+              <fieldset v-if="pluginRunning(plugin)" class="min-w-0 pt-2 border-t border-[var(--v2-border)]" :disabled="pluginLoading || pluginSaving || pendingPlugins.has(plugin.id)">
+                <PluginPanel v-if="plugin.panel" :key="JSON.stringify([plugin.url, plugin.panel])" :plugin="plugin" />
+                <div v-else-if="plugin.id === 'data-migrate'" class="flex items-center justify-between gap-2">
+                  <span class="text-[11px] text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.dataMigrateDesc') }}</span>
+                  <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" @click="openMigrateModal">
+                    <Upload :size="12" />
+                    <span>{{ $t('settings.plugins.migrateBtn') }}</span>
+                  </button>
+                </div>
+                <div v-else-if="plugin.id === 'extended-notifiers'" class="space-y-2">
+                  <div class="flex items-center justify-between gap-2 flex-wrap text-[11px]">
+                    <span class="text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.extendedNotifiersDesc') }}</span>
+                    <span class="font-mono text-[10px] text-[var(--v2-ink-subtle)]">{{ $t('settings.plugins.totalNotified') }}: {{ notifyStats.total }}</span>
+                  </div>
+                  <div class="flex items-center justify-end gap-2">
+                    <button type="button" class="v2-btn v2-btn-sm" @click="activeTab = 'notify'">
+                      <Bell :size="12" />
+                      <span>{{ $t('settings.plugins.notifyChannelSettings') }}</span>
+                    </button>
+                  </div>
+                </div>
+                <div v-else-if="plugin.id === 'yuc_schedule'" class="flex items-center justify-between gap-2">
+                  <span class="text-[11px] text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.yucScheduleDesc') }}</span>
+                  <router-link to="/schedule" class="v2-btn v2-btn-sm">
+                    <Calendar :size="12" />
+                    <span>{{ $t('settings.plugins.viewSchedule') }}</span>
+                  </router-link>
+                </div>
+                <div v-else class="flex items-center justify-between gap-2 text-[11px] text-[var(--v2-ink-subtle)]">
+                  <span>{{ $t('settings.plugins.serviceRunning') }}</span>
+                  <span class="text-emerald-400 font-semibold">{{ $t('settings.plugins.statusRunning') }}</span>
+                </div>
               </fieldset>
             </div>
           </div>
         </div>
 
+        <!-- 数据归档、备份列表与迁移 -->
+        <div v-if="activeTab === 'backup'" class="space-y-5">
+          <div v-if="isPluginActive('data-migrate')" class="v2-panel p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 class="text-sm font-bold text-[var(--v2-ink)] flex items-center gap-2">
+                <Sparkles class="text-[var(--v2-accent)]" :size="16" />
+                <span>{{ $t('settings.migrate.title') }}</span>
+              </h3>
+              <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ $t('settings.migrate.desc') }}</p>
+            </div>
+            <button type="button" @click="openMigrateModal" class="v2-btn v2-btn-primary v2-btn-sm shrink-0">
+              <Upload :size="13" />
+              <span>{{ $t('settings.plugins.migrateBtn') }}</span>
+            </button>
+          </div>
+
+          <div class="v2-panel p-5 sm:p-6 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-bold text-[var(--v2-ink)]">{{ $t('settings.backup.title') }}</h3>
+                <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ $t('settings.backup.desc') }}</p>
+              </div>
+              <div class="flex items-center gap-3 flex-wrap">
+                <label class="flex items-center gap-2 cursor-pointer text-xs">
+                  <input type="checkbox" v-model="showBackupEpisodes" class="checkbox" />
+                  <span>{{ $t('settings.backup.includeEpisodes') }}</span>
+                </label>
+                <button type="button" @click="createBackup" :disabled="creatingBackup" class="v2-btn v2-btn-primary v2-btn-sm">
+                  <Database :size="13" />
+                  <span>{{ creatingBackup ? $t('settings.backup.creating') : $t('settings.backup.createNow') }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto border border-[var(--v2-border)] rounded-xl">
+              <table class="w-full text-left text-xs">
+                <thead>
+                  <tr class="bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] border-b border-[var(--v2-border)]">
+                    <th class="px-4 py-2.5 font-semibold">{{ $t('settings.backup.tableFile') }}</th>
+                    <th class="px-4 py-2.5 font-semibold">{{ $t('settings.backup.tableSize') }}</th>
+                    <th class="px-4 py-2.5 font-semibold">{{ $t('settings.backup.tableTime') }}</th>
+                    <th class="px-4 py-2.5 font-semibold text-right">{{ $t('settings.backup.tableAction') }}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-[var(--v2-border)]">
+                  <tr v-if="backupList.length === 0">
+                    <td colspan="4" class="text-center py-8 text-[var(--v2-ink-subtle)]">{{ $t('settings.backup.empty') }}</td>
+                  </tr>
+                  <tr v-for="b in backupList" :key="b.name" class="hover:bg-[var(--v2-surface-2)]/60">
+                    <td class="px-4 py-2.5 font-mono font-semibold">{{ b.name }}</td>
+                    <td class="px-4 py-2.5 font-mono tabular-nums">{{ formatBackupSize(b.size) }}</td>
+                    <td class="px-4 py-2.5 text-[var(--v2-ink-muted)]">{{ formatBackupTime(b.mod_time) }}</td>
+                    <td class="px-4 py-2.5 text-right">
+                      <div class="inline-flex items-center gap-1">
+                        <button type="button" @click="downloadBackup(b.name)" class="v2-btn v2-btn-ghost v2-btn-sm px-2" :title="$t('settings.backup.download')">
+                          <Download :size="13" />
+                        </button>
+                        <button type="button" @click="restoreBackup(b.name)" :disabled="restoringBackup" class="v2-btn v2-btn-ghost v2-btn-sm px-2 text-amber-400" :title="$t('settings.backup.restore')">
+                          <RotateCcw :size="13" />
+                        </button>
+                        <button type="button" @click="deleteBackup(b.name)" :disabled="deletingBackup === b.name" class="v2-btn v2-btn-ghost v2-btn-sm px-2 text-red-400" :title="$t('settings.backup.delete')">
+                          <Trash2 :size="13" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <!-- 实时运行日志控制台 -->
-        <div v-else-if="activeTab === 'logs'" class="v2-panel p-5 sm:p-6 space-y-4">
+        <div v-if="activeTab === 'logs'" class="v2-panel p-5 sm:p-6 space-y-4">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 class="text-sm font-bold flex items-center gap-2 text-[var(--v2-ink)]">
@@ -1072,7 +2484,7 @@ onUnmounted(() => {
                 <input v-model="logFilter" type="text" :placeholder="$t('settings.logs.searchPlaceholder')" class="v2-input pl-7 h-8 w-44 text-xs font-mono" />
               </div>
               <label class="flex items-center gap-1.5 text-xs cursor-pointer border border-[var(--v2-border)] px-2.5 h-8 rounded-lg">
-                <input type="checkbox" v-model="autoRefreshLogs" class="checkbox checkbox-primary checkbox-xs" />
+                <input type="checkbox" v-model="autoRefreshLogs" class="checkbox" />
                 <span>{{ $t('settings.logs.autoRefresh') }}</span>
               </label>
               <button type="button" class="v2-btn v2-btn-sm" @click="copyAllLogs"><Copy :size="12" /><span>复制</span></button>
@@ -1115,9 +2527,8 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 账户与安全（彻底修复默认头像破图 & 浏览器自动填充 "admin" 串位问题） -->
-        <div v-else-if="activeTab === 'account'" class="space-y-5">
-          <!-- 管理员头像卡片 -->
+        <!-- 账户与安全 -->
+        <div v-if="activeTab === 'account'" class="space-y-5">
           <div class="v2-panel p-5 sm:p-6 space-y-5">
             <div>
               <h3 class="text-sm font-bold text-[var(--v2-ink)]">{{ $t('settings.account.avatarTitle') }}</h3>
@@ -1174,7 +2585,6 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 修改密码（独立 form autocomplete="off" + 隐藏 username 隔离浏览器自动填充） -->
           <div class="v2-panel p-5 sm:p-6 space-y-4">
             <div>
               <h3 class="text-sm font-bold text-[var(--v2-ink)]">{{ $t('settings.account.title') }}</h3>
@@ -1207,7 +2617,6 @@ onUnmounted(() => {
             </form>
           </div>
 
-          <!-- 系统版本与在线更新 -->
           <div class="v2-panel p-5 sm:p-6 space-y-4">
             <div class="flex items-center justify-between gap-3">
               <div>
@@ -1263,23 +2672,190 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+      </div>
+    </div>
 
-        <!-- 外观与多套主题工坊 -->
-        <ThemeAppearancePanel v-else-if="activeTab === 'appearance'" />
-
-        <!-- v2 框架待迁移分组占位卡片（ai, customRegex, notify, backup） -->
-        <div v-else class="v2-panel p-8 sm:p-10 text-center space-y-3">
-          <div class="w-12 h-12 rounded-2xl bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] flex items-center justify-center mx-auto">
-            <Sparkles :size="22" />
+    <!-- 新增 / 导入插件弹窗 -->
+    <div v-if="showPluginModal" class="modal modal-open">
+      <fieldset :disabled="pluginSaving" class="modal-box max-w-2xl space-y-5">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h3 class="text-base font-bold flex items-center gap-2 text-[var(--v2-ink)]">
+              <Sparkles class="text-[var(--v2-accent)]" :size="18" />
+              <span>{{ $t('settings.plugins.modalTitle') }}</span>
+            </h3>
+            <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ $t('settings.plugins.modalDesc') }}</p>
           </div>
-          <h3 class="text-base font-bold text-[var(--v2-ink)]">
-            {{ allFlatTabs.find(t => t.key === activeTab)?.label }} — {{ locale === 'zh' ? 'v2 框架待迁移模块' : 'v2 Pending Migration' }}
-          </h3>
-          <p class="text-xs text-[var(--v2-ink-muted)] max-w-md mx-auto leading-relaxed">
-            {{ locale === 'zh'
-              ? '当前为全新 v2「编辑部放映厅」整体骨架预览阶段。核心设置（存储路径、下载器、多源搜索站、Mikan、Bangumi、调度周期、日志、账户头像与密码）已完整接线；待您确认整体视觉方向后，将把本分组（AI/正则测试/多渠道通知流水/备份迁移）一并迁入。'
-              : 'This section is queued for migration once the v2 visual framework is approved.' }}
-          </p>
+          <button type="button" @click="showPluginModal = false" :aria-label="$t('settings.plugins.cancel')" class="v2-btn v2-btn-ghost v2-btn-sm px-2">
+            <X :size="16" />
+          </button>
+        </div>
+
+        <div class="app-segmented w-full grid grid-cols-2">
+          <button
+            type="button"
+            class="app-segmented-btn justify-center"
+            :data-active="pluginModalTab === 'webhook'"
+            @click="pluginModalTab = 'webhook'"
+          >
+            {{ $t('settings.plugins.tabWebhook') }}
+          </button>
+          <button
+            type="button"
+            class="app-segmented-btn justify-center"
+            :data-active="pluginModalTab === 'json'"
+            @click="pluginModalTab = 'json'"
+          >
+            {{ $t('settings.plugins.tabJson') }}
+          </button>
+        </div>
+
+        <div v-if="pluginModalTab === 'webhook'" class="space-y-3.5">
+          <div class="space-y-1">
+            <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.nameLabel') }}</label>
+            <input v-model="pluginForm.name" type="text" :placeholder="$t('settings.plugins.namePlaceholder')" class="v2-input text-xs" />
+          </div>
+          <div class="space-y-1">
+            <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.urlLabel') }}</label>
+            <input v-model="pluginForm.url" type="url" :placeholder="$t('settings.plugins.urlPlaceholder')" class="v2-input font-mono text-xs" />
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="space-y-1">
+              <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.secretLabel') }}</label>
+              <input v-model="pluginForm.secret" type="password" :placeholder="$t('settings.plugins.secretPlaceholder')" class="v2-input font-mono text-xs" />
+            </div>
+            <div class="space-y-1">
+              <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.descLabel') }}</label>
+              <input v-model="pluginForm.description" type="text" :placeholder="$t('settings.plugins.descPlaceholder')" class="v2-input text-xs" />
+            </div>
+          </div>
+          <div class="space-y-1.5">
+            <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.eventsLabel') }}</label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 v2-panel-muted p-3">
+              <label v-for="ev in availablePluginEvents" :key="ev.id" class="flex items-center gap-2 cursor-pointer text-xs">
+                <input type="checkbox" :value="ev.id" v-model="pluginForm.events" class="checkbox" />
+                <span>{{ $t('settings.plugins.events.' + ev.label) }} ({{ ev.id }})</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <label class="text-xs font-semibold text-[var(--v2-ink-muted)]">{{ $t('settings.plugins.jsonLabel') }}</label>
+            <label class="v2-btn v2-btn-sm cursor-pointer">
+              <Upload :size="12" />
+              <span>{{ $t('settings.plugins.selectFile') }}</span>
+              <input type="file" accept=".json,application/json" class="hidden" @change="handlePluginFileImport" />
+            </label>
+          </div>
+          <textarea
+            :disabled="pluginFileReading"
+            v-model="pluginJsonText"
+            rows="9"
+            class="textarea font-mono text-xs leading-relaxed"
+            :placeholder="$t('settings.plugins.jsonPlaceholder')"
+          ></textarea>
+        </div>
+
+        <p v-if="pluginJsonError" class="text-xs text-red-400 bg-red-500/10 border border-red-500/25 p-3 rounded-lg">{{ pluginJsonError }}</p>
+
+        <div class="modal-action">
+          <button type="button" @click="showPluginModal = false" class="v2-btn v2-btn-ghost">{{ $t('settings.plugins.cancel') }}</button>
+          <button type="button" @click="submitPluginForm" :disabled="pluginSaving || pluginFileReading" class="v2-btn v2-btn-primary">
+            <span v-if="pluginSaving" class="loading loading-spinner loading-xs"></span>
+            <span v-else>{{ $t('settings.plugins.confirmImport') }}</span>
+          </button>
+        </div>
+      </fieldset>
+    </div>
+
+    <!-- 数据导入与迁移弹窗 -->
+    <div v-if="showMigrateModal" class="modal modal-open">
+      <div class="modal-box max-w-xl space-y-5">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h3 class="text-base font-bold flex items-center gap-2 text-[var(--v2-ink)]">
+              <Database class="text-[var(--v2-accent)]" :size="18" />
+              <span>{{ $t('settings.migrate.title') }}</span>
+            </h3>
+            <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ $t('settings.migrate.desc') }}</p>
+          </div>
+          <button type="button" @click="showMigrateModal = false" class="v2-btn v2-btn-ghost v2-btn-sm px-2">
+            <X :size="16" />
+          </button>
+        </div>
+
+        <div class="app-segmented w-full grid grid-cols-2">
+          <button type="button" class="app-segmented-btn justify-center" :data-active="migrateMode === 'upload'" @click="migrateMode = 'upload'">
+            {{ $t('settings.migrate.tabUpload') }}
+          </button>
+          <button type="button" class="app-segmented-btn justify-center" :data-active="migrateMode === 'path'" @click="migrateMode = 'path'">
+            {{ $t('settings.migrate.tabPath') }}
+          </button>
+        </div>
+
+        <div v-if="migrateMode === 'upload'" class="border border-dashed border-[var(--v2-border-strong)] rounded-xl p-6 text-center bg-[var(--v2-surface-2)] cursor-pointer relative hover:border-[var(--v2-accent)]/60 transition-colors">
+          <input type="file" accept=".db,.sqlite,.sqlite3,.json,.zip" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" @change="onMigrateFileSelect" />
+          <div class="flex flex-col items-center gap-2 pointer-events-none">
+            <div class="w-11 h-11 rounded-xl bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] flex items-center justify-center">
+              <Upload :size="20" />
+            </div>
+            <p class="text-xs font-semibold">{{ migrateFile ? migrateFile.name : $t('settings.migrate.selectFile') }}</p>
+            <p class="text-[11px] text-[var(--v2-ink-subtle)]">{{ $t('settings.migrate.fileHint') }}</p>
+          </div>
+        </div>
+
+        <div v-else class="space-y-1.5">
+          <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ $t('settings.migrate.pathLabel') }}</label>
+          <input v-model="migratePath" type="text" :placeholder="$t('settings.migrate.pathPlaceholder')" class="v2-input font-mono text-xs" />
+        </div>
+
+        <div class="v2-panel-muted p-3 text-xs text-[var(--v2-ink-muted)] leading-relaxed">{{ $t('settings.migrate.notice') }}</div>
+
+        <div v-if="migrateResult" class="v2-panel border-emerald-500/30 bg-emerald-500/10 p-4 space-y-2.5">
+          <div class="flex items-center gap-2 text-emerald-400 font-bold text-xs">
+            <Check :size="15" />
+            <span>{{ $t('settings.migrate.resultTitle') }}</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-center font-mono">
+            <div class="p-2 rounded-lg bg-[var(--v2-surface)]">
+              <div class="text-base font-bold text-[var(--v2-accent)]">+{{ migrateResult.Subscriptions || 0 }}</div>
+              <div class="text-[10px] text-[var(--v2-ink-subtle)]">{{ $t('settings.migrate.subsCount') }}</div>
+            </div>
+            <div class="p-2 rounded-lg bg-[var(--v2-surface)]">
+              <div class="text-base font-bold text-emerald-400">+{{ migrateResult.Episodes || 0 }}</div>
+              <div class="text-[10px] text-[var(--v2-ink-subtle)]">{{ $t('settings.migrate.epsCount') }}</div>
+            </div>
+            <div class="p-2 rounded-lg bg-[var(--v2-surface)]">
+              <div class="text-base font-bold">+{{ migrateResult.Downloads || 0 }}</div>
+              <div class="text-[10px] text-[var(--v2-ink-subtle)]">{{ $t('settings.migrate.dlsCount') }}</div>
+            </div>
+          </div>
+          <p v-if="migrateResult.Skipped" class="text-xs text-[var(--v2-ink-muted)]">{{ migrateResult.Skipped }} {{ $t('settings.migrate.skippedCount') }}</p>
+          <div v-if="migrateResult.Errors && migrateResult.Errors.length" class="text-[11px] text-red-400">
+            <div class="font-semibold mb-1">{{ $t('settings.migrate.errorsTitle') }}:</div>
+            <ul class="list-disc list-inside space-y-0.5 font-mono">
+              <li v-for="err in migrateResult.Errors" :key="err">{{ err }}</li>
+            </ul>
+          </div>
+        </div>
+
+        <p v-if="migrateError" class="text-xs text-red-400 bg-red-500/10 border border-red-500/25 p-3 rounded-lg">{{ migrateError }}</p>
+
+        <div class="modal-action">
+          <button type="button" @click="showMigrateModal = false" class="v2-btn v2-btn-ghost">{{ migrateResult ? $t('settings.migrate.closeBtn') : '取消' }}</button>
+          <button
+            v-if="!migrateResult"
+            type="button"
+            @click="executeMigration"
+            :disabled="migrating || (migrateMode === 'upload' && !migrateFile)"
+            class="v2-btn v2-btn-primary"
+          >
+            <span v-if="migrating" class="loading loading-spinner loading-xs"></span>
+            <Upload v-else :size="13" />
+            <span>{{ migrating ? $t('settings.migrate.importing') : $t('settings.migrate.startBtn') }}</span>
+          </button>
         </div>
       </div>
     </div>

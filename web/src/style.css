@@ -702,7 +702,7 @@ body {
     background-color: var(--v2-surface);
     color: var(--v2-ink);
     border: 1px solid var(--v2-border-strong);
-    border-radius: 1rem;
+    border-radius: var(--v2-radius-panel);
     padding: 1.5rem;
     box-shadow: var(--v2-shadow);
     position: relative;

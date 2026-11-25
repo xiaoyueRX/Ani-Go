@@ -18,26 +18,31 @@ export function view(path, request, { route = {}, storage = new Map(), props = {
   const mounted = [], unmounted = []
   const notices = []
   const window = { showToast: (message, type) => notices.push({ message, type }), location: {} }
+  const themeStub = {
+    useTheme: () => ({
+      theme: vue.ref('anigo-dark'),
+      isDark: vue.computed(() => true),
+      setTheme() {},
+      syncTheme() {},
+      toggleTheme() {},
+      hydrateFromServerSettings() {},
+      getServerSettingsPayload: () => ({}),
+    }),
+  }
   const modules = {
     vue: { ...vue, onMounted: fn => mounted.push(fn), onUnmounted: fn => unmounted.push(fn) },
     'vue-router': { onBeforeRouteLeave() {}, useRouter: () => router, useRoute: () => ({ params: {}, query: {}, ...route }) },
     'vue-i18n': { useI18n: () => ({ t: translate, te: translationExists, locale: vue.ref('en') }) },
     '../utils/request': request,
+    './utils/request': request,
     '../utils/subscriptionListHistory': require('../src/utils/subscriptionListHistory.ts'),
     '../utils/setupDownloader': require('../src/utils/setupDownloader.ts'),
     '../utils/dialogSession': require('../src/utils/dialogSession.ts'),
     '../utils/loginRedirect': require('../src/utils/loginRedirect.ts'),
     './utils/loginRedirect': require('../src/utils/loginRedirect.ts'),
     '../composables/useVersion': { currentVersion: vue.ref(''), useVersion: () => ({}) },
-    '../composables/useTheme': {
-      useTheme: () => ({
-        theme: vue.ref('anigo-dark'),
-        isDark: vue.computed(() => true),
-        setTheme() {},
-        syncTheme() {},
-        toggleTheme() {},
-      }),
-    },
+    '../composables/useTheme': themeStub,
+    './composables/useTheme': themeStub,
     '../components/ui': {},
   }
   const exports = {}

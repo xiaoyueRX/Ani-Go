@@ -145,12 +145,12 @@ onMounted(loadConfig)
 </script>
 
 <template>
-  <section class="space-y-3 border-t border-base-content/10 pt-3 text-xs" :aria-busy="busy">
+  <section class="space-y-3 border-t border-[var(--v2-border)] pt-3 text-xs" :aria-busy="busy">
     <template v-if="plugin.panel.credential">
-      <p v-if="plugin.url" class="break-all text-base-content/80">
+      <p v-if="plugin.url" class="break-all text-[var(--v2-ink-muted)] font-mono">
         {{ t('settings.pluginPanel.credentialTarget', { url: plugin.url }) }}
       </p>
-      <p v-if="config" class="text-base-content/75">{{ copy('source.' + config.source) }}</p>
+      <p v-if="config" class="text-[var(--v2-ink-muted)]">{{ copy('source.' + config.source) }}</p>
       <button v-else type="button" class="btn btn-outline btn-xs" :disabled="busy" @click="loadConfig">
         {{ busy ? t('common.loading') : copy('retryConfig') }}
       </button>
@@ -173,7 +173,7 @@ onMounted(loadConfig)
     </template>
 
     <template v-if="available">
-      <div v-for="{ action, result } in actions" :key="action.id" class="space-y-2 border-t border-base-content/10 pt-2">
+      <div v-for="{ action, result } in actions" :key="action.id" class="space-y-2 border-t border-[var(--v2-border)] pt-2">
         <form class="space-y-2" @submit.prevent="execute(action, action.input ? 1 : result?.page ?? 1)">
           <label v-if="action.input" class="block">
             <span class="mb-1 block font-semibold">{{ label(action.input.label) }}</span>

@@ -4,10 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { listView } from '../utils/subscriptionListHistory'
 import { useI18n } from 'vue-i18n'
 import request from '../utils/request'
-import { 
-  ChevronLeft, RefreshCw, AlertTriangle, 
-  Image, Edit3, Pause, Play, 
-  History, Download, Check, 
+import {
+  ChevronLeft, RefreshCw, AlertTriangle,
+  Image, Edit3, Pause, Play,
+  History, Download, Check,
   MoreVertical, FileText, X,
   Trash2,
   Shield, FileCheck2
@@ -279,16 +279,16 @@ async function handleSaveEdit(updated: Record<string, any>) {
 }
 
 const statusCfg = computed<Record<string, { label: string; icon: any; cls: string }>>(() => ({
-  pending: { label: t('detail.logs.status.pending'), icon: History, cls: 'bg-base-200 text-base-content/40 border-base-300' },
-  submitting: { label: t('detail.logs.status.submitting'), icon: Download, cls: 'bg-primary/10 text-primary border-primary/20' },
-  retrying: { label: t('detail.logs.status.retrying'), icon: RefreshCw, cls: 'bg-warning/10 text-warning border-warning/20' },
-  downloaded: { label: t('detail.logs.status.downloaded'), icon: Check, cls: 'bg-primary/10 text-primary border-primary/20' },
-  renaming: { label: t('detail.logs.status.organizing'), icon: FileText, cls: 'bg-primary/10 text-primary border-primary/20' },
-  needs_review: { label: t('detail.logs.status.needsReview'), icon: AlertTriangle, cls: 'bg-warning/10 text-warning border-warning/20' },
-  downloading: { label: t('detail.logs.status.active'), icon: Download, cls: 'bg-primary/10 text-primary border-primary/20' },
-  completed: { label: t('detail.logs.status.finished'), icon: Check, cls: 'bg-success/10 text-success border-success/20' },
-  organized: { label: t('detail.logs.status.organized'), icon: Check, cls: 'bg-success/10 text-success border-success/20' },
-  failed: { label: t('detail.logs.status.failed'), icon: AlertTriangle, cls: 'bg-error/10 text-error border-error/20' },
+  pending: { label: t('detail.logs.status.pending'), icon: History, cls: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] border-[var(--v2-border)]' },
+  submitting: { label: t('detail.logs.status.submitting'), icon: Download, cls: 'bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] border-[var(--v2-accent)]/25' },
+  retrying: { label: t('detail.logs.status.retrying'), icon: RefreshCw, cls: 'bg-amber-500/12 text-amber-400 border-amber-500/25' },
+  downloaded: { label: t('detail.logs.status.downloaded'), icon: Check, cls: 'bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] border-[var(--v2-accent)]/25' },
+  renaming: { label: t('detail.logs.status.organizing'), icon: FileText, cls: 'bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] border-[var(--v2-accent)]/25' },
+  needs_review: { label: t('detail.logs.status.needsReview'), icon: AlertTriangle, cls: 'bg-amber-500/12 text-amber-400 border-amber-500/25' },
+  downloading: { label: t('detail.logs.status.active'), icon: Download, cls: 'bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] border-[var(--v2-accent)]/25' },
+  completed: { label: t('detail.logs.status.finished'), icon: Check, cls: 'bg-emerald-500/12 text-emerald-400 border-emerald-500/25' },
+  organized: { label: t('detail.logs.status.organized'), icon: Check, cls: 'bg-emerald-500/12 text-emerald-400 border-emerald-500/25' },
+  failed: { label: t('detail.logs.status.failed'), icon: AlertTriangle, cls: 'bg-red-500/12 text-red-400 border-red-500/25' },
 }))
 
 function formatSize(bytes: number): string {
@@ -314,7 +314,6 @@ const groupedEpisodes = computed(() => {
     if (!groups[key]) groups[key] = []
     groups[key].push(ep)
   }
-  // 按组名排序，未分组放最后
   const sorted = Object.entries(groups).sort(([a], [b]) => {
     if (a === t('detail.logs.ungrouped')) return 1
     if (b === t('detail.logs.ungrouped')) return -1
@@ -323,12 +322,21 @@ const groupedEpisodes = computed(() => {
   return sorted
 })
 
+// 原生 Vue 折叠状态（替代原失效的 DaisyUI collapse-arrow）
+const expandedGroups = ref<Record<string, boolean>>({})
+function isGroupExpanded(groupName: string, idx: number): boolean {
+  if (groupName in expandedGroups.value) return expandedGroups.value[groupName]
+  return idx === 0
+}
+function toggleGroup(groupName: string, idx: number) {
+  expandedGroups.value[groupName] = !isGroupExpanded(groupName, idx)
+}
+
 const progress = computed(() => {
   if (!sub.value || sub.value.total_episodes <= 0) return null
   return Math.min(100, (sub.value.current_episodes / sub.value.total_episodes) * 100)
 })
 
-// 多选相关函数
 function toggleEpisodeSelect(epId: number) {
   if (bulkActionLoading.value) return
   if (selectedEpisodes.value.has(epId)) {
@@ -499,7 +507,7 @@ async function bulkUpdateStatus(newStatus: string) {
 async function bulkDeleteEpisodes(deleteFiles: boolean) {
   if (!selectedEpisodes.value.size || bulkActionLoading.value || updatingEps.value.size) return
   if (!confirm(t(deleteFiles ? 'detail.bulk.confirmFiles' : 'detail.bulk.confirmRecords', { count: selectedEpisodes.value.size }))) return
-  
+
   bulkActionLoading.value = true
   try {
     const ids = Array.from(selectedEpisodes.value)
@@ -516,32 +524,31 @@ async function bulkDeleteEpisodes(deleteFiles: boolean) {
 
 async function addToBlacklist() {
   if (!selectedEpisodes.value.size || !sub.value || bulkActionLoading.value || updatingEps.value.size) return
-  
+
   const selectedEps = episodes.value.filter(ep => selectedEpisodes.value.has(ep.id))
   const keywords = new Set<string>()
-  
+
   selectedEps.forEach(ep => {
-    // 从文件名提取关键词
     const name = ep.original_name || ep.title
-    const parts = name.split(/[\s\.\-_\[\]\(\)]+/)
+    const parts = name.split(/[\s.\-_[\]()]+/)
     parts.forEach(p => {
       if (p.length > 3 && !/^\d+$/.test(p)) {
         keywords.add(p.toLowerCase())
       }
     })
   })
-  
-  let currentExcluded = []
+
+  let currentExcluded: string[] = []
   if (sub.value.excluded_keywords) {
     try {
-      currentExcluded = JSON.parse(sub.value.excluded_keywords)
-      if (!Array.isArray(currentExcluded)) currentExcluded = []
-    } catch (e) {
+      const parsed = JSON.parse(sub.value.excluded_keywords)
+      if (Array.isArray(parsed)) currentExcluded = parsed
+    } catch {
       currentExcluded = []
     }
   }
   const merged = Array.from(new Set([...currentExcluded, ...keywords]))
-  
+
   try {
     bulkActionLoading.value = true
     if (!await handleSaveEdit({ excluded_keywords: JSON.stringify(merged) })) return
@@ -578,408 +585,478 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6 pb-20">
-    <!-- 顶部返回与刷新 -->
-    <div class="flex items-center justify-between">
-      <button type="button" class="btn btn-ghost btn-sm border border-base-content/12 rounded-lg gap-1.5" @click="returnToList">
-        <ChevronLeft :size="16" />
+  <div class="space-y-6 pb-24">
+    <!-- 顶部操作导航 -->
+    <div class="flex items-center justify-between gap-3">
+      <button type="button" class="v2-btn v2-btn-sm" @click="returnToList">
+        <ChevronLeft :size="15" />
         <span>{{ t('detail.back') }}</span>
       </button>
 
-      <div class="flex gap-2">
-        <button type="button" class="btn btn-ghost btn-square btn-sm rounded-lg border border-base-content/12" :aria-label="t('common.refresh')" @click="fetchDetail" :disabled="loading">
-          <RefreshCw :size="16" :class="{ 'animate-spin': loading }" />
+      <div class="flex items-center gap-2">
+        <button type="button" class="v2-btn v2-btn-sm px-2.5" :aria-label="t('common.refresh')" @click="fetchDetail" :disabled="loading">
+          <RefreshCw :size="15" :class="{ 'animate-spin': loading }" />
         </button>
       </div>
     </div>
 
-    <div v-if="actionError" role="alert" class="alert alert-error rounded-xl break-words text-sm">{{ actionError }}</div>
+    <div v-if="actionError" role="alert" class="v2-panel border-red-500/35 bg-red-500/10 text-red-400 px-4 py-3 text-xs font-medium break-words">
+      {{ actionError }}
+    </div>
+
     <div v-if="loading && !sub" class="flex justify-center py-28">
-      <span class="loading loading-spinner loading-lg text-primary"></span>
+      <span class="loading loading-spinner loading-lg text-[var(--v2-accent)]"></span>
     </div>
 
     <div v-if="error" role="alert" class="max-w-3xl mx-auto">
-      <div class="alert bg-error/10 border border-error/25 text-error rounded-xl p-4">
-        <AlertTriangle :size="20" class="shrink-0" />
-        <div class="flex-1">
-          <h3 class="font-semibold text-sm">{{ t('detail.error.load') }}</h3>
+      <div class="v2-panel border-red-500/35 bg-red-500/10 text-red-400 p-4 flex items-start gap-3">
+        <AlertTriangle :size="19" class="shrink-0 mt-0.5" />
+        <div class="flex-1 min-w-0">
+          <h3 class="font-bold text-sm">{{ t('detail.error.load') }}</h3>
           <p class="text-xs opacity-85 mt-0.5">{{ error }}</p>
         </div>
       </div>
     </div>
 
     <template v-if="sub">
-      <!-- 订阅详情主卡片 -->
-      <div class="relative app-surface rounded-2xl overflow-hidden">
-        <!-- 顶部模糊背景 -->
-        <div class="absolute inset-x-0 top-0 h-48 z-0 overflow-hidden pointer-events-none">
+      <!-- 放映厅作品档案主卡 Hero -->
+      <section class="relative v2-panel overflow-hidden">
+        <div class="absolute inset-x-0 top-0 h-52 z-0 overflow-hidden pointer-events-none">
           <img v-if="sub.cover_url" :src="proxyImage(sub.cover_url)" class="w-full h-full object-cover blur-3xl opacity-15 scale-125" />
-          <div class="absolute inset-0 bg-gradient-to-b from-transparent to-base-100"></div>
+          <div class="absolute inset-0 bg-gradient-to-b from-transparent to-[var(--v2-surface)]"></div>
         </div>
 
-        <div class="p-5 sm:p-7 lg:p-8 relative z-10">
-          <div class="flex flex-col lg:flex-row gap-6 lg:gap-8">
-            <!-- 左侧海报 -->
-            <div class="w-full lg:w-56 xl:w-64 shrink-0 flex justify-center lg:justify-start">
-              <div class="w-full max-w-[220px] lg:max-w-none aspect-[2/3] rounded-xl bg-base-200 overflow-hidden shadow-md border border-base-content/10 relative">
-                <img v-if="sub.cover_url" :src="proxyImage(sub.cover_url)" class="w-full h-full object-cover" />
-                <div v-else class="w-full h-full flex items-center justify-center text-base-content/20">
-                  <Image :size="48" />
-                </div>
-                <div class="absolute top-2.5 left-2.5">
-                  <span class="bg-base-100/90 backdrop-blur-sm text-base-content text-xs font-mono font-semibold px-2.5 py-0.5 rounded-md border border-base-content/15">
-                    #{{ sub.id }}
-                  </span>
-                </div>
+        <div class="p-5 sm:p-7 relative z-10 flex flex-col lg:flex-row gap-6 lg:gap-8">
+          <!-- 左侧 2:3 海报 -->
+          <div class="w-full lg:w-52 xl:w-60 shrink-0 flex justify-center lg:justify-start">
+            <div class="w-full max-w-[210px] lg:max-w-none aspect-[2/3] rounded-xl bg-[var(--v2-surface-2)] overflow-hidden shadow-lg border border-[var(--v2-border-strong)] relative">
+              <img v-if="sub.cover_url" :src="proxyImage(sub.cover_url)" class="w-full h-full object-cover" />
+              <div v-else class="w-full h-full flex items-center justify-center text-[var(--v2-ink-subtle)]">
+                <Image :size="44" />
+              </div>
+              <div class="absolute top-2.5 left-2.5">
+                <span class="bg-black/75 backdrop-blur-sm text-white text-[11px] font-mono font-semibold px-2 py-0.5 rounded-md border border-white/15">
+                  #{{ sub.id }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右侧元信息与控制 -->
+          <div class="flex-1 min-w-0 space-y-5">
+            <div class="space-y-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <span v-if="sub.anime_type && sub.anime_type !== t('detail.type.unknown')" class="v2-pill text-xs border-[var(--v2-accent)]/30 text-[var(--v2-accent)]">
+                  {{ sub.anime_type }}
+                </span>
+                <span v-if="sub.completed" class="badge badge-success badge-xs">
+                  {{ t('detail.status.finished') }}
+                </span>
+                <span v-if="!sub.enabled" class="badge badge-warning badge-xs">
+                  {{ t('detail.status.paused') }}
+                </span>
+              </div>
+
+              <div class="space-y-1">
+                <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-[var(--v2-ink)] leading-snug">{{ sub.title_cn }}</h1>
+                <p v-if="sub.title_jp" class="text-sm text-[var(--v2-ink-muted)]">{{ sub.title_jp }}</p>
+                <p v-if="sub.title_en" class="text-xs text-[var(--v2-ink-subtle)]">{{ sub.title_en }}</p>
               </div>
             </div>
 
-            <!-- 右侧详情与控制 -->
-            <div class="flex-1 min-w-0 space-y-5">
-              <div class="space-y-2.5">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span v-if="sub.anime_type && sub.anime_type !== t('detail.type.unknown')" class="text-xs font-medium text-primary bg-primary/12 px-2.5 py-0.5 rounded-md border border-primary/20">
-                    {{ sub.anime_type }}
-                  </span>
-                  <span v-if="sub.completed" class="text-xs font-medium text-success bg-success/12 px-2.5 py-0.5 rounded-md border border-success/20">
-                    {{ t('detail.status.finished') }}
-                  </span>
-                  <span v-if="!sub.enabled" class="text-xs font-medium text-warning bg-warning/15 px-2.5 py-0.5 rounded-md border border-warning/25">
-                    {{ t('detail.status.paused') }}
-                  </span>
-                </div>
-
-                <div class="space-y-1">
-                  <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-base-content leading-snug">{{ sub.title_cn }}</h1>
-                  <p v-if="sub.title_jp" class="text-sm text-base-content/60">{{ sub.title_jp }}</p>
-                  <p v-if="sub.title_en" class="text-xs text-base-content/45">{{ sub.title_en }}</p>
-                </div>
+            <!-- 元数据摘要网格（metadata_provider 块保持仅两个 <p> 子节点契约） -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 v2-panel-muted">
+              <div>
+                <p class="text-xs text-[var(--v2-ink-muted)]">{{ t('detail.stats.releaseYear') }}</p>
+                <p class="text-base font-semibold font-mono tabular-nums mt-0.5">{{ sub.year || 'N/A' }}</p>
               </div>
+              <div>
+                <p class="text-xs text-[var(--v2-ink-muted)]">{{ t('detail.stats.season') }}</p>
+                <p class="text-base font-semibold font-mono tabular-nums mt-0.5">{{ sub.season || '1' }}</p>
+              </div>
+              <div class="col-span-2 sm:col-span-1">
+                <p class="text-xs text-[var(--v2-ink-muted)]">{{ t('detail.stats.metadata') }}</p>
+                <p class="text-base font-semibold mt-0.5 truncate">{{ sub.metadata_provider?.trim() || t('detail.stats.metadataNotRecorded') }}</p>
+              </div>
+            </div>
 
-              <!-- 元数据摘要网格 -->
-              <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 app-surface-muted rounded-xl">
+            <!-- 进度条 -->
+            <div class="space-y-2">
+              <div class="flex items-end justify-between">
                 <div>
-                  <p class="text-xs text-base-content/55">{{ t('detail.stats.releaseYear') }}</p>
-                  <p class="text-base font-semibold font-mono tabular-nums mt-0.5">{{ sub.year || 'N/A' }}</p>
+                  <p class="text-xs text-[var(--v2-ink-muted)]">{{ t('detail.progress.title') }}</p>
+                  <p class="text-xl font-bold font-mono tabular-nums mt-0.5">
+                    {{ sub.current_episodes }}
+                    <span class="text-[var(--v2-ink-subtle)] mx-0.5">/</span>
+                    {{ sub.total_episodes || '?' }}
+                  </p>
                 </div>
-                <div>
-                  <p class="text-xs text-base-content/55">{{ t('detail.stats.season') }}</p>
-                  <p class="text-base font-semibold font-mono tabular-nums mt-0.5">{{ sub.season || '1' }}</p>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <p class="text-xs text-base-content/55">{{ t('detail.stats.metadata') }}</p>
-                  <p class="text-base font-semibold mt-0.5 truncate">{{ sub.metadata_provider?.trim() || t('detail.stats.metadataNotRecorded') }}</p>
-                </div>
-              </div>
-
-              <!-- 进度条 -->
-              <div class="space-y-2">
-                <div class="flex items-end justify-between">
-                  <div>
-                    <p class="text-xs text-base-content/60">{{ t('detail.progress.title') }}</p>
-                    <p class="text-xl font-bold font-mono tabular-nums mt-0.5">{{ sub.current_episodes }} <span class="text-base-content/30 mx-0.5">/</span> {{ sub.total_episodes || '?' }}</p>
-                  </div>
-                  <div v-if="progress !== null" class="text-right">
-                    <p class="text-lg font-bold font-mono tabular-nums text-primary">{{ Math.round(progress) }}%</p>
-                  </div>
-                </div>
-                <div v-if="progress !== null" class="h-2 w-full bg-base-200 rounded-full overflow-hidden">
-                  <div
-                    class="h-full rounded-full bg-primary transition-all duration-500"
-                    :style="{ width: `${progress}%` }"
-                  ></div>
+                <div v-if="progress !== null" class="text-right">
+                  <p class="text-lg font-bold font-mono tabular-nums text-[var(--v2-accent)]">{{ Math.round(progress) }}%</p>
                 </div>
               </div>
-
-              <!-- 操作按钮 -->
-              <div class="flex flex-wrap gap-2.5 pt-1">
-                <button type="button" class="btn btn-primary h-10 min-h-0 rounded-lg px-5 gap-2 text-sm font-semibold" @click="openEditDialog">
-                  <Edit3 :size="16" />
-                  <span>{{ t('detail.actions.modify') }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="btn h-10 min-h-0 rounded-lg px-5 gap-2 text-sm font-semibold border"
-                  :class="sub.enabled ? 'btn-ghost bg-warning/10 text-warning border-warning/25 hover:bg-warning hover:text-warning-content' : 'btn-ghost bg-success/10 text-success border-success/25 hover:bg-success hover:text-success-content'"
-                  @click="handleSaveEdit({ enabled: !sub.enabled })"
-                >
-                  <component :is="sub.enabled ? Pause : Play" :size="16" />
-                  <span>{{ sub.enabled ? t('detail.actions.suspend') : t('detail.actions.resume') }}</span>
-                </button>
+              <div v-if="progress !== null" class="h-2 w-full bg-[var(--v2-surface-3)] rounded-full overflow-hidden">
+                <div class="h-full rounded-full bg-[var(--v2-accent)] transition-all duration-500" :style="{ width: `${progress}%` }"></div>
               </div>
+            </div>
 
-                <!-- Description -->
-                <div v-if="sub.description" class="mt-12 space-y-4">
-                   <div class="flex items-center gap-4">
-                      <div class="w-1.5 h-4 bg-primary rounded-full"></div>
-                      <h3 class="text-sm font-black uppercase tracking-[0.2em] opacity-30 italic">{{ t('detail.synopsis') }}</h3>
-                   </div>
-                   <p class="text-base-content/70 leading-relaxed text-sm font-bold">{{ sub.description }}</p>
-                </div>
+            <!-- 操作按钮 -->
+            <div class="flex flex-wrap gap-2.5 pt-1">
+              <button type="button" class="v2-btn v2-btn-primary px-5" @click="openEditDialog">
+                <Edit3 :size="15" />
+                <span>{{ t('detail.actions.modify') }}</span>
+              </button>
+              <button
+                type="button"
+                class="v2-btn px-5"
+                :class="sub.enabled ? 'border-amber-500/35 text-amber-400 hover:bg-amber-500/10' : 'border-emerald-500/35 text-emerald-400 hover:bg-emerald-500/10'"
+                @click="handleSaveEdit({ enabled: !sub.enabled })"
+              >
+                <component :is="sub.enabled ? Pause : Play" :size="15" />
+                <span>{{ sub.enabled ? t('detail.actions.suspend') : t('detail.actions.resume') }}</span>
+              </button>
+            </div>
 
-                <!-- Subgroup List -->
-                <div class="mt-10 space-y-4">
-                   <div class="flex items-center gap-4">
-                      <div class="w-1.5 h-4 bg-secondary rounded-full"></div>
-                      <h3 class="text-sm font-black uppercase tracking-[0.2em] opacity-30 italic">{{ t('detail.stats.subgroup') }}</h3>
-                   </div>
-                   <div class="flex flex-wrap gap-2">
-                      <span v-if="sub.subgroup_name" class="px-4 py-2 bg-base-200 rounded-xl text-sm font-bold border border-base-300">
-                         {{ sub.subgroup_name }}
-                      </span>
-                      <span v-else class="px-4 py-2 bg-base-200/50 rounded-xl text-sm font-bold opacity-30 border border-base-300/50">
-                         {{ t('card.generic') }}
-                      </span>
-                   </div>
-                </div>
-             </div>
+            <!-- 作品简介与订阅字幕组 -->
+            <div v-if="sub.description" class="pt-3 border-t border-[var(--v2-border)] space-y-1.5">
+              <h3 class="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-subtle)]">{{ t('detail.synopsis') }}</h3>
+              <p class="text-xs sm:text-sm text-[var(--v2-ink-muted)] leading-relaxed">{{ sub.description }}</p>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 pt-1">
+              <span class="text-xs font-semibold text-[var(--v2-ink-subtle)]">{{ t('detail.stats.subgroup') }}:</span>
+              <span v-if="sub.subgroup_name" class="v2-pill text-xs text-[var(--v2-ink)]">{{ sub.subgroup_name }}</span>
+              <span v-else class="v2-pill text-xs">{{ t('card.generic') }}</span>
             </div>
           </div>
         </div>
-      <!-- Warning Panel -->
+      </section>
+
+      <!-- 停滞告警条 -->
       <Transition name="fade">
-       <div v-if="sub.stalled_episodes > 0" class="max-w-4xl mx-auto">
-          <div class="alert bg-warning/10 border border-warning/20 text-warning rounded-[2.5rem] p-8 flex items-start gap-6 shadow-2xl shadow-lg">
-             <div class="w-16 h-16 rounded-2xl bg-warning/20 flex items-center justify-center shrink-0">
-                <AlertTriangle :size="32" />
-             </div>
-             <div class="flex-1 pt-1">
-                <h3 class="text-lg font-black uppercase tracking-widest">{{ t('detail.warning.title') }}</h3>
-                <p class="text-sm font-bold opacity-80 mt-1 leading-relaxed">
-                  {{ t('detail.warning.desc', { count: sub.stalled_episodes } ) }}
-                  <span v-if="sub.stall_timeout_hours > 0" class="text-[10px] font-black opacity-40 ml-2">(超时阈值: {{ sub.stall_timeout_hours }}h)</span>
-                </p>
-             </div>
+        <div v-if="sub.stalled_episodes > 0" class="v2-panel border-amber-500/35 bg-amber-500/10 text-amber-400 p-4 sm:p-5 flex items-start gap-4">
+          <div class="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
+            <AlertTriangle :size="20" />
           </div>
-       </div>
+          <div class="flex-1 min-w-0">
+            <h3 class="text-sm font-bold">{{ t('detail.warning.title') }}</h3>
+            <p class="text-xs opacity-90 mt-1 leading-relaxed">
+              {{ t('detail.warning.desc', { count: sub.stalled_episodes }) }}
+              <span v-if="sub.stall_timeout_hours > 0" class="font-mono opacity-75 ml-1">({{ sub.stall_timeout_hours }}h)</span>
+            </p>
+          </div>
+        </div>
       </Transition>
 
-      <!-- Episode List Container -->
-      <div class="space-y-6">
-         <!-- Bulk Actions Bar -->
-         <Transition name="slide">
-           <fieldset v-if="showBulkActions" :disabled="bulkActionLoading || updatingEps.size > 0" class="fixed bottom-16 lg:bottom-6 left-3 right-3 sm:left-auto sm:right-6 z-50 bg-base-100/95 backdrop-blur-xl rounded-2xl sm:rounded-[2rem] border border-primary/30 shadow-2xl p-3 sm:p-4 flex flex-col sm:flex-row gap-2 sm:gap-3 animate-in slide-in-from-bottom-4 max-h-[55dvh] overflow-y-auto max-w-2xl">
-             <span class="text-xs sm:text-sm font-black text-primary self-center px-2 whitespace-nowrap shrink-0">
-               {{ t('detail.bulk.selected', { count: selectedEpisodes.size }) }}
-             </span>
-             <div class="flex flex-wrap items-center justify-center gap-1.5">
-               <button type="button" class="btn btn-sm btn-outline gap-2" :disabled="verifyingFiles" @click="verifyFiles('selected')">
-                 <FileCheck2 :size="16" /> {{ t('detail.files.selected') }}
-               </button>
-               <button type="button" class="btn btn-sm btn-outline btn-warning gap-2" @click="bulkRecheck">
-                 <RefreshCw :size="16" /> {{ t('detail.bulk.recheck') }}
-               </button>
-               <button class="btn btn-sm btn-ghost gap-2" @click="bulkUpdateStatus('pending')">
-                 <History :size="16" /> {{ t('detail.logs.status.pending') }}
-               </button>
-               <button class="btn btn-sm btn-ghost gap-2" @click="bulkUpdateStatus('downloading')">
-                 <Download :size="16" /> {{ t('detail.logs.status.active') }}
-               </button>
-               <button class="btn btn-sm btn-ghost gap-2" @click="bulkUpdateStatus('completed')">
-                 <Check :size="16" /> {{ t('detail.logs.status.finished') }}
-               </button>
-               <button class="btn btn-sm btn-ghost gap-2 text-warning" @click="bulkUpdateStatus('failed')">
-                 <AlertTriangle :size="16" /> {{ t('detail.logs.status.failed') }}
-               </button>
-               <button class="btn btn-sm btn-ghost gap-2" @click="bulkUpdateStatus('')">
-                 <X :size="16" /> {{ t('detail.clearMarks') }}
-               </button>
-               <button class="btn btn-sm btn-ghost gap-2 text-error" @click="bulkDeleteEpisodes(false)">
-                 <Trash2 :size="16" /> {{ t('detail.bulk.deleteRecords') }}
-               </button>
-               <button class="btn btn-sm btn-ghost gap-2 text-error" @click="bulkDeleteEpisodes(true)">
-                 <Trash2 :size="16" /> {{ t('detail.bulk.deleteFiles') }}
-               </button>
-               <button class="btn btn-sm btn-ghost gap-2 text-warning" @click="addToBlacklist">
-                 <Shield :size="16" /> {{ t('detail.bulk.blacklist') }}
-               </button>
-               <button class="btn btn-sm btn-ghost gap-2" @click="clearSelection">
-                 <X :size="16" /> {{ t('detail.bulk.cancel') }}
-               </button>
-             </div>
-           </fieldset>
-         </Transition>
-         
-         <div class="flex items-center gap-4 px-4 group">
-            <div class="w-1.5 h-6 bg-primary rounded-full shadow-[0_0_12px_rgba(var(--p),0.5)] group-hover:h-8 transition-all"></div>
-            <h2 class="text-2xl font-black tracking-tight italic uppercase">{{ t('detail.logs.title') }}</h2>
-            <span class="text-[10px] font-black uppercase tracking-widest text-base-content/20 mt-1">{{ t('detail.logs.count', { count: episodes.length }) }}</span>
-         </div>
-         <div v-if="hasOrganizedFiles || taskScope" class="flex flex-wrap items-center gap-2 px-4">
-           <button v-if="taskScope" class="btn btn-sm btn-ghost" type="button" @click="checkDownloadTasks" :disabled="checkingTasks">
-             <RefreshCw :size="16" /> {{ t(checkingTasks ? 'detail.tasks.checking' : 'detail.tasks.check') }}
-           </button>
-           <span v-if="checkedTasksAt" class="text-xs text-base-content/70">{{ t('detail.tasks.checkedAt', { time: new Date(checkedTasksAt).toLocaleTimeString(locale) }) }}</span>
-           <button v-if="hasOrganizedFiles" type="button" class="btn btn-sm btn-ghost" :disabled="verifyingFiles || bulkActionLoading || updatingEps.size > 0" @click="verifyFiles('organized')">
-             <FileCheck2 :size="16" /> {{ t('detail.files.all') }}
-           </button>
-         </div>
-         <p v-if="taskCheckFailed" role="status" class="px-4 text-sm text-warning">{{ t('detail.tasks.failed') }}</p>
-         <p v-if="hasMissingTask" role="status" class="px-4 text-sm">{{ t('detail.tasks.restoreHelp') }}</p>
-         <p v-if="verifyingFiles" role="status" class="px-4 text-sm">{{ t('detail.files.checking') }}</p>
-         <details v-if="fileReport" open class="rounded-2xl border border-base-300 bg-base-100 p-4 text-sm">
-           <summary class="cursor-pointer font-semibold" aria-live="polite">{{ t('detail.files.result', { count: fileReport.rows.length, time: new Date(fileReport.checkedAt).toLocaleTimeString(locale) }) }}</summary>
-           <p v-if="fileReport.volumeGuarded === false" class="mt-2">{{ t('detail.files.currentPath') }}</p>
-           <p v-if="fileReport.rows.some(row => row.status === 'missing')" class="mt-2">{{ t('detail.files.restoreHelp') }}</p>
-           <ul class="mt-2 max-h-60 space-y-1 overflow-y-auto break-words">
-             <li v-for="row in fileReport.rows" :key="row.id">
-               <span class="font-medium">{{ row.name }}</span> · {{ t(`detail.files.${row.status}`) }}
-               <template v-if="row.status === 'size_mismatch'"> · {{ t('detail.files.sizes', { expected: row.expected_size?.toLocaleString(locale), actual: row.actual_size?.toLocaleString(locale) }) }}</template>
-               <template v-if="row.reason"> · {{ t(`detail.files.reason.${row.reason}`) }}</template>
-               <button v-if="row.status === 'missing'" type="button" class="btn btn-outline btn-xs ms-2"
-                 :disabled="verifyingFiles || bulkActionLoading || updatingEps.has(row.id)" @click="restoreFile(row)">
-                 {{ t(row.restoring ? 'detail.files.restoring' : 'detail.files.restore') }}
-               </button>
-               <span v-if="row.restoreError" role="alert" class="block text-error">{{ row.restoreError }}</span>
-             </li>
-           </ul>
-         </details>
-         <details v-if="recheckResults.length" open class="rounded-2xl border border-base-300 bg-base-100 p-4 text-sm">
-           <summary class="cursor-pointer font-semibold"><span aria-live="polite">{{ t('detail.bulk.recheckResults', recheckCounts) }}</span></summary>
-           <ul class="mt-2 max-h-60 space-y-1 overflow-y-auto break-words">
-             <li v-for="result in recheckResults" :key="result.id">
-               <span class="font-medium">{{ result.name }}</span> · {{ t(`detail.bulk.${result.status}`) }}<template v-if="result.reason"> · {{ result.reason }}</template>
-             </li>
-           </ul>
-         </details>
-         <div v-if="episodes.length === 0" class="bg-base-100 rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden">
-            <div class="flex flex-col items-center justify-center py-24 gap-4">
-               <div class="w-16 h-16 rounded-full bg-base-200 flex items-center justify-center">
-                  <FileText :size="32" class="opacity-10" />
-               </div>
-               <p class="text-[10px] font-black uppercase tracking-widest opacity-20">{{ t('detail.logs.empty') }}</p>
+      <!-- 剧集与核验区域 -->
+      <div class="space-y-4">
+        <!-- 悬浮批量操作栏 -->
+        <Transition name="slide">
+          <fieldset
+            v-if="showBulkActions"
+            :disabled="bulkActionLoading || updatingEps.size > 0"
+            class="fixed bottom-16 lg:bottom-6 left-3 right-3 sm:left-auto sm:right-6 z-50 v2-glass border border-[var(--v2-accent)]/40 rounded-2xl shadow-2xl p-3 sm:p-4 flex flex-col sm:flex-row gap-2 sm:gap-3 max-h-[55dvh] overflow-y-auto max-w-2xl"
+          >
+            <span class="text-xs font-bold text-[var(--v2-accent)] self-center px-2 whitespace-nowrap shrink-0">
+              {{ t('detail.bulk.selected', { count: selectedEpisodes.size }) }}
+            </span>
+            <div class="flex flex-wrap items-center justify-center gap-1.5">
+              <button type="button" class="v2-btn v2-btn-sm" :disabled="verifyingFiles" @click="verifyFiles('selected')">
+                <FileCheck2 :size="14" /> {{ t('detail.files.selected') }}
+              </button>
+              <button type="button" class="v2-btn v2-btn-sm text-amber-400 border-amber-500/35" @click="bulkRecheck">
+                <RefreshCw :size="14" /> {{ t('detail.bulk.recheck') }}
+              </button>
+              <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="bulkUpdateStatus('pending')">
+                <History :size="14" /> {{ t('detail.logs.status.pending') }}
+              </button>
+              <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="bulkUpdateStatus('downloading')">
+                <Download :size="14" /> {{ t('detail.logs.status.active') }}
+              </button>
+              <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="bulkUpdateStatus('completed')">
+                <Check :size="14" /> {{ t('detail.logs.status.finished') }}
+              </button>
+              <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm text-amber-400" @click="bulkUpdateStatus('failed')">
+                <AlertTriangle :size="14" /> {{ t('detail.logs.status.failed') }}
+              </button>
+              <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="bulkUpdateStatus('')">
+                <X :size="14" /> {{ t('detail.clearMarks') }}
+              </button>
+              <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm text-red-400" @click="bulkDeleteEpisodes(false)">
+                <Trash2 :size="14" /> {{ t('detail.bulk.deleteRecords') }}
+              </button>
+              <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm text-red-400" @click="bulkDeleteEpisodes(true)">
+                <Trash2 :size="14" /> {{ t('detail.bulk.deleteFiles') }}
+              </button>
+              <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm text-amber-400" @click="addToBlacklist">
+                <Shield :size="14" /> {{ t('detail.bulk.blacklist') }}
+              </button>
+              <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="clearSelection">
+                <X :size="14" /> {{ t('detail.bulk.cancel') }}
+              </button>
             </div>
-         </div>
-         <div v-else class="space-y-4">
-            <!-- Grouped episodes by subgroup -->
-            <div v-for="([groupName, groupEps], gIdx) in groupedEpisodes" :key="groupName"
-                 class="collapse collapse-arrow bg-base-100 rounded-[2.5rem] border border-base-200/60 shadow-xl overflow-hidden">
-              <input type="checkbox" :checked="gIdx === 0" />
-              <div class="collapse-title text-lg font-black tracking-tight flex items-center gap-3">
-                <label class="cursor-pointer flex items-center gap-2">
-                  <input type="checkbox" class="checkbox checkbox-primary" :disabled="bulkActionLoading" :checked="groupEps.every(ep => selectedEpisodes.has(ep.id))" @change="toggleSelectAll(groupEps)" />
-                  <span>{{ groupName }}</span>
+          </fieldset>
+        </Transition>
+
+        <!-- 标题行与文件/任务核验操作 -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+          <div class="flex items-center gap-3">
+            <h2 class="text-base sm:text-lg font-bold tracking-tight text-[var(--v2-ink)]">{{ t('detail.logs.title') }}</h2>
+            <span class="v2-pill font-mono text-[11px]">{{ t('detail.logs.count', { count: episodes.length }) }}</span>
+          </div>
+
+          <div v-if="hasOrganizedFiles || taskScope" class="flex flex-wrap items-center gap-2">
+            <button v-if="taskScope" class="v2-btn v2-btn-sm" type="button" @click="checkDownloadTasks" :disabled="checkingTasks">
+              <RefreshCw :size="14" :class="{ 'animate-spin': checkingTasks }" />
+              <span>{{ t(checkingTasks ? 'detail.tasks.checking' : 'detail.tasks.check') }}</span>
+            </button>
+            <span v-if="checkedTasksAt" class="text-xs text-[var(--v2-ink-muted)] font-mono">
+              {{ t('detail.tasks.checkedAt', { time: new Date(checkedTasksAt).toLocaleTimeString(locale) }) }}
+            </span>
+            <button v-if="hasOrganizedFiles" type="button" class="v2-btn v2-btn-sm" :disabled="verifyingFiles || bulkActionLoading || updatingEps.size > 0" @click="verifyFiles('organized')">
+              <FileCheck2 :size="14" />
+              <span>{{ t('detail.files.all') }}</span>
+            </button>
+          </div>
+        </div>
+
+        <p v-if="taskCheckFailed" role="status" class="text-xs text-amber-400 px-1">{{ t('detail.tasks.failed') }}</p>
+        <p v-if="hasMissingTask" role="status" class="text-xs text-[var(--v2-ink-muted)] px-1">{{ t('detail.tasks.restoreHelp') }}</p>
+        <p v-if="verifyingFiles" role="status" class="text-xs text-[var(--v2-ink-muted)] px-1">{{ t('detail.files.checking') }}</p>
+
+        <!-- 媒体库文件校验报告（<ul><li> 结构供单测直接渲染解析） -->
+        <details v-if="fileReport" open class="v2-panel p-4 text-xs sm:text-sm space-y-2">
+          <summary class="cursor-pointer font-semibold text-[var(--v2-ink)]" aria-live="polite">
+            {{ t('detail.files.result', { count: fileReport.rows.length, time: new Date(fileReport.checkedAt).toLocaleTimeString(locale) }) }}
+          </summary>
+          <p v-if="fileReport.volumeGuarded === false" class="mt-2 text-xs text-[var(--v2-ink-muted)]">{{ t('detail.files.currentPath') }}</p>
+          <p v-if="fileReport.rows.some(row => row.status === 'missing')" class="mt-2 text-xs text-[var(--v2-ink-muted)]">{{ t('detail.files.restoreHelp') }}</p>
+          <ul class="mt-2 max-h-60 space-y-1.5 overflow-y-auto break-words">
+            <li v-for="row in fileReport.rows" :key="row.id">
+              <span class="font-medium">{{ row.name }}</span> · {{ t(`detail.files.${row.status}`) }}
+              <template v-if="row.status === 'size_mismatch'"> · {{ t('detail.files.sizes', { expected: row.expected_size?.toLocaleString(locale), actual: row.actual_size?.toLocaleString(locale) }) }}</template>
+              <template v-if="row.reason"> · {{ t(`detail.files.reason.${row.reason}`) }}</template>
+              <button
+                v-if="row.status === 'missing'"
+                type="button"
+                class="btn btn-outline btn-xs ms-2"
+                :disabled="verifyingFiles || bulkActionLoading || updatingEps.has(row.id)"
+                @click="restoreFile(row)"
+              >
+                {{ t(row.restoring ? 'detail.files.restoring' : 'detail.files.restore') }}
+              </button>
+              <span v-if="row.restoreError" role="alert" class="block text-error">{{ row.restoreError }}</span>
+            </li>
+          </ul>
+        </details>
+
+        <!-- 批量复核结果详情 -->
+        <details v-if="recheckResults.length" open class="v2-panel p-4 text-xs sm:text-sm space-y-2">
+          <summary class="cursor-pointer font-semibold text-[var(--v2-ink)]">
+            <span aria-live="polite">{{ t('detail.bulk.recheckResults', recheckCounts) }}</span>
+          </summary>
+          <ul class="mt-2 max-h-60 space-y-1 overflow-y-auto break-words">
+            <li v-for="result in recheckResults" :key="result.id">
+              <span class="font-medium">{{ result.name }}</span> · {{ t(`detail.bulk.${result.status}`) }}<template v-if="result.reason"> · {{ result.reason }}</template>
+            </li>
+          </ul>
+        </details>
+
+        <!-- 无剧集空状态 -->
+        <div v-if="episodes.length === 0" class="v2-panel py-16 flex flex-col items-center justify-center gap-3 text-center">
+          <div class="w-12 h-12 rounded-2xl bg-[var(--v2-surface-2)] text-[var(--v2-ink-subtle)] flex items-center justify-center">
+            <FileText :size="24" />
+          </div>
+          <p class="text-xs text-[var(--v2-ink-muted)]">{{ t('detail.logs.empty') }}</p>
+        </div>
+
+        <!-- 按字幕组分组的原生可折叠剧集面板（仅使用 RefreshCw / AlertTriangle，兼容单测） -->
+        <div v-else class="space-y-4">
+          <div
+            v-for="([groupName, groupEps], gIdx) in groupedEpisodes"
+            :key="groupName"
+            class="v2-panel overflow-hidden"
+          >
+            <!-- 组头（点击可折叠/展开，复选框阻止冒泡） -->
+            <div
+              class="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3 cursor-pointer select-none hover:bg-[var(--v2-surface-2)]/60 transition-colors"
+              :class="{ 'border-b border-[var(--v2-border)]': isGroupExpanded(groupName, gIdx) }"
+              @click="toggleGroup(groupName, gIdx)"
+            >
+              <div class="flex items-center gap-3 flex-wrap min-w-0">
+                <label class="cursor-pointer flex items-center gap-2.5" @click.stop>
+                  <input
+                    type="checkbox"
+                    class="checkbox"
+                    :disabled="bulkActionLoading"
+                    :checked="groupEps.every(ep => selectedEpisodes.has(ep.id))"
+                    @change="toggleSelectAll(groupEps)"
+                  />
+                  <span class="text-sm sm:text-base font-bold text-[var(--v2-ink)] truncate">{{ groupName }}</span>
                 </label>
-                <span class="text-[10px] font-black uppercase tracking-widest opacity-30 bg-base-200 px-3 py-1 rounded-full">{{ groupEps.length }} {{ t('detail.logs.episodes') }}</span>
-                <span v-if="groupEps.some(ep => ep.status === 'needs_review')" class="badge badge-warning badge-sm">{{ t('detail.logs.status.needsReview') }}</span>
+                <span class="v2-pill font-mono text-[10px]">{{ groupEps.length }} {{ t('detail.logs.episodes') }}</span>
+                <span v-if="groupEps.some(ep => ep.status === 'needs_review')" class="badge badge-warning badge-xs">
+                  {{ t('detail.logs.status.needsReview') }}
+                </span>
               </div>
-              <div class="collapse-content overflow-x-auto p-0">
-                <table class="table table-lg w-full">
-                  <thead>
-                    <tr class="border-b border-base-200 bg-base-200/30">
-                      <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6 pl-10 w-12">
-                        <input type="checkbox" class="checkbox checkbox-primary" :disabled="bulkActionLoading" :checked="groupEps.every(ep => selectedEpisodes.has(ep.id))" @change="toggleSelectAll(groupEps)" />
-                      </th>
-                      <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6">{{ t('detail.logs.table.id') }}</th>
-                      <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6">{{ t('detail.logs.table.name') }}</th>
-                      <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6">{{ t('detail.logs.table.status') }}</th>
-                      <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6">{{ t('detail.logs.table.integrity') }}</th>
-                      <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6">{{ t('detail.logs.table.capacity') }}</th>
-                      <th class="text-[10px] font-black uppercase tracking-widest opacity-40 py-6 pr-10">{{ t('detail.logs.table.timestamp') }}</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-base-200/50">
-                    <tr v-for="ep in groupEps" :key="ep.id" class="hover:bg-base-200/30 transition-colors group/row" :class="{ 'bg-primary/5': selectedEpisodes.has(ep.id) }">
-                      <td class="pl-10">
-                        <label class="cursor-pointer">
-                          <input type="checkbox" class="checkbox checkbox-primary" :disabled="bulkActionLoading" :checked="selectedEpisodes.has(ep.id)" @change="toggleEpisodeSelect(ep.id)" />
-                        </label>
-                      </td>
-                      <td class="pl-10">
-                        <span class="text-xs font-black font-mono bg-base-200 py-1.5 px-3 rounded-lg group-hover/row:bg-primary group-hover/row:text-primary-content transition-colors">
-                          {{ episodeLabel(ep) }}
-                        </span>
-                      </td>
-                      <td class="max-w-md">
-                        <div class="text-sm font-bold truncate transition-all group-hover/row:translate-x-1" :title="ep.original_name">
-                          {{ ep.original_name || ep.title || 'Untitled Stream' }}
-                        </div>
-                      </td>
-                      <td>
-                        <span class="inline-flex items-center gap-2 rounded-lg border px-2 py-1 text-xs" :class="statusCfg[ep.status]?.cls">
-                          <component :is="statusCfg[ep.status]?.icon || MoreVertical" :size="14" />
-                          {{ statusCfg[ep.status]?.label || ep.status }}
-                        </span>
-                        <label class="mt-1 flex items-center gap-1 text-xs">
-                          {{ t('detail.manualMark') }}
-                          <select class="select select-bordered select-xs" :value="ep.manual_status || ''"
-                            :disabled="updatingEps.has(ep.id) || bulkActionLoading" @change="setEpisodeMark(ep, $event)">
-                            <option value="">{{ t('detail.noMark') }}</option>
-                            <option v-for="mark in ['pending', 'downloading', 'completed', 'failed']" :key="mark" :value="mark">
-                              {{ statusCfg[mark]?.label }}
-                            </option>
-                          </select>
-                        </label>
-                      </td>
-                      <td>
-                        <div v-if="ep.status === 'needs_review'" class="min-w-48 max-w-sm space-y-2">
-                          <p class="text-xs whitespace-normal break-words">{{ ep.review_reason || t('detail.review.noReason') }}</p>
-                          <p v-if="ep.source_file" class="text-xs break-all"><span class="font-semibold">{{ t('detail.review.source') }}</span> {{ ep.source_file }}</p>
-                          <p v-if="reviewErrors[ep.id]" role="alert" class="text-xs text-error break-words">{{ reviewErrors[ep.id] }}</p>
-                          <button v-if="ep.can_retry_organize" type="button" class="btn btn-outline btn-warning btn-xs" :disabled="updatingEps.has(ep.id) || bulkActionLoading" @click="retryOrganize(ep)">{{ t(ep.review_kind ? 'detail.review.recheck' : 'detail.review.retry') }}</button>
-                          <form v-if="reviewConfirmation(ep) === 'assign' && assignment && assignment.id === ep.id && assignment.sourceFile === ep.source_file"
-                            @submit.prevent="retryWithAssignment(ep)">
-                            <fieldset class="space-y-2" :disabled="updatingEps.has(ep.id) || bulkActionLoading">
-                              <div class="flex gap-2">
-                                <label class="text-xs">{{ t('detail.review.season') }}
-                                  <input v-model.number="assignment.season" type="number" min="0" max="99" step="1" required class="input input-bordered input-xs block w-20">
-                                </label>
-                                <label class="text-xs">{{ t('detail.review.episode') }}
-                                  <input v-model.number="assignment.number" type="number" min="0" max="2000" step="any" required class="input input-bordered input-xs block w-20">
-                                </label>
-                              </div>
-                              <div class="flex flex-wrap gap-2">
-                                <button type="submit" class="btn btn-outline btn-warning btn-xs" :disabled="!validAssignment">{{ t('detail.review.assignAndRetry') }}</button>
-                                <button type="button" class="btn btn-ghost btn-xs" @click="assignment = null">{{ t('detail.bulk.cancel') }}</button>
-                              </div>
-                            </fieldset>
-                          </form>
-                          <div v-else class="flex flex-wrap gap-2">
-                            <button v-if="reviewConfirmation(ep) === 'assign'" type="button" class="btn btn-outline btn-warning btn-xs" :disabled="updatingEps.has(ep.id) || bulkActionLoading" @click="editAssignment(ep)">{{ t('detail.review.assign') }}</button>
-                            <button v-else-if="reviewConfirmation(ep) === 'movie'" type="button" class="btn btn-outline btn-warning btn-xs h-auto min-h-6 whitespace-normal" :disabled="updatingEps.has(ep.id) || bulkActionLoading" @click="retryOrganize(ep, { confirm_movie: true })">{{ t('detail.review.confirmMovie') }}</button>
-                            <p v-else-if="ep.review_kind === 'episode_identity' || ep.review_kind === 'movie_selection'" class="text-xs text-base-content/70">{{ t('detail.review.missingSource') }}</p>
-                          </div>
-                        </div>
-                        <div v-else-if="episodeTaskState(ep) === 'missing'" class="min-w-32 text-xs text-warning">
-                          <span>{{ t('detail.tasks.missing') }}</span>
-                          <code class="block select-all break-all text-base-content/70">{{ ep.torrent_hash }}</code>
-                        </div>
-                        <span v-else-if="boundTaskKey(ep) && episodeTaskState(ep) !== 'present'" class="text-xs text-base-content/70">
-                          {{ t(checkingTasks ? 'detail.tasks.checking' : 'detail.tasks.unknown') }}
-                        </span>
-                        <span v-else-if="ep.is_stalled" class="flex items-center gap-1.5 text-warning font-black uppercase text-[9px] tracking-widest bg-warning/5 px-3 py-1.5 rounded-full border border-warning/10">
-                          <AlertTriangle :size="12" /> {{ t('detail.logs.integrity.stalled') }}
-                        </span>
-                        <span v-else-if="episodeTaskState(ep) === 'present'" class="text-xs text-base-content/70">{{ t('detail.tasks.present') }}</span>
-                        <span v-else class="text-[10px] font-black opacity-10 tracking-widest uppercase pl-2">{{ t('detail.logs.integrity.verified') }}</span>
-                      </td>
-                      <td>
-                        <span class="text-xs font-bold opacity-40">{{ formatSize(ep.file_size) }}</span>
-                      </td>
-                      <td class="pr-10">
-                        <span class="text-[10px] font-black opacity-30 uppercase tracking-tighter">{{ new Date(ep.created_at).toLocaleString(locale, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}) }}</span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="shrink-0 text-[var(--v2-ink-muted)] transition-transform duration-200"
+                :class="{ 'rotate-180': isGroupExpanded(groupName, gIdx) }"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
             </div>
-         </div>
+
+            <!-- 剧集表格 -->
+            <div v-show="isGroupExpanded(groupName, gIdx)" class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-[var(--v2-border)] bg-[var(--v2-surface-2)]/70 text-[11px] font-semibold uppercase tracking-wider text-[var(--v2-ink-subtle)]">
+                    <th class="py-3 pl-4 sm:pl-5 w-10">
+                      <input
+                        type="checkbox"
+                        class="checkbox"
+                        :disabled="bulkActionLoading"
+                        :checked="groupEps.every(ep => selectedEpisodes.has(ep.id))"
+                        @change="toggleSelectAll(groupEps)"
+                      />
+                    </th>
+                    <th class="py-3 px-3">{{ t('detail.logs.table.id') }}</th>
+                    <th class="py-3 px-3">{{ t('detail.logs.table.name') }}</th>
+                    <th class="py-3 px-3">{{ t('detail.logs.table.status') }}</th>
+                    <th class="py-3 px-3">{{ t('detail.logs.table.integrity') }}</th>
+                    <th class="py-3 px-3">{{ t('detail.logs.table.capacity') }}</th>
+                    <th class="py-3 pl-3 pr-4 sm:pr-5">{{ t('detail.logs.table.timestamp') }}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-[var(--v2-border)] text-xs">
+                  <tr
+                    v-for="ep in groupEps"
+                    :key="ep.id"
+                    class="hover:bg-[var(--v2-surface-2)]/45 transition-colors"
+                    :class="{ 'bg-[var(--v2-accent)]/6': selectedEpisodes.has(ep.id) }"
+                  >
+                    <td class="py-3 pl-4 sm:pl-5">
+                      <label class="cursor-pointer">
+                        <input
+                          type="checkbox"
+                          class="checkbox"
+                          :disabled="bulkActionLoading"
+                          :checked="selectedEpisodes.has(ep.id)"
+                          @change="toggleEpisodeSelect(ep.id)"
+                        />
+                      </label>
+                    </td>
+                    <td class="py-3 px-3 whitespace-nowrap">
+                      <span class="font-mono font-semibold text-xs px-2 py-0.5 rounded bg-[var(--v2-surface-2)] border border-[var(--v2-border)] text-[var(--v2-ink)]">
+                        {{ episodeLabel(ep) }}
+                      </span>
+                    </td>
+                    <td class="py-3 px-3 max-w-xs sm:max-w-md">
+                      <div class="font-medium text-[var(--v2-ink)] truncate" :title="ep.original_name || ep.title">
+                        {{ ep.original_name || ep.title || 'Untitled Stream' }}
+                      </div>
+                    </td>
+                    <td class="py-3 px-3 whitespace-nowrap">
+                      <span class="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium" :class="statusCfg[ep.status]?.cls">
+                        <component :is="statusCfg[ep.status]?.icon || MoreVertical" :size="13" />
+                        {{ statusCfg[ep.status]?.label || ep.status }}
+                      </span>
+                      <label class="mt-1.5 flex items-center gap-1.5 text-[11px] text-[var(--v2-ink-muted)]">
+                        <span>{{ t('detail.manualMark') }}</span>
+                        <select
+                          class="select select-bordered select-xs w-auto min-w-20"
+                          :value="ep.manual_status || ''"
+                          :disabled="updatingEps.has(ep.id) || bulkActionLoading"
+                          @change="setEpisodeMark(ep, $event)"
+                        >
+                          <option value="">{{ t('detail.noMark') }}</option>
+                          <option v-for="mark in ['pending', 'downloading', 'completed', 'failed']" :key="mark" :value="mark">
+                            {{ statusCfg[mark]?.label }}
+                          </option>
+                        </select>
+                      </label>
+                    </td>
+                    <td class="py-3 px-3">
+                      <div v-if="ep.status === 'needs_review'" class="min-w-48 max-w-sm space-y-1.5">
+                        <p class="text-xs whitespace-normal break-words text-[var(--v2-ink)]">{{ ep.review_reason || t('detail.review.noReason') }}</p>
+                        <p v-if="ep.source_file" class="text-[11px] break-all text-[var(--v2-ink-muted)]"><span class="font-semibold">{{ t('detail.review.source') }}</span> {{ ep.source_file }}</p>
+                        <p v-if="reviewErrors[ep.id]" role="alert" class="text-xs text-red-400 break-words">{{ reviewErrors[ep.id] }}</p>
+                        <button v-if="ep.can_retry_organize" type="button" class="btn btn-outline btn-warning btn-xs" :disabled="updatingEps.has(ep.id) || bulkActionLoading" @click="retryOrganize(ep)">{{ t(ep.review_kind ? 'detail.review.recheck' : 'detail.review.retry') }}</button>
+                        <form
+                          v-if="reviewConfirmation(ep) === 'assign' && assignment && assignment.id === ep.id && assignment.sourceFile === ep.source_file"
+                          @submit.prevent="retryWithAssignment(ep)"
+                        >
+                          <fieldset class="space-y-2" :disabled="updatingEps.has(ep.id) || bulkActionLoading">
+                            <div class="flex gap-2">
+                              <label class="text-xs">{{ t('detail.review.season') }}
+                                <input v-model.number="assignment.season" type="number" min="0" max="99" step="1" required class="input input-bordered input-xs block w-20">
+                              </label>
+                              <label class="text-xs">{{ t('detail.review.episode') }}
+                                <input v-model.number="assignment.number" type="number" min="0" max="2000" step="any" required class="input input-bordered input-xs block w-20">
+                              </label>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                              <button type="submit" class="btn btn-outline btn-warning btn-xs" :disabled="!validAssignment">{{ t('detail.review.assignAndRetry') }}</button>
+                              <button type="button" class="btn btn-ghost btn-xs" @click="assignment = null">{{ t('detail.bulk.cancel') }}</button>
+                            </div>
+                          </fieldset>
+                        </form>
+                        <div v-else class="flex flex-wrap gap-2">
+                          <button v-if="reviewConfirmation(ep) === 'assign'" type="button" class="btn btn-outline btn-warning btn-xs" :disabled="updatingEps.has(ep.id) || bulkActionLoading" @click="editAssignment(ep)">{{ t('detail.review.assign') }}</button>
+                          <button v-else-if="reviewConfirmation(ep) === 'movie'" type="button" class="btn btn-outline btn-warning btn-xs h-auto min-h-6 whitespace-normal" :disabled="updatingEps.has(ep.id) || bulkActionLoading" @click="retryOrganize(ep, { confirm_movie: true })">{{ t('detail.review.confirmMovie') }}</button>
+                          <p v-else-if="ep.review_kind === 'episode_identity' || ep.review_kind === 'movie_selection'" class="text-xs text-[var(--v2-ink-muted)]">{{ t('detail.review.missingSource') }}</p>
+                        </div>
+                      </div>
+                      <div v-else-if="episodeTaskState(ep) === 'missing'" class="min-w-32 text-xs text-amber-400">
+                        <span>{{ t('detail.tasks.missing') }}</span>
+                        <code class="block select-all break-all text-[var(--v2-ink-muted)]">{{ ep.torrent_hash }}</code>
+                      </div>
+                      <span v-else-if="boundTaskKey(ep) && episodeTaskState(ep) !== 'present'" class="text-xs text-[var(--v2-ink-muted)]">
+                        {{ t(checkingTasks ? 'detail.tasks.checking' : 'detail.tasks.unknown') }}
+                      </span>
+                      <span v-else-if="ep.is_stalled" class="inline-flex items-center gap-1 text-amber-400 text-xs font-medium">
+                        <AlertTriangle :size="12" /> {{ t('detail.logs.integrity.stalled') }}
+                      </span>
+                      <span v-else-if="episodeTaskState(ep) === 'present'" class="text-xs text-[var(--v2-ink-muted)]">{{ t('detail.tasks.present') }}</span>
+                      <span v-else class="text-[11px] font-mono text-[var(--v2-ink-subtle)]">{{ t('detail.logs.integrity.verified') }}</span>
+                    </td>
+                    <td class="py-3 px-3 whitespace-nowrap font-mono text-[var(--v2-ink-muted)] tabular-nums">
+                      {{ formatSize(ep.file_size) }}
+                    </td>
+                    <td class="py-3 pl-3 pr-4 sm:pr-5 whitespace-nowrap font-mono text-[11px] text-[var(--v2-ink-subtle)]">
+                      {{ new Date(ep.created_at).toLocaleString(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- Edit Dialog -->
-      <dialog ref="editDialog" class="modal bg-black/80 backdrop-blur-xl" @click.self="closeEditDialog" @close="showEdit = false">
-        <div class="modal-box max-w-2xl bg-base-100 rounded-[3rem] p-10 border border-white/5 overflow-y-auto max-h-[85vh]">
-         <div class="flex items-center justify-between mb-10">
-            <div class="space-y-1">
-                <h3 class="text-3xl font-black tracking-tighter italic">{{ t('detail.edit.title') }}</h3>
-                <p class="text-[10px] font-black tracking-widest uppercase opacity-30">{{ t('detail.edit.subtitle') }}</p>
+      <!-- 编辑订阅弹窗 -->
+      <dialog ref="editDialog" class="modal" @click.self="closeEditDialog" @close="showEdit = false">
+        <div class="modal-box max-w-2xl">
+          <div class="flex items-center justify-between mb-6 pb-3 border-b border-[var(--v2-border)]">
+            <div>
+              <h3 class="text-lg font-bold text-[var(--v2-ink)]">{{ t('detail.edit.title') }}</h3>
+              <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ t('detail.edit.subtitle') }}</p>
             </div>
-            <button class="btn btn-ghost btn-circle" @click="closeEditDialog">
-                <X :size="24" />
-             </button>
+            <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm px-2" @click="closeEditDialog">
+              <X :size="16" />
+            </button>
           </div>
-          
+
           <SubscriptionEditForm
             v-if="showEdit"
             :sub="sub"
@@ -1001,38 +1078,21 @@ onUnmounted(() => {
   display: none;
 }
 .fade-enter-active, .fade-leave-active {
-  transition: opacity 0.5s ease, transform 0.5s ease;
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
-  transform: translateY(20px);
+  transform: translateY(10px);
 }
-
 .slide-enter-active, .slide-leave-active {
-  transition: all 0.3s ease;
+  transition: all 0.22s ease;
 }
 .slide-enter-from {
   opacity: 0;
-  transform: translateY(20px) scale(0.95);
+  transform: translateY(14px) scale(0.97);
 }
 .slide-leave-to {
   opacity: 0;
-  transform: translateY(-20px) scale(0.95);
-}
-
-.table th, .table td {
-  border-color: rgba(var(--bc), 0.05);
-}
-
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: hsl(var(--bc) / 0.1);
-  border-radius: 10px;
+  transform: translateY(10px) scale(0.97);
 }
 </style>

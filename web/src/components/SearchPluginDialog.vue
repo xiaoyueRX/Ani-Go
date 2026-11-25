@@ -74,10 +74,10 @@ onUnmounted(session.abort)
           </option>
         </select>
       </label>
-      <div v-if="target" class="space-y-1 rounded-xl bg-base-200 p-3 text-sm">
+      <div v-if="target" class="space-y-1 v2-panel-muted p-3 text-sm">
         <p v-if="targets.length === 1" class="font-semibold">{{ target.name }} · {{ label(target, target.label) }}</p>
-        <p class="text-xs">{{ t(target.official ? 'settings.plugins.official' : 'settings.plugins.community') }}</p>
-        <p v-if="target.url" dir="ltr" class="break-all text-xs">{{ target.url }}</p>
+        <p class="text-xs text-[var(--v2-ink-muted)]">{{ t(target.official ? 'settings.plugins.official' : 'settings.plugins.community') }}</p>
+        <p v-if="target.url" dir="ltr" class="break-all text-xs font-mono text-[var(--v2-ink-subtle)]">{{ target.url }}</p>
       </div>
       <p v-if="message" role="status" class="break-words text-sm text-success">{{ message }}</p>
       <div v-if="error" role="alert" class="space-y-1 text-sm">

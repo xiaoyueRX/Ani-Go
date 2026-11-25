@@ -170,24 +170,24 @@ async function finishSetup() {
   <div v-if="show" class="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-6">
     <div class="absolute inset-0 bg-black/75 backdrop-blur-md transition-opacity" @click="skipWizard"></div>
 
-    <div class="relative w-full max-w-2xl bg-base-100 border border-base-200/80 rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in duration-300">
-      <div class="px-6 sm:px-10 pt-8 pb-4 border-b border-base-200/60 bg-base-200/30">
+    <div class="relative w-full max-w-2xl v2-panel shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in duration-300">
+      <div class="px-6 sm:px-8 pt-6 pb-4 border-b border-[var(--v2-border)] bg-[var(--v2-surface-2)]/70">
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center text-primary-content shadow-md shadow-primary/20">
+            <div class="w-10 h-10 rounded-xl bg-[var(--v2-accent)] text-[var(--v2-accent-ink)] flex items-center justify-center shadow-sm">
               <Sparkles :size="20" />
             </div>
             <div>
-              <h2 class="text-xl font-black tracking-tight text-base-content">{{ $t("wizard.title") }}</h2>
-              <p class="text-xs font-bold text-base-content/50">{{ $t("wizard.subtitle") }}</p>
+              <h2 class="text-lg font-bold tracking-tight text-[var(--v2-ink)]">{{ $t("wizard.title") }}</h2>
+              <p class="text-xs text-[var(--v2-ink-muted)]">{{ $t("wizard.subtitle") }}</p>
             </div>
           </div>
-          <button @click="skipWizard" class="btn btn-ghost btn-sm rounded-xl text-xs font-bold text-base-content/50 hover:text-base-content">
+          <button type="button" @click="skipWizard" class="v2-btn v2-btn-ghost v2-btn-sm">
             {{ $t("wizard.skipBtn") }}
           </button>
         </div>
 
-        <div class="flex items-center justify-between gap-1 sm:gap-2 mt-4">
+        <div class="flex items-center justify-between gap-1.5 sm:gap-2 mt-3">
           <div
             v-for="(st, idx) in steps"
             :key="st"
@@ -196,11 +196,11 @@ async function finishSetup() {
           >
             <div
               class="w-full h-1.5 rounded-full transition-all duration-300"
-              :class="idx <= currentStep ? 'bg-primary shadow-sm shadow-primary/30' : 'bg-base-300/60'"
+              :class="idx <= currentStep ? 'bg-[var(--v2-accent)]' : 'bg-[var(--v2-surface-3)]'"
             ></div>
             <span
-              class="text-[10px] font-black uppercase tracking-wider transition-colors hidden sm:inline"
-              :class="idx === currentStep ? 'text-primary' : (idx < currentStep ? 'text-base-content/70' : 'text-base-content/30')"
+              class="text-[10px] font-semibold uppercase tracking-wider transition-colors hidden sm:inline"
+              :class="idx === currentStep ? 'text-[var(--v2-accent)]' : (idx < currentStep ? 'text-[var(--v2-ink-muted)]' : 'text-[var(--v2-ink-subtle)]')"
             >
               {{ $t(`wizard.steps.${st}`) }}
             </span>
@@ -208,8 +208,8 @@ async function finishSetup() {
         </div>
       </div>
 
-      <div class="p-6 sm:p-10 overflow-y-auto flex-1 space-y-6">
-        <div v-if="errorMsg" class="alert alert-error text-xs font-bold rounded-2xl py-2.5">
+      <div class="p-6 sm:p-8 overflow-y-auto flex-1 space-y-5">
+        <div v-if="errorMsg" class="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium">
           <span>{{ errorMsg }}</span>
         </div>
 
@@ -402,45 +402,45 @@ async function finishSetup() {
 
         <!-- Step 4: 准备就绪 -->
         <div v-if="currentStep === 4" class="space-y-6 animate-in fade-in duration-200">
-          <div class="text-center py-4 space-y-2">
-            <div class="w-16 h-16 rounded-3xl bg-gradient-to-tr from-primary to-secondary text-primary-content flex items-center justify-center mx-auto shadow-xl shadow-primary/25">
-              <Sparkles :size="32" />
+          <div class="text-center py-3 space-y-2">
+            <div class="w-14 h-14 rounded-2xl bg-[var(--v2-accent)] text-[var(--v2-accent-ink)] flex items-center justify-center mx-auto shadow-lg">
+              <Sparkles :size="28" />
             </div>
-            <h3 class="text-2xl font-black text-base-content pt-2">{{ $t("wizard.ready.title") }}</h3>
-            <p class="text-xs text-base-content/60 max-w-md mx-auto leading-relaxed font-medium">{{ $t("wizard.ready.desc") }}</p>
+            <h3 class="text-xl font-bold text-[var(--v2-ink)] pt-2">{{ $t("wizard.ready.title") }}</h3>
+            <p class="text-xs text-[var(--v2-ink-muted)] max-w-md mx-auto leading-relaxed">{{ $t("wizard.ready.desc") }}</p>
           </div>
 
-          <div class="bg-base-200/40 border border-base-200 rounded-3xl p-5 space-y-2.5">
-            <h4 class="text-xs font-black uppercase tracking-wider text-base-content/40 mb-3">{{ $t("wizard.ready.summaryTitle") }}</h4>
-            <div class="flex items-center justify-between text-xs font-bold">
-              <span class="text-base-content/70">动漫媒体目录</span>
-              <span class="font-mono text-primary">{{ tvBasePath }}</span>
+          <div class="v2-panel-muted p-4 sm:p-5 space-y-2.5">
+            <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-subtle)] mb-2">{{ $t("wizard.ready.summaryTitle") }}</h4>
+            <div class="flex items-center justify-between text-xs font-semibold">
+              <span class="text-[var(--v2-ink-muted)]">动漫媒体目录</span>
+              <span class="font-mono text-[var(--v2-accent)]">{{ tvBasePath }}</span>
             </div>
-            <div class="flex items-center justify-between text-xs font-bold">
-              <span class="text-base-content/70">下载引擎</span>
-              <span class="badge badge-neutral badge-xs font-bold uppercase">{{ dlType }}</span>
+            <div class="flex items-center justify-between text-xs font-semibold">
+              <span class="text-[var(--v2-ink-muted)]">下载引擎</span>
+              <span class="v2-pill font-mono uppercase text-[10px]">{{ dlType }}</span>
             </div>
-            <div class="flex items-center justify-between text-xs font-bold">
-              <span class="text-base-content/70">Mikan 订阅源</span>
-              <span :class="mikanRssUrl ? 'text-success' : 'text-base-content/40'">{{ mikanRssUrl ? $t("wizard.ready.configured") : $t("wizard.ready.unconfigured") }}</span>
+            <div class="flex items-center justify-between text-xs font-semibold">
+              <span class="text-[var(--v2-ink-muted)]">Mikan 订阅源</span>
+              <span :class="mikanRssUrl ? 'text-emerald-400' : 'text-[var(--v2-ink-subtle)]'">{{ mikanRssUrl ? $t("wizard.ready.configured") : $t("wizard.ready.unconfigured") }}</span>
             </div>
-            <div class="flex items-center justify-between text-xs font-bold">
-              <span class="text-base-content/70">Bangumi 令牌</span>
-              <span :class="bgmUserToken ? 'text-success' : 'text-base-content/40'">{{ bgmUserToken ? $t("wizard.ready.configured") : $t("wizard.ready.unconfigured") }}</span>
+            <div class="flex items-center justify-between text-xs font-semibold">
+              <span class="text-[var(--v2-ink-muted)]">Bangumi 令牌</span>
+              <span :class="bgmUserToken ? 'text-emerald-400' : 'text-[var(--v2-ink-subtle)]'">{{ bgmUserToken ? $t("wizard.ready.configured") : $t("wizard.ready.unconfigured") }}</span>
             </div>
           </div>
         </div>
       </div>
 
       <!-- Bottom Nav Bar -->
-      <div class="px-6 sm:px-10 py-5 bg-base-200/50 border-t border-base-200/60 flex items-center justify-between">
+      <div class="px-6 sm:px-8 py-4 bg-[var(--v2-surface-2)]/70 border-t border-[var(--v2-border)] flex items-center justify-between">
         <button
           v-if="currentStep > 0"
           type="button"
           @click="prevStep"
-          class="btn btn-ghost btn-sm rounded-xl font-bold gap-1 text-xs"
+          class="v2-btn v2-btn-ghost v2-btn-sm"
         >
-          <ChevronLeft :size="16" />
+          <ChevronLeft :size="15" />
           <span>{{ $t("wizard.prevBtn") }}</span>
         </button>
         <div v-else></div>
@@ -450,10 +450,10 @@ async function finishSetup() {
             v-if="currentStep < steps.length - 1"
             type="button"
             @click="nextStep"
-            class="btn btn-primary btn-sm rounded-xl px-6 font-black tracking-wide text-xs gap-1.5 shadow-md shadow-primary/20"
+            class="v2-btn v2-btn-primary v2-btn-sm px-5"
           >
             <span>{{ $t("wizard.nextBtn") }}</span>
-            <ChevronRight :size="16" />
+            <ChevronRight :size="15" />
           </button>
 
           <button
@@ -461,7 +461,7 @@ async function finishSetup() {
             type="button"
             @click="finishSetup"
             :disabled="saving"
-            class="btn btn-primary btn-sm rounded-xl px-7 font-black tracking-wide text-xs gap-2 shadow-lg shadow-primary/25 hover:scale-[1.02] active:scale-95 transition-all"
+            class="v2-btn v2-btn-primary v2-btn-sm px-6"
           >
             <RefreshCw v-if="saving" :size="14" class="animate-spin" />
             <Sparkles v-else :size="14" />

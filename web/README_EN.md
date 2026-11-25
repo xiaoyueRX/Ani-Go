@@ -2,7 +2,9 @@
 
 [简体中文](README.md) · [Installation](../README_EN.md)
 
-The dashboard uses Vue 3, Vue Router, TypeScript and Vite. The plugins section in Settings handles manifest import, enablement and provenance filters. `PluginPanel.vue` renders credentials, actions and task lists from an Ani-Go panel declaration. [Author guide](../docs/02_PLUGIN_SPEC_EN.md) · [Import example](../examples/plugins/cloud-tasks.json)
+The dashboard uses Vue 3, Vue Router, TypeScript, Vite and pure Tailwind CSS v4 primitives. It ships 3 official theme presets (4 dark/light color styles each) and supports validated import/export of third-party `anigo-theme-v1` JSON theme packs, synced via `/api/settings` from Settings → Themes & Appearance or the quick Theme Studio drawer.
+
+The plugins section in Settings handles manifest import, enablement and provenance filters. `PluginPanel.vue` renders credentials, actions and task lists from an Ani-Go panel declaration. [Author guide](../docs/02_PLUGIN_SPEC_EN.md) · [Import example](../examples/plugins/cloud-tasks.json)
 
 ## Local development
 

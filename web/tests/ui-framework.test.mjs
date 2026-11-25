@@ -247,3 +247,50 @@ test('支持导入与导出多色彩第三方主题，拒绝非法 CSS 注入并
   })
   assert.equal(conflict.ok, false)
 })
+
+test('主题配置支持服务端设置双向同步，并安全忽略损坏的服务端自定义包', () => {
+  const storage = new Map()
+  const ctx = loadThemeModule(storage)
+  const {
+    importCustomTheme,
+    selectTheme,
+    getServerSettingsPayload,
+    hydrateFromServerSettings,
+    customThemes,
+    activePackId,
+    activeStyleId,
+  } = ctx.mod.useTheme()
+
+  const imported = importCustomTheme(JSON.stringify(ctx.mod.THIRD_PARTY_THEME_TEMPLATE))
+  assert.equal(imported.ok, true)
+  selectTheme('neo-tokyo-custom', 'silver-daylight')
+
+  const payload = getServerSettingsPayload()
+  assert.equal(payload.UI_THEME_PACK, 'neo-tokyo-custom')
+  assert.equal(payload.UI_THEME_STYLE, 'silver-daylight')
+  assert.match(payload.UI_CUSTOM_THEMES, /"neo-tokyo-custom"/)
+
+  // 切到另一台设备（清空上下文，只注入服务端 settings）
+  const freshCtx = loadThemeModule(new Map())
+  const fresh = freshCtx.mod.useTheme()
+  fresh.hydrateFromServerSettings({
+    UI_THEME_PACK: 'neo-tokyo-custom',
+    UI_THEME_STYLE: 'silver-daylight',
+    UI_CUSTOM_THEMES: payload.UI_CUSTOM_THEMES,
+  })
+  assert.equal(fresh.activePackId.value, 'neo-tokyo-custom')
+  assert.equal(fresh.activeStyleId.value, 'silver-daylight')
+  assert.equal(fresh.customThemes.value.length, 1)
+
+  // 注入恶意/不存在的服务端包时保持当前合法主题且不接受非法内容
+  fresh.hydrateFromServerSettings({
+    UI_THEME_PACK: 'nonexistent-pack',
+    UI_THEME_STYLE: 'unknown',
+    UI_CUSTOM_THEMES: '[{"schema":"bad","id":"x"}]',
+  })
+  assert.equal(fresh.activePackId.value, 'neo-tokyo-custom')
+  assert.equal(fresh.customThemes.value.length, 1)
+  assert.equal(activePackId.value, 'neo-tokyo-custom')
+  assert.equal(activeStyleId.value, 'silver-daylight')
+  assert.equal(customThemes.value.length, 1)
+})

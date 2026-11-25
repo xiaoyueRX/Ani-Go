@@ -150,7 +150,7 @@ onUnmounted(session.abort)
       <p v-if="loading" role="status" class="text-sm">{{ t('search.review.preparing') }}</p>
       <p v-if="saved" role="status" class="text-sm">{{ t('search.action.batchSubscribeSuccess', { count: saved }) }}</p>
       <div class="min-h-0 space-y-4 overflow-y-auto">
-        <fieldset v-for="row in rows" :key="row.id" class="space-y-3 rounded-lg border border-base-300 p-3" :disabled="sending">
+        <fieldset v-for="row in rows" :key="row.id" class="space-y-3 v2-panel-muted p-3.5" :disabled="sending">
           <details v-if="row.items.length > 1" class="text-sm">
             <summary class="cursor-pointer">{{ t('search.review.releases', { count: row.items.length }) }}</summary>
             <ul class="list-inside list-disc py-2"><li v-for="(item, i) in row.items" :key="i" class="break-words">{{ item.title }}</li></ul>

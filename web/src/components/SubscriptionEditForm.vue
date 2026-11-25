@@ -47,7 +47,7 @@ function handleSubmit() {
   if (allowedSubgroups.value !== (props.sub.allowed_subgroups || '[]')) u.allowed_subgroups = allowedSubgroups.value || '[]'
   const stallVal = stallTimeoutHours.value === '' || stallTimeoutHours.value === null ? 0 : Number(stallTimeoutHours.value)
   if (stallVal !== (props.sub.stall_timeout_hours || 0)) u.stall_timeout_hours = stallVal
-  
+
   if (Object.keys(u).length === 0) {
     emit('cancel')
     return
@@ -57,35 +57,35 @@ function handleSubmit() {
 </script>
 
 <template>
-  <form @submit.prevent="handleSubmit" class="space-y-6">
-    <div class="space-y-2">
-      <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.primary') }}</label>
-      <input v-model="titleCN" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" required />
+  <form @submit.prevent="handleSubmit" class="space-y-4">
+    <div class="space-y-1.5">
+      <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.primary') }}</label>
+      <input v-model="titleCN" type="text" class="v2-input" required />
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-      <div class="space-y-2">
-        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.aliasEn') }}</label>
-        <input v-model="titleEN" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.aliasEn') }}</label>
+        <input v-model="titleEN" type="text" class="v2-input" />
       </div>
-      <div class="space-y-2">
-        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.aliasJp') }}</label>
-        <input v-model="titleJP" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.aliasJp') }}</label>
+        <input v-model="titleJP" type="text" class="v2-input" />
       </div>
     </div>
 
-    <div class="grid grid-cols-3 gap-6">
-      <div class="space-y-2">
-        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.year') }}</label>
-        <input v-model.number="year" type="number" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+    <div class="grid grid-cols-3 gap-3.5">
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.year') }}</label>
+        <input v-model.number="year" type="number" class="v2-input font-mono" />
       </div>
-      <div class="space-y-2">
-        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.season') }}</label>
-        <input v-model.number="season" type="number" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.season') }}</label>
+        <input v-model.number="season" type="number" class="v2-input font-mono" />
       </div>
-      <div class="space-y-2">
-        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.classification') }}</label>
-        <select v-model="animeType" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold appearance-none">
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.classification') }}</label>
+        <select v-model="animeType" class="v2-input cursor-pointer">
           <option value="">{{ t('edit.select') }}</option>
           <option value="TV">{{ t('edit.types.tv') }}</option>
           <option value="剧场版">{{ t('edit.types.movie') }}</option>
@@ -95,79 +95,79 @@ function handleSubmit() {
       </div>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-      <div class="space-y-2">
-        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.releaseGroup') }}</label>
-        <input v-model="subgroupName" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.releaseGroup') }}</label>
+        <input v-model="subgroupName" type="text" class="v2-input" />
       </div>
-      <div class="space-y-2">
-        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.bangumiRef') }}</label>
-        <input v-model="bangumiId" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" placeholder="ID: 123456" />
-      </div>
-    </div>
-
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-      <div class="space-y-2">
-        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.totalEpisodes') }}</label>
-        <input v-model.number="totalEpisodes" type="number" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" />
-      </div>
-      <div class="space-y-2">
-        <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.stallTimeoutHours') }}</label>
-        <input v-model.number="stallTimeoutHours" type="number" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" placeholder="0 = 默认 (24h)" />
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.bangumiRef') }}</label>
+        <input v-model="bangumiId" type="text" class="v2-input font-mono" placeholder="ID: 123456" />
       </div>
     </div>
 
-    <div class="space-y-2">
-      <label for="subscription-download-directory" class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.pathOverride') }}</label>
-      <input id="subscription-download-directory" v-model="customPath" type="text" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-2xl px-6 py-4 transition-all outline-none font-bold" :placeholder="t('edit.label.defaultDownloadDirectory')" />
-    </div>
-
-    <div class="space-y-2">
-      <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.filterRules') }}</label>
-      <textarea v-model="filterJson" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-[1.5rem] px-6 py-4 transition-all outline-none font-bold h-32" placeholder='{"keywords": ["1080p"], "exclude": ["RAW"]}'></textarea>
-    </div>
-
-    <div class="space-y-2">
-      <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.excludedKeywords') }}</label>
-      <textarea v-model="excludedKeywords" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-[1.5rem] px-6 py-4 transition-all outline-none font-bold h-24" placeholder='["720p", "HEVC", "WEB-DL"]'></textarea>
-      <p class="text-[10px] font-bold opacity-40 uppercase tracking-widest ml-4">{{ t('edit.label.excludedKeywordsHint') }}</p>
-    </div>
-
-    <div class="space-y-2">
-      <label class="text-[10px] font-black uppercase tracking-widest opacity-30 ml-4">{{ t('edit.label.allowedSubgroups') }}</label>
-      <textarea v-model="allowedSubgroups" class="w-full bg-base-200/50 border border-base-300 focus:border-primary/30 focus:bg-base-100 rounded-[1.5rem] px-6 py-4 transition-all outline-none font-bold h-24" placeholder='["LoliHouse", "ANi", "MoyaiSubs"]'></textarea>
-      <p class="text-[10px] font-bold opacity-40 uppercase tracking-widest ml-4">{{ t('edit.label.allowedSubgroupsHint') }}</p>
-    </div>
-
-    <div class="p-6 bg-base-200/50 rounded-2xl border border-base-300 flex items-center justify-between">
-       <div class="flex items-center gap-4">
-         <div class="w-10 h-10 rounded-full bg-success/20 flex items-center justify-center text-success">
-            <Check :size="20" />
-         </div>
-         <div>
-            <p class="text-sm font-black tracking-tight">{{ t('edit.label.finalized') }}</p>
-            <p class="text-[10px] font-bold opacity-40 uppercase tracking-widest">{{ t('edit.label.finalizedDesc') }}</p>
-         </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.totalEpisodes') }}</label>
+        <input v-model.number="totalEpisodes" type="number" class="v2-input font-mono" />
       </div>
-       <input v-model="completed" type="checkbox" class="toggle toggle-success" />
-    </div>
-
-    <div class="p-6 bg-base-200/50 rounded-2xl border border-base-300 flex items-center justify-between">
-       <div class="flex items-center gap-4">
-         <div class="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center text-warning">
-            <StepForward :size="20" />
-         </div>
-         <div>
-            <p class="text-sm font-black tracking-tight">{{ t('edit.label.skipBulkUpdate') }}</p>
-            <p class="text-[10px] font-bold opacity-40 uppercase tracking-widest">{{ t('edit.label.skipBulkUpdateDesc') }}</p>
-         </div>
+      <div class="space-y-1.5">
+        <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.stallTimeoutHours') }}</label>
+        <input v-model.number="stallTimeoutHours" type="number" class="v2-input font-mono" placeholder="0 = 默认 (24h)" />
       </div>
-       <input v-model="skipBulkUpdate" type="checkbox" class="toggle toggle-warning" />
     </div>
 
-    <div class="flex gap-4 justify-end pt-6">
-      <button type="button" class="btn btn-ghost rounded-2xl px-8 h-14 min-h-0 uppercase font-black tracking-widest text-[10px]" @click="emit('cancel')">{{ t('edit.abandon') }}</button>
-      <button type="submit" class="btn btn-primary rounded-2xl px-12 h-14 min-h-0 uppercase font-black tracking-widest text-[10px] shadow-xl shadow-lg">{{ t('edit.commit') }}</button>
+    <div class="space-y-1.5">
+      <label for="subscription-download-directory" class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.pathOverride') }}</label>
+      <input id="subscription-download-directory" v-model="customPath" type="text" class="v2-input font-mono text-xs" :placeholder="t('edit.label.defaultDownloadDirectory')" />
+    </div>
+
+    <div class="space-y-1.5">
+      <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.filterRules') }}</label>
+      <textarea v-model="filterJson" class="textarea font-mono text-xs h-24" placeholder='{"keywords": ["1080p"], "exclude": ["RAW"]}'></textarea>
+    </div>
+
+    <div class="space-y-1.5">
+      <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.excludedKeywords') }}</label>
+      <textarea v-model="excludedKeywords" class="textarea font-mono text-xs h-20" placeholder='["720p", "HEVC", "WEB-DL"]'></textarea>
+      <p class="text-[11px] text-[var(--v2-ink-subtle)]">{{ t('edit.label.excludedKeywordsHint') }}</p>
+    </div>
+
+    <div class="space-y-1.5">
+      <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.allowedSubgroups') }}</label>
+      <textarea v-model="allowedSubgroups" class="textarea font-mono text-xs h-20" placeholder='["LoliHouse", "ANi", "MoyaiSubs"]'></textarea>
+      <p class="text-[11px] text-[var(--v2-ink-subtle)]">{{ t('edit.label.allowedSubgroupsHint') }}</p>
+    </div>
+
+    <div class="v2-panel-muted p-3.5 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-9 h-9 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-400 shrink-0">
+          <Check :size="17" />
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-[var(--v2-ink)]">{{ t('edit.label.finalized') }}</p>
+          <p class="text-[11px] text-[var(--v2-ink-muted)] truncate">{{ t('edit.label.finalizedDesc') }}</p>
+        </div>
+      </div>
+      <input v-model="completed" type="checkbox" class="toggle" />
+    </div>
+
+    <div class="v2-panel-muted p-3.5 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-9 h-9 rounded-full bg-amber-500/15 flex items-center justify-center text-amber-400 shrink-0">
+          <StepForward :size="17" />
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-[var(--v2-ink)]">{{ t('edit.label.skipBulkUpdate') }}</p>
+          <p class="text-[11px] text-[var(--v2-ink-muted)] truncate">{{ t('edit.label.skipBulkUpdateDesc') }}</p>
+        </div>
+      </div>
+      <input v-model="skipBulkUpdate" type="checkbox" class="toggle" />
+    </div>
+
+    <div class="flex justify-end gap-2.5 pt-2">
+      <button type="button" class="v2-btn v2-btn-ghost px-5" @click="emit('cancel')">{{ t('edit.abandon') }}</button>
+      <button type="submit" class="v2-btn v2-btn-primary px-6">{{ t('edit.commit') }}</button>
     </div>
   </form>
 </template>
