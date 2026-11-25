@@ -27,20 +27,20 @@ docker compose up -d ani-go
 docker compose logs ani-go
 ```
 
-Open `http://<NAS-LAN-address>:20001` and sign in as `admin`. On a fresh database, the current source uses `ANIGO_ADMIN_PASSWORD` for the initial password. If unset, it writes a generated password to the first startup log. For the v0.7.0 release, follow that version's login instructions in the startup log and change the initial password. Upgrades keep existing accounts.
+Open `http://<NAS-LAN-address>:20001` and sign in as `admin`. On a fresh database, v0.8.0+ releases and the current source use `ANIGO_ADMIN_PASSWORD` for the initial password. If unset, they write a generated password to the first startup log. For historical releases such as `v0.7.0`, follow that version's login instructions in the startup log and change the initial password. Upgrades keep existing accounts.
 
-The Compose file pulls the GHCR `latest` image, which follows commits to `main` that pass CI. For a pinned release, select its version tag. To run your checkout, change the service image to `ani-go:local`, enable `build: .`, and run `docker compose up -d --build ani-go`. The *Unreleased* section of the changelog lists source changes since the last release. [Compose file](docker-compose.yml) · [Changelog](CHANGELOG.md)
+The Compose file pulls the GHCR `latest` image, which follows commits to `main` that pass CI. For a pinned release, select its version tag. To run your checkout, change the service image to `ani-go:local`, enable `build: .`, and run `docker compose up -d --build ani-go`. See the changelog for release notes and changes across versions. [Compose file](docker-compose.yml) · [Changelog](CHANGELOG.md)
 
 ### Standalone binary
 
-The 1.0 release targets x86-64 (`amd64`) and ARM64 on Windows and Linux, and Apple Silicon (`darwin-arm64`) on macOS. For a Linux NAS with a 64-bit Intel or AMD processor, choose `linux-amd64`.
+Starting with v0.8.0, official releases target x86-64 (`amd64`) and ARM64 on Windows and Linux, and Apple Silicon (`darwin-arm64`) on macOS. For a Linux NAS with a 64-bit Intel or AMD processor, choose `linux-amd64`.
 
 Download the archive matching your operating system and CPU architecture. Use `checksums.txt` from the same release to verify it. In the extracted directory, configure `.env` and run `./anigo` (on Windows, `anigo.exe`). Use the same working directory on subsequent starts so the program can find its configuration and database at their relative paths. On Linux and macOS, the repository installer can also download and verify a release archive. [Installer](install.sh) · [Release downloads](https://github.com/xiaoyueRX/Ani-Go/releases/latest)
 
 ## Track your first series
 
 1. In Settings, choose the active download client, enter its Web API address and credentials, and test the connection. Set a personal Mikan RSS feed, or supply a series-specific RSS feed on the subscription.
-2. Search for a series and choose **Subscribe**. In the current source, selecting an episode release lets you review the series title, season, release group and resolution before tracking future releases. Mikan series entries offer a release-group picker.
+2. Search for a series and choose **Subscribe**. Selecting an episode release lets you review the series title, season, release group and resolution before tracking future releases. Mikan series entries and schedule dialogs offer a multi-select release-group picker with default-group matching.
 3. Open Downloads to see the transfer. Open the subscription to check the episode's organization status after download. Leaving the subscription download directory empty uses the client's own save settings. Series, movies and specials can each have a separate library directory.
 4. Open the subscription to inspect files marked **Needs review**. After correcting a mount, select the affected files and click **Recheck selected**. The page shows which files are queued and keeps failed items selected for retry. It skips files that need identification. For each of those, enter the season and episode or confirm the feature film. Use season 0 for specials.
 5. Scan the organized directory with your media server. The Compose example enables hard linking to keep the source file available for seeding. Hard links require a shared filesystem. Organizing across filesystems copies the file and uses additional disk space.
@@ -53,7 +53,7 @@ Plugins maintained by xiaoyueRX are marked **Official** in Ani-Go. Other authors
 
 ### 115 cloud downloads
 
-NaJue requested a way to submit magnet links to 115 cloud downloads. The current source includes the official `cloud-115` plugin. [Original request #1](https://github.com/xiaoyueRX/Ani-Go/issues/1)
+NaJue requested a way to submit magnet links to 115 cloud downloads. Built-in support ships in v0.8.0+ as the official `cloud-115` plugin. [Original request #1](https://github.com/xiaoyueRX/Ani-Go/issues/1)
 
 1. Open **Settings → Plugins & Automation** and enable **115 磁力云下载** (115 magnet cloud downloads). The plugin is disabled by default.
 2. Save a user-authorized 115 Open Platform OAuth `access_token` with cloud download permission, or set `CLOUD115_ACCESS_TOKEN` in the deployment environment. The environment token takes precedence. Replace or remove it at its source.

@@ -362,7 +362,7 @@ function closeDrawer() {
 
     <!-- 移动端顶栏：第一个按钮触发侧滑抽屉，右侧 .avatar 触发账户菜单 -->
     <header class="sticky top-0 z-30 flex h-14 w-full items-center justify-between px-3 bg-[var(--v2-dock-bg)] backdrop-blur-xl border-b border-[var(--v2-border)] lg:hidden">
-      <button type="button" class="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)]" @click="isDrawerOpen = true" aria-label="Menu">
+      <button type="button" class="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)]" @click="isUserMenuOpen = false; isDrawerOpen = true" aria-label="Menu">
         <Menu :size="19" />
       </button>
 
@@ -395,7 +395,9 @@ function closeDrawer() {
           v-if="isUserMenuOpen"
           class="absolute right-0 mt-2 w-48 v2-panel p-1.5 shadow-xl z-50 border border-[var(--v2-border-strong)]"
         >
-          <div class="px-3 py-1.5 text-xs font-semibold text-[var(--v2-ink-muted)] truncate">{{ username || 'admin' }}</div>
+          <ul class="m-0 p-0 list-none">
+            <li class="px-3 py-1.5 text-xs font-semibold text-[var(--v2-ink-muted)] truncate">{{ username || 'admin' }}</li>
+          </ul>
           <button type="button" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium hover:bg-[var(--v2-surface-2)]" @click="openThemeStudio">
             <Palette :size="14" class="text-[var(--v2-accent)]" />
             <span>{{ locale === 'zh' ? '主题与配色' : 'Themes' }}</span>

@@ -140,7 +140,7 @@ class InstallerTest(unittest.TestCase):
                 (self.state / ".env").write_text("user config")
                 (self.state / "ani-go.db").write_text("user data")
                 self.fetch_log.unlink()
-                for version in ("", "latest", "v1.0.0-rc.1", "1.0.0", "v2.1.0"):
+                for version in ("", "latest", "0.8.0", "v0.8.0", "v1.0.0-rc.1", "1.0.0", "v2.1.0"):
                     result = self.install(ANIGO_VERSION=version, success=False, **env)
                     self.assertIn(label, result.stderr)
                     self.assertIn("ANIGO_VERSION=v0.7.0", result.stderr)
@@ -149,11 +149,11 @@ class InstallerTest(unittest.TestCase):
                     self.assertEqual(subprocess.check_output([self.program], text=True).strip(), "v0.7.0")
                     self.assertEqual((self.state / ".env").read_text(), "user config")
                     self.assertEqual((self.state / "ani-go.db").read_text(), "user data")
-                self.release("v0.8.0", "linux-amd64")
-                result = self.install(ANIGO_VERSION="v0.8.0", success=False, **env)
-                self.assertIn(f"ani-go-v0.8.0-{package}.tar.gz", result.stderr)
+                self.release("v0.7.1", "linux-amd64")
+                result = self.install(ANIGO_VERSION="v0.7.1", success=False, **env)
+                self.assertIn(f"ani-go-v0.7.1-{package}.tar.gz", result.stderr)
                 self.assertEqual(self.fetch_log.read_text().splitlines(), [
-                    "https://github.com/xiaoyueRX/Ani-Go/releases/download/v0.8.0/checksums.txt",
+                    "https://github.com/xiaoyueRX/Ani-Go/releases/download/v0.7.1/checksums.txt",
                 ])
                 self.assertEqual(self.program.resolve(), program)
                 self.install("--uninstall", **env)

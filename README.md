@@ -27,20 +27,20 @@ docker compose up -d ani-go
 docker compose logs ani-go
 ```
 
-通过 `http://<NAS 的局域网地址>:20001` 登录，账户为 `admin`。当前源码在空数据库上使用 `ANIGO_ADMIN_PASSWORD` 预设首密，留空则在首次启动日志中显示随机密码。若使用 v0.7.0 发行包，请按该版本启动日志中的提示登录并更换初始密码。升级会保留已有账号。
+通过 `http://<NAS 的局域网地址>:20001` 登录，账户为 `admin`。v0.8.0+ 发行版及当前源码在空数据库上使用 `ANIGO_ADMIN_PASSWORD` 预设首密，留空则在首次启动日志中显示随机密码。若使用 `v0.7.0` 等历史发行包，请按对应版本启动日志中的提示登录并更换初始密码。升级会保留已有账号。
 
-Compose 默认拉取 GHCR 的 `latest` 镜像，跟随通过 CI 的 `main` 提交。需要固定版本时，选用与 GitHub Release 对应的版本标签。要运行当前检出的源码，可将 Compose 服务的 `image` 改为 `ani-go:local`，启用 `build: .`，运行 `docker compose up -d --build ani-go`。发行包与源码的功能差异见更新记录的「未发布」部分。[Compose 文件](docker-compose.yml) · [更新记录](CHANGELOG.md)
+Compose 默认拉取 GHCR 的 `latest` 镜像，跟随通过 CI 的 `main` 提交。需要固定版本时，选用与 GitHub Release 对应的版本标签。要运行当前检出的源码，可将 Compose 服务的 `image` 改为 `ani-go:local`，启用 `build: .`，运行 `docker compose up -d --build ani-go`。各版本功能变化与发布说明见更新记录。[Compose 文件](docker-compose.yml) · [更新记录](CHANGELOG.md)
 
 ### 独立二进制
 
-1.0 的官方目标为 Windows 和 Linux 的 x86-64（`amd64`）与 ARM64，以及 Apple Silicon Mac（`darwin-arm64`）。使用 Intel 或 AMD 64 位处理器的 Linux NAS 选择 `linux-amd64`。
+自 v0.8.0 起，官方发行目标为 Windows 和 Linux 的 x86-64（`amd64`）与 ARM64，以及 Apple Silicon Mac（`darwin-arm64`）。使用 Intel 或 AMD 64 位处理器的 Linux NAS 选择 `linux-amd64`。
 
 从 Releases 下载与操作系统和 CPU 架构匹配的压缩包，可用同一发行页的 `checksums.txt` 校验。在解压目录中配置 `.env`，运行 `./anigo`（Windows 为 `anigo.exe`）。以后从同一工作目录启动，以便继续读取配置和相对路径下的数据库。Linux 和 macOS 也可运行仓库的安装脚本下载并校验发行包。[安装脚本](install.sh) · [下载发行包](https://github.com/xiaoyueRX/Ani-Go/releases/latest)
 
 ## 从订阅到入库
 
 1. 在设置中选定下载器，填写 Web API 地址和凭据并测试连接。配置蜜柑个人 RSS，或在订阅中指定该作品的 RSS。
-2. 在番剧检索页找到作品并追番。当前源码支持从单集发布标题提取作品名、季数、字幕组和分辨率，确认后会按作品和季跟踪后续集数。蜜柑系列条目可以直接选择字幕组。
+2. 在番剧检索页找到作品并追番。从单集发布标题提取作品名、季数、字幕组和分辨率后，确认即可按作品和季跟踪后续集数。蜜柑系列条目与时间表弹窗支持多选字幕组，并按默认组自动匹配或引导选择。
 3. 在下载队列查看传输进度，在订阅详情查看每集的整理状态。订阅的下载目录留空时使用下载器自己的保存设置。整理目录可分别为番剧、电影和特别篇设定。
 4. 若剧集显示「待复核」，打开订阅详情核对原因和文件名。修正挂载后，可以勾选受影响的文件，点击「批量重新核验」。页面会显示哪些文件已排队，并保留失败项供重试。需要确认归属的文件会跳过，请逐项指定季集或确认电影正片。特别篇用第 0 季。
 5. 用媒体服务器扫描整理目录。Compose 示例开启硬链接以保留下载源继续做种；源与目标在同一文件系统才能建立硬链接，跨卷时会复制文件并额外占用磁盘。
@@ -53,7 +53,7 @@ Ani-Go 还支持按历史发布补全缺集、查看放送日历、按模板命�
 
 ### 115 云下载插件
 
-NaJue 在 issue #1 中提出「希望能提交115磁力云下载，来加速。」当前源码提供官方插件 `cloud-115`。[原始需求](https://github.com/xiaoyueRX/Ani-Go/issues/1)
+NaJue 在 issue #1 中提出「希望能提交115磁力云下载，来加速。」v0.8.0 起内置官方插件 `cloud-115`。[原始需求](https://github.com/xiaoyueRX/Ani-Go/issues/1)
 
 1. 打开 **设置 → 插件与自动化**，启用默认关闭的 **115 磁力云下载**。
 2. 保存已获用户授权且具备云下载权限的 115 开放平台 OAuth `access_token`。也可以设置环境变量 `CLOUD115_ACCESS_TOKEN`。环境令牌优先，更换或移除时请在部署环境操作。

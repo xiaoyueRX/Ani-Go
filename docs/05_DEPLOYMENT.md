@@ -88,7 +88,7 @@ curl -fsS http://localhost:20001/api/health
 
 ## 独立二进制安装
 
-1.0 的 macOS 安装包适用于 Apple Silicon。Linux 和 Windows 均提供 x86-64（`amd64`）和 ARM64 安装包。Intel Mac 和 32 位 ARMv7 Linux 设备可固定使用提供对应安装包的历史版本，例如 `v0.7.0`。旧版界面可能提示有新版本；要迁移到 1.0，请在受支持的设备上恢复备份，并单独迁移媒体文件。[v0.7.0 发行包](https://github.com/xiaoyueRX/Ani-Go/releases/tag/v0.7.0)
+自 v0.8.0 起，macOS 安装包适用于 Apple Silicon，Linux 和 Windows 均提供 x86-64（`amd64`）和 ARM64 安装包。Intel Mac 和 32 位 ARMv7 Linux 设备可固定使用提供对应安装包的历史版本，例如 `v0.7.0`。旧版界面可能提示有新版本；要迁移到 v0.8.0 及后续版本，请在受支持的设备上恢复备份，并单独迁移媒体文件。[v0.7.0 发行包](https://github.com/xiaoyueRX/Ani-Go/releases/tag/v0.7.0)
 
 Linux 或 macOS 可使用安装脚本，它从 GitHub 下载发行包，核对同一版本的 `checksums.txt` 后安装到当前用户的目录。需要固定版本时，把示例中的 `| sh` 改成 `| ANIGO_VERSION=v0.7.0 sh`。
 

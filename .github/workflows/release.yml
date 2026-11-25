@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: Existing release tag (e.g. v0.7.0). Leave empty to use the selected tag or the version declared in main.go.
+        description: Existing release tag (e.g. v0.8.0). Leave empty to use the selected tag or the version declared in main.go.
         type: string
         required: false
 

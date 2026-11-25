@@ -32,7 +32,7 @@ import (
 	"github.com/xiaoyueRX/Ani-Go/internal/update"
 )
 
-var version = "v0.7.0"
+var version = "v0.8.0"
 
 func main() {
 	if update.RunHandoff(os.Args[1:]) {

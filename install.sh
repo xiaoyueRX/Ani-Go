@@ -65,8 +65,8 @@ case $os-$arch in
 esac
 if [ -n "$legacy_platform" ]; then
   case $version in
-    0.*|v0.*) ;; # 仅允许显式固定历史版本，并照常核验官方校验清单。
-    *) die "Ani-Go 从 1.0 起不再为 $legacy_platform 提供发行包。需要历史版本时可指定 ANIGO_VERSION=v0.7.0。" ;;
+    0.[0-7].*|v0.[0-7].*) ;; # 仅允许显式固定历史版本，并照常核验官方校验清单。
+    *) die "Ani-Go 从 v0.8.0 起不再为 $legacy_platform 提供发行包。需要历史版本时可指定 ANIGO_VERSION=v0.7.0。" ;;
   esac
 fi
 if [ -z "$version" ]; then
