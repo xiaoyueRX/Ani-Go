@@ -2,65 +2,88 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
-import { 
-  Antenna, LayoutGrid, RefreshCw, 
-  AlertTriangle, X, Calendar, 
+import {
+  Antenna, LayoutGrid, RefreshCw,
+  AlertTriangle, X, Calendar,
   Image, Check, Clock,
-  Search,
-  WifiOff, Info, History
+  Search, WifiOff, Info, History, Sparkles, ListChecks, CheckCircle, XCircle
 } from 'lucide-vue-next'
-import { ListChecks, CheckCircle, XCircle } from 'lucide-vue-next'
 import OnboardingModal from '../components/OnboardingModal.vue'
 import ChangelogModal from '../components/ChangelogModal.vue'
-import { PageHeader, EmptyState } from '../components/ui'
 import { useVersion } from '../composables/useVersion'
 import { useAuth } from '../composables/useAuth'
-
 import { useI18n } from 'vue-i18n'
-const { t } = useI18n()
 
-// 认证状态
+const { t, locale } = useI18n()
 const { isAuthenticated, isOfflineMode, initAuth, checkAuth } = useAuth()
 
 interface TorrentItem {
-  title: string; 
-  url: string; 
-  source: string; 
-  bangumi_id: string; 
-  info_hash: string; 
-  cover_url: string;
-  aired_time?: string;
-  aired_date?: string;
-  total_episodes?: number;
-  is_finished?: boolean;
+  title: string
+  url: string
+  source: string
+  bangumi_id: string
+  info_hash: string
+  cover_url: string
+  aired_time?: string
+  aired_date?: string
+  total_episodes?: number
+  is_finished?: boolean
 }
 
-
 interface BangumiEpisode {
-  number: number;
-  title: string;
+  number: number
+  title: string
 }
 
 interface BangumiAnime {
-  id: string;
-  title_cn: string;
-  year: number;
-  total_eps: number;
-  description: string;
-  cover_url: string;
+  id: string
+  title_cn: string
+  year: number
+  total_eps: number
+  description: string
+  cover_url: string
 }
 
 interface WeekDay {
-  day_of_week: number; label: string; items: TorrentItem[]
+  day_of_week: number
+  label: string
+  items: TorrentItem[]
 }
 
 const router = useRouter()
 const weekDays = ref<WeekDay[]>([])
 const subscribedIds = ref<Record<string, boolean>>({})
 const loading = ref(true)
-const scheduleSource = ref<"mikan" | "bangumi" | "yuc">("mikan")
+const scheduleSource = ref<'mikan' | 'bangumi' | 'yuc'>('mikan')
 const isYucPluginEnabled = ref(false)
 const error = ref('')
+const fallbackSourceNotice = ref('')
+const activeTab = ref<'schedule' | 'mysub'>('schedule')
+const selectedDayFilter = ref<number | 'all'>('all')
+const selectedItem = ref<TorrentItem | null>(null)
+const selectedMetadata = ref<{ anime: BangumiAnime; episodes: BangumiEpisode[] } | null>(null)
+const metaLoading = ref(false)
+const subStats = ref<Record<number, { downloaded: number; total: number }>>({})
+
+const batchMode = ref(false)
+const selectedItems = ref<Set<string>>(new Set())
+const subgroupPickerOpen = ref(false)
+const subgroupPickerItem = ref<TorrentItem | null>(null)
+const selectedSubgroups = ref<Map<string, string[]>>(new Map())
+const currentSubgroupSet = ref<Set<string>>(new Set())
+const customSubgroupInput = ref('')
+const defaultSubgroups = ref<string[]>([])
+const defaultSubgroupPickerOpen = ref(false)
+
+const COMMON_SUBGROUPS = [
+  '桜都字幕组', '千夏字幕组', '喵萌奶茶屋', 'LoliHouse',
+  'Airota', 'ANi', '极影字幕社', 'SweetSub',
+  'Haruhana', 'MingY', '星空字幕组',
+]
+
+const batchResultModal = ref(false)
+const batchResult = ref<{ success: { title: string; id: number }[]; failed: { title: string; error: string }[] }>({ success: [], failed: [] })
+const batchSubmitting = ref(false)
 
 async function checkYucPlugin() {
   try {
@@ -70,51 +93,12 @@ async function checkYucPlugin() {
       isYucPluginEnabled.value = !!(p && p.enabled)
       if (!isYucPluginEnabled.value && scheduleSource.value === 'yuc') {
         scheduleSource.value = 'mikan'
-        fetchSchedule()
       }
     }
   } catch {}
 }
-const activeTab = ref<'schedule' | 'mysub'>('schedule')
-const selectedItem = ref<TorrentItem | null>(null)
-const selectedMetadata = ref<{anime: BangumiAnime, episodes: BangumiEpisode[]} | null>(null)
-const metaLoading = ref(false)
-
-// 订阅下载统计
-const subStats = ref<Record<number, {downloaded: number, total: number}>>({})
-
-// 批量订阅
-const batchMode = ref(false)
-const selectedItems = ref<Set<string>>(new Set())
-const subgroupPickerOpen = ref(false)
-const subgroupPickerItem = ref<TorrentItem | null>(null)
-const selectedSubgroups = ref<Map<string, string[]>>(new Map())
-const currentSubgroupSet = ref<Set<string>>(new Set())
-const customSubgroupInput = ref('')
-
-const defaultSubgroups = ref<string[]>([])
-const defaultSubgroupPickerOpen = ref(false)
-
-const COMMON_SUBGROUPS = [
-  '桜都字幕组',
-  '千夏字幕组',
-  '喵萌奶茶屋',
-  'LoliHouse',
-  'Airota',
-  'ANi',
-  '极影字幕社',
-  'SweetSub',
-  'Haruhana',
-  'MingY',
-  '星空字幕组',
-]
-
-const batchResultModal = ref(false)
-const batchResult = ref<{success: {title: string, id: number}[], failed: {title: string, error: string}[]}>({success: [], failed: []})
-const batchSubmitting = ref(false)
 
 function getSubId(item: TorrentItem): number | null {
-  // info_hash 已被后端复用为 sub_id（字符串形式）
   if (item.info_hash && item.info_hash !== 'subscribed') {
     return parseInt(item.info_hash)
   }
@@ -123,9 +107,7 @@ function getSubId(item: TorrentItem): number | null {
 
 function getItemStats(item: TorrentItem) {
   const id = getSubId(item)
-  if (id !== null && subStats.value[id]) {
-    return subStats.value[id]
-  }
+  if (id !== null && subStats.value[id]) return subStats.value[id]
   return null
 }
 
@@ -138,12 +120,8 @@ else if (currentMonth >= 4 && currentMonth <= 6) currentSeason = 2
 else if (currentMonth >= 7 && currentMonth <= 9) currentSeason = 3
 else currentSeason = 4
 
-let defaultYear = currentYear
-let defaultSeason = currentSeason
-
-const selectedYear = ref(defaultYear)
-const selectedSeason = ref(defaultSeason)
-
+const selectedYear = ref(currentYear)
+const selectedSeason = ref(currentSeason)
 const { changelog, showChangelog, checkVersion } = useVersion()
 
 const years = computed(() => {
@@ -160,66 +138,65 @@ const allSeasons = computed(() => [
   { value: 4, label: t('schedule.seasons.autumn') },
 ])
 
-const maxSeason = computed(() => {
-  if (selectedYear.value > currentYear) return 4
-  return Math.min(currentSeason + 1, 4)
-})
+const maxSeason = computed(() => (selectedYear.value > currentYear ? 4 : Math.min(currentSeason + 1, 4)))
+const seasons = computed(() => (selectedYear.value < currentYear ? allSeasons.value : allSeasons.value.filter(s => s.value <= maxSeason.value)))
 
-const seasons = computed(() => {
-  if (selectedYear.value < currentYear) return allSeasons.value
-  return allSeasons.value.filter(s => s.value <= maxSeason.value)
-})
-
-const weekOrder = [1, 2, 3, 4, 5, 6, 7, 0, 8]
+const weekOrder = [1, 2, 3, 4, 5, 6, 7]
 const dayNames = computed<Record<number, string>>(() => ({
-  1: t('schedule.days.monday'), 2: t('schedule.days.tuesday'), 3: t('schedule.days.wednesday'), 4: t('schedule.days.thursday'),
-  5: t('schedule.days.friday'), 6: t('schedule.days.saturday'), 7: t('schedule.days.sunday'), 0: t('schedule.days.sp'), 8: t('schedule.days.tbd'),
+  1: t('schedule.days.monday'),
+  2: t('schedule.days.tuesday'),
+  3: t('schedule.days.wednesday'),
+  4: t('schedule.days.thursday'),
+  5: t('schedule.days.friday'),
+  6: t('schedule.days.saturday'),
+  7: t('schedule.days.sunday'),
 }))
 
-const sortedDays = computed(() =>
-  [...weekDays.value]
-    // 只展示周一至周日正片放送，彻底排除 SP/OVA/剧场版等杂类分组
-    .filter(d => d.day_of_week >= 1 && d.day_of_week <= 7)
-    .map(d => ({
-      ...d,
-      label: dayNames.value[d.day_of_week] || d.label,
-      // 过滤无效或空标题条目，防止网格出现空白占位洞
-      items: (d.items || []).filter(item => item && item.title && item.title.trim().length > 0)
-    }))
-    .sort((a, b) => weekOrder.indexOf(a.day_of_week) - weekOrder.indexOf(b.day_of_week))
-)
-
-const scheduleSearch = ref('')
-const onlyToday = ref(false)
 const todayWeekday = computed(() => {
   const d = new Date().getDay()
   return d === 0 ? 7 : d
 })
 
+const sortedDays = computed(() =>
+  [...weekDays.value]
+    .filter(d => d.day_of_week >= 1 && d.day_of_week <= 7)
+    .map(d => ({
+      ...d,
+      label: dayNames.value[d.day_of_week] || d.label,
+      items: (d.items || []).filter(item => item && item.title && item.title.trim().length > 0)
+    }))
+    .sort((a, b) => weekOrder.indexOf(a.day_of_week) - weekOrder.indexOf(b.day_of_week))
+)
+
+const dayCounts = computed(() => {
+  const map: Record<number, number> = {}
+  for (const d of sortedDays.value) map[d.day_of_week] = d.items.length
+  return map
+})
+
+const totalEntriesCount = computed(() => sortedDays.value.reduce((acc, d) => acc + d.items.length, 0))
+
+const scheduleSearch = ref('')
+
 function setScheduleSource(src: 'mikan' | 'bangumi' | 'yuc') {
   if (scheduleSource.value === src) return
   scheduleSource.value = src
-  fetchSchedule()
+  fallbackSourceNotice.value = ''
+  void fetchSchedule(false)
 }
 
 const filteredDays = computed(() => {
   let days = sortedDays.value
-  
-  if (onlyToday.value) {
-    days = days.filter(d => d.day_of_week === todayWeekday.value)
+  if (selectedDayFilter.value !== 'all') {
+    days = days.filter(d => d.day_of_week === selectedDayFilter.value)
   }
-
   if (scheduleSearch.value.trim()) {
     const q = scheduleSearch.value.toLowerCase()
-    days = days.map(d => {
-      const items = d.items.filter(i => 
-        i.title.toLowerCase().includes(q) || 
-        (i.bangumi_id && i.bangumi_id.includes(q))
-      )
-      return { ...d, items }
-    }).filter(d => d.items.length > 0)
+    days = days.map(d => ({
+      ...d,
+      items: d.items.filter(i => i.title.toLowerCase().includes(q) || (i.bangumi_id && i.bangumi_id.includes(q)))
+    })).filter(d => d.items.length > 0)
   }
-
   return days
 })
 
@@ -227,10 +204,8 @@ const subscribedSchedule = computed(() => {
   const map: Record<string, TorrentItem[]> = {}
   for (const day of weekDays.value) {
     if (day.day_of_week < 1 || day.day_of_week > 7) continue
+    if (selectedDayFilter.value !== 'all' && day.day_of_week !== selectedDayFilter.value) continue
     let items = (day.items || []).filter(i => i && i.title && (i.info_hash || subscribedIds.value[i.bangumi_id]))
-    if (onlyToday.value && day.day_of_week !== todayWeekday.value) {
-      continue
-    }
     if (scheduleSearch.value.trim()) {
       const q = scheduleSearch.value.toLowerCase()
       items = items.filter(i => i.title.toLowerCase().includes(q) || (i.bangumi_id && i.bangumi_id.includes(q)))
@@ -240,21 +215,14 @@ const subscribedSchedule = computed(() => {
   return map
 })
 
-const subscribedCount = computed(() => {
-  let count = 0
-  Object.values(subscribedSchedule.value).forEach(items => {
-    count += items.length
-  })
-  return count
-})
+const subscribedCount = computed(() => Object.values(subscribedSchedule.value).reduce((acc, items) => acc + items.length, 0))
+
 async function handleItemClick(item: TorrentItem) {
   const subId = item.info_hash || subscribedIds.value[item.bangumi_id]
-  if (subId && subId !== "subscribed") {
+  if (subId && subId !== 'subscribed') {
     router.push(`/subscriptions/${subId}`)
     return
   }
-
-  
   selectedItem.value = item
   if (item.bangumi_id) {
     metaLoading.value = true
@@ -278,8 +246,6 @@ function proxyImage(url: string | undefined): string {
   return `/api/proxy/image?url=${encodeURIComponent(target)}`
 }
 
-
-// 季度回退提示：数据源尚未发布所选季度时，后端会回退到最近有内容的季度
 const seasonNotice = ref('')
 const seasonNoticeDetail = ref('')
 
@@ -303,14 +269,10 @@ function applyScheduleData(data: any) {
   if (fbYear > 0 && (fbYear !== selectedYear.value || fbSeason !== selectedSeason.value)) {
     const reqYear = Number(data?.requested_year || selectedYear.value)
     const reqSeason = Number(data?.requested_season || selectedSeason.value)
-    // 同步选择器到实际展示的季度，避免界面内容与选择项不一致
     selectedYear.value = fbYear
     selectedSeason.value = fbSeason
     seasonNoticeDetail.value = t('schedule.fallback.detail', {
-      reqYear,
-      reqSeason: seasonLabel(reqSeason),
-      fbYear,
-      fbSeason: seasonLabel(fbSeason),
+      reqYear, reqSeason: seasonLabel(reqSeason), fbYear, fbSeason: seasonLabel(fbSeason),
     })
     seasonNotice.value = t('schedule.fallback.title')
   } else {
@@ -319,63 +281,59 @@ function applyScheduleData(data: any) {
   }
 }
 
-// 空数据时一键回看上一个季度
 function gotoPreviousSeason() {
-  if (selectedSeason.value > 1) {
-    selectedSeason.value -= 1
-  } else {
-    selectedSeason.value = 4
-    selectedYear.value -= 1
-  }
-  fetchSchedule()
+  if (selectedSeason.value > 1) selectedSeason.value -= 1
+  else { selectedSeason.value = 4; selectedYear.value -= 1 }
+  void fetchSchedule(false)
 }
 
-async function fetchSchedule() {
-  loading.value = true; error.value = ''
+async function fetchSchedule(allowMikanFallback = false) {
+  loading.value = true
+  error.value = ''
   try {
     let endpoint = '/schedule'
-    const params: Record<string, any> = { 
-      year: selectedYear.value, 
-      season: selectedSeason.value 
-    }
-    if (scheduleSource.value === 'bangumi') {
-      endpoint = '/schedule/bangumi'
-    } else if (scheduleSource.value === 'yuc') {
-      params.source = 'yuc'
-    } else {
-      params.source = 'mikan'
-    }
-    const { data } = await request.get(endpoint, { 
-      params,
-      timeout: 30000 
-    })
+    const params: Record<string, any> = { year: selectedYear.value, season: selectedSeason.value }
+    if (scheduleSource.value === 'bangumi') endpoint = '/schedule/bangumi'
+    else if (scheduleSource.value === 'yuc') params.source = 'yuc'
+    else params.source = 'mikan'
+
+    const { data } = await request.get(endpoint, { params, timeout: 30000 })
     applyScheduleData(data)
   } catch (e: any) {
     if (e.response?.status === 401) {
-      // Token 过期，触发重新验证
       await checkAuth()
-      // 如果验证通过，重试一次
       if (isAuthenticated.value) {
         try {
-          const { data } = await request.get('/schedule', { 
-            params: { 
-              year: selectedYear.value, 
-              season: selectedSeason.value 
-            },
-            timeout: 30000 
-          })
+          const { data } = await request.get('/schedule', { params: { year: selectedYear.value, season: selectedSeason.value }, timeout: 30000 })
           applyScheduleData(data)
           return
-        } catch (retryError: any) {
-          error.value = retryError.code === 'ECONNABORTED' ? t('schedule.error.timeout') : t('schedule.error.failed')
-        }
+        } catch {}
       } else {
-        // 离线模式：显示公开数据（不包含订阅信息）
         error.value = t('schedule.error.offlineMode')
+        loading.value = false
+        return
       }
-    } else {
-      error.value = e.code === 'ECONNABORTED' ? t('schedule.error.timeout') : t('schedule.error.failed')
     }
+
+    // 默认蜜柑源首次加载不可达时，自动温和回退至 Bangumi 每日放送
+    if (allowMikanFallback && scheduleSource.value === 'mikan') {
+      try {
+        scheduleSource.value = 'bangumi'
+        const { data } = await request.get('/schedule/bangumi', {
+          params: { year: selectedYear.value, season: selectedSeason.value },
+          timeout: 30000
+        })
+        applyScheduleData(data)
+        fallbackSourceNotice.value = locale.value === 'zh'
+          ? '蜜柑计划 (mikanani.me) 当前网络不可达，已自动切换至 Bangumi 每日放送日历。'
+          : 'Mikan is currently unreachable; switched automatically to Bangumi daily calendar.'
+        return
+      } catch {
+        scheduleSource.value = 'mikan'
+      }
+    }
+
+    error.value = e.code === 'ECONNABORTED' ? t('schedule.error.timeout') : t('schedule.error.failed')
   } finally {
     loading.value = false
   }
@@ -383,7 +341,6 @@ async function fetchSchedule() {
 
 const MAX_BATCH_SUBSCRIBE = 20
 
-// 切换勾选
 function toggleSelect(item: TorrentItem) {
   const id = item.title
   const newSet = new Set(selectedItems.value)
@@ -395,12 +352,7 @@ function toggleSelect(item: TorrentItem) {
     selectedItems.value = newSet
     return
   }
-  if (newSet.size >= MAX_BATCH_SUBSCRIBE) {
-    // @ts-ignore
-    if (typeof ElMessage !== 'undefined') ElMessage.warning(`最多选择 ${MAX_BATCH_SUBSCRIBE} 部番剧`)
-    return
-  }
-  // 如果设置了默认字幕组 → 直接勾选
+  if (newSet.size >= MAX_BATCH_SUBSCRIBE) return
   if (defaultSubgroups.value.length > 0) {
     newSet.add(id)
     selectedItems.value = newSet
@@ -409,7 +361,6 @@ function toggleSelect(item: TorrentItem) {
     selectedSubgroups.value = newMap
     return
   }
-  // 否则弹窗逐部选
   subgroupPickerItem.value = item
   currentSubgroupSet.value = new Set()
   subgroupPickerOpen.value = true
@@ -438,6 +389,7 @@ function confirmDefaultSubgroups() {
   defaultSubgroups.value = [...currentSubgroupSet.value]
   defaultSubgroupPickerOpen.value = false
 }
+
 function skipDefaultSubgroups() {
   defaultSubgroups.value = []
   defaultSubgroupPickerOpen.value = false
@@ -445,23 +397,14 @@ function skipDefaultSubgroups() {
 
 function toggleSubgroup(name: string) {
   const newSet = new Set(currentSubgroupSet.value)
-  if (newSet.has(name)) {
-    newSet.delete(name)
-  } else {
-    newSet.add(name)
-  }
+  if (newSet.has(name)) newSet.delete(name)
+  else newSet.add(name)
   currentSubgroupSet.value = newSet
 }
 
 function addCustomSubgroup() {
   const val = customSubgroupInput.value.trim()
-  if (!val) return
-  if (val.length > 20) {
-    // @ts-ignore
-    if (typeof ElMessage !== 'undefined') ElMessage.warning('字幕组名称不超过 20 个字符')
-    return
-  }
-  if (currentSubgroupSet.value.has(val)) return  // 去重
+  if (!val || val.length > 20 || currentSubgroupSet.value.has(val)) return
   const newSet = new Set(currentSubgroupSet.value)
   newSet.add(val)
   currentSubgroupSet.value = newSet
@@ -472,7 +415,6 @@ function isSelected(item: TorrentItem): boolean {
   return selectedItems.value.has(item.title)
 }
 
-// 进入批量模式
 function enterBatchMode() {
   batchMode.value = true
   selectedItems.value = new Set()
@@ -483,7 +425,6 @@ function enterBatchMode() {
   defaultSubgroupPickerOpen.value = true
 }
 
-// 退出批量模式
 function exitBatchMode() {
   batchMode.value = false
   selectedItems.value = new Set()
@@ -491,40 +432,25 @@ function exitBatchMode() {
   defaultSubgroups.value = []
 }
 
-// 确认批量订阅
 async function confirmBatchSubscribe() {
   if (selectedItems.value.size === 0) return
-  
-  // 构建 payload
-  const allItems: {item: TorrentItem, title: string, bangumi_id: string, cover_url: string, subgroups: string[]}[] = []
+  const allItems: { item: TorrentItem; title: string; bangumi_id: string; cover_url: string; subgroups: string[] }[] = []
   for (const day of weekDays.value) {
     for (const item of day.items) {
       if (selectedItems.value.has(item.title)) {
         allItems.push({
-          item,
-          title: item.title,
-          bangumi_id: item.bangumi_id,
-          cover_url: item.cover_url || '',
-          subgroups: selectedSubgroups.value.get(item.title) || [],
+          item, title: item.title, bangumi_id: item.bangumi_id,
+          cover_url: item.cover_url || '', subgroups: selectedSubgroups.value.get(item.title) || [],
         })
       }
     }
   }
-  
-  // 前端限制最多 20 部（与后端一致）
-  const MAX_BATCH = 20
-  if (allItems.length > MAX_BATCH) {
-    batchResult.value = {
-      success: [],
-      failed: [{title: `批量订阅最多 ${MAX_BATCH} 部，已选 ${allItems.length} 部，请减少选择`, error: ''}]
-    }
+  if (allItems.length > MAX_BATCH_SUBSCRIBE) {
+    batchResult.value = { success: [], failed: [{ title: `批量订阅最多 ${MAX_BATCH_SUBSCRIBE} 部`, error: '' }] }
     batchResultModal.value = true
-    batchSubmitting.value = false
     return
   }
-  
   batchSubmitting.value = true
-  
   try {
     const payload = {
       items: allItems.map(i => ({
@@ -539,276 +465,311 @@ async function confirmBatchSubscribe() {
         is_finished: i.item.is_finished || false,
       }))
     }
-    
     const { data } = await request.post('/subscriptions/batch', payload, { timeout: 30000 })
     batchResult.value = data
-    
-    // 刷新时间表，更新订阅状态
-    await fetchSchedule()
+    await fetchSchedule(false)
     batchMode.value = false
     selectedItems.value = new Set()
     batchResultModal.value = true
   } catch (e: any) {
-    batchResult.value = {
-      success: [],
-      failed: [{title: '批量订阅失败', error: e.response?.data?.error || e.message}]
-    }
+    batchResult.value = { success: [], failed: [{ title: '批量订阅失败', error: e.response?.data?.error || e.message }] }
     batchResultModal.value = true
   } finally {
     batchSubmitting.value = false
   }
 }
 
-// 已选数量
 const selectedCount = computed(() => selectedItems.value.size)
 
 onMounted(async () => {
   await checkYucPlugin()
   await initAuth()
-  await fetchSchedule()
+  await fetchSchedule(true)
   checkVersion()
 })
 </script>
 
 <template>
-  <div class="space-y-6 pb-20">
-    <!-- 顶部页头 -->
-    <PageHeader :title="$t('schedule.title')" :subtitle="$t('schedule.subtitle')">
-      <template #meta>
-        <span
-          v-if="isOfflineMode"
-          class="inline-flex items-center gap-1.5 px-2 py-0.5 bg-warning/15 border border-warning/25 text-warning rounded-md text-xs font-medium"
-        >
-          <WifiOff :size="12" />
-          <span>{{ $t('schedule.offlineMode') }}</span>
-        </span>
-      </template>
-
-      <template #actions>
-        <div v-if="activeTab === 'schedule'" class="flex items-center gap-1 p-1 app-surface rounded-lg h-9">
-          <select v-model="selectedYear" @change="fetchSchedule" class="select select-ghost select-xs focus:bg-transparent font-semibold text-xs w-20 h-7 min-h-0">
-            <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-          </select>
-          <div class="w-px h-3.5 bg-base-content/12"></div>
-          <select v-model="selectedSeason" @change="fetchSchedule" class="select select-ghost select-xs focus:bg-transparent font-semibold text-xs w-20 h-7 min-h-0">
-            <option v-for="s in seasons" :key="s.value" :value="s.value">{{ s.label }}</option>
-          </select>
+  <div class="space-y-5 pb-16">
+    <!-- 顶部工作室时间表栏 -->
+    <section class="v2-panel p-4 sm:p-5 space-y-4">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div class="flex items-center gap-3 min-w-0">
+          <div>
+            <div class="flex items-center gap-2.5 flex-wrap">
+              <h1 class="text-lg sm:text-xl font-bold tracking-tight text-[var(--v2-ink)]">{{ $t('schedule.title') }}</h1>
+              <span v-if="isOfflineMode" class="v2-pill text-amber-400 border-amber-500/30 bg-amber-500/10">
+                <WifiOff :size="11" />
+                <span>{{ $t('schedule.offlineMode') }}</span>
+              </span>
+            </div>
+            <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ $t('schedule.subtitle') }}</p>
+          </div>
         </div>
 
-        <div class="app-segmented">
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <!-- 数据源切换 -->
+          <div class="inline-flex items-center p-0.5 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] text-xs">
+            <button
+              type="button"
+              @click="setScheduleSource('bangumi')"
+              class="h-7 px-2.5 rounded-md font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+              :class="scheduleSource === 'bangumi' ? 'bg-[var(--v2-accent)] text-white' : 'text-[var(--v2-ink-muted)] hover:text-[var(--v2-ink)]'"
+            >
+              <Calendar :size="12" />
+              <span>{{ $t('schedule.sourceBangumi') }}</span>
+            </button>
+            <button
+              type="button"
+              @click="setScheduleSource('mikan')"
+              class="h-7 px-2.5 rounded-md font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+              :class="scheduleSource === 'mikan' ? 'bg-[var(--v2-accent)] text-white' : 'text-[var(--v2-ink-muted)] hover:text-[var(--v2-ink)]'"
+            >
+              <Sparkles :size="12" />
+              <span>{{ $t('schedule.sourceMikan') }}</span>
+            </button>
+            <button
+              v-if="isYucPluginEnabled"
+              type="button"
+              @click="setScheduleSource('yuc')"
+              class="h-7 px-2.5 rounded-md font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+              :class="scheduleSource === 'yuc' ? 'bg-[var(--v2-accent)] text-white' : 'text-[var(--v2-ink-muted)] hover:text-[var(--v2-ink)]'"
+            >
+              <Antenna :size="12" />
+              <span>{{ $t('schedule.sourceYuc') }}</span>
+            </button>
+          </div>
+
+          <!-- 季度选择 -->
+          <div v-if="activeTab === 'schedule'" class="flex items-center gap-1 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-1.5 h-8">
+            <select v-model="selectedYear" @change="fetchSchedule(false)" class="bg-transparent text-xs font-semibold outline-none cursor-pointer">
+              <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
+            </select>
+            <span class="text-[var(--v2-border-strong)]">/</span>
+            <select v-model="selectedSeason" @change="fetchSchedule(false)" class="bg-transparent text-xs font-semibold outline-none cursor-pointer">
+              <option v-for="s in seasons" :key="s.value" :value="s.value">{{ s.label }}</option>
+            </select>
+          </div>
+
+          <!-- 全站时间表 / 我的订阅 -->
+          <div class="inline-flex items-center p-0.5 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] text-xs">
+            <button
+              type="button"
+              class="h-7 px-2.5 rounded-md font-semibold flex items-center gap-1 cursor-pointer"
+              :class="activeTab === 'schedule' ? 'bg-[var(--v2-surface)] text-[var(--v2-ink)]' : 'text-[var(--v2-ink-muted)]'"
+              @click="activeTab = 'schedule'"
+            >
+              <Antenna :size="12" />
+              <span>{{ $t('schedule.tabs.all') }}</span>
+            </button>
+            <button
+              type="button"
+              class="h-7 px-2.5 rounded-md font-semibold flex items-center gap-1 cursor-pointer"
+              :class="activeTab === 'mysub' ? 'bg-[var(--v2-surface)] text-[var(--v2-ink)]' : 'text-[var(--v2-ink-muted)]'"
+              @click="activeTab = 'mysub'"
+            >
+              <LayoutGrid :size="12" />
+              <span>{{ $t('schedule.tabs.mine') }}</span>
+              <span v-if="subscribedCount > 0" class="font-mono text-[10px] text-[var(--v2-accent)]">({{ subscribedCount }})</span>
+            </button>
+          </div>
+
+          <button v-if="!batchMode" type="button" class="v2-btn v2-btn-sm" @click="enterBatchMode">
+            <ListChecks :size="14" />
+            <span>{{ $t('schedule.batchSubscribe') }}</span>
+          </button>
+
+          <button type="button" class="v2-btn v2-btn-sm w-8 px-0" @click="fetchSchedule(false)" :disabled="loading" :aria-label="$t('common.refresh')">
+            <RefreshCw :size="14" :class="{ 'animate-spin': loading }" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Horizontal 7-Day Weekday Strip + 筛选输入框 -->
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-[var(--v2-border)]">
+        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
           <button
-            v-for="tab in [ {id: 'schedule', label: $t('schedule.tabs.all'), icon: Antenna}, {id: 'mysub', label: $t('schedule.tabs.mine'), icon: LayoutGrid} ]"
-            :key="tab.id"
             type="button"
-            class="app-segmented-btn"
-            :data-active="activeTab === tab.id ? 'true' : 'false'"
-            @click="activeTab = tab.id as any"
+            @click="selectedDayFilter = 'all'"
+            class="h-8 px-3 rounded-full text-xs font-semibold border whitespace-nowrap flex items-center gap-1.5 transition-all cursor-pointer"
+            :class="selectedDayFilter === 'all'
+              ? 'bg-[var(--v2-accent)] text-white border-[var(--v2-accent)]'
+              : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] border-[var(--v2-border)] hover:text-[var(--v2-ink)]'"
           >
-            <component :is="tab.icon" :size="14" />
-            <span>{{ tab.label }}</span>
-            <span v-if="tab.id === 'mysub' && subscribedCount > 0" class="badge badge-primary badge-xs font-mono tabular-nums">{{ subscribedCount }}</span>
+            <span>{{ locale === 'zh' ? '全周总览' : 'All Week' }}</span>
+            <span class="font-mono text-[10px] opacity-80">{{ totalEntriesCount }}</span>
+          </button>
+
+          <button
+            v-for="d in weekOrder"
+            :key="d"
+            type="button"
+            @click="selectedDayFilter = d"
+            class="h-8 px-3 rounded-full text-xs font-semibold border whitespace-nowrap flex items-center gap-1.5 transition-all cursor-pointer"
+            :class="selectedDayFilter === d
+              ? 'bg-[var(--v2-accent)] text-white border-[var(--v2-accent)]'
+              : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] border-[var(--v2-border)] hover:text-[var(--v2-ink)]'"
+          >
+            <span
+              v-if="d === todayWeekday"
+              class="w-1.5 h-1.5 rounded-full shrink-0"
+              :class="selectedDayFilter === d ? 'bg-white' : 'bg-[var(--v2-accent)]'"
+              title="Today"
+            ></span>
+            <span>{{ dayNames[d] }}</span>
+            <span class="font-mono text-[10px] opacity-75">{{ dayCounts[d] || 0 }}</span>
           </button>
         </div>
 
-        <button
-          v-if="!batchMode"
-          type="button"
-          class="btn btn-ghost btn-sm border border-base-content/12 rounded-lg gap-1.5 text-xs font-medium whitespace-nowrap"
-          @click="enterBatchMode"
-        >
-          <ListChecks :size="15" />
-          <span>{{ $t('schedule.batchSubscribe') }}</span>
-        </button>
-
-        <button
-          type="button"
-          class="btn btn-ghost btn-square btn-sm border border-base-content/12 rounded-lg"
-          @click="fetchSchedule"
-          :disabled="loading"
-          :aria-label="$t('common.refresh')"
-        >
-          <RefreshCw :size="15" :class="{ 'animate-spin': loading }" />
-        </button>
-      </template>
-    </PageHeader>
-
-    <!-- 错误提示 -->
-    <div v-if="error" class="max-w-4xl mx-auto">
-      <div class="alert bg-error/10 border border-error/25 text-error rounded-xl p-4">
-        <AlertTriangle :size="20" class="shrink-0" />
-        <div class="flex-1 min-w-0">
-          <h3 class="font-semibold text-sm">{{ $t('schedule.error.sync') }}</h3>
-          <p class="text-xs opacity-85 mt-0.5">{{ error }}</p>
+        <div class="relative w-full lg:w-64 shrink-0">
+          <Search :size="13" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--v2-ink-subtle)]" />
+          <input v-model="scheduleSearch" type="text" :placeholder="$t('schedule.filterPlaceholder')" class="v2-input pl-8 h-8 text-xs" />
         </div>
-        <button type="button" class="btn btn-ghost btn-circle btn-xs" @click="error = ''">
+      </div>
+    </section>
+
+    <!-- 温和的数据源自动回退提示（替代红色错误框） -->
+    <div v-if="fallbackSourceNotice && !loading" class="v2-panel border-[var(--v2-accent)]/30 bg-[var(--v2-accent)]/8 px-4 py-3 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5 text-xs font-medium text-[var(--v2-ink)]">
+        <Info :size="16" class="text-[var(--v2-accent)] shrink-0" />
+        <span>{{ fallbackSourceNotice }}</span>
+      </div>
+      <button type="button" class="p-1 rounded hover:bg-black/10" @click="fallbackSourceNotice = ''">
+        <X :size="14" />
+      </button>
+    </div>
+
+    <!-- 季度回退提示 -->
+    <div v-if="seasonNotice && !loading" class="v2-panel border-sky-500/30 bg-sky-500/10 text-sky-300 px-4 py-3 flex items-start justify-between gap-3">
+      <div class="flex items-start gap-2.5 text-xs">
+        <Info :size="16" class="shrink-0 mt-0.5" />
+        <div>
+          <p class="font-semibold">{{ seasonNotice }}</p>
+          <p class="opacity-85 mt-0.5">{{ seasonNoticeDetail }}</p>
+        </div>
+      </div>
+      <button type="button" class="p-1 rounded hover:bg-sky-500/20" @click="seasonNotice = ''">
+        <X :size="14" />
+      </button>
+    </div>
+
+    <!-- 错误提示（仅用户主动选择某个失败数据源时触发） -->
+    <div v-if="error && !loading" class="v2-panel border-red-500/35 bg-red-500/10 text-red-400 p-4 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5 text-xs font-medium">
+        <AlertTriangle :size="18" class="shrink-0" />
+        <div>
+          <h3 class="font-semibold">{{ $t('schedule.error.sync') }}</h3>
+          <p class="opacity-85 mt-0.5">{{ error }}</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" class="v2-btn v2-btn-sm" @click="setScheduleSource('bangumi')">
+          {{ locale === 'zh' ? '切至 Bangumi 每日放送' : 'Use Bangumi' }}
+        </button>
+        <button type="button" class="p-1 rounded hover:bg-red-500/20" @click="error = ''">
           <X :size="14" />
         </button>
       </div>
     </div>
 
     <!-- 加载骨架 -->
-    <div v-if="loading" class="grid gap-8">
-      <div v-for="i in 3" :key="i" class="space-y-3">
-        <div class="h-5 w-28 bg-base-200 rounded-md animate-pulse"></div>
-        <div class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
-          <div v-for="j in 6" :key="j" class="aspect-[2/3] bg-base-200 rounded-xl animate-pulse border border-base-content/8"></div>
+    <div v-if="loading" class="grid gap-6">
+      <div v-for="i in 2" :key="i" class="space-y-3">
+        <div class="h-5 w-28 bg-[var(--v2-surface-2)] rounded animate-pulse"></div>
+        <div class="grid gap-4 grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
+          <div v-for="j in 7" :key="j" class="aspect-[2/3] bg-[var(--v2-surface-2)] rounded-xl animate-pulse"></div>
         </div>
       </div>
-    </div>
-
-    <!-- 筛选过滤与源切换工具栏 -->
-    <div v-if="!loading" class="app-toolbar">
-      <div class="flex items-center gap-2 flex-wrap">
-        <div class="app-segmented text-xs">
-          <button
-            type="button"
-            @click="setScheduleSource('mikan')"
-            class="app-segmented-btn"
-            :data-active="scheduleSource === 'mikan' ? 'true' : 'false'"
-          >
-            <Sparkles :size="13" />
-            <span>{{ $t('schedule.sourceMikan') }}</span>
-          </button>
-          <button
-            type="button"
-            @click="setScheduleSource('bangumi')"
-            class="app-segmented-btn"
-            :data-active="scheduleSource === 'bangumi' ? 'true' : 'false'"
-          >
-            <Calendar :size="13" />
-            <span>{{ $t('schedule.sourceBangumi') }}</span>
-          </button>
-          <button
-            v-if="isYucPluginEnabled"
-            type="button"
-            @click="setScheduleSource('yuc')"
-            class="app-segmented-btn"
-            :data-active="scheduleSource === 'yuc' ? 'true' : 'false'"
-          >
-            <Antenna :size="13" />
-            <span>{{ $t('schedule.sourceYuc') }}</span>
-          </button>
-        </div>
-
-        <button
-          type="button"
-          @click="onlyToday = !onlyToday"
-          class="btn btn-sm rounded-lg font-medium gap-1.5"
-          :class="onlyToday ? 'btn-primary' : 'btn-ghost border border-base-content/12 text-base-content/75'"
-        >
-          <Clock :size="14" />
-          <span>{{ $t('schedule.todayOnly') }}</span>
-          <span class="badge badge-xs" :class="onlyToday ? 'bg-white/20 text-white border-none' : 'badge-neutral'">
-            {{ dayNames[todayWeekday] }}
-          </span>
-        </button>
-      </div>
-
-      <div class="relative w-full sm:w-64">
-        <input
-          v-model="scheduleSearch"
-          type="text"
-          :placeholder="$t('schedule.filterPlaceholder')"
-          class="input input-sm w-full bg-base-200/70 border border-base-content/12 rounded-lg pl-8 text-xs font-medium"
-        />
-        <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-base-content/40" />
-      </div>
-    </div>
-
-    <!-- 季度自动回退提示 -->
-    <div v-if="seasonNotice && !loading" class="max-w-5xl mx-auto alert bg-info/10 border border-info/25 text-info rounded-xl px-4 py-3 flex items-start gap-3">
-      <Info :size="17" class="shrink-0 mt-0.5" />
-      <div class="flex-1 min-w-0 space-y-0.5">
-        <p class="text-xs font-semibold">{{ seasonNotice }}</p>
-        <p class="text-xs opacity-80 leading-relaxed">{{ seasonNoticeDetail }}</p>
-      </div>
-      <button type="button" class="btn btn-ghost btn-xs btn-circle opacity-60 hover:opacity-100" @click="seasonNotice = ''">
-        <X :size="14" />
-      </button>
     </div>
 
     <!-- 空状态 -->
-    <EmptyState
-      v-if="!loading && (activeTab === 'schedule' ? filteredDays.length === 0 : Object.keys(subscribedSchedule).length === 0)"
-      :title="scheduleSearch || onlyToday ? $t('schedule.empty.noMatch') : $t('schedule.empty.title')"
-      :description="scheduleSearch || onlyToday ? $t('schedule.empty.noMatchDesc') : $t('schedule.empty.desc')"
-      :hint="!scheduleSearch && !onlyToday ? $t('schedule.empty.sourceHint') : undefined"
-      class="max-w-3xl mx-auto"
+    <div
+      v-else-if="(activeTab === 'schedule' ? filteredDays.length === 0 : Object.keys(subscribedSchedule).length === 0)"
+      class="v2-panel py-14 px-6 text-center space-y-3"
     >
-      <template #icon>
+      <div class="w-12 h-12 rounded-2xl bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] flex items-center justify-center mx-auto">
         <Calendar :size="22" />
-      </template>
-      <template #actions>
-        <button
-          v-if="!scheduleSearch && !onlyToday"
-          type="button"
-          class="btn btn-outline btn-sm rounded-lg gap-1.5 border-base-content/15"
-          @click="gotoPreviousSeason"
-        >
-          <History :size="14" />
+      </div>
+      <h3 class="text-sm font-bold text-[var(--v2-ink)]">
+        {{ scheduleSearch || selectedDayFilter !== 'all' ? $t('schedule.empty.noMatch') : $t('schedule.empty.title') }}
+      </h3>
+      <p class="text-xs text-[var(--v2-ink-muted)] max-w-md mx-auto">
+        {{ scheduleSearch || selectedDayFilter !== 'all' ? $t('schedule.empty.noMatchDesc') : $t('schedule.empty.desc') }}
+      </p>
+      <div class="pt-1 flex justify-center gap-2">
+        <button v-if="!scheduleSearch && selectedDayFilter === 'all'" type="button" class="v2-btn v2-btn-sm" @click="gotoPreviousSeason">
+          <History :size="13" />
           <span>{{ $t('schedule.empty.viewPrevious') }}</span>
         </button>
-      </template>
-    </EmptyState>
+        <button v-else type="button" class="v2-btn v2-btn-sm" @click="scheduleSearch = ''; selectedDayFilter = 'all'">
+          {{ locale === 'zh' ? '显示全周番剧' : 'Show Full Week' }}
+        </button>
+      </div>
+    </div>
 
-    <!-- ====== Main Timeline ====== -->
-    <div v-else-if="!loading" class="space-y-12">
-      <!-- Section Template -->
+    <!-- 主时间表密集海报网格 -->
+    <div v-else class="space-y-9">
       <template v-if="activeTab === 'schedule'">
-        <div v-for="day in filteredDays" :key="day.day_of_week + day.label" class="space-y-6">
-          <div class="flex items-center gap-4 group">
-            <div class="w-1.5 h-6 bg-primary rounded-full shadow-[0_0_12px_rgba(var(--p),0.5)] group-hover:h-8 transition-all"
-              :class="{ 'bg-secondary w-2.5 h-8': day.day_of_week === todayWeekday }"></div>
-            <h2 class="text-2xl font-black tracking-tight italic flex items-center gap-2.5">
-              <span>{{ day.label }}</span>
-              <span v-if="day.day_of_week === todayWeekday" class="badge badge-primary badge-sm font-black text-[10px] tracking-wider uppercase shadow-sm">
-                🌟 今日放送
+        <div v-for="day in filteredDays" :key="day.day_of_week + day.label" class="space-y-3.5">
+          <div class="flex items-center justify-between border-b border-[var(--v2-border)] pb-2">
+            <div class="flex items-center gap-2.5">
+              <span
+                class="w-1.5 h-5 rounded-full"
+                :class="day.day_of_week === todayWeekday ? 'bg-[var(--v2-accent)]' : 'bg-[var(--v2-border-strong)]'"
+              ></span>
+              <h2 class="text-base sm:text-lg font-bold tracking-tight text-[var(--v2-ink)]">{{ day.label }}</h2>
+              <span v-if="day.day_of_week === todayWeekday" class="px-2 py-0.5 rounded-full bg-[var(--v2-accent)]/15 text-[var(--v2-accent)] text-[10px] font-bold">
+                {{ locale === 'zh' ? '今日放送' : 'TODAY' }}
               </span>
-            </h2>
-            <span class="text-[10px] font-black uppercase tracking-widest text-base-content/20 mt-1">{{ day.items.length }} {{ $t('schedule.entries') }}</span>
+            </div>
+            <span class="text-xs font-mono text-[var(--v2-ink-subtle)]">{{ day.items.length }} {{ locale === 'zh' ? '部番剧' : 'entries' }}</span>
           </div>
 
-          <div class="grid gap-4 sm:gap-6 items-start grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
-            <div v-for="item in day.items" :key="item.title"
-              class="group relative bg-base-100/60 rounded-[1.8rem] overflow-hidden border border-base-200/80 shadow-sm hover:shadow-2xl hover:border-primary/40 transition-all duration-500 cursor-pointer active:scale-95 flex flex-col"
-              @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)">
-              
-              <!-- 统一定高比例海报容器：杜绝海报大小不一与加载失败塌陷成空洞 -->
-              <div class="relative aspect-[3/4.2] w-full overflow-hidden bg-base-200/60">
-                <div v-if="batchMode"
-                  class="absolute top-3 left-3 z-20 w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 pointer-events-none"
-                  :class="isSelected(item) ? 'bg-primary shadow-lg ring-2 ring-primary/50' : 'bg-black/50 backdrop-blur-sm border border-white/30 hover:bg-black/70'">
-                  <Check v-if="isSelected(item)" :size="14" class="text-primary-content" />
+          <div class="grid gap-3.5 sm:gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
+            <div
+              v-for="item in day.items"
+              :key="item.title"
+              class="group relative v2-panel overflow-hidden hover:border-[var(--v2-accent)]/50 transition-all duration-200 cursor-pointer flex flex-col"
+              @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)"
+            >
+              <div class="relative aspect-[2/3] w-full overflow-hidden bg-[var(--v2-surface-2)]">
+                <div
+                  v-if="batchMode"
+                  class="absolute top-2.5 left-2.5 z-20 w-6 h-6 rounded-full flex items-center justify-center pointer-events-none"
+                  :class="isSelected(item) ? 'bg-[var(--v2-accent)] text-white shadow' : 'bg-black/60 border border-white/30'"
+                >
+                  <Check v-if="isSelected(item)" :size="13" />
                 </div>
 
-                <!-- 默认占位底图：即便图片 404 或网络延迟也维持几何网格完整，绝不留白洞 -->
-                <div class="absolute inset-0 flex items-center justify-center text-base-content/15 pointer-events-none">
-                  <Image :size="36" />
+                <div class="absolute inset-0 flex items-center justify-center text-[var(--v2-ink-subtle)]/40 pointer-events-none">
+                  <Image :size="28" />
                 </div>
 
-                <img 
-                  v-if="item.cover_url" 
-                  :src="proxyImage(item.cover_url)" 
-                  :alt="item.title" 
-                  class="relative z-10 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
-                  loading="lazy" 
+                <img
+                  v-if="item.cover_url"
+                  :src="proxyImage(item.cover_url)"
+                  :alt="item.title"
+                  class="relative z-10 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  loading="lazy"
                   referrerpolicy="no-referrer"
-                  @error="(e: Event) => { const el = (e.target as HTMLImageElement); el.style.opacity = '0'; }" 
+                  @error="(e: Event) => { (e.target as HTMLImageElement).style.opacity = '0' }"
                 />
 
-                <div class="absolute inset-0 z-10 bg-gradient-to-t from-black/90 via-black/25 to-transparent opacity-70 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                <div class="absolute inset-0 z-10 bg-gradient-to-t from-black/90 via-black/25 to-transparent"></div>
 
-                <div v-if="item.info_hash || subscribedIds[item.bangumi_id]" class="absolute top-3 right-3 z-20 flex items-center gap-1">
-                   <div v-if="getItemStats(item)" class="px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[8px] font-black text-white tracking-wider leading-none">
-                     {{ getItemStats(item)?.downloaded }}<span v-if="getItemStats(item)?.total">/{{ getItemStats(item)?.total }}</span>
-                   </div>
-                   <div class="w-8 h-8 rounded-full bg-primary/90 backdrop-blur-md flex items-center justify-center text-primary-content shadow-lg border border-white/20">
-                      <Check :size="16" />
-                   </div>
+                <div v-if="item.info_hash || subscribedIds[item.bangumi_id]" class="absolute top-2.5 right-2.5 z-20 flex items-center gap-1">
+                  <span v-if="getItemStats(item)" class="px-1.5 py-0.5 rounded bg-black/75 font-mono text-[10px] font-bold text-white">
+                    {{ getItemStats(item)?.downloaded }}<span v-if="getItemStats(item)?.total">/{{ getItemStats(item)?.total }}</span>
+                  </span>
+                  <div class="w-6 h-6 rounded-full bg-[var(--v2-accent)] flex items-center justify-center text-white shadow">
+                    <Check :size="13" />
+                  </div>
                 </div>
 
-                <div class="absolute bottom-0 left-0 w-full p-3.5 z-20">
-                   <p class="text-[11px] font-black leading-tight text-white line-clamp-2 uppercase tracking-wide group-hover:text-primary transition-colors drop-shadow-sm">{{ item.title }}</p>
+                <div class="absolute bottom-0 inset-x-0 p-3 z-20">
+                  <p class="text-xs font-semibold leading-snug text-white line-clamp-2 group-hover:text-[var(--v2-accent-hover)] transition-colors">
+                    {{ item.title }}
+                  </p>
                 </div>
               </div>
             </div>
@@ -816,62 +777,44 @@ onMounted(async () => {
         </div>
       </template>
 
-      <!-- ====== My Subscriptions Timeline ====== -->
       <template v-else>
-        <div v-if="Object.keys(subscribedSchedule).length === 0" class="flex flex-col items-center justify-center py-20 text-center bg-base-100/30 rounded-[3rem] border-2 border-dashed border-base-200 max-w-4xl mx-auto">
-           <div class="w-24 h-24 bg-base-200/50 rounded-full flex items-center justify-center mb-6">
-              <LayoutGrid :size="40" class="opacity-10" />
-           </div>
-           <h3 class="text-xl font-black tracking-tight mb-2 text-base-content/40">{{ $t('schedule.mineEmpty.title') }}</h3>
-           <button class="btn btn-primary btn-sm rounded-xl px-8 uppercase font-black tracking-widest text-[10px] h-10 min-h-0" @click="router.push('/search')">{{ $t('schedule.mineEmpty.action') }}</button>
-        </div>
-
-        <div v-for="(items, label) in subscribedSchedule" :key="label" class="space-y-6">
-          <div class="flex items-center gap-4 group">
-            <div class="w-1.5 h-6 bg-success rounded-full shadow-[0_0_12px_rgba(var(--s),0.5)] group-hover:h-8 transition-all"></div>
-            <h2 class="text-2xl font-black tracking-tight italic">{{ label }}</h2>
+        <div v-for="(items, label) in subscribedSchedule" :key="label" class="space-y-3.5">
+          <div class="flex items-center gap-2.5 border-b border-[var(--v2-border)] pb-2">
+            <span class="w-1.5 h-5 rounded-full bg-emerald-500"></span>
+            <h2 class="text-base sm:text-lg font-bold tracking-tight text-[var(--v2-ink)]">{{ label }}</h2>
           </div>
 
-          <div class="grid gap-4 sm:gap-6 items-start grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
-            <div v-for="item in items" :key="item.title"
-              class="group relative bg-base-100/60 rounded-[1.8rem] overflow-hidden border border-base-200/80 shadow-sm hover:shadow-2xl hover:border-success/40 transition-all duration-500 cursor-pointer active:scale-95 flex flex-col"
-              @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)">
-              
-              <!-- 统一定高比例海报容器 -->
-              <div class="relative aspect-[3/4.2] w-full overflow-hidden bg-base-200/60">
-                <div v-if="batchMode"
-                  class="absolute top-3 left-3 z-20 w-7 h-7 rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 pointer-events-none"
-                  :class="isSelected(item) ? 'bg-primary shadow-lg ring-2 ring-primary/50' : 'bg-black/50 backdrop-blur-sm border border-white/30 hover:bg-black/70'">
-                  <Check v-if="isSelected(item)" :size="14" class="text-primary-content" />
+          <div class="grid gap-3.5 sm:gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
+            <div
+              v-for="item in items"
+              :key="item.title"
+              class="group relative v2-panel overflow-hidden hover:border-emerald-500/50 transition-all duration-200 cursor-pointer flex flex-col"
+              @click.stop="batchMode ? toggleSelect(item) : handleItemClick(item)"
+            >
+              <div class="relative aspect-[2/3] w-full overflow-hidden bg-[var(--v2-surface-2)]">
+                <div class="absolute inset-0 flex items-center justify-center text-[var(--v2-ink-subtle)]/40 pointer-events-none">
+                  <Image :size="28" />
                 </div>
-
-                <div class="absolute inset-0 flex items-center justify-center text-base-content/15 pointer-events-none">
-                  <Image :size="36" />
-                </div>
-
-                <img 
-                  v-if="item.cover_url" 
-                  :src="proxyImage(item.cover_url)" 
-                  :alt="item.title" 
-                  class="relative z-10 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
-                  loading="lazy" 
+                <img
+                  v-if="item.cover_url"
+                  :src="proxyImage(item.cover_url)"
+                  :alt="item.title"
+                  class="relative z-10 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  loading="lazy"
                   referrerpolicy="no-referrer"
-                  @error="(e: Event) => { const el = (e.target as HTMLImageElement); el.style.opacity = '0'; }" 
+                  @error="(e: Event) => { (e.target as HTMLImageElement).style.opacity = '0' }"
                 />
-
-                <div class="absolute inset-0 z-10 bg-gradient-to-t from-black/90 via-black/25 to-transparent opacity-70 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-
-                <div class="absolute top-3 right-3 z-20 flex items-center gap-1">
-                   <div v-if="getItemStats(item)" class="px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[8px] font-black text-white tracking-wider leading-none">
-                     {{ getItemStats(item)?.downloaded }}<span v-if="getItemStats(item)?.total">/{{ getItemStats(item)?.total }}</span>
-                   </div>
-                   <div class="w-8 h-8 rounded-full bg-success/90 backdrop-blur-md flex items-center justify-center text-success-content shadow-lg border border-white/20">
-                      <Check :size="16" />
-                   </div>
+                <div class="absolute inset-0 z-10 bg-gradient-to-t from-black/90 via-black/25 to-transparent"></div>
+                <div class="absolute top-2.5 right-2.5 z-20 flex items-center gap-1">
+                  <span v-if="getItemStats(item)" class="px-1.5 py-0.5 rounded bg-black/75 font-mono text-[10px] font-bold text-white">
+                    {{ getItemStats(item)?.downloaded }}<span v-if="getItemStats(item)?.total">/{{ getItemStats(item)?.total }}</span>
+                  </span>
+                  <div class="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow">
+                    <Check :size="13" />
+                  </div>
                 </div>
-
-                <div class="absolute bottom-0 left-0 w-full p-3.5 z-20">
-                   <p class="text-[11px] font-black leading-tight text-white line-clamp-2 uppercase tracking-wide group-hover:text-success transition-colors drop-shadow-sm">{{ item.title }}</p>
+                <div class="absolute bottom-0 inset-x-0 p-3 z-20">
+                  <p class="text-xs font-semibold leading-snug text-white line-clamp-2">{{ item.title }}</p>
                 </div>
               </div>
             </div>
@@ -880,229 +823,126 @@ onMounted(async () => {
       </template>
     </div>
 
-    <!-- 数据来源 -->
-    <div class="text-center py-10">
-      <p class="text-xs font-medium text-base-content/30 tracking-wide">
+    <!-- 数据来源脚注 -->
+    <div class="text-center py-4">
+      <p class="text-xs text-[var(--v2-ink-subtle)]">
         {{ scheduleSource === 'bangumi' ? '数据来源：Bangumi 放送日历 (bgm.tv)' : (scheduleSource === 'yuc' ? $t('schedule.credit') : '数据来源：蜜柑计划 (mikanani.me)') }}
       </p>
     </div>
 
-    <!-- 批量订阅浮动栏 -->
-    <Transition name="slide-up">
-      <div v-if="batchMode" class="fixed bottom-16 lg:bottom-0 left-0 right-0 z-50 p-3 sm:p-4 bg-gradient-to-t from-base-200 via-base-200/95 to-transparent pointer-events-none">
-        <div class="max-w-4xl mx-auto pointer-events-auto">
-          <div class="bg-base-100 rounded-2xl sm:rounded-[2rem] border border-base-200/80 shadow-2xl p-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
-            <div class="flex items-center gap-3 sm:gap-4 flex-wrap justify-center sm:justify-start">
-              <span class="text-xs sm:text-sm font-black tracking-tight">{{ $t('schedule.batch.selected', { count: selectedCount }) }}</span>
-              <span v-if="defaultSubgroups.length > 0" class="text-[9px] font-black uppercase tracking-widest opacity-30">{{ $t('schedule.batch.default', { group: defaultSubgroups.join(', ') }) }}</span>
-              <span v-if="selectedCount > 20" class="text-[8px] font-black text-error uppercase tracking-widest">(最多20部)</span>
-            </div>
-            <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-end">
-              <button class="btn btn-ghost btn-xs sm:btn-sm rounded-xl text-[10px] font-black uppercase tracking-widest flex-1 sm:flex-initial" @click="exitBatchMode">{{ $t('common.cancel') }}</button>
-              <button class="btn btn-primary btn-xs sm:btn-sm rounded-xl px-5 sm:px-6 text-[10px] font-black uppercase tracking-widest gap-1.5 flex-1 sm:flex-initial" :disabled="selectedCount === 0 || selectedCount > 20 || batchSubmitting" @click="confirmBatchSubscribe">
-                <span v-if="batchSubmitting" class="loading loading-spinner loading-xs"></span>
-                <template v-else>{{ $t('schedule.batch.confirm') }} {{ selectedCount > 0 ? `(${selectedCount})` : '' }}</template>
-              </button>
-            </div>
-          </div>
+    <!-- 批量订阅浮动条 -->
+    <div v-if="batchMode" class="fixed bottom-16 lg:bottom-5 left-0 right-0 z-50 px-4 pointer-events-none">
+      <div class="max-w-3xl mx-auto v2-panel border border-[var(--v2-border-strong)] shadow-2xl px-5 py-3 flex items-center justify-between gap-4 pointer-events-auto">
+        <div class="flex items-center gap-3 text-xs font-semibold">
+          <span>{{ $t('schedule.batch.selected', { count: selectedCount }) }}</span>
+          <span v-if="defaultSubgroups.length > 0" class="text-[var(--v2-ink-muted)]">{{ defaultSubgroups.join(', ') }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="exitBatchMode">{{ $t('common.cancel') }}</button>
+          <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" :disabled="selectedCount === 0 || selectedCount > 20 || batchSubmitting" @click="confirmBatchSubscribe">
+            {{ $t('schedule.batch.confirm') }} ({{ selectedCount }})
+          </button>
         </div>
       </div>
-    </Transition>
+    </div>
 
-    <!-- 设置默认字幕组 Modal -->
+    <!-- 默认字幕组 / 单部字幕组 / 批量结果 Modal -->
     <dialog :class="['modal', { 'modal-open': defaultSubgroupPickerOpen }]">
-      <div class="modal-box bg-base-200/95 backdrop-blur-3xl border border-white/5 rounded-[2.5rem] max-w-sm w-full p-8">
-        <h3 class="text-xl font-black tracking-tight mb-2">设置默认字幕组</h3>
-        <p class="text-[10px] font-bold uppercase tracking-widest opacity-30 mb-6">所有已选番剧将使用该字幕组。如需逐部设置，点跳过即可</p>
-        
-        <div class="space-y-2 max-h-48 overflow-y-auto">
-          <button v-for="name in COMMON_SUBGROUPS" :key="name"
-            class="w-full text-left px-5 py-3.5 rounded-xl text-sm font-bold transition-all border"
-            :class="currentSubgroupSet.has(name) ? 'bg-primary text-primary-content border-primary shadow-lg' : 'bg-base-100 hover:bg-base-300 border-base-200/50'"
-            @click="toggleSubgroup(name)">
-            <Check v-if="currentSubgroupSet.has(name)" :size="14" class="inline mr-2" />
+      <div class="modal-box max-w-sm">
+        <h3 class="text-base font-bold mb-1">设置默认字幕组</h3>
+        <p class="text-xs text-[var(--v2-ink-muted)] mb-4">所有已选番剧将使用该字幕组。如需逐部设置，点跳过即可。</p>
+        <div class="space-y-1.5 max-h-48 overflow-y-auto mb-3">
+          <button v-for="name in COMMON_SUBGROUPS" :key="name" type="button" class="w-full text-left px-3 py-2 rounded-lg text-xs font-semibold border transition-colors" :class="currentSubgroupSet.has(name) ? 'bg-[var(--v2-accent)] text-white border-[var(--v2-accent)]' : 'bg-[var(--v2-surface-2)] border-[var(--v2-border)]'" @click="toggleSubgroup(name)">
             {{ name }}
           </button>
         </div>
-        
-        <div class="mt-4 flex gap-2">
-          <input v-model="customSubgroupInput" type="text" placeholder="输入自定义字幕组" class="flex-1 bg-base-100 border border-base-200/50 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-primary/30 transition-all"
-            @keyup.enter="addCustomSubgroup" />
-          <button class="btn btn-ghost btn-sm rounded-xl text-[10px] font-black uppercase tracking-widest px-4" @click="addCustomSubgroup">添加</button>
+        <div class="flex gap-2 mb-4">
+          <input v-model="customSubgroupInput" type="text" placeholder="自定义字幕组" class="v2-input h-8 text-xs flex-1" @keyup.enter="addCustomSubgroup" />
+          <button type="button" class="v2-btn v2-btn-sm" @click="addCustomSubgroup">添加</button>
         </div>
-        
-        <div v-if="currentSubgroupSet.size > 0" class="mt-4 p-3 bg-base-100/50 rounded-xl">
-          <p class="text-[9px] font-black uppercase tracking-widest opacity-30 mb-1">已选默认字幕组</p>
-          <div class="flex flex-wrap gap-1.5">
-            <span v-for="name in [...currentSubgroupSet]" :key="name"
-              class="px-2 py-1 bg-primary/20 text-primary text-[10px] font-black rounded-lg flex items-center gap-1">
-              {{ name }}
-              <X :size="12" class="cursor-pointer" @click.stop="toggleSubgroup(name)" />
-            </span>
-          </div>
-        </div>
-        
-        <div class="mt-6 flex gap-3">
-          <button class="flex-1 btn btn-ghost rounded-xl text-[10px] font-black uppercase tracking-widest" @click="skipDefaultSubgroups">跳过，逐部设置</button>
-          <button class="flex-1 btn btn-primary rounded-xl text-[10px] font-black uppercase tracking-widest" :disabled="currentSubgroupSet.size === 0" @click="confirmDefaultSubgroups">确认</button>
+        <div class="flex gap-2 justify-end">
+          <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="skipDefaultSubgroups">跳过</button>
+          <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" :disabled="currentSubgroupSet.size === 0" @click="confirmDefaultSubgroups">确认</button>
         </div>
       </div>
-      <div class="modal-backdrop bg-black/50" @click="skipDefaultSubgroups"></div>
+      <div class="modal-backdrop" @click="skipDefaultSubgroups"></div>
     </dialog>
 
-    <!-- 字幕组选择器 Modal -->
     <dialog :class="['modal', { 'modal-open': subgroupPickerOpen }]">
-      <div class="modal-box bg-base-200/95 backdrop-blur-3xl border border-white/5 rounded-[2.5rem] max-w-sm w-full p-8">
-        <h3 class="text-xl font-black tracking-tight mb-2">选择字幕组</h3>
-        <p v-if="subgroupPickerItem" class="text-[10px] font-bold uppercase tracking-widest opacity-30 mb-6 truncate">{{ subgroupPickerItem.title }}</p>
-        
-        <div class="space-y-2 max-h-48 overflow-y-auto">
-          <button v-for="name in COMMON_SUBGROUPS" :key="name"
-            class="w-full text-left px-5 py-3.5 rounded-xl text-sm font-bold transition-all border"
-            :class="currentSubgroupSet.has(name) ? 'bg-primary text-primary-content border-primary shadow-lg' : 'bg-base-100 hover:bg-base-300 border-base-200/50'"
-            @click="toggleSubgroup(name)">
-            <Check v-if="currentSubgroupSet.has(name)" :size="14" class="inline mr-2" />
+      <div class="modal-box max-w-sm">
+        <h3 class="text-base font-bold mb-1">选择字幕组</h3>
+        <p v-if="subgroupPickerItem" class="text-xs text-[var(--v2-ink-muted)] mb-4 truncate">{{ subgroupPickerItem.title }}</p>
+        <div class="space-y-1.5 max-h-48 overflow-y-auto mb-3">
+          <button v-for="name in COMMON_SUBGROUPS" :key="name" type="button" class="w-full text-left px-3 py-2 rounded-lg text-xs font-semibold border transition-colors" :class="currentSubgroupSet.has(name) ? 'bg-[var(--v2-accent)] text-white border-[var(--v2-accent)]' : 'bg-[var(--v2-surface-2)] border-[var(--v2-border)]'" @click="toggleSubgroup(name)">
             {{ name }}
           </button>
         </div>
-        
-        <!-- 自定义输入 -->
-        <div class="mt-4 flex gap-2">
-          <input v-model="customSubgroupInput" type="text" placeholder="输入自定义字幕组" class="flex-1 bg-base-100 border border-base-200/50 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-primary/30 transition-all"
-            @keyup.enter="addCustomSubgroup" />
-          <button class="btn btn-ghost btn-sm rounded-xl text-[10px] font-black uppercase tracking-widest px-4" @click="addCustomSubgroup">添加</button>
+        <div class="flex gap-2 mb-4">
+          <input v-model="customSubgroupInput" type="text" placeholder="自定义字幕组" class="v2-input h-8 text-xs flex-1" @keyup.enter="addCustomSubgroup" />
+          <button type="button" class="v2-btn v2-btn-sm" @click="addCustomSubgroup">添加</button>
         </div>
-        
-        <!-- 已选显示 -->
-        <div v-if="currentSubgroupSet.size > 0" class="mt-4 p-3 bg-base-100/50 rounded-xl">
-          <p class="text-[9px] font-black uppercase tracking-widest opacity-30 mb-1">已选字幕组</p>
-          <div class="flex flex-wrap gap-1.5">
-            <span v-for="name in [...currentSubgroupSet]" :key="name"
-              class="px-2 py-1 bg-primary/20 text-primary text-[10px] font-black rounded-lg flex items-center gap-1">
-              {{ name }}
-              <X :size="12" class="cursor-pointer" @click.stop="toggleSubgroup(name)" />
-            </span>
-          </div>
-        </div>
-        
-        <div class="mt-6 flex gap-3">
-          <button class="flex-1 btn btn-ghost rounded-xl text-[10px] font-black uppercase tracking-widest" @click="cancelSubgroupPicker">取消</button>
-          <button class="flex-1 btn btn-primary rounded-xl text-[10px] font-black uppercase tracking-widest" @click="confirmSubgroupPicker">确认</button>
+        <div class="flex gap-2 justify-end">
+          <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="cancelSubgroupPicker">取消</button>
+          <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" @click="confirmSubgroupPicker">确认</button>
         </div>
       </div>
-      <div class="modal-backdrop bg-black/50" @click="cancelSubgroupPicker"></div>
+      <div class="modal-backdrop" @click="cancelSubgroupPicker"></div>
     </dialog>
 
-    <!-- 批量订阅结果 Modal -->
     <dialog :class="['modal', { 'modal-open': batchResultModal }]">
-      <div class="modal-box bg-base-200/95 backdrop-blur-3xl border border-white/5 rounded-[2.5rem] max-w-sm w-full p-8">
-        <div class="flex items-center gap-4 mb-6">
-          <div v-if="batchResult.failed.length === 0" class="w-12 h-12 rounded-full bg-success/20 flex items-center justify-center">
-            <CheckCircle :size="24" class="text-success" />
-          </div>
-          <div v-else class="w-12 h-12 rounded-full bg-warning/20 flex items-center justify-center">
-            <XCircle :size="24" class="text-warning" />
-          </div>
-          <div class="space-y-1">
-            <h3 class="text-xl font-black tracking-tight">批量订阅完成</h3>
-            <p class="text-[10px] font-bold uppercase tracking-widest opacity-30">
-              成功 {{ batchResult.success.length }} 部，失败 {{ batchResult.failed.length }} 部
-            </p>
+      <div class="modal-box max-w-sm space-y-4">
+        <div class="flex items-center gap-3">
+          <CheckCircle v-if="batchResult.failed.length === 0" :size="22" class="text-emerald-400" />
+          <XCircle v-else :size="22" class="text-amber-400" />
+          <div>
+            <h3 class="text-base font-bold">批量订阅完成</h3>
+            <p class="text-xs text-[var(--v2-ink-muted)]">成功 {{ batchResult.success.length }} 部，失败 {{ batchResult.failed.length }} 部</p>
           </div>
         </div>
-        
-        <div v-if="batchResult.success.length > 0" class="mb-4">
-          <p class="text-[9px] font-black uppercase tracking-widest text-success mb-2">✅ 成功</p>
-          <div class="space-y-1 max-h-24 overflow-y-auto">
-            <p v-for="s in batchResult.success" :key="s.id" class="text-xs font-bold px-3 py-1.5 bg-success/10 rounded-lg">
-              {{ s.title }}
-            </p>
-          </div>
-        </div>
-        
-        <div v-if="batchResult.failed.length > 0">
-          <p class="text-[9px] font-black uppercase tracking-widest text-error mb-2">❌ 失败</p>
-          <div class="space-y-1 max-h-32 overflow-y-auto">
-            <div v-for="f in batchResult.failed" :key="f.title" class="px-3 py-1.5 bg-error/10 rounded-lg">
-              <p class="text-xs font-bold">{{ f.title }}</p>
-              <p class="text-[9px] opacity-60">{{ f.error }}</p>
-            </div>
-          </div>
-        </div>
-        
-        <button class="btn btn-primary w-full rounded-xl text-[10px] font-black uppercase tracking-widest mt-6" @click="batchResultModal = false">知道了</button>
+        <button type="button" class="v2-btn v2-btn-primary v2-btn-sm w-full" @click="batchResultModal = false">知道了</button>
       </div>
-      <form method="dialog" class="modal-backdrop" @click="batchResultModal = false">
-        <button class="cursor-default">close</button>
-      </form>
+      <div class="modal-backdrop" @click="batchResultModal = false"></div>
     </dialog>
 
-    <!-- Anime Detail Modal -->
+    <!-- 番剧快速详情弹窗 -->
     <dialog :class="['modal', { 'modal-open': selectedItem }]">
-      <div v-if="selectedItem" class="modal-box bg-base-200/95 backdrop-blur-3xl border border-white/5 rounded-[2.5rem] p-0 overflow-hidden max-w-sm w-full shadow-[0_0_40px_rgba(0,0,0,0.5)]">
-        <!-- Header Image -->
-        <div class="relative w-full aspect-[3/3.8] bg-base-300">
+      <div v-if="selectedItem" class="modal-box max-w-sm p-0 overflow-hidden">
+        <div class="relative w-full aspect-[3/3.6] bg-[var(--v2-surface-2)]">
           <img v-if="selectedItem.cover_url" :src="proxyImage(selectedItem.cover_url)" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
-          <div class="absolute inset-0 bg-gradient-to-t from-base-200 to-transparent"></div>
-          <button class="btn btn-circle btn-sm btn-ghost absolute top-4 right-4 text-white bg-black/20 hover:bg-black/40 border-none backdrop-blur-md" @click="selectedItem = null">
-            <X :size="16" />
+          <div class="absolute inset-0 bg-gradient-to-t from-[var(--v2-surface)] via-transparent to-transparent"></div>
+          <button type="button" class="w-8 h-8 rounded-full bg-black/55 text-white flex items-center justify-center absolute top-3 right-3 hover:bg-black/80" @click="selectedItem = null">
+            <X :size="15" />
           </button>
         </div>
-        
-        <!-- Content -->
-        <div class="p-6 pt-2 space-y-4">
+        <div class="p-5 space-y-4">
           <div>
-            <h3 class="text-xl font-black leading-tight mb-1 text-base-content">{{ selectedMetadata?.anime?.title_cn || selectedItem.title }}</h3>
-            <div v-if="selectedMetadata?.anime?.year" class="text-[10px] font-black text-primary uppercase tracking-widest mb-3 italic">
-              {{ selectedMetadata.anime.year }} Release • {{ selectedMetadata.anime.total_eps || '?' }} Episodes
+            <h3 class="text-base font-bold text-[var(--v2-ink)]">{{ selectedMetadata?.anime?.title_cn || selectedItem.title }}</h3>
+            <div v-if="selectedMetadata?.anime?.year" class="text-xs font-mono text-[var(--v2-accent)] mt-1">
+              {{ selectedMetadata.anime.year }} • {{ selectedMetadata.anime.total_eps || '?' }} EP
             </div>
-            <div class="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest text-base-content/60">
-              <span class="flex items-center gap-1.5 bg-base-100/50 px-3 py-1.5 rounded-xl border border-base-content/5"><Clock :size="14" /> {{ selectedItem.aired_time || 'TBA' }}</span>
-              <span class="flex items-center gap-1.5 bg-base-100/50 px-3 py-1.5 rounded-xl border border-base-content/5"><Calendar :size="14" /> {{ selectedItem.aired_date || 'TBA' }}</span>
-            </div>
-          </div>
-          
-          <!-- Metadata / Description -->
-          <div v-if="metaLoading" class="py-10 flex justify-center">
-            <span class="loading loading-spinner loading-md opacity-20"></span>
-          </div>
-          <div v-else-if="selectedMetadata" class="space-y-4">
-            <div class="bg-base-100/30 p-4 rounded-2xl border border-base-content/5">
-              <p class="text-[11px] leading-relaxed opacity-60 line-clamp-4 hover:line-clamp-none transition-all cursor-default">
-                {{ selectedMetadata.anime.description || '暂无剧情简介' }}
-              </p>
-            </div>
-            
-            <!-- Episodes List -->
-            <div v-if="selectedMetadata.episodes?.length" class="space-y-2">
-               <p class="text-[9px] font-black uppercase tracking-widest opacity-30 px-1">Recent Episodes</p>
-               <div class="grid grid-cols-1 gap-1 max-h-32 overflow-y-auto no-scrollbar">
-                  <div v-for="ep in selectedMetadata.episodes.slice(0, 10)" :key="ep.number" class="flex items-center gap-3 px-3 py-2 bg-base-100/50 rounded-xl border border-white/5">
-                    <span class="text-[10px] font-black font-mono opacity-40">EP{{ ep.number }}</span>
-                    <span class="text-[10px] font-bold truncate opacity-80">{{ ep.title }}</span>
-                  </div>
-               </div>
+            <div class="flex flex-wrap gap-2 mt-2 text-xs text-[var(--v2-ink-muted)]">
+              <span class="v2-pill"><Clock :size="11" /> {{ selectedItem.aired_time || 'TBA' }}</span>
+              <span class="v2-pill"><Calendar :size="11" /> {{ selectedItem.aired_date || 'TBA' }}</span>
             </div>
           </div>
-          
-          <!-- Action -->
-          <div class="pt-2">
-            <button class="btn btn-primary w-full rounded-2xl flex gap-3 items-center justify-center font-black tracking-widest text-xs h-14 shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-shadow" @click="router.push(`/search?q=${encodeURIComponent(selectedItem?.title || '')}`)">
-              <Search :size="20" />
-              {{ $t('schedule.modal.searchAndSub') }}
-            </button>
+
+          <div v-if="metaLoading" class="py-6 flex justify-center">
+            <span class="loading loading-spinner loading-md text-[var(--v2-accent)]"></span>
           </div>
+          <p v-else-if="selectedMetadata?.anime?.description" class="text-xs text-[var(--v2-ink-muted)] leading-relaxed line-clamp-4">
+            {{ selectedMetadata.anime.description }}
+          </p>
+
+          <button type="button" class="v2-btn v2-btn-primary w-full" @click="router.push(`/search?q=${encodeURIComponent(selectedItem?.title || '')}`)">
+            <Search :size="15" />
+            <span>{{ $t('schedule.modal.searchAndSub') }}</span>
+          </button>
         </div>
       </div>
-      <form method="dialog" class="modal-backdrop" @click="selectedItem = null">
-        <button class="cursor-default">close</button>
-      </form>
+      <div class="modal-backdrop" @click="selectedItem = null"></div>
     </dialog>
 
-    <!-- Onboarding Modal -->
     <OnboardingModal />
-
-    <!-- Changelog Modal -->
     <ChangelogModal :show="showChangelog" :changelog="changelog" @close="showChangelog = false" />
   </div>
 </template>

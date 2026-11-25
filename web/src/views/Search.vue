@@ -4,12 +4,12 @@ import { useRouter, useRoute } from 'vue-router'
 import request from '../utils/request'
 import SearchPluginDialog, { type SearchPluginTarget } from '../components/SearchPluginDialog.vue'
 import SubscriptionReviewDialog, { type ReviewRelease } from '../components/SubscriptionReviewDialog.vue'
-import { 
+import {
   ChevronLeft, Search, Timer, Calendar,
-  AlertTriangle, X, Antenna, Sparkles, Info, 
-  Check, Plus, User, Copy, ExternalLink, Trash2, 
+  AlertTriangle, X, Sparkles, Info,
+  Check, Plus, User, Copy, ExternalLink, Trash2,
   HardDrive, History, Filter, Clock, Download,
-  CheckSquare, Square, ListChecks, CloudUpload
+  CheckSquare, Square, ListChecks, CloudUpload, Globe
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
@@ -40,11 +40,12 @@ const router = useRouter()
 const route = useRoute()
 const searchInputRef = ref<HTMLInputElement | null>(null)
 
-// 核心搜索状态
 const query = ref('')
 const results = ref<TorrentItem[]>([])
 const loading = ref(false)
 const error = ref('')
+const rawError = ref('')
+const hasSearched = ref(false)
 const subscribed = ref<Set<string>>(new Set())
 const lastSearchTime = ref('')
 const searchDuration = ref(0)
@@ -54,16 +55,79 @@ const usedAI = ref(false)
 const aiError = ref('')
 const aiConfigured = ref(false)
 
-// 结果内即时筛选与排序
+// 多源搜索开关条（从 /api/settings 真实读取，严格 val === 'true'，缺省为 false）
+interface SourceToggleDef {
+  key: 'ACGRIP_ENABLED' | 'NYAA_ENABLED' | 'ANIMETOSHO_ENABLED'
+  label: string
+  tag: string
+}
+const extraSources: SourceToggleDef[] = [
+  { key: 'ACGRIP_ENABLED', label: 'ACG.RIP', tag: '国内友站' },
+  { key: 'NYAA_ENABLED', label: 'Nyaa', tag: '海外主站' },
+  { key: 'ANIMETOSHO_ENABLED', label: 'AnimeTosho', tag: '镜像索引' },
+]
+const sourceEnabled = ref<Record<string, boolean>>({
+  ACGRIP_ENABLED: false,
+  NYAA_ENABLED: false,
+  ANIMETOSHO_ENABLED: false,
+})
+const sourceToggling = ref<Record<string, boolean>>({})
+const settingsLoaded = ref(false)
+
+async function loadSourceSettings() {
+  try {
+    const { data } = await request.get<Record<string, string>>('/settings')
+    sourceEnabled.value = {
+      ACGRIP_ENABLED: data?.ACGRIP_ENABLED === 'true',
+      NYAA_ENABLED: data?.NYAA_ENABLED === 'true',
+      ANIMETOSHO_ENABLED: data?.ANIMETOSHO_ENABLED === 'true',
+    }
+    settingsLoaded.value = true
+  } catch {
+    settingsLoaded.value = false
+  }
+}
+
+async function toggleSource(src: SourceToggleDef) {
+  if (sourceToggling.value[src.key]) return
+  const next = !sourceEnabled.value[src.key]
+  sourceToggling.value[src.key] = true
+  sourceEnabled.value[src.key] = next
+  try {
+    await request.put('/settings', { settings: { [src.key]: next ? 'true' : 'false' } })
+    window.showToast?.(
+      next ? `已开启 ${src.label} 搜索源` : `已关闭 ${src.label} 搜索源`,
+      'success'
+    )
+  } catch (e: any) {
+    sourceEnabled.value[src.key] = !next
+    window.showToast?.(e?.response?.data?.error || `切换 ${src.label} 失败`, 'error')
+  } finally {
+    sourceToggling.value[src.key] = false
+  }
+}
+
+function humanizeError(raw: string): string {
+  const lower = raw.toLowerCase()
+  if (lower.includes('network is unreachable') || lower.includes('no such host') || lower.includes('lookup ')) {
+    return '无法解析或连接资源站域名，请检查本地 DNS、宿主网络连通性或系统代理设置。'
+  }
+  if (lower.includes('timeout') || lower.includes('context deadline exceeded') || lower.includes('econnaborted')) {
+    return '连接资源站响应超时，可在多源开关中切换直连站点（如 ACG.RIP）或检查代理后重试。'
+  }
+  if (lower.includes('connection refused')) {
+    return '目标站点或代理端口拒绝连接，请检查镜像域名或网络端口配置。'
+  }
+  return raw
+}
+
 const selectedSource = ref('all')
 const inResultFilter = ref('')
 const sortBy = ref<'default' | 'date' | 'size_desc' | 'size_asc'>('default')
 
-// 字幕组记忆与快速过滤
 const FILTER_PREF_KEY = 'anigo_search_filter_pref'
 const selectedSubgroup = ref(localStorage.getItem(FILTER_PREF_KEY) || 'all')
 
-// 直接下载与批量模式
 const directDownloading = ref<Record<string, boolean>>({})
 const batchMode = ref(false)
 const selectedItems = ref<TorrentItem[]>([])
@@ -92,8 +156,10 @@ async function loadPluginTargets() {
     if (generation !== catalogRequest) return
     pluginTargets.value = data.filter(p => p.enabled && p.status === 'active').flatMap(p =>
       (p.panel?.actions ?? []).filter(a => a.placement === 'search_result' && a.input?.format === 'magnet' && a.result === 'message')
-        .map(a => ({ id: p.id, name: p.name, official: p.is_builtin === true && p.origin === 'official',
-          action: a.id, label: a.label, url: p.url ?? '' })))
+        .map(a => ({
+          id: p.id, name: p.name, official: p.is_builtin === true && p.origin === 'official',
+          action: a.id, label: a.label, url: p.url ?? ''
+        })))
   } catch {
     if (generation === catalogRequest) pluginTargets.value = []
   }
@@ -105,7 +171,7 @@ function sourceLink(item: TorrentItem) {
     try {
       const url = new URL(candidate)
       if (url.protocol === 'https:' || url.protocol === 'http:') return url.href
-    } catch { /* Try the other URL supplied by this source. */ }
+    } catch {}
   }
   return ''
 }
@@ -119,20 +185,17 @@ function choosePlugin(item: TorrentItem) {
   if (magnet && pluginTargets.value.length) pluginSelection.value = { item: { title: item.title, magnet }, targets: pluginTargets.value }
 }
 
-// 搜索历史与热门标签
 const SEARCH_HISTORY_KEY = 'anigo_search_history'
 const searchHistory = ref<string[]>([])
 const popularTags = [
-  '葬送的芙莉莲', '我推的孩子', '迷宫饭', '孤独摇滚', 
+  '葬送的芙莉莲', '我推的孩子', '迷宫饭', '孤独摇滚',
   '鬼灭之刃', '间谍过家家', '无职转生', '1080p', '4K', '简日双语'
 ]
 
 function loadSearchHistory() {
   try {
     const raw = localStorage.getItem(SEARCH_HISTORY_KEY)
-    if (raw) {
-      searchHistory.value = JSON.parse(raw)
-    }
+    if (raw) searchHistory.value = JSON.parse(raw)
   } catch {}
 }
 
@@ -141,26 +204,19 @@ function saveSearchHistory(q: string) {
   if (!clean) return
   const set = new Set([clean, ...searchHistory.value])
   searchHistory.value = Array.from(set).slice(0, 10)
-  try {
-    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.value))
-  } catch {}
+  try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.value)) } catch {}
 }
 
 function removeHistoryItem(item: string) {
   searchHistory.value = searchHistory.value.filter(s => s !== item)
-  try {
-    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.value))
-  } catch {}
+  try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.value)) } catch {}
 }
 
 function clearAllHistory() {
   searchHistory.value = []
-  try {
-    localStorage.removeItem(SEARCH_HISTORY_KEY)
-  } catch {}
+  try { localStorage.removeItem(SEARCH_HISTORY_KEY) } catch {}
 }
 
-// 加载已有追番列表
 async function loadSubscribedList() {
   try {
     const { data } = await request.get('/subscriptions')
@@ -173,6 +229,7 @@ async function loadSubscribedList() {
 onMounted(async () => {
   loadSearchHistory()
   loadSubscribedList()
+  void loadSourceSettings()
   void loadPluginTargets()
   window.addEventListener?.('focus', loadPluginTargets)
 
@@ -182,14 +239,12 @@ onMounted(async () => {
     void handleSearch()
   }
 
-  // 检查 AI 是否已配置
   try {
     const { data } = await request.get('/search/capabilities')
     aiConfigured.value = data.smart_search === true
-  } catch (e) {
+  } catch {
     aiConfigured.value = false
   }
-
 })
 
 onUnmounted(() => {
@@ -200,7 +255,6 @@ onUnmounted(() => {
   window.removeEventListener('focus', loadPluginTargets)
 })
 
-// 字幕组选择弹窗
 const reviewItems = ref<TorrentItem[]>([])
 const showGroupModal = ref(false)
 const groupSubmitting = ref(false)
@@ -239,8 +293,10 @@ async function handleSearch() {
   aiError.value = ''
   lastSearchTime.value = ''
   saveSearchHistory(q)
+  hasSearched.value = true
   loading.value = true
   error.value = ''
+  rawError.value = ''
   selectedSource.value = 'all'
   inResultFilter.value = ''
   const start = Date.now()
@@ -264,11 +320,9 @@ async function handleSearch() {
     searchDuration.value = Date.now() - start
   } catch (e: any) {
     if (current.signal.aborted) return
-    if (e.code === 'ECONNABORTED') {
-      error.value = t('search.error.timeout') || '检索超时'
-    } else {
-      error.value = e.response?.data?.error || t('search.error.failed') || '检索失败'
-    }
+    const raw = e.response?.data?.error || e.message || t('search.error.failed') || '检索失败'
+    rawError.value = raw
+    error.value = e.code === 'ECONNABORTED' ? (t('search.error.timeout') || '检索超时') : humanizeError(raw)
   } finally {
     if (current === searchRequest) loading.value = false
   }
@@ -284,20 +338,19 @@ function clearQuery() {
   searchRequest?.abort()
   searchRequest = undefined
   loading.value = false
+  hasSearched.value = false
   results.value = []
   error.value = ''
+  rawError.value = ''
   expandedQueries.value = []
   aiError.value = ''
   usedAI.value = false
   lastSearchTime.value = ''
   exitBatchMode()
   query.value = ''
-  if (searchInputRef.value) {
-    searchInputRef.value.focus()
-  }
+  searchInputRef.value?.focus()
 }
 
-// 统计结果数据源
 const availableSources = computed(() => {
   const map = new Map<string, number>()
   for (const item of results.value) {
@@ -307,60 +360,65 @@ const availableSources = computed(() => {
   return map
 })
 
-// 字幕组智能提取与记忆
 function selectSubgroup(group: string) {
   selectedSubgroup.value = group
-  try {
-    localStorage.setItem(FILTER_PREF_KEY, group)
-  } catch {}
+  try { localStorage.setItem(FILTER_PREF_KEY, group) } catch {}
+}
+
+function extractItemSubgroup(title: string): string {
+  const m = title.match(/^[\[【]([^\]】]+)[\]】]/)
+  if (m && m[1]) {
+    const g = m[1].trim()
+    if (!/^(1080p|720p|4k|2160p|hevc|x264|x265|bilibili|web-dl)$/i.test(g) && g.length <= 28) {
+      return g
+    }
+  }
+  return ''
+}
+
+function extractQualityTags(title: string): string[] {
+  const hits: string[] = []
+  const patterns: [RegExp, string][] = [
+    [/2160p|4K/i, '4K'],
+    [/1080p/i, '1080P'],
+    [/720p/i, '720P'],
+    [/HEVC|x265|H\.265/i, 'HEVC'],
+    [/简日|简繁|CHS|CHT/i, '中文'],
+  ]
+  for (const [re, label] of patterns) {
+    if (re.test(title) && !hits.includes(label)) hits.push(label)
+  }
+  return hits.slice(0, 3)
 }
 
 const extractedSubgroups = computed(() => {
   const map = new Map<string, number>()
-  const regex = /^[\[【]([^\]】]+)[\]】]/
   for (const item of results.value) {
-    const match = item.title.match(regex)
-    if (match && match[1]) {
-      const g = match[1].trim()
-      if (!/^(1080p|720p|4k|2160p|hevc|x264|x265|bilibili|web-dl)$/i.test(g) && g.length <= 25) {
-        map.set(g, (map.get(g) || 0) + 1)
-      }
-    }
+    const g = extractItemSubgroup(item.title)
+    if (g) map.set(g, (map.get(g) || 0) + 1)
   }
-  return Array.from(map.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
+  return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10)
 })
 
-// 多维度过滤与排序
 const filteredResults = computed(() => {
   let list = results.value
-
   if (selectedSource.value !== 'all') {
     list = list.filter(item => item.source === selectedSource.value)
   }
-
   if (selectedSubgroup.value !== 'all') {
     list = list.filter(item => item.title.includes(selectedSubgroup.value))
   }
-
   const kw = inResultFilter.value.trim().toLowerCase()
   if (kw) {
     list = list.filter(item => item.title.toLowerCase().includes(kw))
   }
-
   if (sortBy.value === 'date') {
-    list = [...list].sort((a, b) => {
-      const ta = new Date(a.pub_date || 0).getTime()
-      const tb = new Date(b.pub_date || 0).getTime()
-      return tb - ta
-    })
+    list = [...list].sort((a, b) => new Date(b.pub_date || 0).getTime() - new Date(a.pub_date || 0).getTime())
   } else if (sortBy.value === 'size_desc') {
     list = [...list].sort((a, b) => (b.size || 0) - (a.size || 0))
   } else if (sortBy.value === 'size_asc') {
     list = [...list].sort((a, b) => (a.size || 0) - (b.size || 0))
   }
-
   return list
 })
 
@@ -399,11 +457,8 @@ function toggleItemSelection(item: TorrentItem) {
   const key = getItemKey(item)
   if (batchProcessing.value || !canDownload(item)) return
   const idx = selectedItems.value.findIndex(i => getItemKey(i) === key)
-  if (idx >= 0) {
-    selectedItems.value.splice(idx, 1)
-  } else {
-    selectedItems.value.push(item)
-  }
+  if (idx >= 0) selectedItems.value.splice(idx, 1)
+  else selectedItems.value.push(item)
 }
 
 const visibleDownloads = computed(() => filteredResults.value.filter(canDownload))
@@ -437,11 +492,7 @@ async function submitBatch(operation: 'download' | 'subscribe') {
   batchProcessing.value = true
   for (const item of items) {
     if (!activeView) break
-    try {
-      await queueDownload(item)
-    } catch {
-      failed.push(item)
-    }
+    try { await queueDownload(item) } catch { failed.push(item) }
   }
   batchProcessing.value = false
   if (!activeView) return
@@ -541,11 +592,7 @@ async function copyMagnet(item: TorrentItem) {
       document.body.appendChild(input)
       input.select()
       copied = document.execCommand('copy')
-    } catch {
-      copied = false
-    } finally {
-      input.remove()
-    }
+    } catch { copied = false } finally { input.remove() }
   }
   window.showToast?.(t(copied ? 'search.action.magnetCopied' : 'search.action.copyFailed'), copied ? 'success' : 'error')
 }
@@ -568,58 +615,54 @@ function formatPubDate(d?: string): string {
   return date.toLocaleDateString(locale.value)
 }
 
-function sourceBadge(source: string): string {
+function sourceBadgeClass(source: string): string {
   const map: Record<string, string> = {
-    Mikan: 'bg-primary/10 text-primary border-primary/20',
-    Nyaa: 'bg-secondary/10 text-secondary border-secondary/20',
-    'ACG.RIP': 'bg-accent/10 text-accent border-accent/20',
-    AnimeTosho: 'bg-info/10 text-info border-info/20',
+    Mikan: 'bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] border-[var(--v2-accent)]/30',
+    Nyaa: 'bg-sky-500/12 text-sky-400 border-sky-500/30',
+    'ACG.RIP': 'bg-emerald-500/12 text-emerald-400 border-emerald-500/30',
+    AnimeTosho: 'bg-violet-500/12 text-violet-400 border-violet-500/30',
   }
-  return map[source] || 'bg-base-200 text-base-content/40 border-base-300'
+  return map[source] || 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] border-[var(--v2-border)]'
 }
 </script>
 
 <template>
-  <div class="space-y-6 pb-20 max-w-6xl mx-auto">
-    <!-- 顶部页头（首个子元素保留原生节点与仅含 ChevronLeft/Plus/Search，以兼容 search-navigation.test.mjs 的 SSR 片段断言） -->
+  <div class="space-y-5 pb-16">
+    <!-- 顶部页头：第一个子元素必须为原生 <header>，仅使用 ChevronLeft/Plus/Search 图标（契约测试要求） -->
     <header class="app-page-header">
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2.5 flex-wrap">
           <h1 class="app-page-title">{{ $t('search.title') }}</h1>
-          <span v-if="results.length > 0" class="badge badge-neutral badge-sm font-mono font-semibold tabular-nums">
-            {{ t('search.resultsCount', { count: results.length }) }}
+          <span v-if="results.length > 0" class="v2-pill font-mono text-xs">
+            {{ $t('search.resultsCount', { count: results.length }) }}
           </span>
         </div>
         <p class="app-page-subtitle">{{ $t('search.subtitle') }}</p>
       </div>
 
       <div class="flex flex-wrap items-center gap-2 shrink-0">
-        <router-link to="/subscriptions/new" class="btn btn-outline btn-sm rounded-lg gap-1.5 border-base-content/15">
+        <router-link to="/subscriptions/new" class="v2-btn v2-btn-sm">
           <Plus :size="15" aria-hidden="true" />
           <span>{{ $t('search.addManually') }}</span>
         </router-link>
-        <button
-          type="button"
-          class="btn btn-ghost btn-sm border border-base-content/12 rounded-lg gap-1.5"
-          @click="router.push('/schedule')"
-        >
+        <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="router.push('/schedule')">
           <ChevronLeft :size="15" />
           <span>{{ $t('search.back') }}</span>
         </button>
       </div>
     </header>
 
-    <!-- 检索输入框 -->
-    <div class="space-y-3 max-w-3xl mx-auto w-full">
-      <div class="app-surface rounded-xl flex items-center p-1.5 shadow-sm focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/15 transition-all">
-        <div class="pl-3 text-base-content/40 shrink-0">
-          <Search :size="18" />
+    <!-- 宽幅指令检索 Hero + 实时多源开关条 -->
+    <section class="v2-panel p-4 sm:p-6 space-y-4">
+      <div class="flex items-center p-1.5 rounded-xl bg-[var(--v2-surface-2)] border border-[var(--v2-border-strong)] focus-within:border-[var(--v2-accent)] focus-within:ring-2 focus-within:ring-[var(--v2-accent)]/20 transition-all">
+        <div class="pl-3 text-[var(--v2-ink-subtle)] shrink-0">
+          <Search :size="19" />
         </div>
         <input
           ref="searchInputRef"
           v-model="query"
           type="text"
-          class="flex-1 min-w-0 bg-transparent border-none outline-none px-3 py-2 text-sm sm:text-base font-medium placeholder:text-base-content/35"
+          class="flex-1 min-w-0 bg-transparent border-none outline-none px-3 py-2 text-sm sm:text-base font-medium text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-subtle)]"
           :placeholder="$t('search.placeholder')"
           @keyup.enter="handleSearch"
         />
@@ -627,13 +670,13 @@ function sourceBadge(source: string): string {
           v-if="query"
           type="button"
           @click="clearQuery"
-          class="btn btn-ghost btn-circle btn-xs mr-1.5 text-base-content/45 hover:text-base-content"
+          class="p-1.5 rounded-lg text-[var(--v2-ink-muted)] hover:text-[var(--v2-ink)] mr-1"
         >
-          <X :size="14" />
+          <X :size="15" />
         </button>
         <button
           type="button"
-          class="btn btn-primary h-9 min-h-0 px-4 sm:px-5 rounded-lg gap-1.5 shrink-0 font-semibold text-xs sm:text-sm"
+          class="v2-btn v2-btn-primary px-5 shrink-0"
           :disabled="loading || !query.trim()"
           @click="handleSearch"
         >
@@ -645,107 +688,150 @@ function sourceBadge(source: string): string {
         </button>
       </div>
 
-      <!-- Search Options Bar -->
-      <div class="flex items-center justify-between px-2 flex-wrap gap-3">
-        <label class="flex items-center gap-2 cursor-pointer text-xs font-bold select-none text-base-content/70 hover:text-base-content transition-colors">
-          <Sparkles :size="15" class="text-secondary" />
-          <span>{{ $t('search.smart') }}</span>
-          <input v-model="smartSearch" type="checkbox" class="toggle toggle-primary toggle-sm rounded-full" :disabled="!aiConfigured" />
-          <span v-if="!aiConfigured" class="text-[10px] font-bold text-warning ml-1">
-            ({{ $t('settings.ai.notConfiguredTip') }})
+      <!-- 实时多源开关条 + AI 扩展开关 -->
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-1">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-[11px] font-semibold text-[var(--v2-ink-subtle)] flex items-center gap-1 mr-1">
+            <Globe :size="13" />
+            <span>{{ locale === 'zh' ? '检索数据源:' : 'Sources:' }}</span>
           </span>
-        </label>
 
-        <div v-if="lastSearchTime && results.length > 0" class="text-[11px] font-mono opacity-50 flex items-center gap-3">
-          <span class="flex items-center gap-1"><Timer :size="12" /> {{ (searchDuration / 1000).toFixed(2) }}s</span>
-          <span>•</span>
-          <span class="flex items-center gap-1"><Clock :size="12" /> {{ lastSearchTime }}</span>
+          <!-- Mikan 内置源 -->
+          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--v2-accent)]/12 border border-[var(--v2-accent)]/30 text-xs font-semibold text-[var(--v2-accent)]">
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--v2-accent)]"></span>
+            <span>Mikan</span>
+            <span class="text-[10px] opacity-75">[{{ locale === 'zh' ? '内置' : 'Built-in' }}]</span>
+          </div>
+
+          <!-- 可即时切换的扩展源（直接读取与写入 PUT /api/settings） -->
+          <button
+            v-for="src in extraSources"
+            :key="src.key"
+            type="button"
+            role="switch"
+            :aria-checked="sourceEnabled[src.key]"
+            :disabled="!!sourceToggling[src.key]"
+            @click="toggleSource(src)"
+            class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-xs font-medium transition-all cursor-pointer"
+            :class="sourceEnabled[src.key]
+              ? 'bg-emerald-500/12 border-emerald-500/35 text-emerald-400 font-semibold'
+              : 'bg-[var(--v2-surface-2)] border-[var(--v2-border)] text-[var(--v2-ink-muted)] hover:border-[var(--v2-border-strong)]'"
+          >
+            <span
+              class="w-1.5 h-1.5 rounded-full"
+              :class="sourceEnabled[src.key] ? 'bg-emerald-400' : 'bg-[var(--v2-ink-subtle)]'"
+            ></span>
+            <span>{{ src.label }}</span>
+            <span class="text-[10px] opacity-70">{{ src.tag }}</span>
+            <span class="font-mono text-[10px] px-1.5 py-0.2 rounded bg-black/20">
+              {{ sourceEnabled[src.key] ? 'ON' : 'OFF' }}
+            </span>
+          </button>
+        </div>
+
+        <div class="flex items-center justify-between sm:justify-end gap-4">
+          <label class="flex items-center gap-2 cursor-pointer text-xs font-semibold text-[var(--v2-ink-muted)] select-none">
+            <Sparkles :size="14" class="text-[var(--v2-accent)]" />
+            <span>{{ $t('search.smart') }}</span>
+            <button
+              type="button"
+              role="switch"
+              class="v2-switch"
+              :aria-checked="smartSearch"
+              :disabled="!aiConfigured"
+              @click="aiConfigured && (smartSearch = !smartSearch)"
+            >
+              <span class="v2-switch-thumb"></span>
+            </button>
+            <span v-if="!aiConfigured" class="text-[11px] text-amber-400">({{ $t('settings.ai.notConfiguredTip') }})</span>
+          </label>
+
+          <div v-if="lastSearchTime && results.length > 0" class="text-[11px] font-mono text-[var(--v2-ink-subtle)] flex items-center gap-2 tabular-nums">
+            <span class="flex items-center gap-1"><Timer :size="12" /> {{ (searchDuration / 1000).toFixed(2) }}s</span>
+            <span>•</span>
+            <span class="flex items-center gap-1"><Clock :size="12" /> {{ lastSearchTime }}</span>
+          </div>
         </div>
       </div>
+    </section>
+
+    <!-- AI 降级提示 -->
+    <div v-if="smartSearch && aiError" class="v2-panel border-amber-500/30 bg-amber-500/10 text-amber-400 px-4 py-3 flex items-center gap-2.5 text-xs font-medium">
+      <Info :size="16" class="shrink-0" />
+      <span>{{ $t('search.degraded') }}</span>
     </div>
 
-    <!-- AI Degradation Notice -->
-    <Transition name="fade">
-      <div v-if="smartSearch && aiError" class="max-w-4xl mx-auto alert bg-warning/10 border border-warning/20 text-warning rounded-2xl py-3 px-4 flex items-center gap-3">
-        <Info :size="18" class="shrink-0" />
-        <span class="text-xs font-bold">{{ $t('search.degraded') }}</span>
-      </div>
-    </Transition>
-
-    <!-- Expanded Query Chips -->
-    <div v-if="results.length > 0 && expandedQueries.length > 1" class="max-w-5xl mx-auto flex flex-wrap items-center gap-2 bg-base-100 p-3 rounded-2xl border border-base-200/80">
-      <span class="text-[10px] font-black uppercase tracking-wider text-base-content/40 mr-1 flex items-center gap-1">
-        <Sparkles :size="12" class="text-primary" /> {{ $t('search.expanded') }}:
+    <!-- 扩展检索词 -->
+    <div v-if="results.length > 0 && expandedQueries.length > 1" class="v2-panel p-3 flex flex-wrap items-center gap-2">
+      <span class="text-[11px] font-semibold text-[var(--v2-ink-subtle)] flex items-center gap-1 mr-1">
+        <Sparkles :size="12" class="text-[var(--v2-accent)]" /> {{ $t('search.expanded') }}:
       </span>
-      <span v-for="(item, idx) in expandedQueries" :key="`${item}-${idx}`"
-        class="badge badge-sm border-base-300 bg-base-200/60 font-bold"
-        :class="idx === 0 ? 'text-primary border-primary/20' : 'opacity-80'">
+      <span v-for="(item, idx) in expandedQueries" :key="`${item}-${idx}`" class="v2-pill text-xs">
         {{ item }}
       </span>
     </div>
 
-    <!-- Error Alert -->
-    <div v-if="error" class="max-w-4xl mx-auto">
-      <div class="alert bg-error/10 border-error/20 text-error rounded-2xl p-4 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <AlertTriangle :size="20" class="shrink-0" />
-          <div>
-            <h4 class="font-black text-xs uppercase tracking-wider">{{ $t('search.error.title') }}</h4>
-            <p class="text-xs font-bold opacity-80 mt-0.5">{{ error }}</p>
+    <!-- 人性化网络错误诊断 -->
+    <div v-if="error" class="v2-panel border-red-500/35 bg-red-500/10 text-red-400 p-4 space-y-2">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex items-start gap-3">
+          <AlertTriangle :size="18" class="shrink-0 mt-0.5" />
+          <div class="space-y-1">
+            <h4 class="font-semibold text-xs">{{ $t('search.error.title') }}</h4>
+            <p class="text-xs text-[var(--v2-ink)]">{{ error }}</p>
           </div>
         </div>
-        <button class="btn btn-ghost btn-circle btn-xs" @click="error = ''">
+        <button type="button" class="p-1 rounded hover:bg-red-500/20" @click="error = ''; rawError = ''">
           <X :size="14" />
         </button>
       </div>
+      <details v-if="rawError && rawError !== error" class="pl-7 text-[11px] font-mono text-[var(--v2-ink-muted)]">
+        <summary class="cursor-pointer hover:text-[var(--v2-ink)]">查看原始网络错误</summary>
+        <pre class="mt-1.5 p-2 rounded-lg bg-black/25 whitespace-pre-wrap break-all">{{ rawError }}</pre>
+      </details>
     </div>
 
-    <!-- Results Filter & Sorting Toolbar (when results > 0) -->
-    <div v-if="results.length > 0" class="flex flex-col gap-3 bg-base-100 p-4 rounded-2xl border border-base-200/80 shadow-sm max-w-5xl mx-auto w-full">
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <!-- Source Filter Chips -->
-        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 md:pb-0 text-xs">
-          <button 
-            @click="selectedSource = 'all'" 
-            class="btn btn-xs sm:btn-sm rounded-xl font-bold whitespace-nowrap"
-            :class="selectedSource === 'all' ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
+    <!-- 结果筛选工具栏 -->
+    <div v-if="results.length > 0" class="v2-panel p-3.5 space-y-3">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div class="flex items-center gap-1.5 overflow-x-auto">
+          <button
+            type="button"
+            @click="selectedSource = 'all'"
+            class="h-7 px-3 rounded-full text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+            :class="selectedSource === 'all' ? 'bg-[var(--v2-accent)] text-white' : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)]'"
           >
             {{ $t('search.filterAll') }} ({{ results.length }})
           </button>
-          <button 
-            v-for="[src, count] in availableSources" 
+          <button
+            v-for="[src, count] in availableSources"
             :key="src"
-            @click="selectedSource = src" 
-            class="btn btn-xs sm:btn-sm rounded-xl font-bold whitespace-nowrap"
-            :class="selectedSource === src ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60 opacity-70'"
+            type="button"
+            @click="selectedSource = src"
+            class="h-7 px-3 rounded-full text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+            :class="selectedSource === src ? 'bg-[var(--v2-accent)] text-white' : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)]'"
           >
             {{ src }} ({{ count }})
           </button>
         </div>
 
-        <!-- Quick Search, Sort & Batch Toggle -->
         <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
           <div class="relative flex-1 sm:w-52">
-            <input 
-              v-model="inResultFilter" 
-              type="text" 
-              :placeholder="$t('search.filterKeyword')" 
-              class="input input-bordered input-xs sm:input-sm w-full rounded-xl pl-7 text-xs font-medium"
-            />
-            <Filter :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
+            <Filter :size="12" class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--v2-ink-subtle)]" />
+            <input v-model="inResultFilter" type="text" :placeholder="$t('search.filterKeyword')" class="v2-input pl-7 h-8 text-xs" />
           </div>
-
-          <select v-model="sortBy" class="select select-bordered select-xs sm:select-sm rounded-xl text-xs font-bold">
+          <select v-model="sortBy" class="v2-input w-36 h-8 text-xs font-medium cursor-pointer">
             <option value="default">{{ $t('search.sortDefault') }}</option>
             <option value="date">{{ $t('search.sortDate') }}</option>
             <option value="size_desc">{{ $t('search.sortSizeDesc') }}</option>
             <option value="size_asc">{{ $t('search.sortSizeAsc') }}</option>
           </select>
-
-          <button 
-            @click="batchMode ? exitBatchMode() : (batchMode = true)" :disabled="batchProcessing"
-            class="btn btn-xs sm:btn-sm rounded-xl font-bold gap-1.5 whitespace-nowrap"
-            :class="batchMode ? 'btn-primary shadow-sm' : 'btn-ghost border border-base-300/60'"
+          <button
+            type="button"
+            @click="batchMode ? exitBatchMode() : (batchMode = true)"
+            :disabled="batchProcessing"
+            class="v2-btn v2-btn-sm"
+            :class="batchMode ? 'v2-btn-primary' : ''"
           >
             <ListChecks :size="14" />
             <span>{{ batchMode ? $t('search.action.batchCancel') : $t('search.action.batchSelect') }}</span>
@@ -753,360 +839,309 @@ function sourceBadge(source: string): string {
         </div>
       </div>
 
-      <!-- Subgroup Quick Filter Chips -->
-      <div v-if="extractedSubgroups.length > 0" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-base-200/60 text-xs">
-        <span class="text-[10px] font-black uppercase text-base-content/40 shrink-0">{{ t('search.filterGroups') }}</span>
-        <button 
-          @click="selectSubgroup('all')" 
-          class="btn btn-xs rounded-lg font-bold whitespace-nowrap"
-          :class="selectedSubgroup === 'all' ? 'btn-neutral' : 'btn-ghost opacity-60 border border-base-200'"
+      <div v-if="extractedSubgroups.length > 0" class="flex items-center gap-1.5 overflow-x-auto pt-2 border-t border-[var(--v2-border)] text-xs">
+        <span class="text-[11px] font-semibold text-[var(--v2-ink-subtle)] shrink-0">{{ t('search.filterGroups') }}</span>
+        <button
+          type="button"
+          @click="selectSubgroup('all')"
+          class="h-6 px-2.5 rounded-md text-[11px] font-medium whitespace-nowrap cursor-pointer"
+          :class="selectedSubgroup === 'all' ? 'bg-[var(--v2-ink)] text-[var(--v2-bg)]' : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)]'"
         >
           {{ t('search.allGroups') }}
         </button>
-        <button 
-          v-for="[group, count] in extractedSubgroups" 
+        <button
+          v-for="[group, count] in extractedSubgroups"
           :key="group"
-          @click="selectSubgroup(group)" 
-          class="btn btn-xs rounded-lg font-bold whitespace-nowrap"
-          :class="selectedSubgroup === group ? 'btn-neutral' : 'btn-ghost opacity-70 border border-base-200'"
+          type="button"
+          @click="selectSubgroup(group)"
+          class="h-6 px-2.5 rounded-md text-[11px] font-medium whitespace-nowrap cursor-pointer"
+          :class="selectedSubgroup === group ? 'bg-[var(--v2-ink)] text-[var(--v2-bg)]' : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)]'"
         >
           {{ group }} ({{ count }})
         </button>
       </div>
     </div>
 
-    <!-- Batch Action Floating Bar -->
-    <Transition name="fade">
-      <div v-if="batchMode && filteredResults.length > 0" class="sticky top-4 z-40 max-w-5xl mx-auto w-full bg-base-100/95 backdrop-blur-md p-3 sm:p-4 rounded-2xl border border-primary/30 shadow-xl flex flex-wrap items-center justify-between gap-3 animate-in slide-in-from-top-2 duration-200">
-        <div class="flex items-center gap-3">
-          <button 
-            @click="toggleSelectAll" :disabled="batchProcessing || !visibleDownloads.length"
-            class="btn btn-ghost btn-xs sm:btn-sm rounded-xl gap-1.5 text-xs font-bold border border-base-300"
-          >
-            <component :is="allVisibleSelected ? CheckSquare : Square" :size="14" class="text-primary" />
-            <span>{{ allVisibleSelected ? $t('search.action.deselectAll') : $t('search.action.selectAll') }}</span>
-          </button>
-          <span class="badge badge-primary badge-sm font-bold font-mono">
-            {{ $t('search.action.selectedCount', { count: selectedItems.length }) }}
-          </span>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <button 
-            @click="submitBatch('download')"
-            :disabled="selectedItems.length === 0 || batchProcessing"
-            class="btn btn-primary btn-xs sm:btn-sm rounded-xl gap-1.5 text-xs font-bold shadow-sm"
-          >
-            <span v-if="batchProcessing" class="loading loading-spinner loading-xs"></span>
-            <Download v-else :size="14" />
-            <span>{{ $t('search.action.batchDownload') }}</span>
-          </button>
-
-          <button 
-            @click="submitBatch('subscribe')"
-            :disabled="selectedItems.length === 0 || batchProcessing"
-            class="btn btn-secondary btn-xs sm:btn-sm rounded-xl gap-1.5 text-xs font-bold shadow-sm"
-          >
-            <span v-if="batchProcessing" class="loading loading-spinner loading-xs"></span>
-            <Plus v-else :size="14" />
-            <span>{{ $t('search.action.batchSubscribe') }}</span>
-          </button>
-
-          <button 
-            @click="exitBatchMode" :disabled="batchProcessing"
-            class="btn btn-ghost btn-xs sm:btn-sm rounded-xl text-xs font-bold"
-          >
-            {{ $t('search.action.batchCancel') }}
-          </button>
-        </div>
+    <!-- 批量浮动操作栏 -->
+    <div v-if="batchMode && filteredResults.length > 0" class="sticky top-18 z-30 v2-panel border-[var(--v2-accent)]/40 p-3 flex flex-wrap items-center justify-between gap-3 shadow-xl">
+      <div class="flex items-center gap-3">
+        <button type="button" @click="toggleSelectAll" :disabled="batchProcessing || !visibleDownloads.length" class="v2-btn v2-btn-sm">
+          <component :is="allVisibleSelected ? CheckSquare : Square" :size="14" class="text-[var(--v2-accent)]" />
+          <span>{{ allVisibleSelected ? $t('search.action.deselectAll') : $t('search.action.selectAll') }}</span>
+        </button>
+        <span class="v2-pill font-mono">{{ $t('search.action.selectedCount', { count: selectedItems.length }) }}</span>
       </div>
-    </Transition>
 
-    <!-- Results List -->
-    <div v-if="filteredResults.length > 0" class="grid gap-3 sm:gap-4 max-w-5xl mx-auto w-full">
-      <div 
-        v-for="(item, idx) in filteredResults" 
+      <div class="flex items-center gap-2">
+        <button type="button" @click="submitBatch('download')" :disabled="selectedItems.length === 0 || batchProcessing" class="v2-btn v2-btn-primary v2-btn-sm">
+          <Download :size="13" />
+          <span>{{ $t('search.action.batchDownload') }}</span>
+        </button>
+        <button type="button" @click="submitBatch('subscribe')" :disabled="selectedItems.length === 0 || batchProcessing" class="v2-btn v2-btn-sm">
+          <Plus :size="13" />
+          <span>{{ $t('search.action.batchSubscribe') }}</span>
+        </button>
+        <button type="button" @click="exitBatchMode" :disabled="batchProcessing" class="v2-btn v2-btn-ghost v2-btn-sm">
+          {{ $t('search.action.batchCancel') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 高密度结构化搜索结果行 -->
+    <div v-if="filteredResults.length > 0" class="v2-panel overflow-hidden divide-y divide-[var(--v2-border)]">
+      <div
+        v-for="(item, idx) in filteredResults"
         :key="item.info_hash || idx"
-        class="group bg-base-100 rounded-2xl sm:rounded-3xl border border-base-200/80 shadow-sm hover:shadow-xl hover:border-primary/30 transition-all duration-300 overflow-hidden p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-        :class="{ 'ring-2 ring-primary/40': isItemSelected(item) }"
+        class="p-3.5 sm:px-5 hover:bg-[var(--v2-surface-2)]/55 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3"
+        :class="{ 'bg-[var(--v2-accent)]/6': isItemSelected(item) }"
       >
-        <!-- Batch Checkbox -->
-        <div v-if="batchMode && canDownload(item)" class="shrink-0 flex items-center sm:self-center">
-          <input 
-            type="checkbox" 
-            :checked="isItemSelected(item)" :disabled="batchProcessing" :aria-label="t('search.action.selectResult', { title: item.title })"
+        <div class="flex items-start gap-3 min-w-0 flex-1">
+          <input
+            v-if="batchMode && canDownload(item)"
+            type="checkbox"
+            :checked="isItemSelected(item)"
+            :disabled="batchProcessing"
+            :aria-label="t('search.action.selectResult', { title: item.title })"
             @change="toggleItemSelection(item)"
-            class="checkbox checkbox-primary checkbox-sm rounded-lg cursor-pointer"
+            class="checkbox checkbox-primary checkbox-sm mt-1 shrink-0"
           />
-        </div>
 
-        <!-- Poster & Meta -->
-        <div class="flex items-start gap-3.5 sm:gap-5 min-w-0 flex-1 w-full">
-          <!-- Poster Thumbnail -->
-          <div class="w-14 h-20 sm:w-16 sm:h-24 rounded-xl bg-base-200 shrink-0 overflow-hidden relative shadow-sm group-hover:scale-105 transition-transform duration-300">
-            <img 
-              v-if="item.cover_url" 
-              :src="proxyImage(item.cover_url)" 
-              :alt="item.title" 
-              class="w-full h-full object-cover" 
-              loading="lazy" 
-              @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" 
-            />
-            <div class="absolute inset-0 flex items-center justify-center text-base-content/20" v-else>
-              <Antenna :size="24" />
-            </div>
+          <div v-if="item.cover_url" class="w-11 h-15 rounded-lg bg-[var(--v2-surface-2)] shrink-0 overflow-hidden border border-[var(--v2-border)] hidden sm:block">
+            <img :src="proxyImage(item.cover_url)" :alt="item.title" class="w-full h-full object-cover" loading="lazy" />
           </div>
 
-          <!-- Info Details -->
-          <div class="flex-1 min-w-0 space-y-2">
-            <h3 class="text-sm sm:text-base font-black tracking-tight line-clamp-2 leading-snug group-hover:text-primary transition-colors select-all" :title="item.title">
-              {{ item.title }}
-            </h3>
-            
-            <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <span v-if="item.url && item.url.includes('/Home/Bangumi/') && !item.magnet" class="text-[10px] font-black uppercase tracking-wider py-0.5 px-2.5 rounded-md bg-primary text-primary-content shadow-sm">
+          <div class="min-w-0 flex-1 space-y-1.5">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span
+                v-if="item.url && item.url.includes('/Home/Bangumi/') && !item.magnet"
+                class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[var(--v2-accent)] text-white"
+              >
                 {{ t('search.seriesEntry') }}
               </span>
-              <span v-else class="text-[10px] font-black uppercase tracking-wider py-0.5 px-2 rounded-md border" :class="sourceBadge(item.source)">
+              <span v-else class="text-[10px] font-bold px-2 py-0.5 rounded-md border" :class="sourceBadgeClass(item.source)">
                 {{ item.source }}
               </span>
-              <span v-if="item.size > 0" class="text-[10px] font-bold font-mono bg-base-200 text-base-content/60 py-0.5 px-2 rounded-md flex items-center gap-1">
-                <HardDrive :size="10" />
-                {{ formatSize(item.size) }}
+
+              <span v-if="extractItemSubgroup(item.title)" class="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-[var(--v2-surface-2)] text-[var(--v2-ink)] border border-[var(--v2-border)]">
+                {{ extractItemSubgroup(item.title) }}
               </span>
-              <span v-if="formatPubDate(item.pub_date)" class="text-[10px] font-bold font-mono bg-base-200 text-base-content/60 py-0.5 px-2 rounded-md flex items-center gap-1">
-                <Calendar :size="10" />
-                {{ formatPubDate(item.pub_date) }}
+
+              <span v-for="tag in extractQualityTags(item.title)" :key="tag" class="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-[var(--v2-accent)]/10 text-[var(--v2-accent)]">
+                {{ tag }}
               </span>
-              <span v-if="item.bangumi_id" class="text-[10px] font-bold font-mono bg-base-200 text-base-content/40 py-0.5 px-2 rounded-md">
-                BGM: {{ item.bangumi_id }}
+            </div>
+
+            <h3 class="text-sm font-semibold leading-snug text-[var(--v2-ink)] break-all select-all">
+              {{ item.title }}
+            </h3>
+
+            <div class="flex flex-wrap items-center gap-3 text-[11px] font-mono text-[var(--v2-ink-subtle)] tabular-nums">
+              <span v-if="item.size > 0" class="flex items-center gap-1">
+                <HardDrive :size="11" /> {{ formatSize(item.size) }}
               </span>
+              <span v-if="formatPubDate(item.pub_date)" class="flex items-center gap-1">
+                <Calendar :size="11" /> {{ formatPubDate(item.pub_date) }}
+              </span>
+              <span v-if="item.bangumi_id">BGM: {{ item.bangumi_id }}</span>
             </div>
           </div>
         </div>
 
-        <!-- Actions -->
-        <div class="flex items-center gap-2 shrink-0 self-end sm:self-center w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-base-200/50 flex-wrap">
-          <!-- 立即下载 (无需订阅) -->
-          <button 
+        <div class="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+          <button
             v-if="canDownload(item)"
+            type="button"
             @click="directDownload(item)"
             :disabled="directDownloading[getItemKey(item)]"
-            class="btn btn-ghost btn-sm rounded-xl gap-1.5 text-xs font-bold hover:bg-base-200 border border-base-200 text-primary"
+            class="v2-btn v2-btn-sm text-[var(--v2-accent)]"
             :title="$t('search.action.downloadDirect')"
           >
-            <span v-if="directDownloading[getItemKey(item)]" class="loading loading-spinner loading-xs"></span>
-            <Download v-else :size="14" />
-            <span class="text-[11px]">{{ $t('search.action.downloadDirect') }}</span>
+            <Download :size="13" />
+            <span>{{ $t('search.action.downloadDirect') }}</span>
           </button>
 
-          <button v-if="resourceMagnet(item) && pluginTargets.length" type="button" @click="choosePlugin(item)"
-            class="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-200" :aria-label="t('search.plugin.open')" :title="t('search.plugin.open')">
-            <CloudUpload :size="15" /><span class="text-[11px] hidden sm:inline">{{ t('search.plugin.open') }}</span>
+          <button
+            v-if="resourceMagnet(item) && pluginTargets.length"
+            type="button"
+            @click="choosePlugin(item)"
+            class="v2-btn v2-btn-sm"
+            :title="t('search.plugin.open')"
+          >
+            <CloudUpload :size="13" />
           </button>
 
-          <button 
+          <button
             v-if="resourceMagnet(item)"
+            type="button"
             @click="copyMagnet(item)"
-            class="btn btn-ghost btn-sm rounded-xl gap-1.5 text-xs font-bold hover:bg-base-200 border border-base-200"
+            class="v2-btn v2-btn-sm"
             :title="$t('search.action.copyMagnet')"
           >
-            <Copy :size="14" />
-            <span class="text-[11px] hidden sm:inline">{{ $t('search.action.copyMagnet') }}</span>
+            <Copy :size="13" />
+            <span class="hidden sm:inline">{{ $t('search.action.copyMagnet') }}</span>
           </button>
 
-          <a 
+          <a
             v-if="sourceLink(item)"
             :href="sourceLink(item)"
-            target="_blank" 
+            target="_blank"
             rel="noopener noreferrer"
-            class="btn btn-ghost btn-sm btn-square rounded-xl hover:bg-base-200 border border-base-200"
+            class="v2-btn v2-btn-sm w-8 px-0"
             :title="$t('search.action.openSource')"
           >
-            <ExternalLink :size="14" />
+            <ExternalLink :size="13" />
           </a>
 
-          <button 
-            class="btn btn-sm rounded-xl gap-1.5 px-4 font-bold shadow-sm transition-all"
-            :class="subscribed.has(item.title) ? 'btn-success text-success-content' : 'btn-primary'"
-            :disabled="subscribed.has(item.title)" 
+          <button
+            type="button"
+            class="v2-btn v2-btn-sm"
+            :class="subscribed.has(item.title) ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'v2-btn-primary'"
+            :disabled="subscribed.has(item.title)"
             @click="openSubscribe(item)"
           >
-            <component :is="subscribed.has(item.title) ? Check : Plus" :size="15" />
-            <span class="text-xs">{{ subscribed.has(item.title) ? $t('search.action.subscribed') : $t('search.action.subscribe') }}</span>
+            <component :is="subscribed.has(item.title) ? Check : Plus" :size="13" />
+            <span>{{ subscribed.has(item.title) ? $t('search.action.subscribed') : $t('search.action.subscribe') }}</span>
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Empty Search / Welcome Dashboard -->
-    <div v-else-if="!loading && results.length === 0" class="max-w-3xl mx-auto space-y-5">
-      <div class="app-empty-state">
-        <div class="w-11 h-11 rounded-xl bg-primary/12 text-primary flex items-center justify-center mb-3">
+    <!-- 空闲发现 2 栏 Bento（最近搜索 | 热门标签） -->
+    <div v-else-if="!loading && results.length === 0" class="space-y-4">
+      <div v-if="hasSearched && !error" class="v2-panel py-12 px-6 text-center space-y-2">
+        <div class="w-11 h-11 rounded-2xl bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] flex items-center justify-center mx-auto">
           <Search :size="20" />
         </div>
-        <h3 class="text-base font-semibold text-base-content">
-          {{ query ? $t('search.empty.noResults') : $t('search.empty.welcome') }}
-        </h3>
-        <p class="text-sm text-base-content/60 mt-1 max-w-md leading-relaxed">
-          {{ query ? $t('search.empty.noResultsDesc') : $t('search.empty.welcomeDesc') }}
-        </p>
+        <h3 class="text-sm font-bold text-[var(--v2-ink)]">{{ $t('search.empty.noResults') }}</h3>
+        <p class="text-xs text-[var(--v2-ink-muted)]">{{ $t('search.empty.noResultsDesc') }}</p>
       </div>
 
-      <!-- 最近搜索 -->
-      <div v-if="searchHistory.length > 0" class="app-surface p-4 sm:p-5 rounded-xl space-y-3">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2 text-xs font-semibold text-base-content/70">
-            <History :size="14" class="text-primary" />
-            <span>{{ $t('search.historyTitle') }}</span>
+      <div class="grid md:grid-cols-2 gap-4">
+        <!-- 最近搜索 -->
+        <div class="v2-panel p-5 space-y-3.5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2 text-xs font-semibold text-[var(--v2-ink)]">
+              <History :size="14" class="text-[var(--v2-accent)]" />
+              <span>{{ $t('search.historyTitle') }}</span>
+            </div>
+            <button
+              v-if="searchHistory.length > 0"
+              type="button"
+              @click="clearAllHistory"
+              class="text-xs text-[var(--v2-ink-subtle)] hover:text-red-400 flex items-center gap-1 cursor-pointer"
+            >
+              <Trash2 :size="12" />
+              <span>{{ $t('search.historyClear') }}</span>
+            </button>
           </div>
-          <button type="button" @click="clearAllHistory" class="text-xs text-base-content/50 hover:text-error transition-colors flex items-center gap-1">
-            <Trash2 :size="12" />
-            <span>{{ $t('search.historyClear') }}</span>
-          </button>
+          <div v-if="searchHistory.length > 0" class="flex flex-wrap gap-2">
+            <div
+              v-for="hist in searchHistory"
+              :key="hist"
+              class="flex items-center gap-1.5 bg-[var(--v2-surface-2)] hover:border-[var(--v2-accent)]/40 hover:text-[var(--v2-accent)] px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer border border-[var(--v2-border)]"
+              @click="quickSearch(hist)"
+            >
+              <span>{{ hist }}</span>
+              <button type="button" @click.stop="removeHistoryItem(hist)" class="opacity-50 hover:opacity-100 hover:text-red-400 p-0.5">
+                <X :size="12" />
+              </button>
+            </div>
+          </div>
+          <p v-else class="text-xs text-[var(--v2-ink-subtle)] py-2">
+            {{ locale === 'zh' ? '暂无最近搜索记录，试试从右侧热门词条发起检索。' : 'No recent search history yet.' }}
+          </p>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <div
-            v-for="hist in searchHistory"
-            :key="hist"
-            class="flex items-center gap-1.5 bg-base-200/70 hover:bg-primary/12 hover:text-primary px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer border border-base-content/8"
-            @click="quickSearch(hist)"
-          >
-            <span>{{ hist }}</span>
-            <button type="button" @click.stop="removeHistoryItem(hist)" class="opacity-50 hover:opacity-100 hover:text-error p-0.5 rounded-full">
-              <X :size="12" />
+
+        <!-- 热门发现 -->
+        <div class="v2-panel p-5 space-y-3.5">
+          <div class="flex items-center gap-2 text-xs font-semibold text-[var(--v2-ink)]">
+            <Sparkles :size="14" class="text-emerald-400" />
+            <span>{{ $t('search.recommendTitle') }}</span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="tag in popularTags"
+              :key="tag"
+              type="button"
+              @click="quickSearch(tag)"
+              class="bg-[var(--v2-surface-2)] hover:bg-[var(--v2-accent)]/12 hover:text-[var(--v2-accent)] hover:border-[var(--v2-accent)]/35 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border border-[var(--v2-border)] cursor-pointer"
+            >
+              {{ tag }}
             </button>
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- 热门发现 -->
-      <div class="app-surface p-4 sm:p-5 rounded-xl space-y-3">
-        <div class="flex items-center gap-2 text-xs font-semibold text-base-content/70">
-          <Sparkles :size="14" class="text-secondary" />
-          <span>{{ $t('search.recommendTitle') }}</span>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-for="tag in popularTags"
-            :key="tag"
-            type="button"
-            @click="quickSearch(tag)"
-            class="bg-base-200/70 hover:bg-primary/12 hover:text-primary px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border border-base-content/8"
-          >
-            {{ tag }}
+    <!-- 字幕组选择 Modal -->
+    <div v-if="showGroupModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div class="w-full max-w-lg v2-panel p-6 space-y-5 shadow-2xl border border-[var(--v2-border-strong)]">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-bold">{{ $t('search.modal.title') }}</h3>
+            <p class="text-xs text-[var(--v2-ink-muted)]">{{ $t('search.modal.subtitle') }}</p>
+          </div>
+          <button type="button" class="p-1.5 rounded-lg hover:bg-[var(--v2-surface-2)]" :disabled="groupSubmitting" @click="closeGroups">
+            <X :size="16" />
           </button>
+        </div>
+
+        <div class="v2-panel-muted p-3 text-xs font-medium text-[var(--v2-ink)] line-clamp-2">
+          {{ selectedItem?.title }}
+        </div>
+
+        <div v-if="subgroups.length > 5" class="relative">
+          <Search :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--v2-ink-subtle)]" />
+          <input v-model="subgroupSearch" type="text" :placeholder="t('search.filterGroups')" class="v2-input pl-8 h-8 text-xs" />
+        </div>
+
+        <div v-if="groupLoading" class="flex flex-col items-center justify-center py-10 gap-2">
+          <span class="loading loading-spinner loading-md text-[var(--v2-accent)]"></span>
+          <p class="text-xs text-[var(--v2-ink-muted)]">{{ $t('search.modal.fetching') }}</p>
+        </div>
+
+        <div v-else-if="groupError" class="v2-panel-muted border border-red-500/30 text-red-400 p-4 text-center text-xs">
+          {{ groupError }}
+        </div>
+
+        <div v-else-if="subgroups.length === 0" class="text-center py-6 space-y-4">
+          <p class="text-sm font-semibold">{{ $t('search.modal.empty') }}</p>
+          <p class="text-xs text-[var(--v2-ink-muted)]">{{ $t('search.modal.emptyDesc') }}</p>
+          <div class="flex justify-center gap-2">
+            <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" :disabled="groupSubmitting" @click="closeGroups">{{ $t('search.modal.cancel') }}</button>
+            <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" :disabled="groupSubmitting" @click="selectedItem && subscribe(selectedItem, '')">
+              {{ $t('search.modal.proceed') }}
+            </button>
+          </div>
+        </div>
+
+        <div v-else class="space-y-2 max-h-72 overflow-y-auto">
+          <button
+            v-for="g in filteredSubgroups"
+            :key="g.rss_url"
+            type="button"
+            class="w-full v2-panel-muted hover:border-[var(--v2-accent)]/40 p-3 flex items-center justify-between text-left transition-colors cursor-pointer"
+            :disabled="groupSubmitting"
+            @click="selectedItem && subscribe(selectedItem, g.rss_url, g.name)"
+          >
+            <div class="flex items-center gap-2.5 min-w-0">
+              <User :size="14" class="text-[var(--v2-accent)] shrink-0" />
+              <span class="font-semibold text-xs truncate">{{ g.name }}</span>
+            </div>
+            <Plus :size="15" class="text-[var(--v2-accent)] shrink-0" />
+          </button>
+        </div>
+
+        <div v-if="subgroups.length > 0" class="pt-2 flex justify-between items-center text-xs border-t border-[var(--v2-border)]">
+          <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" :disabled="groupSubmitting" @click="selectedItem && subscribe(selectedItem, '')">
+            {{ t('search.modal.proceed') }}
+          </button>
+          <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" :disabled="groupSubmitting" @click="closeGroups">{{ $t('search.modal.cancel') }}</button>
         </div>
       </div>
     </div>
 
-    <!-- Subgroup Modal -->
-    <Transition name="scale">
-      <div v-if="showGroupModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-        <div class="w-full max-w-lg bg-base-100 rounded-3xl shadow-2xl border border-base-200 overflow-hidden animate-in zoom-in-95 duration-200">
-          <div class="p-6 sm:p-8 space-y-6">
-            <div class="flex items-center justify-between">
-              <div class="space-y-0.5">
-                <h3 class="text-xl font-black tracking-tight">{{ $t('search.modal.title') }}</h3>
-                <p class="text-[11px] font-bold text-base-content/50">{{ $t('search.modal.subtitle') }}</p>
-              </div>
-              <button class="btn btn-ghost btn-circle btn-sm" :disabled="groupSubmitting" @click="closeGroups">
-                <X :size="18" />
-              </button>
-            </div>
-
-            <div class="bg-base-200/60 p-3.5 rounded-2xl border border-base-300/40">
-              <p class="text-xs font-bold tracking-tight text-base-content/80 line-clamp-2">{{ selectedItem?.title }}</p>
-            </div>
-
-            <!-- Subgroup Search Input if many subgroups -->
-            <div v-if="subgroups.length > 5" class="relative">
-              <input 
-                v-model="subgroupSearch" 
-                type="text" 
-                :placeholder="t('search.filterGroups')"
-                class="input input-bordered input-sm w-full rounded-xl pl-8 text-xs font-medium"
-              />
-              <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
-            </div>
-
-            <div v-if="groupLoading" class="flex flex-col items-center justify-center py-12 gap-3">
-              <span class="loading loading-spinner loading-md text-primary"></span>
-              <p class="text-xs font-bold text-base-content/40">{{ $t('search.modal.fetching') }}</p>
-            </div>
-
-            <div v-else-if="groupError" class="bg-error/10 border border-error/20 text-error rounded-2xl p-5 flex flex-col items-center gap-2">
-              <AlertTriangle :size="24" />
-              <p class="text-xs font-bold">{{ groupError }}</p>
-            </div>
-
-            <div v-else-if="subgroups.length === 0" class="text-center py-8 space-y-5">
-              <div class="w-16 h-16 bg-base-200 rounded-2xl flex items-center justify-center mx-auto text-base-content/30">
-                <User :size="28" />
-              </div>
-              <div class="space-y-1">
-                <p class="text-base font-black tracking-tight">{{ $t('search.modal.empty') }}</p>
-                <p class="text-xs font-medium text-base-content/40 max-w-xs mx-auto">{{ $t('search.modal.emptyDesc') }}</p>
-              </div>
-              <div class="flex flex-col gap-2 pt-2">
-                <button class="btn btn-primary rounded-xl font-bold text-xs" :disabled="groupSubmitting" @click="selectedItem && subscribe(selectedItem, '')">
-                  {{ $t('search.modal.proceed') }}
-                </button>
-                <button class="btn btn-ghost btn-sm rounded-xl text-xs" :disabled="groupSubmitting" @click="closeGroups">{{ $t('search.modal.cancel') }}</button>
-              </div>
-            </div>
-
-            <div v-else class="space-y-2 max-h-[320px] overflow-y-auto pr-1 custom-scrollbar">
-              <button 
-                v-for="g in filteredSubgroups" :key="g.rss_url"
-                class="w-full bg-base-200/40 hover:bg-primary/10 hover:border-primary/30 border border-base-200 rounded-2xl p-3.5 flex items-center justify-between transition-all group/item text-left"
-                :disabled="groupSubmitting" @click="selectedItem && subscribe(selectedItem, g.rss_url, g.name)"
-              >
-                <div class="flex items-center gap-3 min-w-0">
-                  <div class="w-8 h-8 rounded-xl bg-base-200 flex items-center justify-center text-base-content/40 group-hover/item:bg-primary group-hover/item:text-primary-content transition-colors shrink-0">
-                    <User :size="14" />
-                  </div>
-                  <span class="font-bold text-xs tracking-tight group-hover/item:text-primary transition-colors truncate">{{ g.name }}</span>
-                </div>
-                <Plus :size="16" class="opacity-30 group-hover/item:opacity-100 text-primary transition-opacity shrink-0" />
-              </button>
-            </div>
-
-            <div v-if="subgroups.length > 0" class="pt-2 flex justify-between items-center text-xs">
-              <button class="btn btn-ghost btn-xs text-base-content/50" :disabled="groupSubmitting" @click="selectedItem && subscribe(selectedItem, '')">
-                {{ t('search.modal.proceed') }}
-              </button>
-              <button class="btn btn-ghost btn-xs" :disabled="groupSubmitting" @click="closeGroups">{{ $t('search.modal.cancel') }}</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Transition>
-    <SubscriptionReviewDialog v-if="reviewItems.length" :items="reviewItems"
-      @saved="markReviewedItems" @close="reviewItems = []" />
-    <SearchPluginDialog v-if="pluginSelection" :item="pluginSelection.item" :targets="pluginSelection.targets"
-      @close="pluginSelection = null; loadPluginTargets()" />
+    <SubscriptionReviewDialog v-if="reviewItems.length" :items="reviewItems" @saved="markReviewedItems" @close="reviewItems = []" />
+    <SearchPluginDialog v-if="pluginSelection" :item="pluginSelection.item" :targets="pluginSelection.targets" @close="pluginSelection = null; loadPluginTargets()" />
   </div>
 </template>
-
-<style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-.custom-scrollbar::-webkit-scrollbar {
-  width: 5px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: hsl(var(--bc) / 0.15);
-  border-radius: 10px;
-}
-</style>

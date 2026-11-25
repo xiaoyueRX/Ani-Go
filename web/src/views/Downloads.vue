@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import request from '../utils/request'
-import { 
-  RefreshCw, AlertTriangle, X, 
-  Download, Pause, History, 
-  Upload, Check, MoreVertical, 
+import {
+  RefreshCw, AlertTriangle, X,
+  Download, Pause, History,
+  Upload, Check, MoreVertical,
   Folder, Search, Zap,
-  Play, Trash2, ArrowUp, ArrowDown, Clock, Plus
+  Play, Trash2, ArrowUp, ArrowDown, Clock, Plus, Settings
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
-import { PageHeader, StatCard, EmptyState } from '../components/ui'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const router = useRouter()
 
 interface DownloadTask {
   hash: string
@@ -40,7 +41,6 @@ const currentFilter = ref<'all' | 'downloading' | 'seeding' | 'completed' | 'pau
 const autoRefresh = ref(true)
 let timer: any = null
 
-// 删除弹窗状态
 const showDeleteModal = ref(false)
 const taskToDelete = ref<DownloadTask | null>(null)
 const deleteLocalFiles = ref(false)
@@ -49,6 +49,18 @@ const deleting = ref(false)
 const activeReads = ref(0)
 let nextRequest = 0
 let lastApplied = 0
+
+const isDownloaderUnconfigured = computed(() => {
+  const msg = (error.value || '').toLowerCase()
+  return (
+    msg.includes('connection refused') ||
+    msg.includes('connect') ||
+    msg.includes('登录') ||
+    msg.includes('未配置') ||
+    msg.includes('下载器') ||
+    msg.includes('无法取得')
+  )
+})
 
 async function fetchDownloads() {
   const order = ++nextRequest
@@ -68,46 +80,27 @@ async function fetchDownloads() {
   }
 }
 
-// 统计数据
-const totalSpeedDown = computed(() => {
-  return tasks.value.reduce((acc, cur) => acc + (cur.speed_down || 0), 0)
-})
+const totalSpeedDown = computed(() => tasks.value.reduce((acc, cur) => acc + (cur.speed_down || 0), 0))
+const totalSpeedUp = computed(() => tasks.value.reduce((acc, cur) => acc + (cur.speed_up || 0), 0))
+const downloadingCount = computed(() => tasks.value.filter(t => t.display_status === 'downloading').length)
+const seedingCount = computed(() => tasks.value.filter(t => t.display_status === 'seeding').length)
+const completedCount = computed(() => tasks.value.filter(t => t.complete).length)
 
-const totalSpeedUp = computed(() => {
-  return tasks.value.reduce((acc, cur) => acc + (cur.speed_up || 0), 0)
-})
-
-const downloadingCount = computed(() => {
-  return tasks.value.filter(t => t.display_status === 'downloading').length
-})
-
-const seedingCount = computed(() => {
-  return tasks.value.filter(t => t.display_status === 'seeding').length
-})
-
-const completedCount = computed(() => {
-  return tasks.value.filter(t => t.complete).length
-})
-
-// 过滤后的列表
 const filteredTasks = computed(() => {
   let list = tasks.value
-
   if (currentFilter.value !== 'all') {
     list = currentFilter.value === 'completed'
       ? list.filter(t => t.complete)
       : list.filter(t => t.display_status === currentFilter.value)
   }
-
   if (searchQuery.value.trim()) {
     const q = searchQuery.value.trim().toLowerCase()
-    list = list.filter(t => 
-      t.name.toLowerCase().includes(q) || 
+    list = list.filter(t =>
+      t.name.toLowerCase().includes(q) ||
       t.hash.toLowerCase().includes(q) ||
       (t.save_path && t.save_path.toLowerCase().includes(q))
     )
   }
-
   return list
 })
 
@@ -136,27 +129,27 @@ function formatDuration(seconds?: number): string {
   return `${s}s`
 }
 
-function calcPercent(t: DownloadTask): number {
-  if (t.complete) return 100
-  const fraction = Number.isFinite(t.progress) ? t.progress : (t.size > 0 ? t.done / t.size : 0)
+function calcPercent(task: DownloadTask): number {
+  if (task.complete) return 100
+  const fraction = Number.isFinite(task.progress) ? task.progress : (task.size > 0 ? task.done / task.size : 0)
   return Math.min(99, Math.max(0, Math.round(fraction * 100)))
 }
 
 function statusInfo(status: string): { label: string; icon: any; cls: string } {
   const m: Record<string, { label: string; icon: any; cls: string }> = {
-    downloading: { label: t('downloads.status.downloading') || '下载中', icon: Download, cls: 'bg-primary/20 text-primary border-primary/20' },
-    paused: { label: t('downloads.status.paused') || '已暂停', icon: Pause, cls: 'bg-warning/20 text-warning border-warning/20' },
-    queued: { label: t('downloads.status.queued') || '排队中', icon: History, cls: 'bg-base-300 text-base-content/40 border-base-300' },
-    checking: { label: t('downloads.status.checking') || '校验中', icon: RefreshCw, cls: 'bg-info/20 text-info border-info/20' },
-    seeding: { label: t('downloads.status.seeding') || '做种中', icon: Upload, cls: 'bg-success/20 text-success border-success/20' },
-    completed: { label: t('downloads.status.completed') || '已完成', icon: Check, cls: 'bg-success/20 text-success border-success/20' },
-    error: { label: t('downloads.status.error') || '错误', icon: AlertTriangle, cls: 'bg-error/20 text-error border-error/20' },
+    downloading: { label: t('downloads.status.downloading') || '下载中', icon: Download, cls: 'bg-[var(--v2-accent)]/15 text-[var(--v2-accent)] border-[var(--v2-accent)]/25' },
+    paused: { label: t('downloads.status.paused') || '已暂停', icon: Pause, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/25' },
+    queued: { label: t('downloads.status.queued') || '排队中', icon: History, cls: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] border-[var(--v2-border)]' },
+    checking: { label: t('downloads.status.checking') || '校验中', icon: RefreshCw, cls: 'bg-sky-500/15 text-sky-400 border-sky-500/25' },
+    seeding: { label: t('downloads.status.seeding') || '做种中', icon: Upload, cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' },
+    completed: { label: t('downloads.status.completed') || '已完成', icon: Check, cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' },
+    error: { label: t('downloads.status.error') || '错误', icon: AlertTriangle, cls: 'bg-red-500/15 text-red-400 border-red-500/25' },
   }
-  return m[status] || { label: status, icon: MoreVertical, cls: 'bg-base-300 text-base-content/40 border-base-300' }
+  return m[status] || { label: status, icon: MoreVertical, cls: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] border-[var(--v2-border)]' }
 }
 
-// 任务控制操作
 const changingTasks = ref(new Set<string>())
+const batchActionLoading = ref(false)
 
 async function changeTask(task: DownloadTask, command: 'pause' | 'resume') {
   if (changingTasks.value.has(task.hash) || batchActionLoading.value) return
@@ -175,14 +168,15 @@ async function changeTask(task: DownloadTask, command: 'pause' | 'resume') {
 function pauseTask(task: DownloadTask) { return changeTask(task, 'pause') }
 function resumeTask(task: DownloadTask) { return changeTask(task, 'resume') }
 
-function openDeleteModal(t: DownloadTask) {
-  if (changingTasks.value.has(t.hash) || batchActionLoading.value || deleting.value) return
+function openDeleteModal(task: DownloadTask) {
+  if (changingTasks.value.has(task.hash) || batchActionLoading.value || deleting.value) return
   deleteError.value = ''
-  taskToDelete.value = t
+  taskToDelete.value = task
   deleteLocalFiles.value = false
   showDeleteModal.value = true
 }
 
+const deleteError = ref('')
 async function confirmDelete() {
   if (!taskToDelete.value || deleting.value) return
   deleteError.value = ''
@@ -202,14 +196,12 @@ async function confirmDelete() {
   }
 }
 
-// 新建下载任务弹窗状态与操作
 const showAddModal = ref(false)
 const addUrl = ref('')
 const addTitle = ref('')
 const addSavePath = ref('')
 const adding = ref(false)
 const addError = ref('')
-const deleteError = ref('')
 const addDialog = ref<HTMLDialogElement | null>(null)
 const deleteDialog = ref<HTMLDialogElement | null>(null)
 
@@ -256,9 +248,6 @@ async function submitNewDownload() {
   }
 }
 
-// 批量暂停 / 恢复所有任务
-const batchActionLoading = ref(false)
-
 async function pauseAllTasks() {
   if (batchActionLoading.value || changingTasks.value.size || !confirm(t('downloads.action.pauseAllConfirm'))) return
   batchActionLoading.value = true
@@ -292,20 +281,14 @@ function pollDownloads() {
 }
 
 watch(autoRefresh, (val) => {
-  if (val) {
-    timer = setInterval(pollDownloads, 4000)
-  } else if (timer) {
-    clearInterval(timer)
-    timer = null
-  }
+  if (val) timer = setInterval(pollDownloads, 4000)
+  else if (timer) { clearInterval(timer); timer = null }
 })
 
 onMounted(() => {
   document.addEventListener('visibilitychange', pollDownloads)
   fetchDownloads()
-  if (autoRefresh.value) {
-    timer = setInterval(pollDownloads, 4000)
-  }
+  if (autoRefresh.value) timer = setInterval(pollDownloads, 4000)
 })
 
 onUnmounted(() => {
@@ -315,400 +298,351 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6 pb-20 max-w-7xl mx-auto">
-    <!-- 顶部页头 -->
-    <PageHeader
-      :title="$t('downloads.title')"
-      :subtitle="$t('downloads.subtitle')"
-      :badge="`${tasks.length} ${$t('downloads.countUnit')}`"
-    >
-      <template #actions>
+  <div class="space-y-5 pb-16">
+    <!-- 顶部工作室操作栏 -->
+    <section class="v2-panel p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div class="flex items-center gap-3 min-w-0">
+        <div>
+          <div class="flex items-center gap-2.5">
+            <h1 class="text-lg sm:text-xl font-bold tracking-tight text-[var(--v2-ink)]">{{ $t('downloads.title') }}</h1>
+            <span class="v2-pill font-mono text-[11px]">{{ tasks.length }} {{ $t('downloads.countUnit') }}</span>
+          </div>
+          <p class="text-xs text-[var(--v2-ink-muted)] mt-0.5">{{ $t('downloads.subtitle') }}</p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 shrink-0">
         <button
           type="button"
-          class="btn btn-outline btn-sm rounded-lg gap-1.5 border-base-content/15"
+          class="v2-btn v2-btn-sm"
           @click="pauseAllTasks"
           :disabled="batchActionLoading || changingTasks.size > 0 || !tasks.some(task => task.can_pause)"
-          :title="$t('downloads.action.pauseAll')"
         >
-          <Pause :size="14" />
+          <Pause :size="13" />
           <span>{{ $t('downloads.action.pauseAll') }}</span>
         </button>
 
         <button
           type="button"
-          class="btn btn-outline btn-sm rounded-lg gap-1.5 border-base-content/15"
+          class="v2-btn v2-btn-sm"
           @click="resumeAllTasks"
           :disabled="batchActionLoading || changingTasks.size > 0 || !tasks.some(task => task.can_resume)"
-          :title="$t('downloads.action.resumeAll')"
         >
-          <Play :size="14" />
+          <Play :size="13" />
           <span>{{ $t('downloads.action.resumeAll') }}</span>
         </button>
 
-        <button
-          type="button"
-          class="btn btn-primary btn-sm rounded-lg gap-1.5 px-3.5"
-          @click="showAddModal = true"
-        >
-          <Plus :size="15" />
+        <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" @click="showAddModal = true">
+          <Plus :size="14" />
           <span>{{ $t('downloads.action.newDownload') }}</span>
         </button>
 
-        <label class="flex items-center gap-1.5 cursor-pointer text-xs font-medium border border-base-content/12 px-2.5 h-8 rounded-lg hover:bg-base-200/50 transition-colors">
-          <input type="checkbox" v-model="autoRefresh" class="checkbox checkbox-primary checkbox-xs rounded" />
-          <span>{{ $t('downloads.action.autoRefresh') }} (4s)</span>
+        <label class="flex items-center gap-1.5 cursor-pointer text-xs font-medium border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-2.5 h-[1.9rem] rounded-lg">
+          <input type="checkbox" v-model="autoRefresh" class="checkbox checkbox-primary checkbox-xs" />
+          <span>4s</span>
         </label>
 
-        <button
-          type="button"
-          class="btn btn-ghost btn-sm rounded-lg gap-1.5 border border-base-content/12"
-          @click="fetchDownloads"
-          :disabled="activeReads > 0"
-        >
-          <RefreshCw :size="14" :class="{ 'animate-spin': activeReads > 0 }" />
+        <button type="button" class="v2-btn v2-btn-sm" @click="fetchDownloads" :disabled="activeReads > 0">
+          <RefreshCw :size="13" :class="{ 'animate-spin': activeReads > 0 }" />
           <span>{{ $t('downloads.refresh') }}</span>
         </button>
-      </template>
-    </PageHeader>
+      </div>
+    </section>
 
-    <!-- 概览统计卡片 -->
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-      <StatCard tone="primary" :label="$t('downloads.stats.speedDown')" :value="formatSpeed(totalSpeedDown)">
-        <template #icon><Zap :size="18" /></template>
-      </StatCard>
+    <!-- 4 卡实时遥测条 -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+      <div class="v2-panel p-4 flex items-center justify-between gap-3">
+        <div>
+          <div class="text-[11px] font-medium text-[var(--v2-ink-muted)]">{{ $t('downloads.stats.speedDown') }}</div>
+          <div class="text-xl font-bold font-mono tabular-nums text-[var(--v2-accent)] mt-1">{{ formatSpeed(totalSpeedDown) }}</div>
+        </div>
+        <div class="w-10 h-10 rounded-xl bg-[var(--v2-accent)]/12 text-[var(--v2-accent)] flex items-center justify-center shrink-0">
+          <Zap :size="18" />
+        </div>
+      </div>
 
-      <StatCard tone="success" :label="$t('downloads.stats.speedUp')" :value="formatSpeed(totalSpeedUp)">
-        <template #icon><ArrowUp :size="18" /></template>
-      </StatCard>
+      <div class="v2-panel p-4 flex items-center justify-between gap-3">
+        <div>
+          <div class="text-[11px] font-medium text-[var(--v2-ink-muted)]">{{ $t('downloads.stats.speedUp') }}</div>
+          <div class="text-xl font-bold font-mono tabular-nums text-emerald-400 mt-1">{{ formatSpeed(totalSpeedUp) }}</div>
+        </div>
+        <div class="w-10 h-10 rounded-xl bg-emerald-500/12 text-emerald-400 flex items-center justify-center shrink-0">
+          <ArrowUp :size="18" />
+        </div>
+      </div>
 
-      <StatCard tone="primary" :label="$t('downloads.stats.downloading')" :value="downloadingCount">
-        <template #icon><Download :size="18" /></template>
-      </StatCard>
+      <div class="v2-panel p-4 flex items-center justify-between gap-3">
+        <div>
+          <div class="text-[11px] font-medium text-[var(--v2-ink-muted)]">{{ $t('downloads.stats.downloading') }} / {{ $t('downloads.stats.seeding') }}</div>
+          <div class="text-xl font-bold font-mono tabular-nums text-[var(--v2-ink)] mt-1">
+            {{ downloadingCount }} <span class="text-xs font-normal text-[var(--v2-ink-subtle)]">/ {{ seedingCount }}</span>
+          </div>
+        </div>
+        <div class="w-10 h-10 rounded-xl bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] flex items-center justify-center shrink-0">
+          <Download :size="18" />
+        </div>
+      </div>
 
-      <StatCard tone="success" :label="$t('downloads.stats.seeding')" :value="seedingCount">
-        <template #icon><Upload :size="18" /></template>
-      </StatCard>
-
-      <StatCard :label="$t('downloads.stats.completed')" :value="completedCount" class="col-span-2 sm:col-span-1">
-        <template #icon><Check :size="18" /></template>
-      </StatCard>
+      <div class="v2-panel p-4 flex items-center justify-between gap-3">
+        <div>
+          <div class="text-[11px] font-medium text-[var(--v2-ink-muted)]">{{ $t('downloads.stats.completed') }}</div>
+          <div class="text-xl font-bold font-mono tabular-nums text-[var(--v2-ink)] mt-1">{{ completedCount }}</div>
+        </div>
+        <div class="w-10 h-10 rounded-xl bg-[var(--v2-surface-2)] text-emerald-400 flex items-center justify-center shrink-0">
+          <Check :size="18" />
+        </div>
+      </div>
     </div>
 
-    <!-- 状态过滤与搜索栏 -->
-    <div class="app-toolbar">
-      <div class="app-segmented overflow-x-auto no-scrollbar max-w-full">
+    <!-- 分段筛选与搜索 -->
+    <div class="v2-panel p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div class="inline-flex flex-wrap items-center gap-1 p-1 rounded-xl bg-[var(--v2-surface-2)] border border-[var(--v2-border)]">
         <button
+          v-for="tab in [
+            { id: 'all', label: $t('downloads.action.all'), count: tasks.length },
+            { id: 'downloading', label: $t('downloads.status.downloading'), count: downloadingCount },
+            { id: 'seeding', label: $t('downloads.status.seeding'), count: seedingCount },
+            { id: 'completed', label: $t('downloads.status.completed'), count: completedCount },
+            { id: 'paused', label: $t('downloads.status.paused'), count: tasks.filter(t => t.display_status === 'paused').length }
+          ]"
+          :key="tab.id"
           type="button"
-          @click="currentFilter = 'all'"
-          class="app-segmented-btn"
-          :data-active="currentFilter === 'all' ? 'true' : 'false'"
+          class="px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+          :class="currentFilter === tab.id ? 'bg-[var(--v2-surface)] text-[var(--v2-ink)] shadow-xs' : 'text-[var(--v2-ink-muted)] hover:text-[var(--v2-ink)]'"
+          @click="currentFilter = tab.id as any"
         >
-          {{ $t('downloads.action.all') }} ({{ tasks.length }})
-        </button>
-        <button
-          type="button"
-          @click="currentFilter = 'downloading'"
-          class="app-segmented-btn"
-          :data-active="currentFilter === 'downloading' ? 'true' : 'false'"
-        >
-          {{ $t('downloads.status.downloading') }} ({{ downloadingCount }})
-        </button>
-        <button
-          type="button"
-          @click="currentFilter = 'seeding'"
-          class="app-segmented-btn"
-          :data-active="currentFilter === 'seeding' ? 'true' : 'false'"
-        >
-          {{ $t('downloads.status.seeding') }} ({{ seedingCount }})
-        </button>
-        <button
-          type="button"
-          @click="currentFilter = 'completed'"
-          class="app-segmented-btn"
-          :data-active="currentFilter === 'completed' ? 'true' : 'false'"
-        >
-          {{ $t('downloads.status.completed') }} ({{ completedCount }})
-        </button>
-        <button
-          type="button"
-          @click="currentFilter = 'paused'"
-          class="app-segmented-btn"
-          :data-active="currentFilter === 'paused' ? 'true' : 'false'"
-        >
-          {{ $t('downloads.status.paused') }} ({{ tasks.filter(t => t.display_status === 'paused').length }})
+          {{ tab.label }} ({{ tab.count }})
         </button>
       </div>
 
       <div class="relative w-full sm:w-64">
+        <Search :size="14" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--v2-ink-subtle)]" />
         <input
           v-model="searchQuery"
           type="text"
           :placeholder="$t('downloads.action.search')"
           :aria-label="$t('downloads.action.search')"
-          class="input input-sm w-full h-9 bg-base-200/70 border border-base-content/12 rounded-lg pl-8 text-xs font-medium"
+          class="v2-input pl-8 h-8 text-xs"
         />
-        <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-base-content/40" />
       </div>
     </div>
 
-    <!-- 错误提示 -->
-    <div v-if="error" class="alert bg-error/10 border border-error/25 text-error rounded-xl p-4 flex items-center justify-between">
+    <!-- 未配置下载器引导卡 或 普通错误 -->
+    <div v-if="error && isDownloaderUnconfigured" class="v2-panel p-8 sm:p-10 text-center space-y-4 border border-amber-500/25">
+      <div class="w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-400 flex items-center justify-center mx-auto">
+        <Download :size="22" />
+      </div>
+      <div class="space-y-1 max-w-md mx-auto">
+        <h3 class="text-base font-bold text-[var(--v2-ink)]">
+          {{ locale === 'zh' ? '尚未连接到下载客户端' : 'Downloader Client Not Connected' }}
+        </h3>
+        <p class="text-xs text-[var(--v2-ink-muted)] leading-relaxed">
+          {{ locale === 'zh'
+            ? '当前无法连接到 qBittorrent / Transmission / Aria2。前往设置填好地址与凭据并完成联通测试，即可在此管理传输队列。'
+            : 'Unable to reach your configured downloader client. Configure qBittorrent, Transmission, or Aria2 in Settings.' }}
+        </p>
+      </div>
+      <div class="flex items-center justify-center gap-2.5 pt-1">
+        <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" @click="router.push('/settings?tab=downloader')">
+          <Settings :size="14" />
+          <span>{{ locale === 'zh' ? '前往配置下载器' : 'Configure Downloader' }}</span>
+        </button>
+        <button type="button" class="v2-btn v2-btn-sm" @click="fetchDownloads">
+          <RefreshCw :size="13" />
+          <span>{{ locale === 'zh' ? '重试连接' : 'Retry' }}</span>
+        </button>
+      </div>
+      <details class="text-[11px] text-[var(--v2-ink-subtle)] font-mono max-w-xl mx-auto">
+        <summary class="cursor-pointer hover:text-[var(--v2-ink-muted)]">{{ locale === 'zh' ? '查看原始诊断信息' : 'Raw diagnostic details' }}</summary>
+        <p class="mt-2 p-2.5 rounded-lg bg-[var(--v2-surface-2)] text-left break-all">{{ error }}</p>
+      </details>
+    </div>
+
+    <div v-else-if="error" class="v2-panel border-red-500/35 bg-red-500/10 text-red-400 p-4 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3 min-w-0">
         <AlertTriangle :size="18" class="shrink-0" />
         <div class="min-w-0">
           <h4 class="font-semibold text-xs">{{ $t('downloads.error.title') }}</h4>
-          <p class="text-xs opacity-85 mt-0.5">{{ error }}</p>
+          <p class="text-xs opacity-85 mt-0.5 truncate">{{ error }}</p>
         </div>
       </div>
-      <button type="button" class="btn btn-ghost btn-circle btn-xs" @click="error = ''">
+      <button type="button" class="p-1 rounded hover:bg-red-500/20" @click="error = ''">
         <X :size="14" />
       </button>
     </div>
 
     <!-- 加载骨架 -->
-    <div v-if="loading && tasks.length === 0" class="space-y-3">
-      <div v-for="i in 4" :key="i" class="h-24 app-surface rounded-xl animate-pulse"></div>
+    <div v-else-if="loading && tasks.length === 0" class="space-y-3">
+      <div v-for="i in 4" :key="i" class="h-20 v2-panel animate-pulse"></div>
     </div>
 
     <!-- 空状态 -->
-    <EmptyState
-      v-else-if="!error && filteredTasks.length === 0"
-      :title="searchQuery || currentFilter !== 'all' ? $t('downloads.action.noMatches') : $t('downloads.empty.title')"
-      :description="searchQuery || currentFilter !== 'all' ? $t('downloads.action.filterHint') : $t('downloads.empty.desc')"
-    >
-      <template #icon><Download :size="22" /></template>
-    </EmptyState>
+    <div v-else-if="filteredTasks.length === 0" class="v2-panel py-14 px-6 text-center space-y-2.5">
+      <div class="w-11 h-11 rounded-2xl bg-[var(--v2-surface-2)] text-[var(--v2-ink-muted)] flex items-center justify-center mx-auto">
+        <Download :size="20" />
+      </div>
+      <h3 class="text-sm font-bold text-[var(--v2-ink)]">
+        {{ searchQuery || currentFilter !== 'all' ? $t('downloads.action.noMatches') : $t('downloads.empty.title') }}
+      </h3>
+      <p class="text-xs text-[var(--v2-ink-muted)]">
+        {{ searchQuery || currentFilter !== 'all' ? $t('downloads.action.filterHint') : $t('downloads.empty.desc') }}
+      </p>
+    </div>
 
-    <!-- Download List -->
-    <div v-else class="grid gap-4">
+    <!-- 传输队列表格/高密度行 -->
+    <div v-else class="v2-panel overflow-hidden divide-y divide-[var(--v2-border)]">
       <div
-        v-for="t in filteredTasks" :key="t.hash"
-        class="group bg-base-100 rounded-2xl border border-base-200/80 shadow-sm hover:border-primary/30 transition-all p-5 sm:p-6 space-y-4"
+        v-for="task in filteredTasks"
+        :key="task.hash"
+        class="p-4 sm:px-5 hover:bg-[var(--v2-surface-2)]/50 transition-colors space-y-3"
       >
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <!-- Icon & Title -->
-          <div class="flex items-start gap-3.5 min-w-0 flex-1">
-            <div class="w-11 h-11 rounded-xl bg-base-200/70 flex items-center justify-center shrink-0 shadow-inner"
-              :class="t.display_status === 'downloading' ? 'text-primary' : (t.display_status === 'seeding' || t.display_status === 'completed' ? 'text-success' : 'text-base-content/50')">
-              <component :is="statusInfo(t.display_status).icon" :size="22" />
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-start gap-3 min-w-0 flex-1">
+            <div
+              class="w-9 h-9 rounded-xl bg-[var(--v2-surface-2)] border border-[var(--v2-border)] flex items-center justify-center shrink-0"
+              :class="task.display_status === 'downloading' ? 'text-[var(--v2-accent)]' : (task.display_status === 'seeding' || task.display_status === 'completed' ? 'text-emerald-400' : 'text-[var(--v2-ink-muted)]')"
+            >
+              <component :is="statusInfo(task.display_status).icon" :size="17" />
             </div>
 
             <div class="min-w-0 flex-1 space-y-1">
-              <h3 class="text-sm font-black tracking-tight truncate group-hover:text-primary transition-colors select-all" :title="t.name">
-                {{ t.name }}
-              </h3>
-              <div class="flex items-center gap-2 text-[10px] font-mono opacity-50 truncate">
-                <Folder :size="12" class="shrink-0" />
-                <span class="truncate">{{ t.save_path }}</span>
+              <h3 class="text-sm font-semibold truncate text-[var(--v2-ink)] select-all" :title="task.name">{{ task.name }}</h3>
+              <div class="flex items-center gap-2 text-[11px] font-mono text-[var(--v2-ink-subtle)] truncate">
+                <Folder :size="11" class="shrink-0" />
+                <span class="truncate">{{ task.save_path }}</span>
                 <span>•</span>
-                <span class="shrink-0 font-bold uppercase">#{{ t.hash.slice(0, 8) }}</span>
+                <span class="shrink-0">#{{ task.hash.slice(0, 8) }}</span>
               </div>
             </div>
           </div>
 
-          <!-- Status Badge, Speed & Actions -->
-          <div class="flex items-center gap-3 shrink-0 self-end sm:self-center flex-wrap sm:flex-nowrap justify-end">
-            <!-- Down speed -->
-            <div v-if="t.speed_down > 0 || t.display_status === 'downloading'" class="text-right">
-              <span class="text-[9px] font-black uppercase text-primary tracking-wider flex items-center justify-end gap-0.5">
-                <ArrowDown :size="10" /> {{ formatSpeed(t.speed_down) }}
-              </span>
-            </div>
-            <!-- Up speed -->
-            <div v-if="t.speed_up && t.speed_up > 0" class="text-right">
-              <span class="text-[9px] font-black uppercase text-success tracking-wider flex items-center justify-end gap-0.5">
-                <ArrowUp :size="10" /> {{ formatSpeed(t.speed_up) }}
-              </span>
-            </div>
-
-            <span class="text-[10px] font-black uppercase px-2.5 py-1 rounded-lg border font-mono" :class="statusInfo(t.display_status).cls">
-              {{ statusInfo(t.display_status).label }}
+          <div class="flex items-center gap-2.5 shrink-0 flex-wrap justify-end">
+            <span v-if="task.speed_down > 0 || task.display_status === 'downloading'" class="text-xs font-mono font-semibold text-[var(--v2-accent)] flex items-center gap-0.5 tabular-nums">
+              <ArrowDown :size="12" /> {{ formatSpeed(task.speed_down) }}
+            </span>
+            <span v-if="task.speed_up && task.speed_up > 0" class="text-xs font-mono font-semibold text-emerald-400 flex items-center gap-0.5 tabular-nums">
+              <ArrowUp :size="12" /> {{ formatSpeed(task.speed_up) }}
             </span>
 
-            <!-- Actions: Pause/Resume, Delete -->
-            <div class="flex items-center gap-1">
-              <button 
-                v-if="t.can_resume"
-                class="btn btn-ghost btn-xs btn-square rounded-lg border border-base-200 text-primary hover:bg-primary/10"
-                :title="$t('downloads.action.resume')"
-                :disabled="batchActionLoading || changingTasks.has(t.hash)" @click="resumeTask(t)"
-              >
-                <Play :size="13" />
-              </button>
-              <button 
-                v-else-if="t.can_pause"
-                class="btn btn-ghost btn-xs btn-square rounded-lg border border-base-200 hover:bg-base-200"
-                :title="$t('downloads.action.pause')"
-                :disabled="batchActionLoading || changingTasks.has(t.hash)" @click="pauseTask(t)"
-              >
-                <Pause :size="13" />
-              </button>
+            <span class="text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-full border" :class="statusInfo(task.display_status).cls">
+              {{ statusInfo(task.display_status).label }}
+            </span>
 
-              <button 
-                class="btn btn-ghost btn-xs btn-square rounded-lg border border-base-200 text-base-content/50 hover:bg-error/10 hover:text-error hover:border-error/20"
-                :title="$t('downloads.action.delete')"
-                :disabled="batchActionLoading || changingTasks.has(t.hash)" @click="openDeleteModal(t)"
+            <div class="flex items-center gap-1">
+              <button
+                v-if="task.can_resume"
+                type="button"
+                class="v2-btn v2-btn-sm w-7 h-7 px-0 text-[var(--v2-accent)]"
+                :title="$t('downloads.action.resume')"
+                :disabled="batchActionLoading || changingTasks.has(task.hash)"
+                @click="resumeTask(task)"
               >
-                <Trash2 :size="13" />
+                <Play :size="12" />
+              </button>
+              <button
+                v-else-if="task.can_pause"
+                type="button"
+                class="v2-btn v2-btn-sm w-7 h-7 px-0"
+                :title="$t('downloads.action.pause')"
+                :disabled="batchActionLoading || changingTasks.has(task.hash)"
+                @click="pauseTask(task)"
+              >
+                <Pause :size="12" />
+              </button>
+              <button
+                type="button"
+                class="v2-btn v2-btn-sm w-7 h-7 px-0 hover:text-red-400 hover:border-red-500/40"
+                :title="$t('downloads.action.delete')"
+                :disabled="batchActionLoading || changingTasks.has(task.hash)"
+                @click="openDeleteModal(task)"
+              >
+                <Trash2 :size="12" />
               </button>
             </div>
           </div>
         </div>
 
-        <!-- Progress Bar & Details -->
-        <div class="space-y-2 pt-1">
-          <div class="flex items-center justify-between text-xs font-mono">
-            <span class="text-base-content/60 font-medium">
-              {{ formatSize(t.done) }} / {{ formatSize(t.size) }}
-            </span>
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between text-[11px] font-mono tabular-nums text-[var(--v2-ink-muted)]">
+            <span>{{ formatSize(task.done) }} / {{ formatSize(task.size) }}</span>
             <div class="flex items-center gap-3">
-              <span v-if="t.uploaded !== undefined && t.uploaded > 0" class="text-[10px] text-base-content/50">
-                {{ $t('downloads.stats.uploaded') }}: <span class="font-bold text-base-content/70">{{ formatSize(t.uploaded) }}</span>
-              </span>
-              <span v-if="t.ratio !== undefined" class="text-[10px] text-base-content/50">
-                {{ $t('downloads.stats.ratio') }}: <span class="font-bold text-success">{{ t.ratio.toFixed(2) }}</span>
-              </span>
-              <span v-if="t.seeding_time && t.seeding_time > 0" class="text-[10px] text-base-content/50 flex items-center gap-0.5">
-                <Clock :size="10" /> {{ formatDuration(t.seeding_time) }}
-              </span>
-              <span class="font-black" :class="calcPercent(t) === 100 ? 'text-success' : 'text-primary'">
-                {{ calcPercent(t) }}%
-              </span>
+              <span v-if="task.uploaded !== undefined && task.uploaded > 0">{{ $t('downloads.stats.uploaded') }}: {{ formatSize(task.uploaded) }}</span>
+              <span v-if="task.ratio !== undefined">{{ $t('downloads.stats.ratio') }}: <span class="text-emerald-400">{{ task.ratio.toFixed(2) }}</span></span>
+              <span v-if="task.seeding_time && task.seeding_time > 0" class="flex items-center gap-1"><Clock :size="10" /> {{ formatDuration(task.seeding_time) }}</span>
+              <span class="font-bold" :class="calcPercent(task) === 100 ? 'text-emerald-400' : 'text-[var(--v2-accent)]'">{{ calcPercent(task) }}%</span>
             </div>
           </div>
-
-          <div class="h-2 w-full bg-base-200 rounded-full overflow-hidden">
-            <div 
-              class="h-full rounded-full transition-all duration-500 ease-out"
-              :class="t.display_status === 'downloading' ? 'bg-primary' : (t.display_status === 'seeding' || t.display_status === 'completed' ? 'bg-success' : 'bg-warning')"
-              :style="{ width: `${calcPercent(t)}%` }"
+          <div class="h-1.5 w-full bg-[var(--v2-surface-3)] rounded-full overflow-hidden">
+            <div
+              class="h-full rounded-full transition-all duration-500"
+              :class="task.display_status === 'downloading' ? 'bg-[var(--v2-accent)]' : (task.display_status === 'seeding' || task.display_status === 'completed' ? 'bg-emerald-500' : 'bg-amber-500')"
+              :style="{ width: `${calcPercent(task)}%` }"
             ></div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Delete Confirmation Modal -->
-    <dialog ref="deleteDialog" class="modal bg-black/70 backdrop-blur-md" aria-labelledby="download-delete-title"
-      @cancel="deleting && $event.preventDefault()" @close="showDeleteModal = false">
-        <div class="modal-box min-w-0 max-w-md max-h-[90dvh] overflow-y-auto p-0 bg-base-100 rounded-3xl shadow-2xl border border-base-200 animate-in zoom-in-95 duration-200">
-          <div class="p-6 sm:p-7 space-y-5">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-error/10 text-error flex items-center justify-center">
-                  <Trash2 :size="18" />
-                </div>
-                <h3 id="download-delete-title" class="text-base font-black tracking-tight">{{ $t('downloads.action.deleteTitle') }}</h3>
-              </div>
-              <button type="button" class="btn btn-ghost btn-circle btn-xs" :disabled="deleting" :aria-label="$t('downloads.action.cancel')" @click="showDeleteModal = false">
-                <X :size="14" />
-              </button>
-            </div>
-
-            <p class="text-xs text-base-content/70 leading-relaxed">
-              {{ $t('downloads.action.deleteDesc', { name: taskToDelete?.name || '' }) }}
-            </p>
-
-            <div class="bg-base-200/50 p-3.5 rounded-2xl border border-base-200">
-              <label class="flex items-center gap-2.5 cursor-pointer text-xs font-bold select-none text-base-content/80">
-                <input type="checkbox" :disabled="deleting" v-model="deleteLocalFiles" class="checkbox checkbox-error checkbox-xs rounded" />
-                <span>{{ $t('downloads.action.deleteFiles') }}</span>
-              </label>
-            </div>
-
-            <p v-if="deleteError" role="alert" class="text-sm text-error">{{ deleteError }}</p>
-            <div class="flex items-center justify-end gap-3 pt-2">
-              <button 
-                class="btn btn-ghost btn-sm rounded-xl text-xs font-bold" 
-                @click="showDeleteModal = false"
-                :disabled="deleting"
-              >
-                {{ $t('downloads.action.cancel') }}
-              </button>
-              <button 
-                class="btn btn-error btn-sm rounded-xl text-xs font-bold text-error-content px-5 gap-1.5 shadow-sm"
-                @click="confirmDelete"
-                :disabled="deleting"
-              >
-                <span v-if="deleting" class="loading loading-spinner loading-xs"></span>
-                <span v-else>{{ $t('downloads.action.confirmDelete') }}</span>
-              </button>
-            </div>
-          </div>
+    <!-- 删除任务弹窗 -->
+    <dialog ref="deleteDialog" class="modal" aria-labelledby="download-delete-title" @cancel="deleting && $event.preventDefault()" @close="showDeleteModal = false">
+      <div class="modal-box max-w-md">
+        <div class="flex items-center justify-between mb-3">
+          <h3 id="download-delete-title" class="text-base font-bold">{{ $t('downloads.action.deleteTitle') }}</h3>
+          <button type="button" class="p-1 rounded hover:bg-[var(--v2-surface-2)]" :disabled="deleting" @click="showDeleteModal = false"><X :size="14" /></button>
         </div>
+        <p class="text-xs text-[var(--v2-ink-muted)] mb-4 leading-relaxed">{{ $t('downloads.action.deleteDesc', { name: taskToDelete?.name || '' }) }}</p>
+        <label class="flex items-center gap-2.5 p-3 v2-panel-muted cursor-pointer mb-4">
+          <input type="checkbox" :disabled="deleting" v-model="deleteLocalFiles" class="checkbox checkbox-error checkbox-sm" />
+          <span class="text-xs font-semibold">{{ $t('downloads.action.deleteFiles') }}</span>
+        </label>
+        <p v-if="deleteError" role="alert" class="text-xs text-red-400 mb-3">{{ deleteError }}</p>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="showDeleteModal = false" :disabled="deleting">{{ $t('downloads.action.cancel') }}</button>
+          <button type="button" class="v2-btn v2-btn-sm bg-red-500 border-red-500 text-white" @click="confirmDelete" :disabled="deleting">
+            <span v-if="deleting" class="loading loading-spinner loading-xs"></span>
+            <span v-else>{{ $t('downloads.action.confirmDelete') }}</span>
+          </button>
+        </div>
+      </div>
+      <div class="modal-backdrop" @click="!deleting && (showDeleteModal = false)"></div>
     </dialog>
 
-    <!-- New Download Modal -->
-    <dialog ref="addDialog" class="modal bg-black/70 backdrop-blur-md" aria-labelledby="download-add-title"
-      @cancel="adding && $event.preventDefault()" @close="showAddModal = false">
-        <div class="modal-box min-w-0 max-w-lg max-h-[90dvh] overflow-y-auto p-0 bg-base-100 rounded-3xl shadow-2xl border border-base-200 animate-in zoom-in-95 duration-200">
-          <form class="p-6 sm:p-7 space-y-5" @submit.prevent="submitNewDownload">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5">
-                <div class="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                  <Plus :size="18" />
-                </div>
-                <div>
-                  <h3 id="download-add-title" class="text-base font-black tracking-tight">{{ $t('downloads.action.newDownload') }}</h3>
-                  <p class="text-[11px] text-base-content/60">{{ $t('downloads.action.addDescription') }}</p>
-                </div>
-              </div>
-              <button type="button" class="btn btn-ghost btn-circle btn-xs" :aria-label="$t('downloads.action.cancel')" :disabled="adding" @click="showAddModal = false">
-                <X :size="14" />
-              </button>
+    <!-- 新建下载弹窗 -->
+    <dialog ref="addDialog" class="modal" aria-labelledby="download-add-title" @cancel="adding && $event.preventDefault()" @close="showAddModal = false">
+      <div class="modal-box max-w-lg">
+        <form class="space-y-4" @submit.prevent="submitNewDownload">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 id="download-add-title" class="text-base font-bold">{{ $t('downloads.action.newDownload') }}</h3>
+              <p class="text-xs text-[var(--v2-ink-muted)]">{{ $t('downloads.action.addDescription') }}</p>
             </div>
-
-            <div class="space-y-4">
-              <div class="space-y-1.5">
-                <label class="text-xs font-bold text-base-content/70" for="download-url">{{ $t('downloads.action.link') }}</label>
-                <input autofocus id="download-url" type="text" autocomplete="off" :spellcheck="false" :disabled="adding"
-                  v-model="addUrl"
-                  class="input input-bordered w-full rounded-2xl text-xs font-mono focus:input-primary"
-                  placeholder="magnet:?xt=… / https://…/file.torrent"
-                >
-              </div>
-
-              <div class="space-y-1.5">
-                <label class="text-xs font-bold text-base-content/70" for="download-title">{{ $t('downloads.action.taskTitle') }}</label>
-                <input 
-                  type="text" 
-                  id="download-title" :disabled="adding" v-model="addTitle"
-                  class="input input-bordered input-sm w-full rounded-xl text-xs focus:input-primary"
-                  placeholder="Example 01 [1080p]"
-                />
-              </div>
-
-              <div class="space-y-1.5">
-                <label class="text-xs font-bold text-base-content/70" for="download-directory">{{ $t('downloads.action.directory') }}</label>
-                <input 
-                  type="text" 
-                  id="download-directory" :disabled="adding" v-model="addSavePath"
-                  class="input input-bordered input-sm w-full rounded-xl text-xs focus:input-primary"
-                  :placeholder="$t('downloads.action.defaultDirectory')"
-                />
-              </div>
+            <button type="button" class="p-1 rounded hover:bg-[var(--v2-surface-2)]" :disabled="adding" @click="showAddModal = false"><X :size="14" /></button>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs font-semibold text-[var(--v2-ink-muted)] mb-1" for="download-url">{{ $t('downloads.action.link') }}</label>
+              <input id="download-url" type="text" autocomplete="off" :spellcheck="false" :disabled="adding" v-model="addUrl" class="v2-input font-mono text-xs" placeholder="magnet:?xt=… / https://…/file.torrent" />
             </div>
-
-            <p v-if="addError" role="alert" class="text-sm text-error">{{ addError }}</p>
-            <div class="flex items-center justify-end gap-3 pt-2">
-              <button type="button"
-                class="btn btn-ghost btn-sm rounded-xl text-xs font-bold" 
-                @click="showAddModal = false"
-                :disabled="adding"
-              >
-                {{ $t('downloads.action.cancel') }}
-              </button>
-              <button 
-                class="btn btn-primary btn-sm rounded-xl text-xs font-bold px-6 gap-1.5 shadow-sm"
-                type="submit"
-                :disabled="adding || !addUrl.trim()"
-              >
-                <span v-if="adding" class="loading loading-spinner loading-xs"></span>
-                <span v-else>{{ $t('downloads.action.start') }}</span>
-              </button>
+            <div>
+              <label class="block text-xs font-semibold text-[var(--v2-ink-muted)] mb-1" for="download-title">{{ $t('downloads.action.taskTitle') }}</label>
+              <input id="download-title" type="text" :disabled="adding" v-model="addTitle" class="v2-input text-xs" placeholder="Example 01 [1080p]" />
             </div>
-          </form>
-        </div>
+            <div>
+              <label class="block text-xs font-semibold text-[var(--v2-ink-muted)] mb-1" for="download-directory">{{ $t('downloads.action.directory') }}</label>
+              <input id="download-directory" type="text" :disabled="adding" v-model="addSavePath" class="v2-input text-xs" :placeholder="$t('downloads.action.defaultDirectory')" />
+            </div>
+          </div>
+          <p v-if="addError" role="alert" class="text-xs text-red-400">{{ addError }}</p>
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" @click="showAddModal = false" :disabled="adding">{{ $t('downloads.action.cancel') }}</button>
+            <button class="v2-btn v2-btn-primary v2-btn-sm" type="submit" :disabled="adding || !addUrl.trim()">
+              <span v-if="adding" class="loading loading-spinner loading-xs"></span>
+              <span v-else>{{ $t('downloads.action.start') }}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+      <div class="modal-backdrop" @click="!adding && (showAddModal = false)"></div>
     </dialog>
   </div>
 </template>

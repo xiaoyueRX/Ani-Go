@@ -5,8 +5,8 @@ export type ThemeName = 'anigo-dark' | 'anigo-light'
 export const THEME_STORAGE_KEY = 'ani-go-theme'
 
 export const THEME_COLORS: Record<ThemeName, string> = {
-  'anigo-dark': '#0b0d12',
-  'anigo-light': '#f6f7f9',
+  'anigo-dark': '#09090b',
+  'anigo-light': '#f5f3ee',
 }
 
 export function normalizeTheme(raw: unknown): ThemeName {

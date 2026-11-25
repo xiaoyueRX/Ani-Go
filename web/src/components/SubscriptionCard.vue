@@ -42,8 +42,8 @@ function proxyImage(url: string | undefined): string {
     target = 'https:' + url
   }
 
-  const apiPath = window.location.origin + '/api/proxy/image'
-  return `${apiPath}?url=${encodeURIComponent(target)}`
+  const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : ''
+  return `${origin}/api/proxy/image?url=${encodeURIComponent(target)}`
 }
 
 const emit = defineEmits<{
@@ -54,6 +54,7 @@ const emit = defineEmits<{
 }>()
 
 const coverSrc = computed(() => proxyImage(props.sub.cover_url))
+
 function openTitle(event: MouseEvent) {
   if (props.pending || event.defaultPrevented || event.button !== 0 ||
       event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
@@ -72,7 +73,7 @@ function coverLoaded(event: Event) {
 function coverFailed(event: Event) {
   const target = event.currentTarget as HTMLImageElement
   if (target.isConnected && !target.src.startsWith('data:')) {
-    target.src = 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'300\' height=\'450\' viewBox=\'0 0 300 450\'%3E%3Crect width=\'300\' height=\'450\' fill=\'%2314171f\'/%3E%3Ctext x=\'50%25\' y=\'50%25\' dominant-baseline=\'middle\' text-anchor=\'middle\' fill=\'%237a8299\' font-size=\'13\' font-family=\'sans-serif\'%3E暂无封面%3C/text%3E%3C/svg%3E'
+    target.src = 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'300\' height=\'450\' viewBox=\'0 0 300 450\'%3E%3Crect width=\'300\' height=\'450\' fill=\'%23141417\'/%3E%3Ctext x=\'50%25\' y=\'50%25\' dominant-baseline=\'middle\' text-anchor=\'middle\' fill=\'%23a1a1aa\' font-size=\'13\' font-family=\'sans-serif\'%3E暂无封面%3C/text%3E%3C/svg%3E'
   }
 }
 
@@ -81,22 +82,22 @@ const progress = computed(() => {
   return Math.min(100, (props.sub.current_episodes / props.sub.total_episodes) * 100)
 })
 
-const progressColor = computed(() => {
-  if (props.sub.completed) return 'bg-success'
-  if (props.sub.stalled_episodes > 0) return 'bg-warning'
-  return 'bg-primary'
+const progressBarColor = computed(() => {
+  if (props.sub.completed) return 'bg-emerald-500'
+  if (props.sub.stalled_episodes > 0) return 'bg-amber-500'
+  return 'bg-[var(--v2-accent)]'
 })
 </script>
 
 <template>
   <div
-    class="group relative flex flex-col app-surface rounded-xl overflow-hidden hover:border-primary/40 hover:shadow-md transition-all duration-200 cursor-pointer h-full"
-    :class="{ 'opacity-75 grayscale-[0.35]': !sub.enabled, 'opacity-40 pointer-events-none': pending }"
+    class="group relative flex flex-col v2-panel overflow-hidden hover:border-[var(--v2-accent)]/50 transition-all duration-200 cursor-pointer h-full shadow-sm hover:shadow-xl"
+    :class="{ 'opacity-75 grayscale-[0.3]': !sub.enabled, 'opacity-40 pointer-events-none': pending }"
     :inert="pending"
     @click="!pending && emit('click')"
   >
-    <!-- 封面区域（2:3 海报比例） -->
-    <div class="relative aspect-[2/3] overflow-hidden bg-base-200">
+    <!-- 2:3 满幅电影感海报区 -->
+    <div class="relative aspect-[2/3] overflow-hidden bg-[var(--v2-surface-2)]">
       <div v-if="coverSrc && !isImageLoaded" class="absolute inset-0 [content-visibility:auto]" aria-hidden="true">
         <div class="skeleton h-full w-full rounded-none"></div>
       </div>
@@ -105,57 +106,62 @@ const progressColor = computed(() => {
         v-if="coverSrc"
         :src="coverSrc"
         :alt="sub.title_cn"
-        class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+        class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
         :class="{ 'opacity-0': !isImageLoaded, 'opacity-100': isImageLoaded }"
         @load="coverLoaded"
         @error="coverFailed"
         loading="lazy"
       />
-      <div v-else class="w-full h-full flex items-center justify-center text-base-content/20">
-        <Image :size="30" />
+      <div
+        v-else
+        class="w-full h-full flex flex-col items-center justify-center gap-2 text-[var(--v2-ink-subtle)] px-3 text-center"
+        style="background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--v2-accent) 18%, transparent), transparent 65%), var(--v2-surface-2);"
+      >
+        <Image :size="28" class="opacity-65" />
+        <span class="text-[11px] font-medium line-clamp-2 opacity-75">{{ sub.title_cn }}</span>
       </div>
 
-      <!-- 状态标识胶囊 -->
-      <div class="absolute top-2 left-2 flex flex-col gap-1 z-10">
-        <div v-if="sub.completed" class="bg-success/90 backdrop-blur-sm text-success-content text-[11px] font-semibold py-0.5 px-2 rounded-md shadow-sm flex items-center gap-1">
+      <!-- 左上状态标签 -->
+      <div class="absolute top-2.5 left-2.5 flex flex-col gap-1 z-10">
+        <div v-if="sub.completed" class="bg-emerald-500/90 backdrop-blur-md text-white text-[10px] font-bold py-0.5 px-2 rounded-full shadow-sm flex items-center gap-1">
           <Check :size="10" />
           <span>{{ $t('card.completed') }}</span>
         </div>
-        <div v-if="!sub.enabled" class="bg-base-100/85 backdrop-blur-sm text-base-content text-[11px] font-semibold py-0.5 px-2 rounded-md border border-base-content/12 shadow-sm flex items-center gap-1">
+        <div v-if="!sub.enabled" class="bg-black/75 backdrop-blur-md text-white text-[10px] font-semibold py-0.5 px-2 rounded-full border border-white/15 shadow-sm flex items-center gap-1">
           <Pause :size="10" />
           <span>{{ $t('card.paused') }}</span>
         </div>
-        <div v-if="sub.stalled_episodes > 0" class="bg-warning/90 backdrop-blur-sm text-warning-content text-[11px] font-semibold py-0.5 px-2 rounded-md shadow-sm flex items-center gap-1">
+        <div v-if="sub.stalled_episodes > 0" class="bg-amber-500/95 backdrop-blur-md text-zinc-950 text-[10px] font-bold py-0.5 px-2 rounded-full shadow-sm flex items-center gap-1">
           <AlertTriangle :size="10" />
           <span>{{ $t('card.stalled', { count: sub.stalled_episodes }) }}</span>
         </div>
       </div>
 
-      <!-- 批量删除选中遮罩 -->
+      <!-- 批量删除遮罩 -->
       <div
         v-if="batchDeleteMode"
-        class="absolute inset-0 z-20 pointer-events-none rounded-xl transition-colors"
-        :class="batchSelected ? 'ring-2 ring-inset ring-error bg-error/15' : ''"
+        class="absolute inset-0 z-20 pointer-events-none transition-colors"
+        :class="batchSelected ? 'ring-2 ring-inset ring-red-500 bg-red-500/20' : ''"
       >
-        <div v-if="batchSelected" class="absolute top-2 right-2 bg-error text-error-content rounded-full p-1 shadow">
+        <div v-if="batchSelected" class="absolute top-2.5 right-2.5 bg-red-500 text-white rounded-full p-1 shadow">
           <Check :size="12" />
         </div>
       </div>
 
-      <!-- 底部集数与进度条 -->
-      <div class="absolute bottom-0 inset-x-0 px-3 pb-2.5 pt-8 bg-gradient-to-t from-black/85 via-black/40 to-transparent">
+      <!-- 底部电影渐变字幕叠层 + 细进度条 -->
+      <div class="absolute bottom-0 inset-x-0 px-3 pb-2.5 pt-12 bg-gradient-to-t from-black/90 via-black/45 to-transparent">
         <div class="flex items-baseline justify-between gap-2 mb-1.5">
-          <p class="text-xs text-white font-semibold tabular-nums leading-none">
-            {{ sub.current_episodes }}<span class="text-white/55 font-normal ml-0.5">/ {{ sub.total_episodes || '?' }}</span>
-          </p>
-          <span v-if="progress !== null" class="text-[11px] text-white/85 font-mono tabular-nums leading-none">
+          <span class="text-[11px] font-mono font-bold text-white tabular-nums leading-none">
+            S{{ sub.season || 1 }} · {{ sub.current_episodes }}<span class="text-white/55 font-normal">/{{ sub.total_episodes || '?' }}</span>
+          </span>
+          <span v-if="progress !== null" class="text-[10px] text-white/85 font-mono tabular-nums leading-none">
             {{ Math.round(progress) }}%
           </span>
         </div>
         <div v-if="progress !== null" class="h-1 w-full bg-white/20 rounded-full overflow-hidden">
           <div
             class="h-full rounded-full transition-all duration-500"
-            :class="progressColor"
+            :class="progressBarColor"
             :style="{ width: `${progress}%` }"
           ></div>
         </div>
@@ -164,11 +170,11 @@ const progressColor = computed(() => {
 
     <!-- 卡片信息区 -->
     <div class="p-3 flex flex-col gap-2 flex-1">
-      <h3 class="font-semibold text-sm leading-snug line-clamp-2 min-h-[2.5rem] text-base-content" :title="sub.title_cn">
+      <h3 class="font-semibold text-[13.5px] leading-snug line-clamp-2 min-h-[2.35rem] text-[var(--v2-ink)]" :title="sub.title_cn">
         <button
           v-if="batchDeleteMode"
           type="button"
-          class="cursor-pointer text-left hover:text-primary transition-colors"
+          class="cursor-pointer text-left hover:text-[var(--v2-accent)] transition-colors bg-transparent border-0 p-0"
           :aria-pressed="!!batchSelected"
           :disabled="pending"
           @click.stop="emit('click')"
@@ -178,18 +184,18 @@ const progressColor = computed(() => {
         <a
           v-else
           :href="pending ? undefined : `/subscriptions/${sub.id}`"
-          class="hover:text-primary transition-colors"
+          class="hover:text-[var(--v2-accent)] transition-colors"
           @click.stop="openTitle"
         >{{ sub.title_cn }}</a>
       </h3>
 
-      <!-- 标题之后才进入操作按钮，绝对定位保持按钮位于封面右上角 -->
+      <!-- 右上角悬浮操作按钮（保持在标题之后、绝对定位到封面右上角） -->
       <div
-        class="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 group-focus-within:opacity-100 group-focus-within:translate-x-0 transition-all duration-200 z-10"
+        class="absolute top-2.5 right-2.5 flex flex-col gap-1.5 opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 group-focus-within:opacity-100 group-focus-within:translate-x-0 transition-all duration-200 z-10"
         @click.stop
       >
         <button
-          class="w-7 h-7 rounded-full bg-base-100/90 backdrop-blur-sm border border-base-content/15 flex items-center justify-center text-base-content hover:bg-primary hover:text-primary-content shadow transition-colors"
+          class="w-7 h-7 rounded-full bg-black/75 backdrop-blur-md border border-white/15 flex items-center justify-center text-white hover:bg-[var(--v2-accent)] hover:border-[var(--v2-accent)] shadow transition-colors cursor-pointer"
           type="button"
           :aria-label="$t(sub.enabled ? 'detail.actions.suspend' : 'detail.actions.resume')"
           :disabled="pending"
@@ -198,7 +204,7 @@ const progressColor = computed(() => {
           <component :is="sub.enabled ? Pause : Play" :size="13" />
         </button>
         <button
-          class="w-7 h-7 rounded-full bg-base-100/90 backdrop-blur-sm border border-base-content/15 flex items-center justify-center text-base-content hover:bg-error hover:text-error-content shadow transition-colors"
+          class="w-7 h-7 rounded-full bg-black/75 backdrop-blur-md border border-white/15 flex items-center justify-center text-white hover:bg-red-500 hover:border-red-500 shadow transition-colors cursor-pointer"
           type="button"
           :aria-label="$t('common.delete')"
           @click="emit('delete')"
@@ -209,26 +215,26 @@ const progressColor = computed(() => {
         </button>
       </div>
 
-      <div class="flex items-center gap-1.5 flex-wrap mt-auto pt-1">
-        <span class="inline-flex items-center gap-1 text-[11px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md max-w-[140px]">
+      <div class="flex items-center gap-1.5 flex-wrap mt-auto pt-0.5">
+        <span class="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--v2-accent)] bg-[var(--v2-accent)]/12 px-2 py-0.5 rounded-md max-w-[140px]">
           <User :size="10" class="shrink-0" />
           <span class="truncate">{{ sub.subgroup_name || $t('card.generic') }}</span>
         </span>
-        <span v-if="sub.anime_type" class="text-[11px] text-base-content/60 bg-base-200 px-1.5 py-0.5 rounded">
+        <span v-if="sub.anime_type" class="text-[10px] font-mono text-[var(--v2-ink-muted)] bg-[var(--v2-surface-2)] px-1.5 py-0.5 rounded border border-[var(--v2-border)]">
           {{ sub.anime_type }}
         </span>
-        <span v-if="sub.year" class="text-[11px] text-base-content/50 font-mono tabular-nums">
+        <span v-if="sub.year" class="text-[11px] text-[var(--v2-ink-subtle)] font-mono tabular-nums ml-auto">
           {{ sub.year }}
         </span>
       </div>
 
       <div
         v-if="sub.enabled && !sub.completed"
-        class="pt-1 border-t border-base-content/6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+        class="pt-1.5 border-t border-[var(--v2-border)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
         @click.stop
       >
         <button
-          class="btn btn-ghost btn-xs h-6 min-h-0 px-0 text-[11px] font-medium text-primary hover:bg-transparent hover:underline gap-1"
+          class="text-[11px] font-semibold text-[var(--v2-accent)] hover:underline flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer"
           type="button"
           :disabled="pending"
           @click="emit('supplement')"
@@ -243,7 +249,7 @@ const progressColor = computed(() => {
 
 <style scoped>
 :is(a, button):focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 2px solid var(--v2-accent);
   outline-offset: -2px;
 }
 

@@ -16,7 +16,7 @@ function loadThemeModule(initialStorage = new Map(), initialDomTheme = 'anigo-da
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   })
   let domTheme = initialDomTheme
-  let metaColor = '#0b0d12'
+  let metaColor = '#09090b'
   const document = {
     documentElement: {
       getAttribute: name => (name === 'data-theme' ? domTheme : null),
@@ -72,13 +72,13 @@ test('useTheme 默认启用深色主题，非法存储值回退默认并支持�
   assert.equal(isDark.value, false)
   assert.equal(storage.get('ani-go-theme'), 'anigo-light')
   assert.equal(ctx.getDomTheme(), 'anigo-light')
-  assert.equal(ctx.getMetaColor(), '#f6f7f9')
+  assert.equal(ctx.getMetaColor(), '#f5f3ee')
 
   setTheme('anigo-dark')
   assert.equal(theme.value, 'anigo-dark')
   assert.equal(storage.get('ani-go-theme'), 'anigo-dark')
   assert.equal(ctx.getDomTheme(), 'anigo-dark')
-  assert.equal(ctx.getMetaColor(), '#0b0d12')
+  assert.equal(ctx.getMetaColor(), '#09090b')
 })
 
 test('基础 UI 组件均可正确渲染标题、状态、无障碍属性与插槽', async () => {
