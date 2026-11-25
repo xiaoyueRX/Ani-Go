@@ -605,6 +605,20 @@ export default {
       offlineMode: '离线模式 - 仅显示公开数据',
     },
     offlineMode: '离线模式 - 仅显示公开数据',
+    modal: {
+      searchAndSub: '搜索资源与规则订阅',
+      alreadySubscribed: '该番剧已在您的追番列表中',
+      viewDetail: '已订阅 · 查看详情',
+      loadingGroups: '正在获取 Mikan 字幕组列表...',
+      pickMikanGroup: '点击字幕组直接订阅：',
+      groupsFailed: '获取字幕组失败，可直接下方通用订阅',
+      quickSubgroups: '可选偏好字幕组（留空则不限制）：',
+      directSub: '直接订阅',
+      subscribing: '提交订阅中...',
+      customRules: '调整高级规则再订阅',
+      subscribeSuccess: '已成功添加追番：{title}',
+      subscribeFailed: '订阅失败，请重试',
+    },
   },
   subs: {
     title: '订阅管理',
@@ -627,6 +641,7 @@ export default {
     quickSubscribeParsing: '解析中...',
     quickSubscribeSuccess: '已成功添加订阅！',
     oneClickSubscribe: '一键添加订阅',
+    adjustRules: '调整规则再订',
     goToSearch: '去搜索结果确认',
     stats: {
       all: '全部追番',
@@ -761,8 +776,41 @@ export default {
     },
     actions: {
       modify: "编辑订阅",
+      supplement: "立即补全",
+      supplementing: "补全扫描中...",
+      supplementTriggered: "已触发立即补全扫描",
+      supplementFailed: "触发补全失败，请稍后重试",
       suspend: "暂停追番",
-      resume: "恢复追番"
+      resume: "恢复追番",
+      delete: "删除订阅"
+    },
+    rulesSummary: "生效规则",
+    ruleKinds: {
+      rss: "RSS",
+      resolution: "分辨率",
+      include: "包含",
+      exclude: "排除",
+      subgroups: "字幕组",
+      path: "目录"
+    },
+    filter: {
+      all: "全部",
+      needsReview: "待复核",
+      downloading: "进行中",
+      organized: "已入库",
+      failed: "失败",
+      searchPlaceholder: "按集数、文件名或字幕组筛选...",
+      noMatch: "当前筛选条件下没有匹配的剧集",
+      reset: "清除筛选"
+    },
+    deleteModal: {
+      title: "删除订阅",
+      desc: "确认要删除《{title}》吗？未勾选删除文件时可从回收站恢复。",
+      deleteFilesLabel: "同时删除本地已下载视频文件与任务（不可恢复）",
+      confirm: "确认删除",
+      deleting: "删除中...",
+      success: "已删除订阅",
+      failed: "删除订阅失败"
     },
     synopsis: "番剧故事简介",
     warning: {
@@ -809,18 +857,45 @@ export default {
     }
   },
   form: {
-    title: '初始化条目',
-    subtitle: '创建新的同步目标',
+    title: '新建追番订阅',
+    subtitle: '支持手动配置或粘贴 RSS 链接自动解析导入',
+    createSuccess: '订阅创建成功！',
+    mode: {
+      manual: '手动配置',
+      rss: '粘贴 RSS 解析',
+    },
+    rss: {
+      panelTitle: 'RSS 订阅地址实时解析',
+      panelDesc: '粘贴 Mikan / Nyaa 等种子 RSS 链接，自动识别标题、季数、分辨率与发布字幕组。',
+      placeholder: 'https://mikanani.me/RSS/Bangumi?bangumiId=...&subgroupid=...',
+      parseBtn: '解析预览',
+      parsing: '解析中...',
+      emptyUrl: '请先输入 RSS 链接',
+      invalidUrl: 'RSS 链接格式无效，仅支持 http:// 或 https:// 开头',
+      previewFailed: 'RSS 解析失败，请检查链接或网络连通性',
+      feedReady: 'RSS 源解析完成',
+      matchedCount: '共识别 {count} 条发布',
+      detectedSubgroups: '识别到字幕组',
+    },
+    organizePreview: {
+      title: '预计入库归档路径预览',
+      loading: '计算中...',
+    },
     error: {
-      title: '初始化错误',
+      title: '创建失败',
       titleEmpty: '番剧标题不能为空',
       createFailed: '创建失败',
     },
     label: {
       title: '主标题 (中文)*',
+      season: '季数',
+      type: '作品类型',
       subgroup: '字幕组偏好',
       bangumiId: 'Bangumi ID',
-      path: '部署路径模板',
+      rssUrl: 'RSS 订阅链接（可选）',
+      path: '下载目录覆盖（留空用下载器默认）',
+      rules: '可视化过滤规则',
+      rulesHint: '与高级 JSON 双向同步',
       filter: '过滤约束 (JSON)',
     },
     submit: '建立订阅',
@@ -828,7 +903,7 @@ export default {
       title: 'e.g. 鬼灭之刃',
       subgroup: 'e.g. 桜都字幕组',
       bangumiId: '参考 ID (123456)',
-      path: '可选覆盖路径',
+      path: '可选覆盖下载目录',
     }
   },
   edit: {
@@ -854,6 +929,9 @@ export default {
       allowedSubgroupsHint: '仅下载这些字幕组的资源，留空则不限制，JSON 数组格式',
       skipBulkUpdate: '跳过批量补全',
       skipBulkUpdateDesc: '开启后，“全量补全”将跳过此番剧（已完结时建议开启）',
+      rssUrl: '专属 RSS 订阅地址 (RSS URL)',
+      rssPlaceholder: 'https://mikanani.me/RSS/Bangumi?bangumiId=...（留空按全局源或名称检索）',
+      rulesSection: '下载过滤规则与字幕组白名单',
     },
     abandon: '放弃',
     commit: '提交修改',
@@ -986,6 +1064,7 @@ export default {
     action: {
       subscribe: '追番订阅',
       subscribed: '已在追番',
+      viewDetail: '已订阅 · 看详情',
       downloadDirect: '立即下载',
       downloadDirectSuccess: '已添加到下载队列',
       downloadDirectFailed: '添加下载失败: {error}',

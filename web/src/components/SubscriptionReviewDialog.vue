@@ -36,7 +36,7 @@ interface ReviewRow {
 }
 
 const props = defineProps<{ items: ReviewRelease[] }>()
-const emit = defineEmits<{ close: []; saved: [items: ReviewRelease[]] }>()
+const emit = defineEmits<{ close: []; saved: [items: ReviewRelease[], subscriptionId?: number] }>()
 const { t } = useI18n()
 const dialog = ref<HTMLDialogElement | null>(null)
 const rows = ref<ReviewRow[]>([])
@@ -110,7 +110,7 @@ async function submit() {
     if (!session.active()) return
     const item = row.items[0]!
     try {
-      await request.post('/subscriptions', {
+      const response = await request.post<{ id?: number }>('/subscriptions', {
         title_cn: row.title.trim(), season: row.season === '' ? undefined : row.season,
         bangumi_id: item.source === 'Mikan' ? undefined : item.bangumi_id || undefined,
         mikan_id: item.source === 'Mikan' ? item.bangumi_id || undefined : undefined,
@@ -120,7 +120,8 @@ async function submit() {
       }, session.options)
       if (!session.active()) return
       saved.value++
-      emit('saved', row.items)
+      const createdId = typeof response?.data?.id === 'number' ? response.data.id : undefined
+      emit('saved', row.items, createdId)
     } catch (cause) {
       if (!session.active()) return
       row.error = isAxiosError(cause) && typeof cause.response?.data?.error === 'string'

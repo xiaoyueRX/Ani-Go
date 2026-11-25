@@ -21,9 +21,11 @@ Vite serves the UI at `http://localhost:5173` by default and proxies `/api` to `
 
 Browser tabs on the same origin share the login session. Signing out in one tab takes other management pages back to sign-in. Signing in again restores each tab’s previous internal page. The backend creates the administrator account on first startup.
 
-When subscribing from a release in search results, review the original release title and the suggested series title, season, group and resolution. You can supply a series RSS feed. Selecting multiple episodes of one series and season produces one subscription. Conflicting group or resolution choices are left open, and failed submissions remain in the dialog for review. Mikan series entries offer the release-group picker directly.
+When subscribing from a release in search results, review the original release title and the suggested series title, season, group and resolution. You can supply a series RSS feed. Selecting multiple episodes of one series and season produces one subscription. Conflicting group or resolution choices are left open, and failed submissions remain in the dialog for review. Mikan series entries offer the release-group picker directly, and subscribed rows link directly to the series detail page.
 
-Episode rows show the actual download or organization status alongside an optional manual mark. Use the selector to set or clear a mark, or select multiple episodes to apply changes together.
+The Schedule quick modal and `/subscriptions/new` share a unified onboarding flow: Schedule supports inline subgroup selection and one-click subscribing (via Mikan groups or quick chips); the AI quick parser can hand off prefilled rules to `/subscriptions/new`; and `/subscriptions/new` offers both manual configuration and paste-to-preview RSS parsing, visual resolution/include/exclude/subgroup rule chips, and a live destination path preview.
+
+Episode rows show the actual download or organization status alongside an optional manual mark. Use the selector to set or clear a mark, or select multiple episodes to apply changes together. Subscription details expose a one-click "Supplement Now" action, a confirmation delete dialog with optional local file cleanup, an active rule summary bar, and episode status/keyword filters.
 
 Subscription details refresh every 30 seconds while visible and when you return to the tab. Background refresh pauses while editing or changing episodes. Refreshing Bangumi authorization in Settings preserves local unsaved changes.
 

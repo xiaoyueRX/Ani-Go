@@ -29,6 +29,14 @@ export function view(path, request, { route = {}, storage = new Map(), props = {
       getServerSettingsPayload: () => ({}),
     }),
   }
+  const authStub = {
+    useAuth: () => ({
+      isAuthenticated: vue.ref(true),
+      isOfflineMode: vue.ref(false),
+      initAuth: async () => {},
+      checkAuth: async () => {},
+    }),
+  }
   const modules = {
     vue: { ...vue, onMounted: fn => mounted.push(fn), onUnmounted: fn => unmounted.push(fn) },
     'vue-router': { onBeforeRouteLeave() {}, useRouter: () => router, useRoute: () => ({ params: {}, query: {}, ...route }) },
@@ -36,11 +44,15 @@ export function view(path, request, { route = {}, storage = new Map(), props = {
     '../utils/request': request,
     './utils/request': request,
     '../utils/subscriptionListHistory': require('../src/utils/subscriptionListHistory.ts'),
+    '../utils/subscriptionRules': require('../src/utils/subscriptionRules.ts'),
+    '../../utils/subscriptionRules': require('../src/utils/subscriptionRules.ts'),
     '../utils/setupDownloader': require('../src/utils/setupDownloader.ts'),
     '../utils/dialogSession': require('../src/utils/dialogSession.ts'),
     '../utils/loginRedirect': require('../src/utils/loginRedirect.ts'),
     './utils/loginRedirect': require('../src/utils/loginRedirect.ts'),
     '../composables/useVersion': { currentVersion: vue.ref(''), useVersion: () => ({}) },
+    '../composables/useAuth': authStub,
+    './composables/useAuth': authStub,
     '../composables/useTheme': themeStub,
     './composables/useTheme': themeStub,
     '../components/ui': {},

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { Check, StepForward } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
+import request from '../utils/request'
+import SubscriptionRuleEditor from './v2/SubscriptionRuleEditor.vue'
 
 const { t } = useI18n()
 
@@ -22,11 +24,22 @@ const animeType = ref(props.sub.anime_type || '')
 const totalEpisodes = ref(props.sub.total_episodes)
 const completed = ref(props.sub.completed)
 const customPath = ref(props.sub.custom_path || '')
+const rssUrl = ref(props.sub.rss_url || '')
 const filterJson = ref(props.sub.filter_json || '')
 const excludedKeywords = ref(props.sub.excluded_keywords || '[]')
 const skipBulkUpdate = ref(props.sub.skip_bulk_update || false)
 const allowedSubgroups = ref(props.sub.allowed_subgroups || '[]')
 const stallTimeoutHours = ref(props.sub.stall_timeout_hours || 0)
+const subgroupSuggestions = ref<string[]>([])
+
+onMounted(async () => {
+  try {
+    const { data } = await request.get<string[]>('/subgroups')
+    if (Array.isArray(data)) subgroupSuggestions.value = data
+  } catch {
+    // 测试环境或离线时使用内置常见字幕组列表
+  }
+})
 
 function handleSubmit() {
   const u: Record<string, any> = {}
@@ -41,7 +54,8 @@ function handleSubmit() {
   if (totalEpisodes.value !== props.sub.total_episodes) u.total_episodes = totalEpisodes.value
   if (completed.value !== props.sub.completed) u.completed = completed.value
   if (customPath.value !== (props.sub.custom_path || '')) u.custom_path = customPath.value
-  if (filterJson.value !== (props.sub.filter_json || '')) u.filter_json = filterJson.value || null
+  if (rssUrl.value.trim() !== (props.sub.rss_url || '')) u.rss_url = rssUrl.value.trim()
+  if (filterJson.value !== (props.sub.filter_json || '')) u.filter_json = filterJson.value
   if (excludedKeywords.value !== (props.sub.excluded_keywords || '[]')) u.excluded_keywords = excludedKeywords.value || '[]'
   if (skipBulkUpdate.value !== (props.sub.skip_bulk_update || false)) u.skip_bulk_update = skipBulkUpdate.value
   if (allowedSubgroups.value !== (props.sub.allowed_subgroups || '[]')) u.allowed_subgroups = allowedSubgroups.value || '[]'
@@ -98,7 +112,10 @@ function handleSubmit() {
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
       <div class="space-y-1.5">
         <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.releaseGroup') }}</label>
-        <input v-model="subgroupName" type="text" class="v2-input" />
+        <input v-model="subgroupName" type="text" list="edit-subgroup-suggestions" class="v2-input" />
+        <datalist id="edit-subgroup-suggestions">
+          <option v-for="sg in subgroupSuggestions" :key="sg" :value="sg" />
+        </datalist>
       </div>
       <div class="space-y-1.5">
         <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.bangumiRef') }}</label>
@@ -118,25 +135,28 @@ function handleSubmit() {
     </div>
 
     <div class="space-y-1.5">
+      <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.rssUrl') }}</label>
+      <input
+        v-model="rssUrl"
+        type="url"
+        class="v2-input font-mono text-xs"
+        :placeholder="t('edit.label.rssPlaceholder')"
+      />
+    </div>
+
+    <div class="space-y-1.5">
       <label for="subscription-download-directory" class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.pathOverride') }}</label>
       <input id="subscription-download-directory" v-model="customPath" type="text" class="v2-input font-mono text-xs" :placeholder="t('edit.label.defaultDownloadDirectory')" />
     </div>
 
     <div class="space-y-1.5">
-      <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.filterRules') }}</label>
-      <textarea v-model="filterJson" class="textarea font-mono text-xs h-24" placeholder='{"keywords": ["1080p"], "exclude": ["RAW"]}'></textarea>
-    </div>
-
-    <div class="space-y-1.5">
-      <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.excludedKeywords') }}</label>
-      <textarea v-model="excludedKeywords" class="textarea font-mono text-xs h-20" placeholder='["720p", "HEVC", "WEB-DL"]'></textarea>
-      <p class="text-[11px] text-[var(--v2-ink-subtle)]">{{ t('edit.label.excludedKeywordsHint') }}</p>
-    </div>
-
-    <div class="space-y-1.5">
-      <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.allowedSubgroups') }}</label>
-      <textarea v-model="allowedSubgroups" class="textarea font-mono text-xs h-20" placeholder='["LoliHouse", "ANi", "MoyaiSubs"]'></textarea>
-      <p class="text-[11px] text-[var(--v2-ink-subtle)]">{{ t('edit.label.allowedSubgroupsHint') }}</p>
+      <label class="block text-xs font-semibold text-[var(--v2-ink-muted)]">{{ t('edit.label.rulesSection') }}</label>
+      <SubscriptionRuleEditor
+        v-model:filter-json="filterJson"
+        v-model:excluded-keywords="excludedKeywords"
+        v-model:allowed-subgroups="allowedSubgroups"
+        :subgroup-suggestions="subgroupSuggestions"
+      />
     </div>
 
     <div class="v2-panel-muted p-3.5 flex items-center justify-between gap-4">

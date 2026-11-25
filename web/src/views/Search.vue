@@ -47,6 +47,24 @@ const error = ref('')
 const rawError = ref('')
 const hasSearched = ref(false)
 const subscribed = ref<Set<string>>(new Set())
+const subscribedIdMap = ref<Map<string, number>>(new Map())
+
+const normalizeSubKey = (value?: string) => (value || '').trim().toLowerCase()
+
+function registerSubscribedId(id: unknown, keys: Array<string | undefined>) {
+  if (typeof id !== 'number' || id <= 0) return
+  const next = new Map(subscribedIdMap.value)
+  for (const key of keys) {
+    const clean = normalizeSubKey(key)
+    if (clean) next.set(clean, id)
+  }
+  subscribedIdMap.value = next
+}
+
+function findSubscribedId(item: TorrentItem): number | undefined {
+  return subscribedIdMap.value.get(normalizeSubKey(item.bangumi_id))
+    ?? subscribedIdMap.value.get(normalizeSubKey(item.title))
+}
 const lastSearchTime = ref('')
 const searchDuration = ref(0)
 const smartSearch = ref(false)
@@ -222,6 +240,9 @@ async function loadSubscribedList() {
     const { data } = await request.get('/subscriptions')
     if (Array.isArray(data)) {
       subscribed.value = new Set(data.map((s: any) => s.title_cn))
+      for (const s of data) {
+        registerSubscribedId(s?.id, [s?.mikan_id, s?.bangumi_id, s?.metadata_id, s?.title_cn])
+      }
     }
   } catch {}
 }
@@ -505,9 +526,10 @@ async function submitBatch(operation: 'download' | 'subscribe') {
   }
 }
 
-function markReviewedItems(items: ReviewRelease[]) {
+function markReviewedItems(items: ReviewRelease[], createdId?: number) {
   const accepted = new Set(items.map(item => item.title))
   for (const title of accepted) subscribed.value.add(title)
+  registerSubscribedId(createdId, items.flatMap(item => [item.bangumi_id, item.title]))
   selectedItems.value = selectedItems.value.filter(item => !accepted.has(item.title))
   if (batchMode.value && !selectedItems.value.length) exitBatchMode()
 }
@@ -552,7 +574,7 @@ declare global {
 }
 
 async function saveSubscription(item: TorrentItem, rssUrl: string, subgroupName?: string) {
-  await request.post('/subscriptions', {
+  const { data } = await request.post<{ id?: number }>('/subscriptions', {
     title_cn: item.title,
     bangumi_id: item.source === 'Mikan' ? undefined : item.bangumi_id,
     mikan_id: item.source === 'Mikan' ? item.bangumi_id : undefined,
@@ -562,6 +584,7 @@ async function saveSubscription(item: TorrentItem, rssUrl: string, subgroupName?
     cover_url: item.cover_url || '',
   })
   subscribed.value.add(item.title)
+  registerSubscribedId(data?.id, [item.bangumi_id, item.title])
 }
 
 async function subscribe(item: TorrentItem, rssUrl: string, subgroupName?: string) {
@@ -993,6 +1016,16 @@ function sourceBadgeClass(source: string): string {
           </a>
 
           <button
+            v-if="subscribed.has(item.title) && findSubscribedId(item)"
+            type="button"
+            class="v2-btn v2-btn-sm bg-emerald-500/15 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/25"
+            @click="router.push(`/subscriptions/${findSubscribedId(item)}`)"
+          >
+            <Check :size="13" />
+            <span>{{ $t('search.action.viewDetail') }}</span>
+          </button>
+          <button
+            v-else
             type="button"
             class="v2-btn v2-btn-sm"
             :class="subscribed.has(item.title) ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'v2-btn-primary'"

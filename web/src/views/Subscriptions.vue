@@ -6,7 +6,8 @@ import request from '../utils/request'
 import {
   Search, Plus, AlertTriangle,
   X, LayoutGrid, List, RefreshCw,
-  RotateCcw, Trash2, Play, Pause, Check, Sparkles, Layers, History, Image
+  RotateCcw, Trash2, Play, Pause, Check, Sparkles, Layers, History, Image,
+  SlidersHorizontal
 } from 'lucide-vue-next'
 import SubscriptionCard from '../components/SubscriptionCard.vue'
 import { useI18n } from 'vue-i18n'
@@ -369,6 +370,18 @@ async function applyAiSubscribe() {
   }
 }
 
+function adjustAiRules() {
+  if (!aiResult.value) return
+  router.push({
+    path: '/subscriptions/new',
+    query: {
+      title: aiResult.value.title || '',
+      season: String(aiResult.value.season || 1),
+      subgroup: aiResult.value.subgroup_pref || undefined,
+    },
+  })
+}
+
 async function toggleEnabled(sub: Subscription) {
   try {
     await request.put(`/subscriptions/${sub.id}`, { enabled: !sub.enabled })
@@ -729,10 +742,14 @@ onUnmounted(() => {
               <span class="v2-pill font-mono">S{{ aiResult.season || 1 }}</span>
               <span v-if="aiResult.subgroup_pref" class="v2-pill">{{ aiResult.subgroup_pref }}</span>
             </div>
-            <div class="flex items-center gap-1.5">
+            <div class="flex flex-wrap items-center gap-1.5">
               <button type="button" class="v2-btn v2-btn-primary v2-btn-sm" :disabled="aiSubscribing" @click="applyAiSubscribe">
                 <Check :size="12" />
                 <span>{{ $t('subs.oneClickSubscribe') }}</span>
+              </button>
+              <button type="button" class="v2-btn v2-btn-sm" @click="adjustAiRules">
+                <SlidersHorizontal :size="12" />
+                <span>{{ $t('subs.adjustRules') }}</span>
               </button>
               <button type="button" class="v2-btn v2-btn-sm" @click="router.push(`/search?q=${encodeURIComponent(aiResult.title)}`)">
                 <Search :size="12" />

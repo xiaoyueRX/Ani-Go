@@ -185,10 +185,14 @@ func UpdateSubscription(db *gorm.DB, id uint, changes map[string]interface{}) (S
 			if _, explicit := changes["mikan_id"]; !explicit {
 				changes["mikan_id"] = ""
 			}
-			changes["rss_url"] = ""
+			if _, explicit := changes["rss_url"]; !explicit {
+				changes["rss_url"] = ""
+			}
 		}
 		if mikan, ok := changes["mikan_id"].(string); ok && mikan != prior.MikanID {
-			changes["rss_url"] = ""
+			if _, explicit := changes["rss_url"]; !explicit {
+				changes["rss_url"] = ""
+			}
 		}
 		clearObsoleteTMDBID(prior, changes)
 		if err := tx.Model(&Subscription{}).Where("id = ?", id).Updates(changes).Error; err != nil {

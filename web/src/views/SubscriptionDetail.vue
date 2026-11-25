@@ -13,6 +13,7 @@ import {
   Shield, FileCheck2
 } from 'lucide-vue-next'
 import SubscriptionEditForm from '../components/SubscriptionEditForm.vue'
+import { summarizeRules } from '../utils/subscriptionRules'
 
 interface Subscription {
   id: number; title_cn: string; title_en: string; title_jp: string
@@ -21,6 +22,7 @@ interface Subscription {
   description: string; anime_type: string
   total_episodes: number; current_episodes: number; stalled_episodes: number
   enabled: boolean; completed: boolean
+  rss_url?: string
   filter_json: string; custom_path: string
   created_at: string; updated_at: string
   avatar_url?: string
@@ -239,6 +241,48 @@ function closeEditDialog() {
   editDialog.value?.close()
 }
 
+const supplementing = ref(false)
+const showDeleteModal = ref(false)
+const deleteFiles = ref(false)
+const deletingSub = ref(false)
+
+async function triggerSupplement() {
+  if (supplementing.value) return
+  supplementing.value = true
+  actionError.value = ''
+  try {
+    await request.post(`/subscriptions/${id}/trigger-supplement`)
+    window.showToast?.(t('detail.actions.supplementTriggered'), 'success')
+    await fetchDetail()
+  } catch (e: any) {
+    actionError.value = e.response?.data?.error || t('detail.actions.supplementFailed')
+  } finally {
+    supplementing.value = false
+  }
+}
+
+function openDeleteModal() {
+  deleteFiles.value = false
+  showDeleteModal.value = true
+}
+
+async function confirmDeleteSub() {
+  if (deletingSub.value) return
+  deletingSub.value = true
+  actionError.value = ''
+  try {
+    await request.delete(`/subscriptions/${id}`, { params: { delete_files: deleteFiles.value } })
+    showDeleteModal.value = false
+    window.showToast?.(t('detail.deleteModal.success'), 'success')
+    router.push('/subscriptions')
+  } catch (e: any) {
+    actionError.value = e.response?.data?.error || t('detail.deleteModal.failed')
+    showDeleteModal.value = false
+  } finally {
+    deletingSub.value = false
+  }
+}
+
 async function fetchDetail() {
   const sequence = ++detailRead
   loading.value = true
@@ -306,10 +350,56 @@ function episodeLabel(ep: Episode): string {
   return `${season}E${ep.number}`
 }
 
+type EpFilterStatus = 'all' | 'needs_review' | 'downloading' | 'organized' | 'failed'
+const epStatusFilter = ref<EpFilterStatus>('all')
+const epSearchQuery = ref('')
+
+const activeRuleBadges = computed(() => (sub.value ? summarizeRules(sub.value) : []))
+
+const epFilterCounts = computed(() => {
+  const counts: Record<EpFilterStatus, number> = {
+    all: episodes.value.length,
+    needs_review: 0,
+    downloading: 0,
+    organized: 0,
+    failed: 0,
+  }
+  for (const ep of episodes.value) {
+    if (ep.status === 'needs_review') counts.needs_review++
+    else if (ep.status === 'failed') counts.failed++
+    else if (ep.status === 'organized' || ep.status === 'completed') counts.organized++
+    else counts.downloading++
+  }
+  return counts
+})
+
+const filteredEpisodes = computed(() => {
+  let list = episodes.value
+  if (epStatusFilter.value === 'needs_review') {
+    list = list.filter(ep => ep.status === 'needs_review')
+  } else if (epStatusFilter.value === 'failed') {
+    list = list.filter(ep => ep.status === 'failed')
+  } else if (epStatusFilter.value === 'organized') {
+    list = list.filter(ep => ep.status === 'organized' || ep.status === 'completed')
+  } else if (epStatusFilter.value === 'downloading') {
+    list = list.filter(ep => !['needs_review', 'failed', 'organized', 'completed'].includes(ep.status))
+  }
+  const q = epSearchQuery.value.trim().toLowerCase()
+  if (q) {
+    list = list.filter(ep =>
+      (ep.original_name || '').toLowerCase().includes(q)
+      || (ep.title || '').toLowerCase().includes(q)
+      || (ep.group_name || '').toLowerCase().includes(q)
+      || episodeLabel(ep).toLowerCase().includes(q),
+    )
+  }
+  return list
+})
+
 // 按字幕组分组的剧集列表
 const groupedEpisodes = computed(() => {
   const groups: Record<string, Episode[]> = {}
-  for (const ep of episodes.value) {
+  for (const ep of filteredEpisodes.value) {
     const key = ep.group_name || t('detail.logs.ungrouped')
     if (!groups[key]) groups[key] = []
     groups[key].push(ep)
@@ -708,12 +798,29 @@ onUnmounted(() => {
               </button>
               <button
                 type="button"
-                class="v2-btn px-5"
+                class="v2-btn px-4"
+                :disabled="supplementing"
+                @click="triggerSupplement"
+              >
+                <RefreshCw :size="15" :class="{ 'animate-spin': supplementing }" />
+                <span>{{ supplementing ? t('detail.actions.supplementing') : t('detail.actions.supplement') }}</span>
+              </button>
+              <button
+                type="button"
+                class="v2-btn px-4"
                 :class="sub.enabled ? 'border-amber-500/35 text-amber-400 hover:bg-amber-500/10' : 'border-emerald-500/35 text-emerald-400 hover:bg-emerald-500/10'"
                 @click="handleSaveEdit({ enabled: !sub.enabled })"
               >
                 <component :is="sub.enabled ? Pause : Play" :size="15" />
                 <span>{{ sub.enabled ? t('detail.actions.suspend') : t('detail.actions.resume') }}</span>
+              </button>
+              <button
+                type="button"
+                class="v2-btn px-4 border-red-500/35 text-red-400 hover:bg-red-500/10"
+                @click="openDeleteModal"
+              >
+                <Trash2 :size="15" />
+                <span>{{ t('detail.actions.delete') }}</span>
               </button>
             </div>
 
@@ -727,6 +834,19 @@ onUnmounted(() => {
               <span class="text-xs font-semibold text-[var(--v2-ink-subtle)]">{{ t('detail.stats.subgroup') }}:</span>
               <span v-if="sub.subgroup_name" class="v2-pill text-xs text-[var(--v2-ink)]">{{ sub.subgroup_name }}</span>
               <span v-else class="v2-pill text-xs">{{ t('card.generic') }}</span>
+            </div>
+
+            <!-- 生效规则摘要栏 -->
+            <div v-if="activeRuleBadges.length > 0" class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[var(--v2-border)]">
+              <span class="text-[11px] font-semibold text-[var(--v2-ink-subtle)] mr-1">{{ t('detail.rulesSummary') }}:</span>
+              <span
+                v-for="badge in activeRuleBadges"
+                :key="badge.kind"
+                class="v2-pill text-[11px] font-mono max-w-xs truncate"
+                :title="`${t('detail.ruleKinds.' + badge.kind)}: ${badge.value}`"
+              >
+                {{ t('detail.ruleKinds.' + badge.kind) }}: {{ badge.value }}
+              </span>
             </div>
           </div>
         </div>
@@ -862,12 +982,48 @@ onUnmounted(() => {
           </ul>
         </details>
 
+        <!-- 剧集状态筛选与关键词过滤 -->
+        <div v-if="episodes.length > 0" class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-1">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button
+              v-for="tab in ([
+                { key: 'all', label: t('detail.filter.all') },
+                { key: 'needs_review', label: t('detail.filter.needsReview') },
+                { key: 'downloading', label: t('detail.filter.downloading') },
+                { key: 'organized', label: t('detail.filter.organized') },
+                { key: 'failed', label: t('detail.filter.failed') },
+              ] as const)"
+              :key="tab.key"
+              type="button"
+              class="v2-pill text-[11px] cursor-pointer transition-colors"
+              :class="epStatusFilter === tab.key ? 'bg-[var(--v2-accent)] text-white border-[var(--v2-accent)] font-semibold' : 'hover:text-[var(--v2-ink)]'"
+              @click="epStatusFilter = tab.key"
+            >
+              <span>{{ tab.label }}</span>
+              <span class="font-mono opacity-80 ml-1">{{ epFilterCounts[tab.key] }}</span>
+            </button>
+          </div>
+          <input
+            v-model="epSearchQuery"
+            type="search"
+            class="v2-input h-8 sm:w-56 text-xs"
+            :placeholder="t('detail.filter.searchPlaceholder')"
+          />
+        </div>
+
         <!-- 无剧集空状态 -->
         <div v-if="episodes.length === 0" class="v2-panel py-16 flex flex-col items-center justify-center gap-3 text-center">
           <div class="w-12 h-12 rounded-2xl bg-[var(--v2-surface-2)] text-[var(--v2-ink-subtle)] flex items-center justify-center">
             <FileText :size="24" />
           </div>
           <p class="text-xs text-[var(--v2-ink-muted)]">{{ t('detail.logs.empty') }}</p>
+        </div>
+
+        <div v-else-if="filteredEpisodes.length === 0" class="v2-panel py-12 flex flex-col items-center justify-center gap-3 text-center">
+          <p class="text-xs text-[var(--v2-ink-muted)]">{{ t('detail.filter.noMatch') }}</p>
+          <button type="button" class="v2-btn v2-btn-sm" @click="epStatusFilter = 'all'; epSearchQuery = ''">
+            {{ t('detail.filter.reset') }}
+          </button>
         </div>
 
         <!-- 按字幕组分组的原生可折叠剧集面板（仅使用 RefreshCw / AlertTriangle，兼容单测） -->
@@ -1064,6 +1220,35 @@ onUnmounted(() => {
             @cancel="closeEditDialog"
           />
         </div>
+      </dialog>
+
+      <!-- 删除订阅确认弹窗 -->
+      <dialog :class="['modal', { 'modal-open': showDeleteModal }]">
+        <div class="modal-box max-w-md space-y-4">
+          <div class="flex items-center justify-between border-b border-[var(--v2-border)] pb-3">
+            <h3 class="text-base font-bold text-[var(--v2-ink)]">{{ t('detail.deleteModal.title') }}</h3>
+            <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm px-2" @click="showDeleteModal = false">
+              <X :size="15" />
+            </button>
+          </div>
+          <p class="text-xs text-[var(--v2-ink-muted)] leading-relaxed">
+            {{ t('detail.deleteModal.desc', { title: sub.title_cn }) }}
+          </p>
+          <label class="flex items-center gap-2.5 p-3 rounded-xl bg-[var(--v2-surface-2)] border border-[var(--v2-border)] cursor-pointer text-xs text-[var(--v2-ink)]">
+            <input v-model="deleteFiles" type="checkbox" class="checkbox checkbox-sm checkbox-error" />
+            <span>{{ t('detail.deleteModal.deleteFilesLabel') }}</span>
+          </label>
+          <div class="flex justify-end gap-2 pt-1">
+            <button type="button" class="v2-btn v2-btn-ghost v2-btn-sm" :disabled="deletingSub" @click="showDeleteModal = false">
+              {{ t('common.cancel') }}
+            </button>
+            <button type="button" class="v2-btn v2-btn-sm bg-red-500 text-white border-red-500 hover:bg-red-600" :disabled="deletingSub" @click="confirmDeleteSub">
+              <Trash2 :size="14" />
+              <span>{{ deletingSub ? t('detail.deleteModal.deleting') : t('detail.deleteModal.confirm') }}</span>
+            </button>
+          </div>
+        </div>
+        <div class="modal-backdrop" @click="showDeleteModal = false"></div>
       </dialog>
     </template>
   </div>

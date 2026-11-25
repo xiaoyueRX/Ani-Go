@@ -192,7 +192,7 @@ curl -fsS -H "Authorization: Bearer $jwt" "$base/api/plugins"
 
 ## 订阅与剧集
 
-使用 `POST /api/subscriptions` 手动添加订阅，至少提供 `title_cn`，可附上 `season`、`rss_url` 和字幕组限制。成功返回 201。同标题同季返回 409，同标题可分别创建不同季。省略季号时根据作品标题中的明确季号创建，例如“星岛 第二季”会保存为第 2 季。合季、季号冲突或未标季的标题沿用第 1 季。显式填写的季号优先，填 0 仍按第一季创建。旧数据中空或零季号仍按第一季查重。TMDB 电视作品的各季共享作品 ID，因此同一 ID 可分别订阅不同季。已知类型的电影按影片查重；即使编号相同，电影和电视剧也可以分别订阅。相同蜜柑 ID、其他同一提供方的相同元数据 ID，或仅给出旧 `bangumi_id` 且该编号已存在时，也按重复订阅处理。蜜柑条目 ID 放在 `mikan_id`，外部元数据标识放在 `metadata_id` 并指定 `metadata_provider`。只有已知来源时再填提供方。详情包含按季集排序的剧集。部分更新时只发送改动字段。修改片名、季号或来源标识若与另一订阅冲突则返回 409，原记录保留。[订阅处理器](../internal/api/handlers.go)
+使用 `POST /api/subscriptions` 手动添加订阅，至少提供 `title_cn`，可附上 `season`、`rss_url`、`excluded_keywords`、`allowed_subgroups`、`filter_json` 和字幕组限制（`rss_url` 如非空则需为合法 `http`/`https` 链接）。成功返回 201。同标题同季返回 409，同标题可分别创建不同季。省略季号时根据作品标题中的明确季号创建，例如“星岛 第二季”会保存为第 2 季。合季、季号冲突或未标季的标题沿用第 1 季。显式填写的季号优先，填 0 仍按第一季创建。旧数据中空或零季号仍按第一季查重。TMDB 电视作品的各季共享作品 ID，因此同一 ID 可分别订阅不同季。已知类型的电影按影片查重；即使编号相同，电影和电视剧也可以分别订阅。相同蜜柑 ID、其他同一提供方的相同元数据 ID，或仅给出旧 `bangumi_id` 且该编号已存在时，也按重复订阅处理。蜜柑条目 ID 放在 `mikan_id`，外部元数据标识放在 `metadata_id` 并指定 `metadata_provider`。只有已知来源时再填提供方。读取或部分更新（`GET` / `PUT /api/subscriptions/{id}`）均包含并支持按需更新 `rss_url`（校验 `http`/`https`，空串可清空）。部分更新时只发送改动字段。修改片名、季号或来源标识若与另一订阅冲突则返回 409，原记录保留。[订阅处理器](../internal/api/handlers.go)
 
 通过 `PUT /api/subscriptions/{id}` 把 TMDB 电影订阅改为电视剧时，可同时发送 `{"metadata_id":"tv/456","anime_type":"TV"}`。明确的分类与 `movie/` 或 `tv/` 前缀冲突时返回 400。目标电影或目标电视剧的同一季已有订阅时返回 409。两种情况都会保留原记录。
 

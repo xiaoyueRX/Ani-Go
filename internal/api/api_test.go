@@ -721,6 +721,79 @@ func TestHandleTestDownloader(t *testing.T) {
 	}
 }
 
+func TestHandleSubscription_RSSURLAndExcludedKeywords(t *testing.T) {
+	setupTestDB(t)
+	s := newTestServer()
+
+	// 1. 创建时携带合法 rss_url 与 excluded_keywords
+	createBody := bytes.NewBufferString(`{
+		"title_cn": "测试RSS更新",
+		"season": 1,
+		"rss_url": "https://mikanani.me/RSS/Bangumi?bangumiId=100&subgroupid=20",
+		"excluded_keywords": "[\"720p\",\"RAW\"]"
+	}`)
+	reqCreate := httptest.NewRequest(http.MethodPost, "/api/subscriptions", createBody)
+	wCreate := httptest.NewRecorder()
+	s.handleCreateSubscription(wCreate, reqCreate)
+	if wCreate.Code != http.StatusCreated {
+		t.Fatalf("期望创建成功 201, 实际 %d: %s", wCreate.Code, wCreate.Body.String())
+	}
+	var created subscriptionResponse
+	if err := json.NewDecoder(wCreate.Body).Decode(&created); err != nil {
+		t.Fatalf("解码创建响应失败: %v", err)
+	}
+	if created.RSSURL != "https://mikanani.me/RSS/Bangumi?bangumiId=100&subgroupid=20" {
+		t.Errorf("响应应回显 rss_url, 实际 %q", created.RSSURL)
+	}
+	if created.ExcludedKeywords != `["720p","RAW"]` {
+		t.Errorf("响应应回显 excluded_keywords, 实际 %q", created.ExcludedKeywords)
+	}
+
+	// 2. 创建时传入非法 rss_url 应返回 400
+	badCreate := httptest.NewRequest(http.MethodPost, "/api/subscriptions", bytes.NewBufferString(`{"title_cn":"坏链接","rss_url":"file:///etc/passwd"}`))
+	wBad := httptest.NewRecorder()
+	s.handleCreateSubscription(wBad, badCreate)
+	if wBad.Code != http.StatusBadRequest {
+		t.Errorf("非法协议应返回 400, 实际 %d: %s", wBad.Code, wBad.Body.String())
+	}
+
+	// 3. 更新为新的 rss_url，然后传空字符串清空
+	reqUpd := httptest.NewRequest(http.MethodPut, "/api/subscriptions/1", bytes.NewBufferString(`{"rss_url":"https://mikanime.tv/RSS/Bangumi?bangumiId=100"}`))
+	reqUpd.SetPathValue("id", "1")
+	wUpd := httptest.NewRecorder()
+	s.handleUpdateSubscription(wUpd, reqUpd)
+	if wUpd.Code != http.StatusOK {
+		t.Fatalf("更新合法 rss_url 期望 200, 实际 %d: %s", wUpd.Code, wUpd.Body.String())
+	}
+	var updated subscriptionResponse
+	json.NewDecoder(wUpd.Body).Decode(&updated)
+	if updated.RSSURL != "https://mikanime.tv/RSS/Bangumi?bangumiId=100" {
+		t.Errorf("更新后 rss_url 未生效: %q", updated.RSSURL)
+	}
+
+	// 4. 更新非法 rss_url 应返回 400
+	badUpd := httptest.NewRequest(http.MethodPut, "/api/subscriptions/1", bytes.NewBufferString(`{"rss_url":"javascript:alert(1)"}`))
+	badUpd.SetPathValue("id", "1")
+	wBadUpd := httptest.NewRecorder()
+	s.handleUpdateSubscription(wBadUpd, badUpd)
+	if wBadUpd.Code != http.StatusBadRequest {
+		t.Errorf("更新非法 rss_url 应返回 400, 实际 %d", wBadUpd.Code)
+	}
+
+	// 5. 清空 rss_url
+	clearUpd := httptest.NewRequest(http.MethodPut, "/api/subscriptions/1", bytes.NewBufferString(`{"rss_url":""}`))
+	clearUpd.SetPathValue("id", "1")
+	wClear := httptest.NewRecorder()
+	s.handleUpdateSubscription(wClear, clearUpd)
+	if wClear.Code != http.StatusOK {
+		t.Fatalf("清空 rss_url 期望 200, 实际 %d", wClear.Code)
+	}
+	var cleared subscriptionResponse
+	json.NewDecoder(wClear.Body).Decode(&cleared)
+	if cleared.RSSURL != "" {
+		t.Errorf("清空后 rss_url 应为空, 实际 %q", cleared.RSSURL)
+	}
+}
 
 
 

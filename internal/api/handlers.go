@@ -67,6 +67,7 @@ type subscriptionResponse struct {
 	Enabled           bool    `json:"enabled"`
 	Completed         bool    `json:"completed"`
 	FilterJSON        string  `json:"filter_json"`
+	RSSURL            string  `json:"rss_url"`
 	CustomPath        string  `json:"custom_path"`
 	ExcludedKeywords  string  `json:"excluded_keywords"`
 	AllowedSubgroups  string  `json:"allowed_subgroups"`
@@ -84,14 +85,29 @@ type createSubscriptionRequest struct {
 	MetadataProvider string   `json:"metadata_provider"`
 	Season           *int     `json:"season"`
 	TitleCN          string   `json:"title_cn"`
+	AnimeType        string   `json:"anime_type"`
 	BangumiID        string   `json:"bangumi_id"`
 	SubgroupName     string   `json:"subgroup_name"`
 	SubgroupNames    []string `json:"subgroup_names"`
 	AllowedSubgroups []string `json:"allowed_subgroups"`
+	ExcludedKeywords string   `json:"excluded_keywords"`
 	RSSURL           string   `json:"rss_url"`
 	FilterJSON       string   `json:"filter_json"`
 	CustomPath       string   `json:"custom_path"`
 	CoverURL         string   `json:"cover_url"`
+}
+
+// validateOptionalHTTPURL 校验可选的 http/https 链接，空字符串原样放行。
+func validateOptionalHTTPURL(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", errors.New("rss_url 格式无效，仅支持 http/https 协议的完整链接")
+	}
+	return trimmed, nil
 }
 
 type batchSubscriptionItem struct {
@@ -140,6 +156,7 @@ type updateSubscriptionRequest struct {
 	Enabled           *bool           `json:"enabled"`
 	Completed         *bool           `json:"completed"`
 	FilterJSON        *string         `json:"filter_json"`
+	RSSURL            *string         `json:"rss_url"`
 	CustomPath        json.RawMessage `json:"custom_path"`
 	ExcludedKeywords  *string         `json:"excluded_keywords"`
 	AllowedSubgroups  *string         `json:"allowed_subgroups"`
@@ -212,6 +229,7 @@ func toSubscriptionResponse(sub database.Subscription) subscriptionResponse {
 		Enabled:           sub.Enabled != nil && *sub.Enabled,
 		Completed:         sub.Completed,
 		FilterJSON:        sub.FilterJSON,
+		RSSURL:            sub.RSSURL,
 		CustomPath:        sub.CustomPath,
 		ExcludedKeywords:  sub.ExcludedKeywords,
 		AllowedSubgroups:  sub.AllowedSubgroups,
@@ -457,18 +475,25 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "季号不能为负数"})
 		return
 	}
+	validRSSURL, err := validateOptionalHTTPURL(req.RSSURL)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
 	subgroupName, allowedSubgroupsJSON := subscriptionGroups(req.SubgroupName, req.SubgroupNames, req.AllowedSubgroups)
 
 	sub := database.Subscription{
 		TitleCN:          req.TitleCN,
 		Season:           season,
+		AnimeType:        strings.TrimSpace(req.AnimeType),
 		MikanID:          req.MikanID,
 		MetadataID:       req.MetadataID,
 		MetadataProvider: req.MetadataProvider,
 		BangumiID:        req.BangumiID,
 		SubgroupName:     subgroupName,
 		AllowedSubgroups: allowedSubgroupsJSON,
-		RSSURL:           req.RSSURL,
+		ExcludedKeywords: req.ExcludedKeywords,
+		RSSURL:           validRSSURL,
 		FilterJSON:       req.FilterJSON,
 		CustomPath:       req.CustomPath,
 		CoverURL:         req.CoverURL,
@@ -651,6 +676,14 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if req.FilterJSON != nil {
 		updates["filter_json"] = *req.FilterJSON
+	}
+	if req.RSSURL != nil {
+		validRSS, err := validateOptionalHTTPURL(*req.RSSURL)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		updates["rss_url"] = validRSS
 	}
 	if req.CustomPath != nil {
 		var path string

@@ -605,6 +605,20 @@ export default {
       offlineMode: 'Offline Mode - Showing public cached data only',
     },
     offlineMode: 'Offline Mode - Public data only',
+    modal: {
+      searchAndSub: 'Search Resources & Rules',
+      alreadySubscribed: 'This series is already in your subscriptions',
+      viewDetail: 'Subscribed · View Details',
+      loadingGroups: 'Loading Mikan subgroups...',
+      pickMikanGroup: 'Click a subgroup to subscribe directly:',
+      groupsFailed: 'Failed to load subgroups; you can subscribe without restriction below',
+      quickSubgroups: 'Optional preferred subgroups (empty = unrestricted):',
+      directSub: 'Subscribe Now',
+      subscribing: 'Subscribing...',
+      customRules: 'Customize Rules Before Subscribing',
+      subscribeSuccess: 'Subscribed: {title}',
+      subscribeFailed: 'Subscription failed, please retry',
+    },
   },
   subs: {
     title: 'Subscriptions',
@@ -627,6 +641,7 @@ export default {
     quickSubscribeParsing: 'Parsing...',
     quickSubscribeSuccess: 'Successfully added subscription!',
     oneClickSubscribe: '1-Click Subscribe',
+    adjustRules: 'Customize Rules',
     goToSearch: 'Confirm in Search',
     stats: {
       all: 'All Tracked',
@@ -761,8 +776,41 @@ export default {
     },
     actions: {
       modify: "Edit Subscription",
+      supplement: "Supplement Now",
+      supplementing: "Scanning...",
+      supplementTriggered: "Supplement scan triggered",
+      supplementFailed: "Failed to trigger supplement",
       suspend: "Pause",
-      resume: "Resume"
+      resume: "Resume",
+      delete: "Delete"
+    },
+    rulesSummary: "Active Rules",
+    ruleKinds: {
+      rss: "RSS",
+      resolution: "Resolution",
+      include: "Include",
+      exclude: "Exclude",
+      subgroups: "Subgroups",
+      path: "Dir"
+    },
+    filter: {
+      all: "All",
+      needsReview: "Review",
+      downloading: "Active",
+      organized: "Organized",
+      failed: "Failed",
+      searchPlaceholder: "Filter by episode, file or subgroup...",
+      noMatch: "No episodes match current filter",
+      reset: "Reset Filter"
+    },
+    deleteModal: {
+      title: "Delete Subscription",
+      desc: "Delete \"{title}\"? Keeping local files allows recovery from the recycle bin.",
+      deleteFilesLabel: "Also delete downloaded local files and tasks (irreversible)",
+      confirm: "Confirm Delete",
+      deleting: "Deleting...",
+      success: "Subscription deleted",
+      failed: "Failed to delete subscription"
     },
     synopsis: "Synopsis",
     warning: {
@@ -809,8 +857,30 @@ export default {
     }
   },
   form: {
-    title: 'Initialize Anime',
-    subtitle: 'Create a new tracking target',
+    title: 'New Subscription',
+    subtitle: 'Configure manually or import directly from an RSS feed',
+    createSuccess: 'Subscription created!',
+    mode: {
+      manual: 'Manual Entry',
+      rss: 'Paste & Parse RSS',
+    },
+    rss: {
+      panelTitle: 'RSS Feed Live Preview',
+      panelDesc: 'Paste a Mikan / Nyaa RSS URL to automatically detect title, season, resolution, and subgroups.',
+      placeholder: 'https://mikanani.me/RSS/Bangumi?bangumiId=...&subgroupid=...',
+      parseBtn: 'Parse Preview',
+      parsing: 'Parsing...',
+      emptyUrl: 'Please enter an RSS URL first',
+      invalidUrl: 'Invalid URL scheme; only http:// and https:// are supported',
+      previewFailed: 'Failed to parse RSS feed; please check the URL or network',
+      feedReady: 'RSS feed parsed',
+      matchedCount: '{count} releases found',
+      detectedSubgroups: 'Detected subgroups',
+    },
+    organizePreview: {
+      title: 'Destination Path Preview',
+      loading: 'Computing...',
+    },
     error: {
       title: 'Initialization Error',
       titleEmpty: 'Anime title cannot be empty',
@@ -818,9 +888,14 @@ export default {
     },
     label: {
       title: 'Primary Title (Chinese)*',
+      season: 'Season',
+      type: 'Type',
       subgroup: 'Subgroup Preference',
       bangumiId: 'Bangumi ID',
-      path: 'Deployment Path Template',
+      rssUrl: 'RSS URL (Optional)',
+      path: 'Download Directory Override (Empty = Default)',
+      rules: 'Visual Filter Rules',
+      rulesHint: 'Synced with JSON',
       filter: 'Filter Constraint (JSON)',
     },
     submit: 'Create Subscription',
@@ -828,7 +903,7 @@ export default {
       title: 'e.g. Frieren: Beyond Journey\'s End',
       subgroup: 'e.g. LoliHouse',
       bangumiId: 'Reference ID (123456)',
-      path: 'Optional override path',
+      path: 'Optional override download directory',
     }
   },
   edit: {
@@ -854,6 +929,9 @@ export default {
       allowedSubgroupsHint: 'Only download torrents from these subgroups, empty means unrestricted',
       skipBulkUpdate: 'Skip Bulk Supplement',
       skipBulkUpdateDesc: 'When enabled, "Supplement All" skips this entry (recommended when completed)',
+      rssUrl: 'Dedicated RSS URL',
+      rssPlaceholder: 'https://mikanani.me/RSS/Bangumi?bangumiId=... (empty uses global feeds or title search)',
+      rulesSection: 'Filter Rules & Subgroup Whitelist',
     },
     abandon: 'Discard',
     commit: 'Commit Changes',
@@ -986,6 +1064,7 @@ export default {
     action: {
       subscribe: 'Subscribe',
       subscribed: 'Subscribed',
+      viewDetail: 'Subscribed · Details',
       downloadDirect: 'Download Now',
       downloadDirectSuccess: 'Added to download queue',
       downloadDirectFailed: 'Failed to add download: {error}',

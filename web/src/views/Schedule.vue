@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
 import {
   Antenna, LayoutGrid, RefreshCw,
   AlertTriangle, X, Calendar,
-  Image, Check, Clock,
+  Image, Check, Clock, Plus, Loader2, SlidersHorizontal,
   Search, WifiOff, Info, History, Sparkles, ListChecks, CheckCircle, XCircle
 } from 'lucide-vue-next'
 import OnboardingModal from '../components/OnboardingModal.vue'
@@ -64,6 +64,65 @@ const selectedItem = ref<TorrentItem | null>(null)
 const selectedMetadata = ref<{ anime: BangumiAnime; episodes: BangumiEpisode[] } | null>(null)
 const metaLoading = ref(false)
 const subStats = ref<Record<number, { downloaded: number; total: number }>>({})
+const subIdByKey = ref<Record<string, number>>({})
+
+interface MikanGroupOption {
+  name: string
+  rss_url: string
+}
+const modalGroups = ref<MikanGroupOption[]>([])
+const modalGroupsLoading = ref(false)
+const modalGroupsError = ref('')
+const modalSelectedSubgroups = ref<Set<string>>(new Set())
+const modalSubscribing = ref(false)
+const modalSubError = ref('')
+let modalGroupsController: AbortController | null = null
+
+const normKey = (v?: string) => (v || '').trim().toLowerCase()
+
+function registerSubId(id: unknown, keys: Array<string | undefined>) {
+  if (typeof id !== 'number' || id <= 0) return
+  const next = { ...subIdByKey.value }
+  for (const key of keys) {
+    const clean = normKey(key)
+    if (clean) next[clean] = id
+  }
+  subIdByKey.value = next
+}
+
+async function loadSubscribedMap() {
+  if (!isAuthenticated.value) return
+  try {
+    const { data } = await request.get('/subscriptions')
+    if (Array.isArray(data)) {
+      const next: Record<string, number> = {}
+      for (const s of data) {
+        if (typeof s?.id !== 'number' || s.id <= 0) continue
+        for (const k of [s.mikan_id, s.bangumi_id, s.metadata_id, s.title_cn]) {
+          const clean = normKey(k)
+          if (clean) next[clean] = s.id
+        }
+      }
+      subIdByKey.value = next
+    }
+  } catch {}
+}
+
+function resolveSubscribedId(item: TorrentItem | null): string | number | null {
+  if (!item) return null
+  if (item.info_hash && item.info_hash !== 'subscribed') return item.info_hash
+  const mapped = subIdByKey.value[normKey(item.bangumi_id)] ?? subIdByKey.value[normKey(item.title)]
+  if (mapped) return mapped
+  const flag = subscribedIds.value[item.bangumi_id]
+  if (flag && typeof flag !== 'boolean' && flag !== 'subscribed') return flag
+  return null
+}
+
+function isItemSubscribed(item: TorrentItem | null): boolean {
+  if (!item) return false
+  if (resolveSubscribedId(item)) return true
+  return Boolean(item.info_hash || subscribedIds.value[item.bangumi_id])
+}
 
 const batchMode = ref(false)
 const selectedItems = ref<Set<string>>(new Set())
@@ -205,7 +264,7 @@ const subscribedSchedule = computed(() => {
   for (const day of weekDays.value) {
     if (day.day_of_week < 1 || day.day_of_week > 7) continue
     if (selectedDayFilter.value !== 'all' && day.day_of_week !== selectedDayFilter.value) continue
-    let items = (day.items || []).filter(i => i && i.title && (i.info_hash || subscribedIds.value[i.bangumi_id]))
+    let items = (day.items || []).filter(i => i && i.title && isItemSubscribed(i))
     if (scheduleSearch.value.trim()) {
       const q = scheduleSearch.value.toLowerCase()
       items = items.filter(i => i.title.toLowerCase().includes(q) || (i.bangumi_id && i.bangumi_id.includes(q)))
@@ -218,24 +277,120 @@ const subscribedSchedule = computed(() => {
 const subscribedCount = computed(() => Object.values(subscribedSchedule.value).reduce((acc, items) => acc + items.length, 0))
 
 async function handleItemClick(item: TorrentItem) {
-  const subId = item.info_hash || subscribedIds.value[item.bangumi_id]
-  if (subId && subId !== 'subscribed') {
+  const subId = resolveSubscribedId(item)
+  if (subId) {
     router.push(`/subscriptions/${subId}`)
     return
   }
+  modalGroupsController?.abort()
+  modalGroupsController = null
   selectedItem.value = item
+  modalGroups.value = []
+  modalGroupsError.value = ''
+  modalSubError.value = ''
+  modalSelectedSubgroups.value = new Set()
+  modalSubscribing.value = false
+
   if (item.bangumi_id) {
     metaLoading.value = true
     selectedMetadata.value = null
-    try {
-      const { data } = await request.get(`/bangumi/subject/${item.bangumi_id}`)
-      selectedMetadata.value = data
-    } catch (e) {
-      console.error('Failed to fetch bangumi metadata:', e)
-    } finally {
-      metaLoading.value = false
+    const tasks: Promise<void>[] = []
+
+    tasks.push((async () => {
+      try {
+        const { data } = await request.get(`/bangumi/subject/${item.bangumi_id}`)
+        selectedMetadata.value = data
+      } catch (e) {
+        console.error('Failed to fetch bangumi metadata:', e)
+      } finally {
+        metaLoading.value = false
+      }
+    })())
+
+    if (item.source === 'Mikan' && isAuthenticated.value) {
+      modalGroupsLoading.value = true
+      const controller = new AbortController()
+      modalGroupsController = controller
+      tasks.push((async () => {
+        try {
+          const { data } = await request.get(`/mikan/groups?bangumi_id=${encodeURIComponent(item.bangumi_id)}`, {
+            signal: controller.signal,
+            timeout: 15000,
+          })
+          if (controller.signal.aborted) return
+          modalGroups.value = Array.isArray(data) ? data : []
+        } catch (e: any) {
+          if (e?.name === 'CanceledError' || e?.code === 'ERR_CANCELED') return
+          modalGroupsError.value = e?.response?.data?.error || t('schedule.modal.groupsFailed')
+        } finally {
+          if (!controller.signal.aborted) modalGroupsLoading.value = false
+        }
+      })())
+    } else {
+      modalGroupsLoading.value = false
     }
+    await Promise.all(tasks)
+  } else {
+    modalGroupsLoading.value = false
   }
+}
+
+function toggleModalSubgroup(name: string) {
+  const next = new Set(modalSelectedSubgroups.value)
+  if (next.has(name)) next.delete(name)
+  else next.add(name)
+  modalSelectedSubgroups.value = next
+}
+
+async function subscribeFromModal(options?: { subgroupName?: string; rssUrl?: string }) {
+  const item = selectedItem.value
+  if (!item || modalSubscribing.value) return
+  modalSubscribing.value = true
+  modalSubError.value = ''
+
+  const picked = options?.subgroupName
+    ? [options.subgroupName]
+    : Array.from(modalSelectedSubgroups.value)
+
+  try {
+    const title = selectedMetadata.value?.anime?.title_cn?.trim() || item.title
+    const { data } = await request.post<{ id?: number }>('/subscriptions', {
+      title_cn: title,
+      bangumi_id: item.source === 'Mikan' ? undefined : item.bangumi_id || undefined,
+      mikan_id: item.source === 'Mikan' ? item.bangumi_id || undefined : undefined,
+      metadata_id: item.source === 'BGM.tv' ? item.bangumi_id : undefined,
+      metadata_provider: item.source === 'BGM.tv' ? 'BGM.tv' : undefined,
+      cover_url: item.cover_url || '',
+      rss_url: options?.rssUrl || undefined,
+      subgroup_name: picked[0] || undefined,
+      allowed_subgroups: picked.length ? picked : undefined,
+    })
+    registerSubId(data?.id, [item.bangumi_id, item.title, title])
+    if (item.bangumi_id) {
+      subscribedIds.value = { ...subscribedIds.value, [item.bangumi_id]: true }
+    }
+    window.showToast?.(t('schedule.modal.subscribeSuccess', { title }), 'success')
+  } catch (e: any) {
+    modalSubError.value = e?.response?.data?.error || t('schedule.modal.subscribeFailed')
+  } finally {
+    modalSubscribing.value = false
+  }
+}
+
+function openCustomFormFromModal() {
+  const item = selectedItem.value
+  if (!item) return
+  const title = selectedMetadata.value?.anime?.title_cn?.trim() || item.title
+  const picked = Array.from(modalSelectedSubgroups.value)
+  selectedItem.value = null
+  router.push({
+    path: '/subscriptions/new',
+    query: {
+      title,
+      subgroup: picked[0] || undefined,
+      bangumi_id: item.bangumi_id || undefined,
+    },
+  })
 }
 
 function proxyImage(url: string | undefined): string {
@@ -484,8 +639,12 @@ const selectedCount = computed(() => selectedItems.value.size)
 onMounted(async () => {
   await checkYucPlugin()
   await initAuth()
-  await fetchSchedule(true)
+  await Promise.all([fetchSchedule(true), loadSubscribedMap()])
   checkVersion()
+})
+
+onUnmounted(() => {
+  modalGroupsController?.abort()
 })
 </script>
 
@@ -757,7 +916,7 @@ onMounted(async () => {
 
                 <div class="absolute inset-0 z-10 bg-gradient-to-t from-black/90 via-black/25 to-transparent"></div>
 
-                <div v-if="item.info_hash || subscribedIds[item.bangumi_id]" class="absolute top-2.5 right-2.5 z-20 flex items-center gap-1">
+                <div v-if="isItemSubscribed(item)" class="absolute top-2.5 right-2.5 z-20 flex items-center gap-1">
                   <span v-if="getItemStats(item)" class="px-1.5 py-0.5 rounded bg-black/75 font-mono text-[10px] font-bold text-white">
                     {{ getItemStats(item)?.downloaded }}<span v-if="getItemStats(item)?.total">/{{ getItemStats(item)?.total }}</span>
                   </span>
@@ -933,7 +1092,94 @@ onMounted(async () => {
             {{ selectedMetadata.anime.description }}
           </p>
 
-          <button type="button" class="v2-btn v2-btn-primary w-full" @click="router.push(`/search?q=${encodeURIComponent(selectedItem?.title || '')}`)">
+          <!-- 内联快速订阅与已订阅直达 -->
+          <div v-if="isItemSubscribed(selectedItem)" class="space-y-2 pt-1">
+            <div class="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-400 flex items-center gap-2">
+              <Check :size="14" />
+              <span>{{ $t('schedule.modal.alreadySubscribed') }}</span>
+            </div>
+            <button
+              v-if="resolveSubscribedId(selectedItem)"
+              type="button"
+              class="v2-btn v2-btn-primary w-full"
+              @click="() => { const id = resolveSubscribedId(selectedItem); selectedItem = null; if (id) router.push(`/subscriptions/${id}`) }"
+            >
+              <span>{{ $t('schedule.modal.viewDetail') }}</span>
+            </button>
+          </div>
+
+          <div v-else-if="isAuthenticated" class="space-y-2.5 pt-1 border-t border-[var(--v2-border)]">
+            <p v-if="modalSubError" role="alert" class="text-xs text-red-400 bg-red-500/10 border border-red-500/25 rounded-lg px-2.5 py-1.5">
+              {{ modalSubError }}
+            </p>
+
+            <!-- Mikan 源拉取专属字幕组列表 -->
+            <template v-if="selectedItem.source === 'Mikan'">
+              <div v-if="modalGroupsLoading" class="flex items-center gap-2 text-xs text-[var(--v2-ink-muted)] py-1">
+                <Loader2 :size="13" class="animate-spin text-[var(--v2-accent)]" />
+                <span>{{ $t('schedule.modal.loadingGroups') }}</span>
+              </div>
+              <div v-else-if="modalGroups.length > 0" class="space-y-1.5">
+                <p class="text-[11px] font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.pickMikanGroup') }}</p>
+                <div class="max-h-32 overflow-y-auto space-y-1 pr-0.5">
+                  <button
+                    v-for="g in modalGroups"
+                    :key="g.rss_url"
+                    type="button"
+                    class="w-full v2-panel-muted hover:border-[var(--v2-accent)]/50 px-2.5 py-1.5 flex items-center justify-between text-left text-xs transition-colors cursor-pointer"
+                    :disabled="modalSubscribing"
+                    @click="subscribeFromModal({ subgroupName: g.name, rssUrl: g.rss_url })"
+                  >
+                    <span class="truncate font-medium text-[var(--v2-ink)]">{{ g.name }}</span>
+                    <Plus :size="13" class="text-[var(--v2-accent)] shrink-0" />
+                  </button>
+                </div>
+              </div>
+              <p v-else-if="modalGroupsError" class="text-[11px] text-amber-400">{{ modalGroupsError }}</p>
+            </template>
+
+            <!-- Bangumi / Yuc 或通用字幕组快速多选筹码 -->
+            <div v-if="selectedItem.source !== 'Mikan' || (!modalGroupsLoading && modalGroups.length === 0)" class="space-y-1.5">
+              <p class="text-[11px] font-semibold text-[var(--v2-ink-muted)]">{{ $t('schedule.modal.quickSubgroups') }}</p>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="grp in COMMON_SUBGROUPS.slice(0, 6)"
+                  :key="grp"
+                  type="button"
+                  class="px-2 py-0.5 rounded-full text-[11px] border transition-colors cursor-pointer"
+                  :class="modalSelectedSubgroups.has(grp)
+                    ? 'bg-[var(--v2-accent)]/15 border-[var(--v2-accent)] text-[var(--v2-accent)] font-semibold'
+                    : 'bg-[var(--v2-surface-2)] border-[var(--v2-border)] text-[var(--v2-ink-muted)] hover:text-[var(--v2-ink)]'"
+                  @click="toggleModalSubgroup(grp)"
+                >
+                  {{ grp }}
+                </button>
+              </div>
+            </div>
+
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="v2-btn v2-btn-primary flex-1"
+                :disabled="modalSubscribing"
+                @click="subscribeFromModal()"
+              >
+                <Loader2 v-if="modalSubscribing" :size="14" class="animate-spin" />
+                <Plus v-else :size="14" />
+                <span>{{ modalSubscribing ? $t('schedule.modal.subscribing') : $t('schedule.modal.directSub') }}</span>
+              </button>
+              <button
+                type="button"
+                class="v2-btn shrink-0"
+                :title="$t('schedule.modal.customRules')"
+                @click="openCustomFormFromModal"
+              >
+                <SlidersHorizontal :size="14" />
+              </button>
+            </div>
+          </div>
+
+          <button type="button" class="v2-btn w-full" :class="{ 'v2-btn-primary': !isAuthenticated && !isItemSubscribed(selectedItem) }" @click="router.push(`/search?q=${encodeURIComponent(selectedItem?.title || '')}`)">
             <Search :size="15" />
             <span>{{ $t('schedule.modal.searchAndSub') }}</span>
           </button>
